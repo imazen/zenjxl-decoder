@@ -263,6 +263,267 @@ pub fn test_resources_dir() -> std::path::PathBuf {
     manifest_dir.join("resources/test")
 }
 
+/// Get path to codec-corpus JXL directory.
+/// Returns None if codec-corpus is not found.
+pub fn codec_corpus_jxl_dir() -> Option<std::path::PathBuf> {
+    // Try relative path from jxl-rs workspace
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Try common relative locations
+    let candidates = [
+        manifest_dir.join("../../codec-eval/codec-corpus/jxl"),
+        manifest_dir.join("../../../codec-eval/codec-corpus/jxl"),
+        std::path::PathBuf::from("/home/lilith/work/codec-eval/codec-corpus/jxl"),
+    ];
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Some(candidate.clone());
+        }
+    }
+
+    // Try CODEC_CORPUS_PATH environment variable
+    if let Ok(path) = std::env::var("CODEC_CORPUS_PATH") {
+        let p = std::path::PathBuf::from(path).join("jxl");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    None
+}
+
+/// Parse a PPM (P6 binary) file into pixel data.
+/// Returns (width, height, channels, pixels) where pixels is RGB u8 data.
+pub fn load_ppm(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> {
+    use std::io::{BufRead, BufReader, Read};
+
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    // Read magic number
+    let mut magic = String::new();
+    reader.read_line(&mut magic)?;
+    let magic = magic.trim();
+
+    if magic != "P6" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Expected P6 PPM, got {}", magic),
+        ));
+    }
+
+    // Skip comments and read dimensions
+    let mut line = String::new();
+    loop {
+        line.clear();
+        reader.read_line(&mut line)?;
+        let trimmed = line.trim();
+        if !trimmed.starts_with('#') && !trimmed.is_empty() {
+            break;
+        }
+    }
+
+    let dims: Vec<usize> = line
+        .trim()
+        .split_whitespace()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    let (width, height) = (dims[0], dims[1]);
+
+    // Read max value
+    line.clear();
+    reader.read_line(&mut line)?;
+    let max_val: u16 = line.trim().parse().unwrap();
+
+    let channels = 3; // PPM is always RGB
+
+    // Read pixel data
+    let pixel_count = width * height * channels;
+    let pixels = if max_val <= 255 {
+        let mut buf = vec![0u8; pixel_count];
+        reader.read_exact(&mut buf)?;
+        buf
+    } else {
+        // 16-bit PPM, convert to 8-bit
+        let mut buf16 = vec![0u8; pixel_count * 2];
+        reader.read_exact(&mut buf16)?;
+        buf16
+            .chunks_exact(2)
+            .map(|c| (u16::from_be_bytes([c[0], c[1]]) >> 8) as u8)
+            .collect()
+    };
+
+    // Verify we got all pixels
+    if pixels.len() != pixel_count {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("Expected {} pixels, got {}", pixel_count, pixels.len()),
+        ));
+    }
+
+    Ok((width, height, channels, pixels))
+}
+
+/// Parse a PGM (P5 binary) file into pixel data.
+/// Returns (width, height, 1, pixels) where pixels is grayscale u8 data.
+pub fn load_pgm(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> {
+    use std::io::{BufRead, BufReader, Read};
+
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    // Read magic number
+    let mut magic = String::new();
+    reader.read_line(&mut magic)?;
+    let magic = magic.trim();
+
+    if magic != "P5" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Expected P5 PGM, got {}", magic),
+        ));
+    }
+
+    // Skip comments and read dimensions
+    let mut line = String::new();
+    loop {
+        line.clear();
+        reader.read_line(&mut line)?;
+        let trimmed = line.trim();
+        if !trimmed.starts_with('#') && !trimmed.is_empty() {
+            break;
+        }
+    }
+
+    let dims: Vec<usize> = line
+        .trim()
+        .split_whitespace()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    let (width, height) = (dims[0], dims[1]);
+
+    // Read max value
+    line.clear();
+    reader.read_line(&mut line)?;
+    let _max_val: u16 = line.trim().parse().unwrap();
+
+    let channels = 1;
+    let pixel_count = width * height;
+
+    let mut pixels = vec![0u8; pixel_count];
+    reader.read_exact(&mut pixels)?;
+
+    Ok((width, height, channels, pixels))
+}
+
+/// Reference image data loaded from PPM/PNG
+#[derive(Debug)]
+pub struct ReferenceImage {
+    pub width: usize,
+    pub height: usize,
+    pub channels: usize,
+    pub pixels: Vec<u8>,
+}
+
+impl ReferenceImage {
+    /// Load reference image from PPM or PNG file
+    pub fn load(path: &Path) -> std::io::Result<Self> {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+        match ext.to_lowercase().as_str() {
+            "ppm" => {
+                let (width, height, channels, pixels) = load_ppm(path)?;
+                Ok(Self {
+                    width,
+                    height,
+                    channels,
+                    pixels,
+                })
+            }
+            "pgm" => {
+                let (width, height, channels, pixels) = load_pgm(path)?;
+                Ok(Self {
+                    width,
+                    height,
+                    channels,
+                    pixels,
+                })
+            }
+            "png" => {
+                // For PNG, we'd need a PNG decoder - skip for now
+                // In practice, use PPM references where possible
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "PNG reference loading requires external decoder",
+                ))
+            }
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Unsupported reference format: {}", ext),
+            )),
+        }
+    }
+}
+
+/// Codec-corpus test case
+#[derive(Debug)]
+pub struct CodecCorpusTestCase {
+    pub name: String,
+    pub category: String,
+    pub jxl_path: std::path::PathBuf,
+    pub reference_path: Option<std::path::PathBuf>,
+}
+
+/// Discover all JXL test cases in codec-corpus
+pub fn discover_codec_corpus_tests() -> Vec<CodecCorpusTestCase> {
+    let mut tests = Vec::new();
+
+    let Some(corpus_dir) = codec_corpus_jxl_dir() else {
+        return tests;
+    };
+
+    for category in &["conformance", "features", "photographic", "edge-cases"] {
+        let cat_dir = corpus_dir.join(category);
+        if !cat_dir.exists() {
+            continue;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(&cat_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("jxl") {
+                    let name = path.file_stem().unwrap().to_string_lossy().to_string();
+
+                    // Look for reference output
+                    let ref_dir = corpus_dir.join("reference").join(category);
+                    let ref_ppm = ref_dir.join(format!("{}.ppm", name));
+                    let ref_png = ref_dir.join(format!("{}.png", name));
+
+                    let reference_path = if ref_ppm.exists() {
+                        Some(ref_ppm)
+                    } else if ref_png.exists() {
+                        Some(ref_png)
+                    } else {
+                        None
+                    };
+
+                    tests.push(CodecCorpusTestCase {
+                        name,
+                        category: category.to_string(),
+                        jxl_path: path,
+                        reference_path,
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by category and name for consistent ordering
+    tests.sort_by(|a, b| (&a.category, &a.name).cmp(&(&b.category, &b.name)));
+    tests
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

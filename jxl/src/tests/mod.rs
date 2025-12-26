@@ -8,6 +8,7 @@
 //! These tests verify parity with the reference implementation.
 //! Tests that fail indicate implementation bugs - DO NOT WEAKEN TOLERANCES.
 
+pub mod codec_corpus;
 pub mod decode_api;
 pub mod entropy;
 pub mod parity;
