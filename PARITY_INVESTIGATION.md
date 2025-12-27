@@ -88,9 +88,24 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 - patches, patches_5: PASS
 - 177/184 tests pass (up from 171)
 
+### 6. Grayscale ICC Profile Detection (FIXED)
+
+**Commit**: (pending)
+
+**Symptom**: grayscale_jpeg, with_icc showed "Channel count mismatch" - decoder output 3-4 channels, reference expected 1-2.
+
+**Root Cause**: Grayscale detection only worked for `JxlColorProfile::Simple(GrayscaleColorSpace)`, not ICC profiles. When an ICC profile was embedded, the test didn't detect it as grayscale and requested RGB output.
+
+**Fix**: Use `decoder.current_pixel_format().color_type` instead of checking `output_color_profile()`. The decoder already sets the correct default format based on `color_encoding.color_space` from the file header.
+
+**Impact**:
+- grayscale_jpeg, grayscale_jpeg_5: PASS
+- with_icc: PASS
+- 180/184 tests pass (up from 177)
+
 ---
 
-## Remaining Issues (7 failures)
+## Remaining Issues (4 failures)
 
 ### 1. Alpha Premultiplication
 
@@ -104,32 +119,17 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 |------|-------|
 | cmyk_layers | max_error=224 |
 
-### 3. Grayscale JPEG Recompression
-
-| File | Error |
-|------|-------|
-| grayscale_jpeg | Channel count mismatch (3 vs 1) |
-| grayscale_jpeg_5 | Channel count mismatch (3 vs 1) |
-
-**Hypothesis**: JPEG recompressed grayscale is outputting as RGB instead of grayscale
-
-### 4. Multi-layer Noise/Spline
+### 3. Multi-layer Noise/Spline
 
 | File | Error |
 |------|-------|
 | multiple_layers_noise_spline | max_error=70 |
 
-### 5. Progressive AC Decode Error
+### 4. Progressive AC Decode Error
 
 | File | Error |
 |------|-------|
 | progressive_ac | PassesLastPassNonIncreasing |
-
-### 6. ICC Profile Channel Count
-
-| File | Error |
-|------|-------|
-| with_icc | Channel count mismatch (4 vs 2) |
 
 ---
 
@@ -154,6 +154,11 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 ### After Linear Gamma Detection Fix (full run - 184 files)
 - Passed: 177 (96%)
 - Failed: 7
+- Crashes: 0
+
+### After Grayscale ICC Fix (full run - 184 files)
+- Passed: 180 (98%)
+- Failed: 4
 - Crashes: 0
 
 ---
@@ -217,3 +222,5 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 14. Added png_has_linear_gamma() to detect linear references
 15. When detected, decode with xyb_output_linear=true
 16. Full parity test: 177/184 pass (96%), 0 crashes
+17. Fixed grayscale ICC detection by using default pixel format's color_type
+18. Full parity test: 180/184 pass (98%), 0 crashes

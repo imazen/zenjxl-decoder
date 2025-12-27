@@ -12,8 +12,8 @@
 //! is wrong and must be fixed.
 
 use crate::api::{
-    JxlColorEncoding, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions,
-    JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
+    JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
+    ProcessingResult, states,
 };
 use crate::image::{Image, Rect};
 
@@ -59,10 +59,12 @@ fn decode_jxl_to_pixels_with_options(
     let basic_info = decoder.basic_info().clone();
     let (width, height) = basic_info.size;
 
-    // Check if image is grayscale by looking at the output color profile
+    // Get the default pixel format, which is set based on the file header's color_space.
+    // This correctly detects grayscale even when an ICC profile is used.
+    let default_format = decoder.current_pixel_format();
     let is_grayscale = matches!(
-        decoder.output_color_profile(),
-        JxlColorProfile::Simple(JxlColorEncoding::GrayscaleColorSpace { .. })
+        default_format.color_type,
+        JxlColorType::Grayscale | JxlColorType::GrayscaleAlpha
     );
 
     // Determine output format based on whether image has alpha and is grayscale
@@ -391,39 +393,6 @@ mod tests {
             Ok(()) => eprintln!("PASS: 3x3_srgb_lossless.jxl"),
             Err(e) => eprintln!("PENDING: 3x3_srgb_lossless.jxl - {}", e),
         }
-    }
-
-    /// Debug test to compare 3x3 lossless vs lossy decoding
-    #[test]
-    fn test_decode_3x3_debug() {
-        let corpus_dir = match codec_corpus_jxl_dir() {
-            Some(d) => d,
-            None => {
-                eprintln!("Skipping: codec-corpus not found");
-                return;
-            }
-        };
-
-        // Test lossless
-        let lossless_path = corpus_dir.join("edge-cases/3x3_srgb_lossless.jxl");
-        if lossless_path.exists() {
-            decode_and_print_debug(&lossless_path, "3x3_srgb_lossless.jxl");
-        }
-
-        // Test lossy
-        let lossy_path = corpus_dir.join("edge-cases/3x3_srgb_lossy.jxl");
-        if lossy_path.exists() {
-            decode_and_print_debug(&lossy_path, "3x3_srgb_lossy.jxl");
-        }
-
-        // Reference values (djxl):
-        eprintln!("\n=== Reference (djxl) ===");
-        eprintln!(
-            "Lossless: [255,0,0], [0,255,0], [0,0,255], [128,64,64], [64,128,64], [64,64,128], [255,255,255], [128,128,128], [0,0,0]"
-        );
-        eprintln!(
-            "Lossy:    [255,0,14], [0,255,17], [0,0,255], [128,63,64], [60,128,63], [61,57,128], [255,255,255], [129,130,129], [0,0,0]"
-        );
     }
 
     // TODO: Generate tests for all codec-corpus images
