@@ -121,23 +121,40 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 
 ## Remaining Issues (3 failures)
 
-### 1. Alpha Premultiplication
+### 1. Alpha Premultiplication (max_error=239)
 
 | File | Error |
 |------|-------|
-| alpha_premultiplied | max_error=239 |
+| alpha_premultiplied | max_error=239, error_count=1039360/4194304 |
 
-### 2. CMYK Color Space
+**Root Cause**: Missing unpremultiply functionality. When source alpha is premultiplied (`alpha_associated=true`) and `premultiply_output=false` (default), we should divide color by alpha to output straight alpha. libjxl has `JxlDecoderSetUnpremultiplyAlpha` which defaults to true.
+
+**Fix Needed**:
+1. Create `UnpremultiplyAlphaStage` (divide color channels by alpha)
+2. Add logic in render.rs: if `!premultiply_output && source_alpha_associated`, add unpremultiply stage
+
+### 2. CMYK Color Space (max_error=224)
 
 | File | Error |
 |------|-------|
-| cmyk_layers | max_error=224 |
+| cmyk_layers | max_error=224, error_count=324100/1048576 |
 
-### 3. Multi-layer Noise/Spline
+**Root Cause**: CMYK color space handling not implemented. The decoder can parse CMYK but likely doesn't convert CMYK→RGB correctly.
+
+**Fix Needed**: Implement proper CMYK to RGB conversion in the render pipeline.
+
+### 3. Multi-layer Noise/Spline (max_error=70)
 
 | File | Error |
 |------|-------|
-| multiple_layers_noise_spline | max_error=70 |
+| multiple_layers_noise_spline | max_error=70, error_count=3505397/9437184 |
+
+**Root Cause**: Unknown. Image uses multiple layers, noise synthesis, and splines. The max_error=70 (out of 255) suggests accumulated precision errors or a bug in one of these features.
+
+**Investigation Needed**:
+1. Check noise synthesis implementation
+2. Check spline rendering
+3. Check layer compositing
 
 ---
 
