@@ -70,11 +70,17 @@ fn decode_jxl_to_pixels(path: &std::path::Path) -> Result<(usize, usize, usize, 
     };
 
     // Request u8 output format
-    // Note: For GrayscaleAlpha, alpha is part of the color_type, not extra_channel_format
-    let extra_channel_format = match color_type {
-        JxlColorType::Rgba | JxlColorType::Bgra => vec![None], // Alpha as extra channel
-        JxlColorType::GrayscaleAlpha => vec![],                // Alpha is part of GrayscaleAlpha
-        _ => vec![],
+    // Must provide a format slot for EVERY extra channel in the image, even if we don't
+    // want to receive them (use None to skip). The decoder asserts that the number of
+    // format slots matches frame_header.num_extra_channels.
+    let num_extra_channels = basic_info.extra_channels.len();
+    let extra_channel_format = if num_extra_channels > 0 {
+        // For RGBA/BGRA, the first alpha is included in color_type, so skip it (None)
+        // For GrayscaleAlpha, alpha is part of the color_type, so skip it (None)
+        // All other extra channels also get None (we don't need them for parity testing)
+        vec![None; num_extra_channels]
+    } else {
+        vec![]
     };
     let pixel_format = JxlPixelFormat {
         color_type,
