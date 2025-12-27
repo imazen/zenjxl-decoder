@@ -685,6 +685,18 @@ impl I32SimdVec for I32VecAvx {
         let p1 = _mm256_unpackhi_epi32(l, h);
         I32VecAvx(_mm256_unpackhi_epi64(p0, p1), this.1)
     });
+
+    #[inline(always)]
+    fn wrapping_add(self, rhs: Self) -> Self {
+        // SIMD integer addition already wraps
+        self + rhs
+    }
+
+    #[inline(always)]
+    fn wrapping_sub(self, rhs: Self) -> Self {
+        // SIMD integer subtraction already wraps
+        self - rhs
+    }
 }
 
 impl Add<I32VecAvx> for I32VecAvx {
