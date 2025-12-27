@@ -127,11 +127,14 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 |------|-------|
 | alpha_premultiplied | max_error=239, error_count=1039360/4194304 |
 
-**Root Cause**: Missing unpremultiply functionality. When source alpha is premultiplied (`alpha_associated=true`) and `premultiply_output=false` (default), we should divide color by alpha to output straight alpha. libjxl has `JxlDecoderSetUnpremultiplyAlpha` which defaults to true.
+**Investigation**: Created `UnpremultiplyAlphaStage` and tested adding it when source has premultiplied alpha. Result: made things worse (5 failures instead of 3). This indicates djxl does NOT unpremultiply by default when outputting PNG references.
 
-**Fix Needed**:
-1. Create `UnpremultiplyAlphaStage` (divide color channels by alpha)
-2. Add logic in render.rs: if `!premultiply_output && source_alpha_associated`, add unpremultiply stage
+**Actual Root Cause**: Unknown. The issue is likely in how premultiplied alpha interacts with XYB conversion or blending, not in missing unpremultiply logic. The max_error=239 suggests something fundamentally wrong with color values in transparent regions.
+
+**Investigation Needed**:
+1. Compare actual pixel values in transparent vs opaque regions
+2. Check XYB conversion handling for premultiplied alpha
+3. Check how libjxl's djxl generates reference PNGs for this test case
 
 ### 2. CMYK Color Space (max_error=224)
 
@@ -256,3 +259,6 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 18. Full parity test: 180/184 pass (98%), 0 crashes
 19. Fixed progressive_ac by correcting last_pass validation (strictly increasing, not decreasing)
 20. Full parity test: 181/184 pass (98.4%), 0 crashes
+21. Created UnpremultiplyAlphaStage (for future use)
+22. Tested unpremultiply on alpha_premultiplied - made things worse (djxl doesn't unpremultiply)
+23. Remaining 3 failures need deeper investigation (alpha, CMYK, noise/splines)

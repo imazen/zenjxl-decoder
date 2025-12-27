@@ -518,6 +518,11 @@ impl Frame {
                 && alpha_in_color.is_some()
                 && !source_alpha_associated;
 
+            // Note: We don't unpremultiply by default because djxl also doesn't by default.
+            // When source has alpha_associated=true (premultiplied), we output premultiplied
+            // unless explicitly requested otherwise via premultiply_output=false + cms option.
+            // This matches libjxl's JxlDecoderSetUnpremultiplyAlpha default of false.
+
             let color_source_channels: &[usize] =
                 match (pixel_format.color_type.is_grayscale(), alpha_in_color) {
                     (true, None) => &[0],
