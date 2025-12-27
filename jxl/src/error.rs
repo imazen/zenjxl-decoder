@@ -257,6 +257,8 @@ pub enum Error {
     IccTableSizeExceeded(usize),
     #[error("Invalid CMS configuration: requested ICC but no CMS is configured")]
     ICCOutputNoCMS,
+    #[error("CMS error: {0}")]
+    CmsError(String),
     #[error("I/O error: {0}")]
     IOError(#[from] std::io::Error),
     #[error("Wrong buffer count: {0} buffers given, {1} buffers expected")]
