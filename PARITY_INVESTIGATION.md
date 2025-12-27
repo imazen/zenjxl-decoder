@@ -103,9 +103,23 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 - with_icc: PASS
 - 180/184 tests pass (up from 177)
 
+### 7. Progressive AC Validation (FIXED)
+
+**Commit**: (pending)
+
+**Symptom**: progressive_ac failed with "PassesLastPassNonIncreasing" decode error.
+
+**Root Cause**: The validation logic for `Passes::last_pass` was inverted. libjxl requires `last_pass` values to be **strictly increasing** (`last_pass[i] > last_pass[i-1]`), but jxl-rs was checking for **strictly decreasing** (`lp >= last_lp` rejects increasing values).
+
+**Fix**: Changed validation from `if lp >= last_lp` to `if lp <= prev_lp` in frame_header.rs.
+
+**Impact**:
+- progressive_ac: PASS
+- 181/184 tests pass (up from 180)
+
 ---
 
-## Remaining Issues (4 failures)
+## Remaining Issues (3 failures)
 
 ### 1. Alpha Premultiplication
 
@@ -124,12 +138,6 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 | File | Error |
 |------|-------|
 | multiple_layers_noise_spline | max_error=70 |
-
-### 4. Progressive AC Decode Error
-
-| File | Error |
-|------|-------|
-| progressive_ac | PassesLastPassNonIncreasing |
 
 ---
 
@@ -159,6 +167,11 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 ### After Grayscale ICC Fix (full run - 184 files)
 - Passed: 180 (98%)
 - Failed: 4
+- Crashes: 0
+
+### After Progressive AC Validation Fix (full run - 184 files)
+- Passed: 181 (98.4%)
+- Failed: 3
 - Crashes: 0
 
 ---
@@ -224,3 +237,5 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 16. Full parity test: 177/184 pass (96%), 0 crashes
 17. Fixed grayscale ICC detection by using default pixel format's color_type
 18. Full parity test: 180/184 pass (98%), 0 crashes
+19. Fixed progressive_ac by correcting last_pass validation (strictly increasing, not decreasing)
+20. Full parity test: 181/184 pass (98.4%), 0 crashes
