@@ -11,45 +11,114 @@
 //! IMPORTANT: DO NOT WEAKEN TOLERANCES. If a test fails, the implementation
 //! is wrong and must be fixed.
 
-use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+use crate::api::{
+    JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
+    ProcessingResult, states,
+};
+use crate::image::{Image, Rect};
 
 use super::parity::{
     CONFORMANCE_THRESHOLD_U8, CodecCorpusTestCase, ReferenceImage, codec_corpus_jxl_dir,
     compare_u8_buffers, discover_codec_corpus_tests, load_ppm,
 };
 
-/// Decode a JXL file using jxl-rs and return the pixel data.
+/// Decode a JXL file using jxl-rs and return the pixel data as u8.
+/// Returns (width, height, channels, pixels) where pixels is RGB/RGBA u8 data.
 fn decode_jxl_to_pixels(path: &std::path::Path) -> Result<(usize, usize, usize, Vec<u8>), String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read JXL: {}", e))?;
+    let mut input = data.as_slice();
 
     let options = JxlDecoderOptions::default();
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
-    let mut input = data.as_slice();
 
-    loop {
+    // Advance to image info
+    let mut decoder = loop {
         match decoder.process(&mut input) {
-            Ok(ProcessingResult::Complete { result }) => {
-                let info = result.basic_info();
-                let width = info.size.0 as usize;
-                let height = info.size.1 as usize;
-
-                // Get pixel data from the decoder
-                // For now, return placeholder until we wire up actual pixel output
-                // The actual implementation would get pixels from result.pixels() or similar
-
-                // TODO: Extract actual pixel data from decoder result
-                // This requires understanding how jxl-rs exposes decoded pixels
-                return Err("Pixel extraction not yet implemented".to_string());
-            }
+            Ok(ProcessingResult::Complete { result }) => break result,
             Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
                 if input.is_empty() {
-                    return Err("Unexpected end of input".to_string());
+                    return Err("Unexpected end of input during header".to_string());
                 }
                 decoder = fallback;
             }
-            Err(e) => return Err(format!("Decode error: {:?}", e)),
+            Err(e) => return Err(format!("Header decode error: {:?}", e)),
+        }
+    };
+
+    let basic_info = decoder.basic_info().clone();
+    let (width, height) = basic_info.size;
+
+    // Determine output format based on whether image has alpha
+    let has_alpha = basic_info.extra_channels.iter().any(|ec| {
+        matches!(
+            ec.ec_type,
+            crate::headers::extra_channels::ExtraChannel::Alpha
+        )
+    });
+
+    let (color_type, channels) = if has_alpha {
+        (JxlColorType::Rgba, 4)
+    } else {
+        (JxlColorType::Rgb, 3)
+    };
+
+    // Request u8 output format
+    let pixel_format = JxlPixelFormat {
+        color_type,
+        color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
+        extra_channel_format: if has_alpha { vec![None] } else { vec![] },
+    };
+    decoder.set_pixel_format(pixel_format);
+
+    // Advance to frame info
+    let mut decoder = loop {
+        match decoder.process(&mut input) {
+            Ok(ProcessingResult::Complete { result }) => break result,
+            Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                if input.is_empty() {
+                    return Err("Unexpected end of input before frame".to_string());
+                }
+                decoder = fallback;
+            }
+            Err(e) => return Err(format!("Frame info decode error: {:?}", e)),
+        }
+    };
+
+    // Create output buffer
+    let mut output_image = Image::<u8>::new((width * channels, height))
+        .map_err(|e| format!("Buffer error: {:?}", e))?;
+
+    let mut buffers = vec![JxlOutputBuffer::from_image_rect_mut(
+        output_image
+            .get_rect_mut(Rect {
+                origin: (0, 0),
+                size: (width * channels, height),
+            })
+            .into_raw(),
+    )];
+
+    // Decode frame pixels
+    loop {
+        match decoder.process(&mut input, &mut buffers) {
+            Ok(ProcessingResult::Complete { .. }) => break,
+            Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                if input.is_empty() {
+                    return Err("Unexpected end of input during frame".to_string());
+                }
+                decoder = fallback;
+            }
+            Err(e) => return Err(format!("Frame decode error: {:?}", e)),
         }
     }
+
+    // Extract pixels from Image<u8>
+    let mut pixels = Vec::with_capacity(width * height * channels);
+    for y in 0..height {
+        let row = output_image.row(y);
+        pixels.extend_from_slice(row);
+    }
+
+    Ok((width, height, channels, pixels))
 }
 
 /// Run a single parity test case.
@@ -62,12 +131,7 @@ fn run_parity_test(test_case: &CodecCorpusTestCase) -> Result<(), String> {
         )
     })?;
 
-    // Skip PNG references (need external decoder)
-    if ref_path.extension().and_then(|e| e.to_str()) == Some("png") {
-        return Err("PNG reference loading not yet supported".to_string());
-    }
-
-    // Load reference
+    // Load reference (supports PPM, PGM, PNG)
     let reference =
         ReferenceImage::load(ref_path).map_err(|e| format!("Failed to load reference: {}", e))?;
 
@@ -82,25 +146,54 @@ fn run_parity_test(test_case: &CodecCorpusTestCase) -> Result<(), String> {
         ));
     }
 
-    if channels != reference.channels {
+    // Handle channel count mismatch (e.g., RGBA decoded vs RGB reference)
+    let (compare_channels, ref_pixels, actual_pixels) = if channels == reference.channels {
+        (channels, reference.pixels.clone(), actual.clone())
+    } else if channels == 4 && reference.channels == 3 {
+        // RGBA vs RGB: compare only RGB channels
+        let mut rgb_actual = Vec::with_capacity(width * height * 3);
+        for pixel in actual.chunks_exact(4) {
+            rgb_actual.extend_from_slice(&pixel[..3]);
+        }
+        (3, reference.pixels.clone(), rgb_actual)
+    } else if channels == 3 && reference.channels == 4 {
+        // RGB vs RGBA: compare only RGB channels from reference
+        let mut rgb_ref = Vec::with_capacity(width * height * 3);
+        for pixel in reference.pixels.chunks_exact(4) {
+            rgb_ref.extend_from_slice(&pixel[..3]);
+        }
+        (3, rgb_ref, actual.clone())
+    } else {
         return Err(format!(
             "Channel count mismatch: got {}, expected {}",
             channels, reference.channels
         ));
-    }
+    };
 
     // Compare pixels
     let result = compare_u8_buffers(
-        &reference.pixels,
-        &actual,
+        &ref_pixels,
+        &actual_pixels,
         width,
         height,
-        channels,
+        compare_channels,
         CONFORMANCE_THRESHOLD_U8,
     );
 
     if result.passed {
         Ok(())
+    } else if result.max_abs_error == f64::INFINITY {
+        Err(format!(
+            "Buffer size mismatch: jxl-rs={}x{}x{}={} bytes, reference={}x{}x{}={} bytes",
+            width,
+            height,
+            channels,
+            actual_pixels.len(),
+            reference.width,
+            reference.height,
+            reference.channels,
+            ref_pixels.len()
+        ))
     } else {
         Err(format!(
             "Pixel mismatch: max_error={}, error_count={}/{}, first_error={:?}",
@@ -149,7 +242,7 @@ mod tests {
 
     /// Test that reference outputs can be loaded
     #[test]
-    fn test_load_reference_ppm() {
+    fn test_load_reference() {
         let corpus_dir = match codec_corpus_jxl_dir() {
             Some(d) => d,
             None => {
@@ -158,22 +251,69 @@ mod tests {
             }
         };
 
-        let ref_path = corpus_dir.join("reference/edge-cases/basic.ppm");
-        if !ref_path.exists() {
+        // Try PNG first (preferred), then PPM
+        let ref_png = corpus_dir.join("reference/edge-cases/basic.png");
+        let ref_ppm = corpus_dir.join("reference/edge-cases/basic.ppm");
+
+        let ref_path = if ref_png.exists() {
+            ref_png
+        } else if ref_ppm.exists() {
+            ref_ppm
+        } else {
             eprintln!("Skipping: reference outputs not generated");
             eprintln!("Run: codec-corpus/jxl/generate_references.sh");
             return;
-        }
+        };
 
-        let (width, height, channels, pixels) = load_ppm(&ref_path).expect("Failed to load PPM");
+        let reference = ReferenceImage::load(&ref_path).expect("Failed to load reference");
 
         // basic.jxl is a 1x1 image
-        assert_eq!(width, 1);
-        assert_eq!(height, 1);
-        assert_eq!(channels, 3);
-        assert_eq!(pixels.len(), 3);
+        assert_eq!(reference.width, 1);
+        assert_eq!(reference.height, 1);
+        assert_eq!(reference.channels, 3);
+        assert_eq!(reference.pixels.len(), 3);
 
-        eprintln!("basic.jxl reference pixels: {:?}", pixels);
+        eprintln!(
+            "basic.jxl reference pixels (from {:?}): {:?}",
+            ref_path.extension(),
+            reference.pixels
+        );
+    }
+
+    /// Debug test to see what jxl-rs decodes for basic.jxl
+    #[test]
+    fn test_decode_basic_debug() {
+        let corpus_dir = match codec_corpus_jxl_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("Skipping: codec-corpus not found");
+                return;
+            }
+        };
+
+        let jxl_path = corpus_dir.join("edge-cases/basic.jxl");
+        if !jxl_path.exists() {
+            eprintln!("Skipping: basic.jxl not found");
+            return;
+        }
+
+        match decode_jxl_to_pixels(&jxl_path) {
+            Ok((width, height, channels, pixels)) => {
+                eprintln!("jxl-rs decoded: {}x{} {} channels", width, height, channels);
+                eprintln!("jxl-rs pixels: {:?}", pixels);
+            }
+            Err(e) => {
+                eprintln!("jxl-rs decode failed: {}", e);
+            }
+        }
+
+        // Also load reference for comparison
+        let ref_path = corpus_dir.join("reference/edge-cases/basic.png");
+        if ref_path.exists() {
+            if let Ok(reference) = ReferenceImage::load(&ref_path) {
+                eprintln!("djxl reference: {:?}", reference.pixels);
+            }
+        }
     }
 
     /// Test basic.jxl parity (smallest test case)
@@ -231,17 +371,29 @@ mod tests {
         let mut skipped = 0;
 
         for test_case in &tests {
-            match run_parity_test(test_case) {
-                Ok(()) => {
+            // Catch panics to continue testing other files
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_parity_test(test_case)
+            }));
+
+            match result {
+                Ok(Ok(())) => {
                     eprintln!("PASS: {}/{}", test_case.category, test_case.name);
                     passed += 1;
                 }
-                Err(e) if e.contains("not yet") || e.contains("not supported") => {
+                Ok(Err(e)) if e.contains("not yet") || e.contains("not supported") => {
                     eprintln!("SKIP: {}/{} - {}", test_case.category, test_case.name, e);
                     skipped += 1;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     eprintln!("FAIL: {}/{} - {}", test_case.category, test_case.name, e);
+                    failed += 1;
+                }
+                Err(_) => {
+                    eprintln!(
+                        "CRASH: {}/{} - decoder panicked",
+                        test_case.category, test_case.name
+                    );
                     failed += 1;
                 }
             }

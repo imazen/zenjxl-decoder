@@ -121,6 +121,7 @@ pub fn compare_f32_buffers(
 }
 
 /// Compare two u8 pixel buffers with conformance threshold.
+/// Returns None if buffer sizes don't match (caller should handle this as an error).
 pub fn compare_u8_buffers(
     reference: &[u8],
     actual: &[u8],
@@ -129,8 +130,27 @@ pub fn compare_u8_buffers(
     channels: usize,
     threshold: u8,
 ) -> ParityResult {
-    assert_eq!(reference.len(), actual.len());
-    assert_eq!(reference.len(), width * height * channels);
+    if reference.len() != actual.len() {
+        return ParityResult {
+            passed: false,
+            max_abs_error: f64::INFINITY,
+            max_rel_error: f64::INFINITY,
+            error_count: reference.len().max(actual.len()),
+            total_pixels: reference.len().max(actual.len()),
+            first_error_location: Some((0, 0, 0)),
+        };
+    }
+    let expected_len = width * height * channels;
+    if reference.len() != expected_len {
+        return ParityResult {
+            passed: false,
+            max_abs_error: f64::INFINITY,
+            max_rel_error: f64::INFINITY,
+            error_count: expected_len,
+            total_pixels: expected_len,
+            first_error_location: Some((0, 0, 0)),
+        };
+    }
 
     let mut max_abs_error: f64 = 0.0;
     let mut error_count: usize = 0;
@@ -417,6 +437,76 @@ pub fn load_pgm(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> 
     Ok((width, height, channels, pixels))
 }
 
+/// Parse a PNG file into pixel data.
+/// Returns (width, height, channels, pixels) where pixels is RGB/RGBA/Gray u8 data.
+pub fn load_png(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> {
+    let file = std::fs::File::open(path)?;
+    let decoder = png::Decoder::new(file);
+    let mut reader = decoder.read_info().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("PNG decode error: {}", e),
+        )
+    })?;
+
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("PNG frame error: {}", e),
+        )
+    })?;
+
+    let width = info.width as usize;
+    let height = info.height as usize;
+
+    let bytes_per_sample = if info.bit_depth == png::BitDepth::Sixteen {
+        2
+    } else {
+        1
+    };
+
+    let (channels, pixels) = match info.color_type {
+        png::ColorType::Grayscale => {
+            let byte_count = width * height * 1 * bytes_per_sample;
+            let pixels = buf[..byte_count].to_vec();
+            (1, pixels)
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let byte_count = width * height * 2 * bytes_per_sample;
+            let pixels = buf[..byte_count].to_vec();
+            (2, pixels)
+        }
+        png::ColorType::Rgb => {
+            let byte_count = width * height * 3 * bytes_per_sample;
+            let pixels = buf[..byte_count].to_vec();
+            (3, pixels)
+        }
+        png::ColorType::Rgba => {
+            let byte_count = width * height * 4 * bytes_per_sample;
+            let pixels = buf[..byte_count].to_vec();
+            (4, pixels)
+        }
+        png::ColorType::Indexed => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "Indexed PNG not supported",
+            ));
+        }
+    };
+
+    // Handle 16-bit PNGs by converting to 8-bit
+    if info.bit_depth == png::BitDepth::Sixteen {
+        let mut pixels8 = Vec::with_capacity(pixels.len() / 2);
+        for chunk in pixels.chunks_exact(2) {
+            pixels8.push(chunk[0]); // Take high byte (big-endian)
+        }
+        return Ok((width, height, channels, pixels8));
+    }
+
+    Ok((width, height, channels, pixels))
+}
+
 /// Reference image data loaded from PPM/PNG
 #[derive(Debug)]
 pub struct ReferenceImage {
@@ -451,12 +541,13 @@ impl ReferenceImage {
                 })
             }
             "png" => {
-                // For PNG, we'd need a PNG decoder - skip for now
-                // In practice, use PPM references where possible
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "PNG reference loading requires external decoder",
-                ))
+                let (width, height, channels, pixels) = load_png(path)?;
+                Ok(Self {
+                    width,
+                    height,
+                    channels,
+                    pixels,
+                })
             }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
