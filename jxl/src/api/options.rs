@@ -52,7 +52,7 @@ impl Default for JxlDecoderOptions {
             skip_preview: true,
             desired_intensity_target: None,
             progressive_mode: JxlProgressiveMode::Pass,
-            xyb_output_linear: true,
+            xyb_output_linear: false,
             enable_output: true,
             cms: None,
             pixel_limit: None,

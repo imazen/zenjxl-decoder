@@ -366,6 +366,54 @@ mod tests {
         }
     }
 
+    /// Debug test to compare 3x3 lossless vs lossy decoding
+    #[test]
+    fn test_decode_3x3_debug() {
+        let corpus_dir = match codec_corpus_jxl_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("Skipping: codec-corpus not found");
+                return;
+            }
+        };
+
+        // Test lossless
+        let lossless_path = corpus_dir.join("edge-cases/3x3_srgb_lossless.jxl");
+        if lossless_path.exists() {
+            decode_and_print_debug(&lossless_path, "3x3_srgb_lossless.jxl");
+        }
+
+        // Test lossy
+        let lossy_path = corpus_dir.join("edge-cases/3x3_srgb_lossy.jxl");
+        if lossy_path.exists() {
+            decode_and_print_debug(&lossy_path, "3x3_srgb_lossy.jxl");
+        }
+
+        // Reference values (djxl):
+        eprintln!("\n=== Reference (djxl) ===");
+        eprintln!("Lossless: [255,0,0], [0,255,0], [0,0,255], [128,64,64], [64,128,64], [64,64,128], [255,255,255], [128,128,128], [0,0,0]");
+        eprintln!("Lossy:    [255,0,14], [0,255,17], [0,0,255], [128,63,64], [60,128,63], [61,57,128], [255,255,255], [129,130,129], [0,0,0]");
+    }
+
+    /// Helper to decode and print debug info
+    fn decode_and_print_debug(path: &std::path::Path, name: &str) {
+        eprintln!("\n=== {} ===", name);
+
+        // Decode pixels
+        match decode_jxl_to_pixels(path) {
+            Ok((width, height, channels, pixels)) => {
+                eprintln!("Output: {}x{} {} channels", width, height, channels);
+                for y in 0..height {
+                    for x in 0..width {
+                        let i = (y * width + x) * channels;
+                        eprintln!("  ({},{}) = {:?}", x, y, &pixels[i..i + channels]);
+                    }
+                }
+            }
+            Err(e) => eprintln!("decode failed: {}", e),
+        }
+    }
+
     // TODO: Generate tests for all codec-corpus images
     // This would be done via a build script or test generator
 
