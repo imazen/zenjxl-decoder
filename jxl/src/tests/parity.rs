@@ -437,6 +437,33 @@ pub fn load_pgm(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> 
     Ok((width, height, channels, pixels))
 }
 
+/// Check if a PNG file has linear gamma (gAMA=100000).
+/// djxl outputs linear values when the gAMA chunk is 100000 (gamma 1.0).
+/// This happens for some XYB-encoded images with embedded ICC profiles.
+pub fn png_has_linear_gamma(path: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut header = [0u8; 2048]; // Read enough to find gAMA chunk
+    let bytes_read = file.read(&mut header)?;
+    let header = &header[..bytes_read];
+
+    // Look for "gAMA" chunk type (0x67414d41)
+    // The 4 bytes after the type are the gamma value * 100000 (big-endian u32)
+    for i in 0..header.len().saturating_sub(8) {
+        if &header[i..i + 4] == b"gAMA" {
+            let gama_value = u32::from_be_bytes([
+                header[i + 4],
+                header[i + 5],
+                header[i + 6],
+                header[i + 7],
+            ]);
+            // gAMA=100000 means gamma=1.0 (linear)
+            return Ok(gama_value == 100000);
+        }
+    }
+    Ok(false)
+}
+
 /// Parse a PNG file into pixel data.
 /// Returns (width, height, channels, pixels) where pixels is RGB/RGBA/Gray u8 data.
 pub fn load_png(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> {

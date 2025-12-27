@@ -25,10 +25,21 @@ use super::parity::{
 /// Decode a JXL file using jxl-rs and return the pixel data as u8.
 /// Returns (width, height, channels, pixels) where pixels is RGB/RGBA u8 data.
 fn decode_jxl_to_pixels(path: &std::path::Path) -> Result<(usize, usize, usize, Vec<u8>), String> {
+    decode_jxl_to_pixels_with_options(path, false)
+}
+
+/// Decode a JXL file with optional linear output.
+fn decode_jxl_to_pixels_with_options(
+    path: &std::path::Path,
+    output_linear: bool,
+) -> Result<(usize, usize, usize, Vec<u8>), String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read JXL: {}", e))?;
     let mut input = data.as_slice();
 
-    let options = JxlDecoderOptions::default();
+    let options = JxlDecoderOptions {
+        xyb_output_linear: output_linear,
+        ..JxlDecoderOptions::default()
+    };
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
 
     // Advance to image info
@@ -154,8 +165,18 @@ fn run_parity_test(test_case: &CodecCorpusTestCase) -> Result<(), String> {
     let reference =
         ReferenceImage::load(ref_path).map_err(|e| format!("Failed to load reference: {}", e))?;
 
+    // Check if reference PNG has linear gamma (gAMA=100000).
+    // djxl outputs linear values for some XYB-encoded images, indicated by gAMA=100000
+    // in the PNG. We need to decode with linear output to match these references.
+    let use_linear = if ref_path.extension().and_then(|e| e.to_str()) == Some("png") {
+        super::parity::png_has_linear_gamma(ref_path).unwrap_or(false)
+    } else {
+        false
+    };
+
     // Decode with jxl-rs
-    let (width, height, channels, actual) = decode_jxl_to_pixels(&test_case.jxl_path)?;
+    let (width, height, channels, actual) =
+        decode_jxl_to_pixels_with_options(&test_case.jxl_path, use_linear)?;
 
     // Verify dimensions match
     if width != reference.width || height != reference.height {
@@ -421,6 +442,87 @@ mod tests {
                 }
             }
             Err(e) => eprintln!("decode failed: {}", e),
+        }
+    }
+
+    /// Debug test for grayscale color encoding
+    #[test]
+    fn test_debug_failing_color_encodings() {
+        let corpus = super::super::parity::codec_corpus_jxl_dir();
+        let Some(corpus) = corpus else {
+            eprintln!("Skipping: codec-corpus not found");
+            return;
+        };
+
+        // Test grayscale - compare actual pixel values
+        let grayscale_jxl = corpus.join("conformance/grayscale.jxl");
+        let grayscale_ref = corpus.join("reference/conformance/grayscale.png");
+
+        // Load reference PNG
+        let (ref_w, ref_h, ref_ch, ref_pixels) = super::super::parity::load_png(&grayscale_ref).unwrap();
+        eprintln!("Reference: {}x{} {} channels", ref_w, ref_h, ref_ch);
+
+        // Decode JXL
+        let (jxl_w, jxl_h, jxl_ch, jxl_pixels) = decode_jxl_to_pixels(&grayscale_jxl).unwrap();
+        eprintln!("JXL-RS:    {}x{} {} channels", jxl_w, jxl_h, jxl_ch);
+
+        // Compare pixels around first error at (32, 0, 0)
+        eprintln!("\nPixel comparison around (32,0):");
+        for x in 30..40 {
+            let i = x; // y=0, grayscale so 1 channel
+            let ref_val = ref_pixels[i];
+            let jxl_val = jxl_pixels[i];
+            let diff = (ref_val as i16 - jxl_val as i16).abs();
+            eprintln!("  x={:2}: ref={:3}, jxl={:3}, diff={}", x, ref_val, jxl_val, diff);
+        }
+
+        // Also look at a range of values
+        eprintln!("\nFinding pixels with diff > 0:");
+        let mut shown = 0;
+        for i in 0..ref_pixels.len().min(jxl_pixels.len()) {
+            let ref_val = ref_pixels[i];
+            let jxl_val = jxl_pixels[i];
+            let diff = (ref_val as i16 - jxl_val as i16).abs();
+            if diff > 0 && shown < 20 {
+                let x = i % ref_w;
+                let y = i / ref_w;
+                eprintln!("  ({:3},{:3}): ref={:3}, jxl={:3}, diff={}", x, y, ref_val, jxl_val, diff);
+                shown += 1;
+            }
+        }
+
+        // Now try with linear output
+        eprintln!("\n=== grayscale.jxl WITH LINEAR OUTPUT ===");
+        let (jxl_w, jxl_h, jxl_ch, jxl_pixels_linear) =
+            decode_jxl_to_pixels_with_options(&grayscale_jxl, true).unwrap();
+        eprintln!("JXL-RS (linear): {}x{} {} channels", jxl_w, jxl_h, jxl_ch);
+
+        eprintln!("\nPixel comparison around (32,0) with linear output:");
+        for x in 30..50 {
+            let i = x;
+            let ref_val = ref_pixels[i];
+            let jxl_val = jxl_pixels_linear[i];
+            let diff = (ref_val as i16 - jxl_val as i16).abs();
+            eprintln!("  x={:2}: ref={:3}, jxl_linear={:3}, diff={}", x, ref_val, jxl_val, diff);
+        }
+
+        // Also check basic.jxl which passes
+        eprintln!("\n=== basic.jxl (PASSES) ===");
+        let basic_jxl = corpus.join("edge-cases/basic.jxl");
+        let basic_ref = corpus.join("reference/edge-cases/basic.png");
+
+        let (ref_w, ref_h, ref_ch, ref_pixels) = super::super::parity::load_png(&basic_ref).unwrap();
+        eprintln!("Reference: {}x{} {} channels", ref_w, ref_h, ref_ch);
+
+        let (jxl_w, jxl_h, jxl_ch, jxl_pixels) = decode_jxl_to_pixels(&basic_jxl).unwrap();
+        eprintln!("JXL-RS:    {}x{} {} channels", jxl_w, jxl_h, jxl_ch);
+
+        eprintln!("\nPixel comparison (first 10):");
+        for i in 0..10.min(ref_pixels.len()).min(jxl_pixels.len()) {
+            let ref_val = ref_pixels[i];
+            let jxl_val = jxl_pixels[i];
+            let diff = (ref_val as i16 - jxl_val as i16).abs();
+            eprintln!("  [{}] ref={:3}, jxl={:3}, diff={}", i, ref_val, jxl_val, diff);
         }
     }
 
