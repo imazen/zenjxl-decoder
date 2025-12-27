@@ -117,43 +117,27 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 - progressive_ac: PASS
 - 181/184 tests pass (up from 180)
 
+### 8. Extra Channel Bit Depth Bug (FIXED)
+
+**Commit**: (pending)
+
+**Symptom**: alpha_premultiplied had max_error=239, alpha values were completely wrong (255 instead of 127-128)
+
+**Root Cause**: Extra channels (including alpha) were using `metadata.bit_depth` instead of each extra channel's own `bit_depth` in the ConvertModularToF32Stage. This caused incorrect scaling during i32→f32 conversion.
+
+**Fix**:
+- Added `bit_depth()` getter to `ExtraChannelInfo`
+- Changed render.rs to use `metadata.extra_channel_info[i - 3].bit_depth()` for extra channels
+
+**Impact**:
+- alpha_premultiplied: PASS
+- 182/184 tests pass (up from 181)
+
 ---
 
-## Remaining Issues (3 failures)
+## Remaining Issues (2 failures)
 
-### 1. Alpha Premultiplication (max_error=239)
-
-| File | Error |
-|------|-------|
-| alpha_premultiplied | max_error=239, error_count=1039360/4194304 |
-
-**Investigation (2025-12-27)**:
-- Created `UnpremultiplyAlphaStage` - made things worse (djxl doesn't unpremultiply)
-- **Key Finding**: Alpha channel values are completely wrong
-  - Reference (semi-opaque): alpha=127-128, RGB values ~127,64,63
-  - Actual output: alpha=255 (fully opaque!), RGB values ~127,64,63
-  - Reference (transparent): alpha=0
-  - Actual output: alpha=4 (wrong!)
-- RGB values are mostly correct, only alpha is broken
-- Image has: `ec_type: Alpha, alpha_associated: true` (premultiplied source)
-
-**Root Cause Analysis**:
-- The alpha channel IS being included (`color_source_channels = [0, 1, 2, 3]`)
-- `fill_opaque_alpha` is correctly `false` (since alpha_in_color is Some)
-- The issue is in the **alpha channel data values** themselves, not the pipeline configuration
-- Alpha values coming through the pipeline are wrong before the save stage
-
-**Hypothesis**: The alpha channel data from decoding may not be correct, or there's
-a stage that's modifying it incorrectly. The XYB stage only touches channels 0-2,
-so it's not from XYB conversion. Need to trace where alpha values are set during
-modular/VarDCT decoding.
-
-**Investigation Needed**:
-1. Trace alpha channel values at different pipeline stages
-2. Check modular decoder's handling of extra channels
-3. Check if alpha_associated affects how values are stored/loaded
-
-### 2. CMYK Color Space (max_error=224)
+### 1. CMYK Color Space (max_error=224)
 
 | File | Error |
 |------|-------|
@@ -209,6 +193,11 @@ modular/VarDCT decoding.
 ### After Progressive AC Validation Fix (full run - 184 files)
 - Passed: 181 (98.4%)
 - Failed: 3
+- Crashes: 0
+
+### After Extra Channel Bit Depth Fix (full run - 184 files)
+- Passed: 182 (98.9%)
+- Failed: 2
 - Crashes: 0
 
 ---
@@ -283,3 +272,7 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 25. Implemented JxlCms trait wrapper for moxcms (MoxCms struct)
 26. Investigated alpha_premultiplied - found alpha values completely wrong (255 instead of 127)
 27. Root cause is NOT fill_opaque_alpha or pipeline config - actual alpha data values are wrong
+28. Found bug: extra channels using `metadata.bit_depth` instead of their own `bit_depth`
+29. Fixed by using `metadata.extra_channel_info[i - 3].bit_depth()` in render.rs
+30. Full parity test: 182/184 pass (98.9%), 0 crashes
+31. Remaining 2 failures: cmyk_layers (CMYK color space), multiple_layers_noise_spline (noise/splines)
