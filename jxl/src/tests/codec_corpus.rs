@@ -12,14 +12,14 @@
 //! is wrong and must be fixed.
 
 use crate::api::{
-    JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
-    ProcessingResult, states,
+    JxlColorEncoding, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions,
+    JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
 };
 use crate::image::{Image, Rect};
 
 use super::parity::{
     CONFORMANCE_THRESHOLD_U8, CodecCorpusTestCase, ReferenceImage, codec_corpus_jxl_dir,
-    compare_u8_buffers, discover_codec_corpus_tests, load_ppm,
+    compare_u8_buffers, discover_codec_corpus_tests,
 };
 
 /// Decode a JXL file using jxl-rs and return the pixel data as u8.
@@ -48,7 +48,13 @@ fn decode_jxl_to_pixels(path: &std::path::Path) -> Result<(usize, usize, usize, 
     let basic_info = decoder.basic_info().clone();
     let (width, height) = basic_info.size;
 
-    // Determine output format based on whether image has alpha
+    // Check if image is grayscale by looking at the output color profile
+    let is_grayscale = matches!(
+        decoder.output_color_profile(),
+        JxlColorProfile::Simple(JxlColorEncoding::GrayscaleColorSpace { .. })
+    );
+
+    // Determine output format based on whether image has alpha and is grayscale
     let has_alpha = basic_info.extra_channels.iter().any(|ec| {
         matches!(
             ec.ec_type,
@@ -56,17 +62,24 @@ fn decode_jxl_to_pixels(path: &std::path::Path) -> Result<(usize, usize, usize, 
         )
     });
 
-    let (color_type, channels) = if has_alpha {
-        (JxlColorType::Rgba, 4)
-    } else {
-        (JxlColorType::Rgb, 3)
+    let (color_type, channels) = match (is_grayscale, has_alpha) {
+        (true, true) => (JxlColorType::GrayscaleAlpha, 2),
+        (true, false) => (JxlColorType::Grayscale, 1),
+        (false, true) => (JxlColorType::Rgba, 4),
+        (false, false) => (JxlColorType::Rgb, 3),
     };
 
     // Request u8 output format
+    // Note: For GrayscaleAlpha, alpha is part of the color_type, not extra_channel_format
+    let extra_channel_format = match color_type {
+        JxlColorType::Rgba | JxlColorType::Bgra => vec![None], // Alpha as extra channel
+        JxlColorType::GrayscaleAlpha => vec![],                // Alpha is part of GrayscaleAlpha
+        _ => vec![],
+    };
     let pixel_format = JxlPixelFormat {
         color_type,
         color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
-        extra_channel_format: if has_alpha { vec![None] } else { vec![] },
+        extra_channel_format,
     };
     decoder.set_pixel_format(pixel_format);
 
