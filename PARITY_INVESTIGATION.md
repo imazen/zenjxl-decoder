@@ -119,7 +119,7 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 
 ### 8. Extra Channel Bit Depth Bug (FIXED)
 
-**Commit**: (pending)
+**Commit**: `908170c`
 
 **Symptom**: alpha_premultiplied had max_error=239, alpha values were completely wrong (255 instead of 127-128)
 
