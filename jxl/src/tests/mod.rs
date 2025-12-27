@@ -11,5 +11,6 @@
 pub mod codec_corpus;
 pub mod decode_api;
 pub mod entropy;
+pub mod feature_tests;
 pub mod parity;
 pub mod streaming;
