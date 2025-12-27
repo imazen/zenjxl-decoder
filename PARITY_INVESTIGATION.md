@@ -127,14 +127,31 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 |------|-------|
 | alpha_premultiplied | max_error=239, error_count=1039360/4194304 |
 
-**Investigation**: Created `UnpremultiplyAlphaStage` and tested adding it when source has premultiplied alpha. Result: made things worse (5 failures instead of 3). This indicates djxl does NOT unpremultiply by default when outputting PNG references.
+**Investigation (2025-12-27)**:
+- Created `UnpremultiplyAlphaStage` - made things worse (djxl doesn't unpremultiply)
+- **Key Finding**: Alpha channel values are completely wrong
+  - Reference (semi-opaque): alpha=127-128, RGB values ~127,64,63
+  - Actual output: alpha=255 (fully opaque!), RGB values ~127,64,63
+  - Reference (transparent): alpha=0
+  - Actual output: alpha=4 (wrong!)
+- RGB values are mostly correct, only alpha is broken
+- Image has: `ec_type: Alpha, alpha_associated: true` (premultiplied source)
 
-**Actual Root Cause**: Unknown. The issue is likely in how premultiplied alpha interacts with XYB conversion or blending, not in missing unpremultiply logic. The max_error=239 suggests something fundamentally wrong with color values in transparent regions.
+**Root Cause Analysis**:
+- The alpha channel IS being included (`color_source_channels = [0, 1, 2, 3]`)
+- `fill_opaque_alpha` is correctly `false` (since alpha_in_color is Some)
+- The issue is in the **alpha channel data values** themselves, not the pipeline configuration
+- Alpha values coming through the pipeline are wrong before the save stage
+
+**Hypothesis**: The alpha channel data from decoding may not be correct, or there's
+a stage that's modifying it incorrectly. The XYB stage only touches channels 0-2,
+so it's not from XYB conversion. Need to trace where alpha values are set during
+modular/VarDCT decoding.
 
 **Investigation Needed**:
-1. Compare actual pixel values in transparent vs opaque regions
-2. Check XYB conversion handling for premultiplied alpha
-3. Check how libjxl's djxl generates reference PNGs for this test case
+1. Trace alpha channel values at different pipeline stages
+2. Check modular decoder's handling of extra channels
+3. Check if alpha_associated affects how values are stored/loaded
 
 ### 2. CMYK Color Space (max_error=224)
 
@@ -262,3 +279,7 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 21. Created UnpremultiplyAlphaStage (for future use)
 22. Tested unpremultiply on alpha_premultiplied - made things worse (djxl doesn't unpremultiply)
 23. Remaining 3 failures need deeper investigation (alpha, CMYK, noise/splines)
+24. Added moxcms as optional CMS dependency with "cms" feature flag
+25. Implemented JxlCms trait wrapper for moxcms (MoxCms struct)
+26. Investigated alpha_premultiplied - found alpha values completely wrong (255 instead of 127)
+27. Root cause is NOT fill_opaque_alpha or pipeline config - actual alpha data values are wrong
