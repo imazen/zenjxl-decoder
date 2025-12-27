@@ -65,42 +65,71 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 - `large_header`: PASSES
 - `cmyk_layers`: No longer crashes (now pixel mismatch - CMYK color space issue)
 
+### 5. Linear Gamma Detection in Reference PNGs (FIXED)
+
+**Commit**: `44d4128`
+
+**Symptom**: max_error=74 for grayscale, progressive, patches tests
+
+**Root Cause**: Some djxl-generated reference PNGs have gAMA=100000 (linear gamma, gamma=1.0) instead of sRGB gamma (gAMA=45455, gamma≈0.45). This happens for XYB-encoded images with embedded ICC profiles. Our decoder was outputting sRGB values while reference was in linear colorspace.
+
+**Investigation**:
+- Reference grayscale.png: pixel values 0-3 (linear)
+- jxl-rs sRGB output: pixel values 15-28 (sRGB)
+- jxl-rs linear output: pixel values 0-3 (matches!)
+
+**Fix**:
+- Added `png_has_linear_gamma()` to detect gAMA=100000 in reference PNGs
+- When detected, decode with `xyb_output_linear=true` to match reference
+
+**Impact**:
+- grayscale, grayscale_5: PASS
+- progressive, progressive_5: PASS
+- patches, patches_5: PASS
+- 177/184 tests pass (up from 171)
+
 ---
 
-## Remaining Issues (13 failures)
+## Remaining Issues (7 failures)
 
-### 1. Progressive Mode Errors
-
-| File | Error |
-|------|-------|
-| progressive | max_error=74 |
-| progressive_5 | max_error=74 |
-
-**Hypothesis**: Progressive AC decoding may have coefficient ordering issues
-
-### 3. Patches Mode Errors
-
-| File | Error |
-|------|-------|
-| patches | max_error=74 |
-| patches_5 | max_error=74 |
-
-### 4. Grayscale VarDCT Errors
-
-| File | Error |
-|------|-------|
-| grayscale | max_error=74 |
-| grayscale_5 | max_error=74 |
-| grayscale_jpeg | Channel count mismatch (3 vs 1) |
-| grayscale_jpeg_5 | Channel count mismatch (3 vs 1) |
-
-**Note**: The max_error=74 for grayscale may be a separate issue from the RGB fix
-
-### 5. Alpha Premultiplication
+### 1. Alpha Premultiplication
 
 | File | Error |
 |------|-------|
 | alpha_premultiplied | max_error=239 |
+
+### 2. CMYK Color Space
+
+| File | Error |
+|------|-------|
+| cmyk_layers | max_error=224 |
+
+### 3. Grayscale JPEG Recompression
+
+| File | Error |
+|------|-------|
+| grayscale_jpeg | Channel count mismatch (3 vs 1) |
+| grayscale_jpeg_5 | Channel count mismatch (3 vs 1) |
+
+**Hypothesis**: JPEG recompressed grayscale is outputting as RGB instead of grayscale
+
+### 4. Multi-layer Noise/Spline
+
+| File | Error |
+|------|-------|
+| multiple_layers_noise_spline | max_error=70 |
+
+### 5. Progressive AC Decode Error
+
+| File | Error |
+|------|-------|
+| progressive_ac | PassesLastPassNonIncreasing |
+
+### 6. ICC Profile Channel Count
+
+| File | Error |
+|------|-------|
+| with_icc | Channel count mismatch (4 vs 2) |
 
 ---
 
@@ -117,9 +146,14 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 - Failed: 9
 - Crashes: 4
 
-### After All Session Fixes (full run - 184 files)
+### After RCT + Extra Channel Fixes (full run - 184 files)
 - Passed: 171 (93%)
 - Failed: 13
+- Crashes: 0
+
+### After Linear Gamma Detection Fix (full run - 184 files)
+- Passed: 177 (96%)
+- Failed: 7
 - Crashes: 0
 
 ---
@@ -178,3 +212,8 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 9. Fixed RCT overflow crash by adding wrapping arithmetic to I32SimdVec
 10. Fixed extra channel format assertion by allocating slots for all extra channels
 11. Full parity test: 171/184 pass (93%), 0 crashes
+12. Investigated max_error=74 pattern in grayscale, progressive, patches
+13. Discovered reference PNGs have gAMA=100000 (linear gamma)
+14. Added png_has_linear_gamma() to detect linear references
+15. When detected, decode with xyb_output_linear=true
+16. Full parity test: 177/184 pass (96%), 0 crashes
