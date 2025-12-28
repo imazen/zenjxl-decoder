@@ -62,12 +62,14 @@ fn map_aspect_ratio<T: Fn() -> u32>(ysize: u32, ratio: AspectRatio, fallback: T)
     match ratio {
         AspectRatio::Unknown => fallback(),
         AspectRatio::Ratio1Over1 => ysize,
-        AspectRatio::Ratio12Over10 => (ysize as u64 * 12 / 10) as u32,
-        AspectRatio::Ratio4Over3 => (ysize as u64 * 4 / 3) as u32,
-        AspectRatio::Ratio3Over2 => (ysize as u64 * 3 / 2) as u32,
-        AspectRatio::Ratio16Over9 => (ysize as u64 * 16 / 9) as u32,
-        AspectRatio::Ratio5Over4 => (ysize as u64 * 5 / 4) as u32,
-        AspectRatio::Ratio2Over1 => ysize * 2,
+        // Use u64 intermediate to prevent overflow, then saturate to u32::MAX
+        // (matching the implicit truncation behavior but safely)
+        AspectRatio::Ratio12Over10 => (ysize as u64 * 12 / 10).min(u32::MAX as u64) as u32,
+        AspectRatio::Ratio4Over3 => (ysize as u64 * 4 / 3).min(u32::MAX as u64) as u32,
+        AspectRatio::Ratio3Over2 => (ysize as u64 * 3 / 2).min(u32::MAX as u64) as u32,
+        AspectRatio::Ratio16Over9 => (ysize as u64 * 16 / 9).min(u32::MAX as u64) as u32,
+        AspectRatio::Ratio5Over4 => (ysize as u64 * 5 / 4).min(u32::MAX as u64) as u32,
+        AspectRatio::Ratio2Over1 => (ysize as u64 * 2).min(u32::MAX as u64) as u32,
     }
 }
 
