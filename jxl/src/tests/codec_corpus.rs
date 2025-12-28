@@ -11,6 +11,8 @@
 //! IMPORTANT: DO NOT WEAKEN TOLERANCES. If a test fails, the implementation
 //! is wrong and must be fixed.
 
+#[cfg(feature = "cms")]
+use crate::api::MoxCms;
 use crate::api::{
     JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
     ProcessingResult, states,
@@ -36,6 +38,13 @@ fn decode_jxl_to_pixels_with_options(
     let data = std::fs::read(path).map_err(|e| format!("Failed to read JXL: {}", e))?;
     let mut input = data.as_slice();
 
+    #[cfg(feature = "cms")]
+    let options = JxlDecoderOptions {
+        xyb_output_linear: output_linear,
+        cms: Some(Box::new(MoxCms::new())),
+        ..JxlDecoderOptions::default()
+    };
+    #[cfg(not(feature = "cms"))]
     let options = JxlDecoderOptions {
         xyb_output_linear: output_linear,
         ..JxlDecoderOptions::default()

@@ -234,6 +234,7 @@ impl CodestreamParser {
             decoder_state.render_spotcolors = decode_options.render_spot_colors;
             decoder_state.high_precision = decode_options.high_precision;
             decoder_state.premultiply_output = decode_options.premultiply_output;
+            decoder_state.embedded_color_profile = self.embedded_color_profile.clone();
             self.decoder_state = Some(decoder_state);
             // Reset bit offset to 0 since we've consumed everything up to a byte boundary
             self.non_section_bit_offset = 0;

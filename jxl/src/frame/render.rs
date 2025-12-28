@@ -6,6 +6,8 @@
 use std::sync::Arc;
 
 use crate::api::JxlCms;
+#[cfg(feature = "cms")]
+use crate::api::JxlColorProfile;
 use crate::api::JxlColorType;
 use crate::api::JxlDataFormat;
 use crate::api::JxlOutputBuffer;
@@ -207,12 +209,75 @@ impl Frame {
         Ok(())
     }
 
+    /// Helper function to detect CMYK ICC profile from bytes.
+    /// Returns true if the ICC profile has CMYK color space signature.
+    #[cfg(feature = "cms")]
+    fn is_cmyk_icc_profile(icc_data: &[u8]) -> bool {
+        if icc_data.len() < 20 {
+            return false;
+        }
+        // ICC color space signature is at bytes 16-19
+        &icc_data[16..20] == b"CMYK"
+    }
+
+    /// Try to create a CMS-based CMYK→RGB conversion stage.
+    /// Returns Some(stage) if successful, None if we should fall back to simple K multiplication.
+    #[cfg(feature = "cms")]
+    fn try_create_cms_cmyk_stage(
+        decoder_state: &DecoderState,
+        cms: Option<&dyn JxlCms>,
+        black_channel_offset: usize,
+    ) -> Result<Option<CmsCmykToRgbStage>> {
+        use crate::api::JxlColorEncoding;
+
+        // Check if we have a CMS and a CMYK ICC profile
+        let (cms, icc_data) = match (cms, &decoder_state.embedded_color_profile) {
+            (Some(cms), Some(JxlColorProfile::Icc(icc_data))) => (cms, icc_data),
+            _ => return Ok(None),
+        };
+
+        // Check if the ICC profile is CMYK
+        if !Self::is_cmyk_icc_profile(icc_data) {
+            return Ok(None);
+        }
+
+        // Create CMYK → sRGB transform
+        let cmyk_profile = JxlColorProfile::Icc(icc_data.clone());
+        let srgb_profile = JxlColorProfile::Simple(JxlColorEncoding::srgb(false));
+
+        // Initialize a single transformer for CMYK → sRGB
+        let (output_channels, mut transformers) = cms.initialize_transforms(
+            1,   // We only need 1 transformer
+            256, // pixels per transform (row chunk size is typically small)
+            cmyk_profile,
+            srgb_profile,
+            decoder_state
+                .file_header
+                .image_metadata
+                .tone_mapping
+                .intensity_target,
+        )?;
+
+        // Verify we got an RGB output (3 channels)
+        if output_channels != 3 || transformers.is_empty() {
+            return Ok(None);
+        }
+
+        // Take the transformer and create the CMS stage
+        let transformer = transformers.remove(0);
+        Ok(Some(CmsCmykToRgbStage::new(
+            black_channel_offset,
+            transformer,
+        )))
+    }
+
     pub(crate) fn build_render_pipeline<T: RenderPipeline>(
         decoder_state: &DecoderState,
         frame_header: &FrameHeader,
         lf_global: &LfGlobalState,
         epf_sigma: &Option<Arc<Image<f32>>>,
         pixel_format: &JxlPixelFormat,
+        cms: Option<&dyn JxlCms>,
     ) -> Result<Box<T>> {
         let num_channels = frame_header.num_extra_channels as usize + 3;
         let num_temp_channels = if frame_header.has_noise() { 3 } else { 0 };
@@ -427,7 +492,21 @@ impl Frame {
             .enumerate()
         {
             if info.ec_type == ExtraChannel::Black {
-                pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                // Try to use CMS-based CMYK conversion if we have:
+                // 1. A CMS implementation available
+                // 2. An embedded CMYK ICC profile
+                #[cfg(feature = "cms")]
+                if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)? {
+                    pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                } else {
+                    // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
+                    pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                }
+                #[cfg(not(feature = "cms"))]
+                {
+                    let _ = cms; // suppress unused warning when cms feature is off
+                    pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                }
             }
         }
 
@@ -587,7 +666,7 @@ impl Frame {
     pub fn prepare_render_pipeline(
         &mut self,
         pixel_format: &JxlPixelFormat,
-        _cms: Option<&dyn JxlCms>,
+        cms: Option<&dyn JxlCms>,
     ) -> Result<()> {
         let lf_global = self.lf_global.as_mut().unwrap();
         let epf_sigma = if self.header.restoration_filter.epf_iters > 0 {
@@ -605,6 +684,7 @@ impl Frame {
                 lf_global,
                 &epf_sigma,
                 pixel_format,
+                cms,
             )? as Box<dyn std::any::Any>
         } else {
             Self::build_render_pipeline::<LowMemoryRenderPipeline>(
@@ -613,6 +693,7 @@ impl Frame {
                 lf_global,
                 &epf_sigma,
                 pixel_format,
+                cms,
             )? as Box<dyn std::any::Any>
         };
         #[cfg(not(test))]
@@ -622,6 +703,7 @@ impl Frame {
             lf_global,
             &epf_sigma,
             pixel_format,
+            cms,
         )?;
         self.render_pipeline = Some(render_pipeline);
         self.lf_global_was_rendered = false;

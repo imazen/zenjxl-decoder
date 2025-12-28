@@ -1106,7 +1106,7 @@ impl JxlColorEncoding {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum JxlColorProfile {
     Icc(Vec<u8>),
     Simple(JxlColorEncoding),

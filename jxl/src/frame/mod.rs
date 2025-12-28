@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use crate::{
+    api::JxlColorProfile,
     entropy_coding::decode::Histograms,
     error::Result,
     features::{noise::Noise, patches::PatchesDictionary, spline::Splines},
@@ -125,6 +126,9 @@ pub struct DecoderState {
     pub nonvisible_frame_index: usize,
     pub high_precision: bool,
     pub premultiply_output: bool,
+    /// The embedded color profile from the JXL file (ICC or simple color encoding).
+    /// This is needed for CMS-based color space conversion (e.g., CMYK → RGB).
+    pub embedded_color_profile: Option<JxlColorProfile>,
 }
 
 impl DecoderState {
@@ -144,6 +148,7 @@ impl DecoderState {
             nonvisible_frame_index: 0,
             high_precision: false,
             premultiply_output: false,
+            embedded_color_profile: None,
         }
     }
 

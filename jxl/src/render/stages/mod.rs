@@ -6,6 +6,8 @@
 mod black;
 mod blending;
 mod chroma_upsample;
+#[cfg(feature = "cms")]
+mod cms_cmyk;
 mod convert;
 mod epf;
 mod extend;
@@ -28,6 +30,8 @@ mod nearest_neighbor;
 pub use black::*;
 pub use blending::*;
 pub use chroma_upsample::*;
+#[cfg(feature = "cms")]
+pub use cms_cmyk::*;
 pub use convert::*;
 pub use epf::*;
 pub use extend::*;

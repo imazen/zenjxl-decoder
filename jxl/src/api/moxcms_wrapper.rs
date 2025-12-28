@@ -171,6 +171,7 @@ impl JxlCms for MoxCms {
         let output_channels = layout_channels(dst_layout);
 
         // Use default transform options (perceptual intent)
+        // This produces fewer error pixels than RelativeColorimetric or AbsoluteColorimetric
         let options = moxcms::TransformOptions::default();
 
         let mut transforms: Vec<Box<dyn JxlCmsTransformer>> = Vec::with_capacity(n);
