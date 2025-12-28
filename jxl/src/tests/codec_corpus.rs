@@ -19,7 +19,7 @@ use crate::image::{Image, Rect};
 
 use super::parity::{
     CONFORMANCE_THRESHOLD_U8, CodecCorpusTestCase, ReferenceImage, codec_corpus_jxl_dir,
-    compare_u8_buffers, discover_codec_corpus_tests,
+    compare_u8_buffers, discover_codec_corpus_tests, png_has_linear_gamma,
 };
 
 /// Decode a JXL file using jxl-rs and return the pixel data as u8.
@@ -392,6 +392,67 @@ mod tests {
         match run_parity_test(test_case) {
             Ok(()) => eprintln!("PASS: 3x3_srgb_lossless.jxl"),
             Err(e) => eprintln!("PENDING: 3x3_srgb_lossless.jxl - {}", e),
+        }
+    }
+
+    /// Debug test for multiple_layers_noise_spline
+    #[test]
+    fn test_debug_multiple_layers_noise_spline() {
+        let tests = discover_codec_corpus_tests();
+        let test_case = tests
+            .iter()
+            .find(|t| t.name == "multiple_layers_noise_spline");
+
+        let Some(test_case) = test_case else {
+            eprintln!("Skipping: multiple_layers_noise_spline.jxl not found");
+            return;
+        };
+
+        // Load reference
+        let ref_path = test_case.reference_path.as_ref().unwrap();
+        let reference = ReferenceImage::load(ref_path).expect("Failed to load reference");
+        eprintln!(
+            "Reference: {}x{}, {} channels",
+            reference.width, reference.height, reference.channels
+        );
+
+        // Check if linear gamma
+        let use_linear = if ref_path.extension().and_then(|e| e.to_str()) == Some("png") {
+            png_has_linear_gamma(ref_path).unwrap_or(false)
+        } else {
+            false
+        };
+        eprintln!("Linear output: {}", use_linear);
+
+        // Decode with jxl-rs
+        let (width, height, channels, actual) =
+            decode_jxl_to_pixels_with_options(&test_case.jxl_path, use_linear)
+                .expect("Decode failed");
+        eprintln!(
+            "jxl-rs output: {}x{}, {} channels",
+            width, height, channels
+        );
+
+        // Print first few pixels
+        eprintln!("\nFirst 10x10 pixels comparison:");
+        for y in 0..10.min(height) {
+            for x in 0..10.min(width) {
+                let ref_idx = (y * width + x) * reference.channels;
+                let act_idx = (y * width + x) * channels;
+
+                let ref_pix: Vec<u8> = reference.pixels[ref_idx..ref_idx + reference.channels].to_vec();
+                let act_pix: Vec<u8> = actual[act_idx..act_idx + channels].to_vec();
+
+                if ref_pix != act_pix {
+                    eprintln!("  ({},{}) ref={:?} jxl-rs={:?}", x, y, ref_pix, act_pix);
+                }
+            }
+        }
+
+        // Run the parity test
+        match run_parity_test(test_case) {
+            Ok(()) => eprintln!("PASS"),
+            Err(e) => eprintln!("FAIL: {}", e),
         }
     }
 

@@ -157,25 +157,35 @@ CMYK colors to RGB accurately. Our simple K multiplication is insufficient.
 2. Create CMYK→sRGB transform using the embedded profile
 3. Apply transform during render pipeline
 
-### 2. Multi-layer Noise/Spline (max_error=70)
+### 2. Multi-layer Noise/Spline (max_error=66-70)
 
 | File | Error |
 |------|-------|
-| multiple_layers_noise_spline | max_error=70, error_count=3505397/9437184 |
+| multiple_layers_noise_spline | max_error=66-70, error_count=~3.5M/9.4M (37%) |
 
 **Investigation (2025-12-27)**:
 - Individual noise tests PASS: noise, noise_5, 8x8_noise, noise_0, noise_1, photon_noise_*
 - Individual spline tests PASS: animation_spline, splines, spline_on_first_frame
 - Only the COMBINATION of layers + noise + splines fails
+- Error pattern: primarily in B (blue) channel, values differ by 0-16 (noise-like)
+- R channel (red) matches almost exactly; G channel (green) is 0 in both
 
-**Root Cause**: Likely a **pipeline ordering issue** when multiple features interact together.
-The individual implementations are correct, but their interaction during multi-layer
-compositing may have timing or ordering problems.
+**Detailed Debug Output (pixel comparison)**:
+- Pixel (0,0): ref=[124, 0, 0, 255] jxl-rs=[124, 0, 11, 255] → B differs by 11
+- Pattern repeats: B channel has noise differences while R/G match
 
-**Investigation Needed**:
-1. Check if noise is applied at correct stage relative to blending
-2. Check if splines interact correctly with layer compositing
-3. Compare pipeline stage order with libjxl for multi-layer images
+**RNG Investigation**:
+- Checked Xorshift128Plus initialization against libjxl
+- jxl-rs 4-seed constructor uses: s0[i] = split_mix_64(s0[i-1]), s1[i] = split_mix_64(s1[i-1])
+- libjxl uses: s0[i] = SplitMix64(s1[i-1]), s1[i] = SplitMix64(s0[i])
+- ATTEMPTED FIX: Changed to match libjxl → BROKE all other noise tests
+- REVERTED: Original jxl-rs initialization is correct for passing noise tests
+
+**Conclusion**: RNG is NOT the issue. The issue is specific to the multi-layer + noise + splines
+combination. Need to investigate:
+1. How noise is applied when multiple frames are composited
+2. If the B channel (XYB blue/yellow component) has different handling
+3. Stage ordering when all three features interact
 
 ---
 
@@ -299,3 +309,11 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 35. Simple K multiplication doesn't match djxl - requires ICC profile-based CMS
 36. Investigated multiple_layers_noise_spline - individual noise/spline tests all pass
 37. Only the combination of layers + noise + splines fails - likely pipeline ordering issue
+38. Created debug test for multiple_layers_noise_spline to compare pixel values
+39. Found error pattern: B channel has noise-like differences (0-16), R/G channels match
+40. Investigated Xorshift128Plus RNG initialization - compared with libjxl
+41. jxl-rs uses different expansion loop than libjxl (s0[i] from s0[i-1] vs s1[i-1])
+42. Attempted to match libjxl initialization - BROKE all other noise tests
+43. Reverted RNG change - original implementation is correct for passing tests
+44. Conclusion: RNG is NOT the issue for multiple_layers_noise_spline
+45. Issue is specific to multi-layer + noise + splines combination, needs further investigation
