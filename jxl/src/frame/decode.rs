@@ -168,6 +168,8 @@ impl Frame {
     }
     #[instrument(level = "debug", skip_all)]
     pub fn decode_lf_global(&mut self, br: &mut BitReader) -> Result<()> {
+        // Check for cancellation at start of major decode step
+        self.decoder_state.check_cancelled()?;
         debug!(section_size = br.total_bits_available());
         assert!(self.lf_global.is_none());
         trace!(pos = br.total_bits_read());
@@ -187,7 +189,11 @@ impl Frame {
 
         let splines = if self.header.has_splines() {
             info!("decoding splines");
-            Some(Splines::read(br, self.header.width * self.header.height)?)
+            Some(Splines::read(
+                br,
+                self.header.width * self.header.height,
+                self.decoder_state.limits.max_spline_points,
+            )?)
         } else {
             None
         };
@@ -227,12 +233,15 @@ impl Frame {
         debug!(?color_correlation_params);
 
         let tree = if br.read(1)? == 1 {
-            let size_limit = (1024
+            // Calculate dynamic size limit based on image dimensions
+            let dynamic_limit = 1024
                 + self.header.width as usize
                     * self.header.height as usize
                     * (self.color_channels + self.decoder_state.extra_channel_info().len())
-                    / 16)
-                .min(1 << 22);
+                    / 16;
+            // Use configured limit if set, otherwise use 2^22 default
+            let configured_limit = self.decoder_state.limits.max_tree_size.unwrap_or(1 << 22);
+            let size_limit = dynamic_limit.min(configured_limit);
             Some(Tree::read(br, size_limit)?)
         } else {
             None
@@ -304,6 +313,8 @@ impl Frame {
 
     #[instrument(level = "debug", skip_all)]
     pub fn decode_hf_global(&mut self, br: &mut BitReader) -> Result<()> {
+        // Check for cancellation at start of major decode step
+        self.decoder_state.check_cancelled()?;
         debug!(section_size = br.total_bits_available());
         if self.header.encoding == Encoding::Modular {
             return Ok(());

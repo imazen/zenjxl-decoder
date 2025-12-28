@@ -56,6 +56,16 @@ impl CancellationToken {
     pub fn reset(&self) {
         self.cancelled.store(false, Ordering::Release);
     }
+
+    /// Checks if cancelled and returns an error if so.
+    /// Use this at cancellation check points in the decoder.
+    pub fn check(&self) -> crate::error::Result<()> {
+        if self.is_cancelled() {
+            Err(crate::error::Error::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Security limits for the JXL decoder to prevent resource exhaustion attacks.

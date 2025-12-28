@@ -757,15 +757,21 @@ impl Splines {
     }
 
     #[instrument(level = "debug", skip(br), ret, err)]
-    pub fn read(br: &mut BitReader, num_pixels: u32) -> Result<Splines> {
+    pub fn read(
+        br: &mut BitReader,
+        num_pixels: u32,
+        max_spline_points: Option<u32>,
+    ) -> Result<Splines> {
         trace!(pos = br.total_bits_read());
         let splines_histograms = Histograms::decode(NUM_SPLINE_CONTEXTS, br, true)?;
         let mut splines_reader = SymbolReader::new(&splines_histograms, br, None)?;
         let num_splines = splines_reader
             .read_unsigned(&splines_histograms, br, NUM_SPLINES_CONTEXT)
             .saturating_add(1);
+        // Use configured limit if set, otherwise use default 2^20
+        let hard_limit = max_spline_points.unwrap_or(MAX_NUM_CONTROL_POINTS);
         let max_control_points =
-            MAX_NUM_CONTROL_POINTS.min(num_pixels / MAX_NUM_CONTROL_POINTS_PER_PIXEL_RATIO);
+            hard_limit.min(num_pixels / MAX_NUM_CONTROL_POINTS_PER_PIXEL_RATIO);
         if num_splines > max_control_points {
             return Err(Error::SplinesTooMany(num_splines, max_control_points));
         }

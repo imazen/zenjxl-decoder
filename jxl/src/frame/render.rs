@@ -195,6 +195,8 @@ impl Frame {
         }
 
         for (group, passes) in groups {
+            // Check for cancellation between groups
+            self.decoder_state.check_cancelled()?;
             // TODO(veluca): render all the available passes at once.
             for (pass, br) in passes {
                 self.decode_hf_group(group, pass, br, &mut buffer_splitter)?;

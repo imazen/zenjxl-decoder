@@ -125,6 +125,10 @@ pub struct DecoderState {
     pub nonvisible_frame_index: usize,
     pub high_precision: bool,
     pub premultiply_output: bool,
+    /// Security limits for decoding. Stored here to propagate through frame decoding.
+    pub limits: crate::api::JxlDecoderLimits,
+    /// Optional cancellation token for cooperative cancellation.
+    pub cancellation_token: Option<crate::api::CancellationToken>,
 }
 
 impl DecoderState {
@@ -144,6 +148,17 @@ impl DecoderState {
             nonvisible_frame_index: 0,
             high_precision: false,
             premultiply_output: false,
+            limits: crate::api::JxlDecoderLimits::default(),
+            cancellation_token: None,
+        }
+    }
+
+    /// Check cancellation status and return error if cancelled.
+    pub fn check_cancelled(&self) -> crate::error::Result<()> {
+        if let Some(ref token) = self.cancellation_token {
+            token.check()
+        } else {
+            Ok(())
         }
     }
 
@@ -246,10 +261,21 @@ impl Frame {
         // frames are around.
         self.render_pipeline = None;
         if self.header.can_be_referenced {
+            let slot = self.header.save_as_reference as usize;
+            // Check reference frame limit
+            if let Some(limit) = self.decoder_state.limits.max_reference_frames
+                && slot >= limit
+            {
+                return Err(crate::error::Error::LimitExceeded {
+                    resource: "reference_frames",
+                    actual: (slot + 1) as u64,
+                    limit: limit as u64,
+                });
+            }
             info!("Saving frame in slot {}", self.header.save_as_reference);
             let rf = Arc::get_mut(&mut self.decoder_state.reference_frames)
                 .expect("remaining references to reference_frames");
-            rf[self.header.save_as_reference as usize] = Some(ReferenceFrame {
+            rf[slot] = Some(ReferenceFrame {
                 frame: self.reference_frame_data.unwrap(),
                 saved_before_color_transform: self.header.save_before_ct,
             });
