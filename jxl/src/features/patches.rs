@@ -370,12 +370,19 @@ impl PatchesDictionary {
             PatchContext::NumRefPatch as usize,
         ) as usize;
         // Use checked arithmetic to prevent overflow attacks
+        // Fail rather than saturate - incorrect limits could allow attacks
         let num_pixels = xsize
             .checked_mul(ysize)
             .ok_or(Error::ImageSizeTooLarge(xsize, ysize))?;
-        let max_ref_patches = 1024usize.saturating_add(num_pixels / 4);
-        let max_patches = max_ref_patches.saturating_mul(4);
-        let max_blending_infos = max_patches.saturating_mul(4);
+        let max_ref_patches = 1024usize
+            .checked_add(num_pixels / 4)
+            .ok_or(Error::ArithmeticOverflow)?;
+        let max_patches = max_ref_patches
+            .checked_mul(4)
+            .ok_or(Error::ArithmeticOverflow)?;
+        let max_blending_infos = max_patches
+            .checked_mul(4)
+            .ok_or(Error::ArithmeticOverflow)?;
         if num_ref_patch > max_ref_patches {
             return Err(Error::PatchesTooMany(
                 "reference patches".to_string(),
@@ -486,11 +493,11 @@ impl PatchesDictionary {
                 ));
             }
             positions.try_reserve(next_size.saturating_sub(positions.len()))?;
-            blendings.try_reserve(
-                next_size
-                    .saturating_mul(PatchBlendMode::NUM_BLEND_MODES as usize)
-                    .saturating_sub(blendings.len()),
-            )?;
+            // Use checked_mul to fail rather than silently under-allocate
+            let blendings_needed = next_size
+                .checked_mul(PatchBlendMode::NUM_BLEND_MODES as usize)
+                .ok_or(Error::ArithmeticOverflow)?;
+            blendings.try_reserve(blendings_needed.saturating_sub(blendings.len()))?;
 
             for i in 0..id_count {
                 let mut pos = PatchPosition {
