@@ -17,7 +17,7 @@ use crate::{
         toc::Toc,
     },
     image::Image,
-    util::tracing_wrappers::*,
+    util::{MemoryTracker, tracing_wrappers::*},
 };
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;
@@ -129,6 +129,8 @@ pub struct DecoderState {
     pub limits: crate::api::JxlDecoderLimits,
     /// Optional cancellation token for cooperative cancellation.
     pub cancellation_token: Option<crate::api::CancellationToken>,
+    /// Memory tracker for enforcing max_memory_bytes limits.
+    pub memory_tracker: MemoryTracker,
 }
 
 impl DecoderState {
@@ -150,6 +152,7 @@ impl DecoderState {
             premultiply_output: false,
             limits: crate::api::JxlDecoderLimits::default(),
             cancellation_token: None,
+            memory_tracker: MemoryTracker::unlimited(),
         }
     }
 

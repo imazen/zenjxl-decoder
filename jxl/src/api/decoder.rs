@@ -1035,7 +1035,13 @@ pub(crate) mod tests {
         match result {
             Err(err) => {
                 assert!(
-                    matches!(err, Error::LimitExceeded { resource: "pixels", .. }),
+                    matches!(
+                        err,
+                        Error::LimitExceeded {
+                            resource: "pixels",
+                            ..
+                        }
+                    ),
                     "Expected LimitExceeded for pixels, got {:?}",
                     err
                 );

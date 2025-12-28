@@ -57,6 +57,7 @@ impl Frame {
             && image_metadata.color_encoding.color_space == ColorSpace::Gray;
         let color_channels = if is_gray { 1 } else { 3 };
         let size_blocks = frame_header.size_blocks();
+        let tracker = &decoder_state.memory_tracker;
         let lf_image = if frame_header.encoding == Encoding::VarDCT {
             if frame_header.has_lf_frame() {
                 decoder_state.lf_frames[frame_header.lf_level as usize]
@@ -67,26 +68,26 @@ impl Frame {
                     .transpose()?
             } else {
                 Some([
-                    Image::new(size_blocks)?,
-                    Image::new(size_blocks)?,
-                    Image::new(size_blocks)?,
+                    Image::new_tracked(size_blocks, tracker)?,
+                    Image::new_tracked(size_blocks, tracker)?,
+                    Image::new_tracked(size_blocks, tracker)?,
                 ])
             }
         } else {
             None
         };
-        let quant_lf = Image::new(size_blocks)?;
+        let quant_lf = Image::new_tracked(size_blocks, tracker)?;
         let size_color_tiles = (size_blocks.0.div_ceil(8), size_blocks.1.div_ceil(8));
         let hf_meta = if frame_header.encoding == Encoding::VarDCT {
             Some(HfMetadata {
-                ytox_map: Image::new(size_color_tiles)?,
-                ytob_map: Image::new(size_color_tiles)?,
-                raw_quant_map: Image::new(size_blocks)?,
+                ytox_map: Image::new_tracked(size_color_tiles, tracker)?,
+                ytob_map: Image::new_tracked(size_color_tiles, tracker)?,
+                raw_quant_map: Image::new_tracked(size_blocks, tracker)?,
                 transform_map: Image::new_with_value(
                     size_blocks,
                     HfTransformType::INVALID_TRANSFORM,
                 )?,
-                epf_map: Image::new(size_blocks)?,
+                epf_map: Image::new_tracked(size_blocks, tracker)?,
                 used_hf_types: 0,
             })
         } else {
@@ -105,7 +106,7 @@ impl Frame {
             let num_ref_channels = 3 + image_metadata.extra_channel_info.len();
             Some(
                 (0..num_ref_channels)
-                    .map(|_| Image::new(sz))
+                    .map(|_| Image::new_tracked(sz, tracker))
                     .collect::<Result<Vec<_>>>()?,
             )
         } else {
@@ -113,9 +114,10 @@ impl Frame {
         };
 
         let lf_frame_data = if frame_header.lf_level != 0 {
+            let upsampled = frame_header.size_upsampled();
             Some(
                 (0..3)
-                    .map(|_| Image::new(frame_header.size_upsampled()))
+                    .map(|_| Image::new_tracked(upsampled, tracker))
                     .collect::<Result<Vec<_>, _>>()?
                     .try_into()
                     .unwrap(),
@@ -359,10 +361,11 @@ impl Frame {
         } else {
             let xs = GROUP_DIM * GROUP_DIM;
             let ys = self.header.num_groups();
+            let tracker = &self.decoder_state.memory_tracker;
             Some((
-                Image::new((xs, ys))?,
-                Image::new((xs, ys))?,
-                Image::new((xs, ys))?,
+                Image::new_tracked((xs, ys), tracker)?,
+                Image::new_tracked((xs, ys), tracker)?,
+                Image::new_tracked((xs, ys), tracker)?,
             ))
         };
         self.hf_global = Some(HfGlobalState {
@@ -498,7 +501,10 @@ impl Frame {
                 pipeline!(self, p, p.get_buffer(1))?,
                 pipeline!(self, p, p.get_buffer(2))?,
             ];
-            let buffers = self.vardct_buffers.get_or_insert_with(VarDctBuffers::new);
+            let buffers = match &mut self.vardct_buffers {
+                Some(b) => b,
+                None => self.vardct_buffers.insert(VarDctBuffers::new()?),
+            };
             decode_vardct_group(
                 group,
                 pass,

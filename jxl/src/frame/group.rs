@@ -18,7 +18,7 @@ use crate::{
     },
     headers::frame_header::FrameHeader,
     image::{Image, ImageRect, Rect},
-    util::{CeilLog2, ShiftRightCeil, tracing_wrappers::*},
+    util::{CeilLog2, ShiftRightCeil, TryVecExt, tracing_wrappers::*},
 };
 use jxl_simd::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, simd_function};
 
@@ -33,16 +33,22 @@ pub struct VarDctBuffers {
 }
 
 impl VarDctBuffers {
-    pub fn new() -> Self {
-        Self {
-            scratch: vec![0.0; LF_BUFFER_SIZE],
+    /// Creates a new VarDctBuffers with fallible allocation.
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            scratch: Vec::try_from_elem(0.0, LF_BUFFER_SIZE)
+                .map_err(|_| Error::ImageOutOfMemory(LF_BUFFER_SIZE, 1))?,
             transform_buffer: [
-                vec![0.0; MAX_COEFF_AREA],
-                vec![0.0; MAX_COEFF_AREA],
-                vec![0.0; MAX_COEFF_AREA],
+                Vec::try_from_elem(0.0, MAX_COEFF_AREA)
+                    .map_err(|_| Error::ImageOutOfMemory(MAX_COEFF_AREA, 1))?,
+                Vec::try_from_elem(0.0, MAX_COEFF_AREA)
+                    .map_err(|_| Error::ImageOutOfMemory(MAX_COEFF_AREA, 1))?,
+                Vec::try_from_elem(0.0, MAX_COEFF_AREA)
+                    .map_err(|_| Error::ImageOutOfMemory(MAX_COEFF_AREA, 1))?,
             ],
-            coeffs_storage: vec![0; 3 * GROUP_DIM * GROUP_DIM],
-        }
+            coeffs_storage: Vec::try_from_elem(0, 3 * GROUP_DIM * GROUP_DIM)
+                .map_err(|_| Error::ImageOutOfMemory(3 * GROUP_DIM * GROUP_DIM, 1))?,
+        })
     }
 
     /// Reset buffers to zero for reuse.
@@ -57,7 +63,8 @@ impl VarDctBuffers {
 
 impl Default for VarDctBuffers {
     fn default() -> Self {
-        Self::new()
+        // For Default trait, panic on OOM rather than return Result
+        Self::new().expect("failed to allocate VarDctBuffers")
     }
 }
 

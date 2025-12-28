@@ -39,7 +39,9 @@ pub fn aligned_vec_with_capacity<T>(capacity: usize) -> Result<AlignedVec<T>, Tr
 }
 
 /// Creates a new aligned vector filled with zeros.
-pub fn aligned_vec_zeroed<T: Default + Clone>(len: usize) -> Result<AlignedVec<T>, TryReserveError> {
+pub fn aligned_vec_zeroed<T: Default + Clone>(
+    len: usize,
+) -> Result<AlignedVec<T>, TryReserveError> {
     let mut vec = aligned_vec_with_capacity(len)?;
     vec.resize(len, T::default());
     Ok(vec)
