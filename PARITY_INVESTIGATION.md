@@ -133,15 +133,38 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 - alpha_premultiplied: PASS
 - 182/184 tests pass (up from 181)
 
+### 9. Noise Upsampling Seeding Bug (FIXED)
+
+**Commit**: (pending)
+
+**Symptom**: multiple_layers_noise_spline had max_error=66-70, error_count=~3.5M/9.4M (37%)
+
+**Root Cause**: libjxl iterates through upsampling subdivisions with separate RNG seeds, while jxl-rs used a single RNG for the entire upsampled area.
+
+**Investigation**:
+- multiple_layers_noise_spline has upsampling=2 (other passing noise tests have upsampling=1)
+- libjxl generates noise in subregions of size group_dim, with separate seeds: `(gx * upsampling + ix) * group_dim`
+- jxl-rs was generating one large buffer with seed: `gx * upsampling * group_dim`
+- Additionally, libjxl shares ONE RNG across all 3 color channels per subregion
+
+**Fix**:
+- Restructured noise generation in decode.rs to loop over (iy, ix) upsampling subdivisions
+- For each subregion, create ONE RNG shared across all 3 channels
+- Get all 3 noise buffers upfront, fill them with correct subregion patterns
+
+**Impact**:
+- multiple_layers_noise_spline: PASS
+- 183/184 tests pass (up from 182)
+
 ---
 
-## Remaining Issues (2 failures)
+## Remaining Issues (1 failure)
 
-### 1. CMYK Color Space (max_error=224)
+### 1. CMYK Color Space (max_error=74)
 
 | File | Error |
 |------|-------|
-| cmyk_layers | max_error=224, error_count=324100/1048576 |
+| cmyk_layers | max_error=74, error_count=323882/1048576 |
 
 **Investigation (2025-12-27)**:
 - Added `BlackChannelStage` to apply K channel to CMY (simple CMYK→RGB: R=C*K, G=M*K, B=Y*K)
@@ -156,45 +179,6 @@ CMYK colors to RGB accurately. Our simple K multiplication is insufficient.
 1. Detect CMYK color space from ICC profile
 2. Create CMYK→sRGB transform using the embedded profile
 3. Apply transform during render pipeline
-
-### 2. Multi-layer Noise/Spline (max_error=66-70)
-
-| File | Error |
-|------|-------|
-| multiple_layers_noise_spline | max_error=66-70, error_count=~3.5M/9.4M (37%) |
-
-**Investigation (2025-12-27)**:
-- Individual noise tests PASS: noise, noise_5, 8x8_noise, noise_0, noise_1, photon_noise_*
-- Individual spline tests PASS: animation_spline, splines, spline_on_first_frame
-- Only the COMBINATION of layers + noise + splines fails
-- Error pattern: primarily in B (blue) channel, values differ by 0-16 (noise-like)
-- R channel (red) matches almost exactly; G channel (green) is 0 in both
-
-**Detailed Debug Output (pixel comparison)**:
-- Pixel (0,0): ref=[124, 0, 0, 255] jxl-rs=[124, 0, 11, 255] → B differs by 11
-- Pattern repeats: B channel has noise differences while R/G match
-
-**RNG Investigation**:
-- Checked Xorshift128Plus initialization against libjxl
-- jxl-rs 4-seed constructor uses: s0[i] = split_mix_64(s0[i-1]), s1[i] = split_mix_64(s1[i-1])
-- libjxl uses: s0[i] = SplitMix64(s1[i-1]), s1[i] = SplitMix64(s0[i])
-- ATTEMPTED FIX: Changed to match libjxl → BROKE all other noise tests
-- REVERTED: Original jxl-rs initialization is correct for passing noise tests
-
-**Conclusion**: RNG is NOT the issue. The issue is specific to the multi-layer + noise + splines
-combination.
-
-**Libjxl Source Analysis**:
-- libjxl noise seeding: `x0 = (gx * upsampling + ix) * group_dim`, `y0 = (gy * upsampling + iy) * group_dim`
-- jxl-rs noise seeding: `x0 = gx * upsampling * group_dim`, `y0 = gy * upsampling * group_dim`
-- No frame origin offset in either (noise uses local frame coordinates)
-- Blending stage does NOT access noise channels - they're regular channels by then
-
-**Next Investigation Steps**:
-1. Print visible_frame_index and nonvisible_frame_index for each frame in multi-layer decode
-2. Check if multiple frames have noise enabled independently
-3. Compare x0, y0 coordinates between jxl-rs and djxl for multi-layer images
-4. Investigate the `ix`, `iy` loop in libjxl noise generation - may indicate subgroup iteration
 
 ---
 
@@ -234,6 +218,11 @@ combination.
 ### After Extra Channel Bit Depth Fix (full run - 184 files)
 - Passed: 182 (98.9%)
 - Failed: 2
+- Crashes: 0
+
+### After Noise Upsampling Seeding Fix (full run - 184 files)
+- Passed: 183 (99.5%)
+- Failed: 1 (cmyk_layers only)
 - Crashes: 0
 
 ---
@@ -326,3 +315,14 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 43. Reverted RNG change - original implementation is correct for passing tests
 44. Conclusion: RNG is NOT the issue for multiple_layers_noise_spline
 45. Issue is specific to multi-layer + noise + splines combination, needs further investigation
+46. (2025-12-27 continued) Created debug test to compare upsampling values across noise tests
+47. Discovered: passing noise tests have upsampling=1, multiple_layers_noise_spline has upsampling=2
+48. Analyzed libjxl noise code: loops over (iy, ix) in 0..upsampling with separate RNG seeds
+49. libjxl seeding: `(gx * upsampling + ix) * group_dim` for each subregion
+50. jxl-rs was using single seed: `gx * upsampling * group_dim` for entire upsampled area
+51. Key insight: libjxl shares ONE RNG across all 3 channels PER subregion
+52. First fix attempt broke noise tests - was creating new RNG per channel
+53. Final fix: restructured to loop (iy, ix) first, then fill all 3 channels with shared RNG
+54. Get all 3 buffers upfront, fill with correct subregion patterns, then set buffers
+55. Full parity test: 183/184 pass (99.5%), 0 crashes
+56. Only remaining failure: cmyk_layers (requires ICC-based CMS for CMYK→RGB)

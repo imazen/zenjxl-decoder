@@ -395,9 +395,14 @@ mod tests {
         }
     }
 
-    /// Debug test for multiple_layers_noise_spline
+    /// Debug test for multiple_layers_noise_spline - examines frame structure
     #[test]
     fn test_debug_multiple_layers_noise_spline() {
+        use crate::bit_reader::BitReader;
+        use crate::headers::encodings::UnconditionalCoder;
+        use crate::headers::frame_header::FrameHeader;
+        use crate::headers::{FileHeader, JxlHeader};
+
         let tests = discover_codec_corpus_tests();
         let test_case = tests
             .iter()
@@ -408,11 +413,86 @@ mod tests {
             return;
         };
 
+        // Read the raw file and parse frame headers
+        let data = std::fs::read(&test_case.jxl_path).expect("Failed to read file");
+        eprintln!("File size: {} bytes", data.len());
+
+        // Skip container if present
+        let offset = if data.len() >= 12
+            && &data[0..4] == b"\x00\x00\x00\x0C"
+            && &data[4..8] == b"JXL "
+        {
+            // ISOBMFF container - find the codestream box
+            eprintln!("ISOBMFF container detected");
+            let mut pos = 0;
+            let mut found_offset = 0;
+            while pos + 8 <= data.len() {
+                let box_size =
+                    u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
+                        as usize;
+                let box_type = &data[pos + 4..pos + 8];
+                if box_type == b"jxlc" || box_type == b"jxlp" {
+                    found_offset = pos + 8;
+                    break;
+                }
+                if box_size == 0 {
+                    break;
+                }
+                pos += box_size;
+            }
+            found_offset
+        } else {
+            // Bare codestream - start from beginning
+            eprintln!("Bare codestream");
+            0
+        };
+
+        // Parse file header
+        let mut br = BitReader::new(&data[offset..]);
+        let file_header = match FileHeader::read(&mut br) {
+            Ok(fh) => fh,
+            Err(e) => {
+                eprintln!("Failed to parse file header: {:?}", e);
+                return;
+            }
+        };
+        eprintln!(
+            "Image size: {}x{}",
+            file_header.size.xsize(),
+            file_header.size.ysize()
+        );
+        eprintln!("XYB encoded: {}", file_header.image_metadata.xyb_encoded);
+
+        // Parse first frame header
+        let nonserialized = file_header.frame_header_nonserialized();
+        let frame_header = match FrameHeader::read_unconditional(&(), &mut br, &nonserialized) {
+            Ok(fh) => fh,
+            Err(e) => {
+                eprintln!("Failed to parse frame header: {:?}", e);
+                return;
+            }
+        };
+
+        eprintln!("\nFrame 0:");
+        eprintln!("  is_last: {}", frame_header.is_last);
+        eprintln!("  is_visible: {}", frame_header.is_visible());
+        eprintln!("  has_noise: {}", frame_header.has_noise());
+        eprintln!("  has_splines: {}", frame_header.has_splines());
+        eprintln!("  has_patches: {}", frame_header.has_patches());
+        eprintln!("  needs_blending: {}", frame_header.needs_blending());
+        eprintln!("  size: {:?}", frame_header.size());
+        eprintln!("  upsampling: {}", frame_header.upsampling);
+        eprintln!("  encoding: {:?}", frame_header.encoding);
+        eprintln!("  can_be_referenced: {}", frame_header.can_be_referenced);
+        eprintln!("  save_before_ct: {}", frame_header.save_before_ct);
+        eprintln!("  group_dim: {}", frame_header.group_dim());
+        eprintln!("  size_groups: {:?}", frame_header.size_groups());
+
         // Load reference
         let ref_path = test_case.reference_path.as_ref().unwrap();
         let reference = ReferenceImage::load(ref_path).expect("Failed to load reference");
         eprintln!(
-            "Reference: {}x{}, {} channels",
+            "\nReference: {}x{}, {} channels",
             reference.width, reference.height, reference.channels
         );
 
@@ -428,10 +508,7 @@ mod tests {
         let (width, height, channels, actual) =
             decode_jxl_to_pixels_with_options(&test_case.jxl_path, use_linear)
                 .expect("Decode failed");
-        eprintln!(
-            "jxl-rs output: {}x{}, {} channels",
-            width, height, channels
-        );
+        eprintln!("jxl-rs output: {}x{}, {} channels", width, height, channels);
 
         // Print first few pixels
         eprintln!("\nFirst 10x10 pixels comparison:");
@@ -440,7 +517,8 @@ mod tests {
                 let ref_idx = (y * width + x) * reference.channels;
                 let act_idx = (y * width + x) * channels;
 
-                let ref_pix: Vec<u8> = reference.pixels[ref_idx..ref_idx + reference.channels].to_vec();
+                let ref_pix: Vec<u8> =
+                    reference.pixels[ref_idx..ref_idx + reference.channels].to_vec();
                 let act_pix: Vec<u8> = actual[act_idx..act_idx + channels].to_vec();
 
                 if ref_pix != act_pix {
@@ -453,6 +531,95 @@ mod tests {
         match run_parity_test(test_case) {
             Ok(()) => eprintln!("PASS"),
             Err(e) => eprintln!("FAIL: {}", e),
+        }
+    }
+
+    /// Debug test to compare frame headers for noise tests
+    #[test]
+    fn test_debug_noise_upsampling() {
+        use crate::bit_reader::BitReader;
+        use crate::headers::encodings::UnconditionalCoder;
+        use crate::headers::frame_header::FrameHeader;
+        use crate::headers::{FileHeader, JxlHeader};
+
+        let tests = discover_codec_corpus_tests();
+
+        // List of noise-related tests to examine
+        let noise_tests = [
+            "noise",
+            "noise_5",
+            "8x8_noise",
+            "multiple_layers_noise_spline",
+        ];
+
+        for test_name in noise_tests {
+            let test_case = tests.iter().find(|t| t.name == test_name);
+            let Some(test_case) = test_case else {
+                eprintln!("{}: NOT FOUND", test_name);
+                continue;
+            };
+
+            let data = std::fs::read(&test_case.jxl_path).expect("Failed to read file");
+
+            // Skip container if present
+            let offset =
+                if data.len() >= 12 && &data[0..4] == b"\x00\x00\x00\x0C" && &data[4..8] == b"JXL "
+                {
+                    let mut pos = 0;
+                    let mut found_offset = 0;
+                    while pos + 8 <= data.len() {
+                        let box_size = u32::from_be_bytes([
+                            data[pos],
+                            data[pos + 1],
+                            data[pos + 2],
+                            data[pos + 3],
+                        ]) as usize;
+                        let box_type = &data[pos + 4..pos + 8];
+                        if box_type == b"jxlc" || box_type == b"jxlp" {
+                            found_offset = pos + 8;
+                            break;
+                        }
+                        if box_size == 0 {
+                            break;
+                        }
+                        pos += box_size;
+                    }
+                    found_offset
+                } else {
+                    0
+                };
+
+            let mut br = BitReader::new(&data[offset..]);
+            let file_header = match FileHeader::read(&mut br) {
+                Ok(fh) => fh,
+                Err(e) => {
+                    eprintln!("{}: Failed to parse file header: {:?}", test_name, e);
+                    continue;
+                }
+            };
+
+            let nonserialized = file_header.frame_header_nonserialized();
+            let frame_header = match FrameHeader::read_unconditional(&(), &mut br, &nonserialized) {
+                Ok(fh) => fh,
+                Err(e) => {
+                    eprintln!("{}: Failed to parse frame header: {:?}", test_name, e);
+                    continue;
+                }
+            };
+
+            eprintln!(
+                "{}: image={}x{}, frame_size={:?}, upsampling={}, group_dim={}, size_groups={:?}, has_noise={}, xyb={}, visible={}",
+                test_name,
+                file_header.size.xsize(),
+                file_header.size.ysize(),
+                frame_header.size(),
+                frame_header.upsampling,
+                frame_header.group_dim(),
+                frame_header.size_groups(),
+                frame_header.has_noise(),
+                file_header.image_metadata.xyb_encoded,
+                frame_header.is_visible()
+            );
         }
     }
 
