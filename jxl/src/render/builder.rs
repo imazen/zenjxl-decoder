@@ -51,9 +51,12 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                 // Panics if dimensions would overflow - caller should validate earlier
                 group_chan_ready_passes: vec![
                     vec![0; num_channels];
-                    size.0.shrc(log_group_size)
+                    size.0
+                        .shrc(log_group_size)
                         .checked_mul(size.1.shrc(log_group_size))
-                        .expect("group count overflow - image dimensions too large")
+                        .expect(
+                            "group count overflow - image dimensions too large"
+                        )
                 ],
                 num_passes,
                 chunk_size,

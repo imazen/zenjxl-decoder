@@ -275,6 +275,8 @@ pub enum Error {
         actual: u64,
         limit: u64,
     },
+    #[error("Decoding cancelled")]
+    Cancelled,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

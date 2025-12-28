@@ -451,12 +451,8 @@ pub fn png_has_linear_gamma(path: &Path) -> std::io::Result<bool> {
     // The 4 bytes after the type are the gamma value * 100000 (big-endian u32)
     for i in 0..header.len().saturating_sub(8) {
         if &header[i..i + 4] == b"gAMA" {
-            let gama_value = u32::from_be_bytes([
-                header[i + 4],
-                header[i + 5],
-                header[i + 6],
-                header[i + 7],
-            ]);
+            let gama_value =
+                u32::from_be_bytes([header[i + 4], header[i + 5], header[i + 6], header[i + 7]]);
             // gAMA=100000 means gamma=1.0 (linear)
             return Ok(gama_value == 100000);
         }
