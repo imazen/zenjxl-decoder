@@ -182,10 +182,19 @@ CMYK colors to RGB accurately. Our simple K multiplication is insufficient.
 - REVERTED: Original jxl-rs initialization is correct for passing noise tests
 
 **Conclusion**: RNG is NOT the issue. The issue is specific to the multi-layer + noise + splines
-combination. Need to investigate:
-1. How noise is applied when multiple frames are composited
-2. If the B channel (XYB blue/yellow component) has different handling
-3. Stage ordering when all three features interact
+combination.
+
+**Libjxl Source Analysis**:
+- libjxl noise seeding: `x0 = (gx * upsampling + ix) * group_dim`, `y0 = (gy * upsampling + iy) * group_dim`
+- jxl-rs noise seeding: `x0 = gx * upsampling * group_dim`, `y0 = gy * upsampling * group_dim`
+- No frame origin offset in either (noise uses local frame coordinates)
+- Blending stage does NOT access noise channels - they're regular channels by then
+
+**Next Investigation Steps**:
+1. Print visible_frame_index and nonvisible_frame_index for each frame in multi-layer decode
+2. Check if multiple frames have noise enabled independently
+3. Compare x0, y0 coordinates between jxl-rs and djxl for multi-layer images
+4. Investigate the `ix`, `iy` loop in libjxl noise generation - may indicate subgroup iteration
 
 ---
 
