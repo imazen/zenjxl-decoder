@@ -202,6 +202,13 @@ moxcms and skcms/lcms2 CMS implementations. This is a known limitation when usin
 different CMS libraries. Perfect parity would require using the exact same CMS
 as libjxl (skcms).
 
+**GitHub Issue**: https://github.com/imazen/oxcms/issues/2
+Discussion confirmed:
+- skcms auto-inverts CMYK values (assumes Photoshop convention)
+- moxcms/lcms2 use ICC standard convention (0=no ink, 1=max ink)
+- moxcms vs lcms2 max diff = 7 (excellent inter-CMS parity)
+- skcms vs lcms2 max diff = 60 (same as our observed gap)
+
 ---
 
 ## Test Results Summary
