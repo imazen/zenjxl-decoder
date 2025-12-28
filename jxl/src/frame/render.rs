@@ -416,6 +416,21 @@ impl Frame {
             }
         }
 
+        // Apply Black (K) channel for CMYK images BEFORE blending.
+        // The Black channel multiplies the CMY channels to produce RGB output.
+        // This must happen before blending so that the RGB values are correct for compositing.
+        for (i, info) in decoder_state
+            .file_header
+            .image_metadata
+            .extra_channel_info
+            .iter()
+            .enumerate()
+        {
+            if info.ec_type == ExtraChannel::Black {
+                pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+            }
+        }
+
         if frame_header.needs_blending() {
             if linear {
                 pipeline = pipeline

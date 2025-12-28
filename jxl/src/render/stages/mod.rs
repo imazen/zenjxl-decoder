@@ -3,6 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+mod black;
 mod blending;
 mod chroma_upsample;
 mod convert;
@@ -24,6 +25,7 @@ mod ycbcr;
 #[cfg(test)]
 mod nearest_neighbor;
 
+pub use black::*;
 pub use blending::*;
 pub use chroma_upsample::*;
 pub use convert::*;

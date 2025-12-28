@@ -143,22 +143,39 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 |------|-------|
 | cmyk_layers | max_error=224, error_count=324100/1048576 |
 
-**Root Cause**: CMYK color space handling not implemented. The decoder can parse CMYK but likely doesn't convert CMYK→RGB correctly.
+**Investigation (2025-12-27)**:
+- Added `BlackChannelStage` to apply K channel to CMY (simple CMYK→RGB: R=C*K, G=M*K, B=Y*K)
+- Stage runs BEFORE BlendingStage to ensure layers are composited with correct RGB values
+- However, this simple formula doesn't match djxl's output
 
-**Fix Needed**: Implement proper CMYK to RGB conversion in the render pipeline.
+**Root Cause**: CMYK to RGB conversion in libjxl requires **ICC profile-based CMS** (lcms2/skcms).
+The cmyk_layers.jxl file has an embedded CMYK ICC profile. djxl uses its CMS to convert
+CMYK colors to RGB accurately. Our simple K multiplication is insufficient.
 
-### 3. Multi-layer Noise/Spline (max_error=70)
+**Fix Needed**: Enable moxcms CMS integration for CMYK ICC profile conversion. The CMS needs to:
+1. Detect CMYK color space from ICC profile
+2. Create CMYK→sRGB transform using the embedded profile
+3. Apply transform during render pipeline
+
+### 2. Multi-layer Noise/Spline (max_error=70)
 
 | File | Error |
 |------|-------|
 | multiple_layers_noise_spline | max_error=70, error_count=3505397/9437184 |
 
-**Root Cause**: Unknown. Image uses multiple layers, noise synthesis, and splines. The max_error=70 (out of 255) suggests accumulated precision errors or a bug in one of these features.
+**Investigation (2025-12-27)**:
+- Individual noise tests PASS: noise, noise_5, 8x8_noise, noise_0, noise_1, photon_noise_*
+- Individual spline tests PASS: animation_spline, splines, spline_on_first_frame
+- Only the COMBINATION of layers + noise + splines fails
+
+**Root Cause**: Likely a **pipeline ordering issue** when multiple features interact together.
+The individual implementations are correct, but their interaction during multi-layer
+compositing may have timing or ordering problems.
 
 **Investigation Needed**:
-1. Check noise synthesis implementation
-2. Check spline rendering
-3. Check layer compositing
+1. Check if noise is applied at correct stage relative to blending
+2. Check if splines interact correctly with layer compositing
+3. Compare pipeline stage order with libjxl for multi-layer images
 
 ---
 
@@ -276,3 +293,9 @@ RUST_BACKTRACE=1 CODEC_CORPUS_PATH=/path/to/codec-corpus cargo test -p jxl test_
 29. Fixed by using `metadata.extra_channel_info[i - 3].bit_depth()` in render.rs
 30. Full parity test: 182/184 pass (98.9%), 0 crashes
 31. Remaining 2 failures: cmyk_layers (CMYK color space), multiple_layers_noise_spline (noise/splines)
+32. Investigated cmyk_layers - has Black (K) extra channel + Alpha
+33. Created BlackChannelStage to apply K to CMY (simple CMYK→RGB formula: R=C*K)
+34. Added stage to pipeline BEFORE BlendingStage for correct layer compositing
+35. Simple K multiplication doesn't match djxl - requires ICC profile-based CMS
+36. Investigated multiple_layers_noise_spline - individual noise/spline tests all pass
+37. Only the combination of layers + noise + splines fails - likely pipeline ordering issue
