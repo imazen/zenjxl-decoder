@@ -164,21 +164,37 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 
 | File | Error |
 |------|-------|
-| cmyk_layers | max_error=74, error_count=323882/1048576 |
+| cmyk_layers | max_error=74, error_count=559143/1048576 (53% of pixels) |
 
-**Investigation (2025-12-27)**:
-- Added `BlackChannelStage` to apply K channel to CMY (simple CMYK→RGB: R=C*K, G=M*K, B=Y*K)
-- Stage runs BEFORE BlendingStage to ensure layers are composited with correct RGB values
-- However, this simple formula doesn't match djxl's output
+**File structure (2025-12-27 investigation)**:
+- Image size: 512x512
+- XYB encoded: false (Modular)
+- Color space: RGB (internally represents CMY channels)
+- want_icc: true (embedded CMYK ICC profile)
+- Extra channels: 2 (Black, Alpha)
+- jxl-rs outputs pure white [255,255,255] where djxl outputs [252,254,255]
+- Error pattern: R and G channels have higher error than B, Alpha is correct
 
-**Root Cause**: CMYK to RGB conversion in libjxl requires **ICC profile-based CMS** (lcms2/skcms).
-The cmyk_layers.jxl file has an embedded CMYK ICC profile. djxl uses its CMS to convert
-CMYK colors to RGB accurately. Our simple K multiplication is insufficient.
+**Root Cause**: CMYK→RGB conversion in libjxl requires **ICC profile-based CMS** (lcms2/skcms).
+The cmyk_layers.jxl has `want_icc=true` meaning it has an embedded CMYK ICC profile. djxl uses
+its CMS to convert CMYK colors through the profile's lookup tables, accounting for:
+- Black generation/removal curves
+- Dot gain compensation
+- Color gamut mapping
+- Total ink limit
 
-**Fix Needed**: Enable moxcms CMS integration for CMYK ICC profile conversion. The CMS needs to:
-1. Detect CMYK color space from ICC profile
-2. Create CMYK→sRGB transform using the embedded profile
-3. Apply transform during render pipeline
+Our simple K multiplication (R = C * K, G = M * K, B = Y * K) doesn't account for these.
+
+**moxcms wrapper prepared**:
+- Added CMYK ICC profile detection (`detect_icc_color_space` in moxcms_wrapper.rs)
+- moxcms supports CMYK via `Layout::Rgba` (4 channels mapped to CMYK)
+- Uses profile signature at bytes 16-19: "CMYK", "GRAY", "RGB "
+
+**Fix Still Needed**: Create a CMS-based CMYK→RGB stage that:
+1. Takes CMY color channels + K extra channel
+2. Uses moxcms to create CMYK→sRGB transform with embedded ICC profile
+3. Applies transform to produce RGB output
+4. Wire into render pipeline when CMYK ICC profile is detected
 
 ---
 

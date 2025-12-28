@@ -534,6 +534,157 @@ mod tests {
         }
     }
 
+    /// Debug test for cmyk_layers - examines what's happening with CMYK conversion
+    #[test]
+    fn test_debug_cmyk_layers() {
+        use crate::bit_reader::BitReader;
+        use crate::headers::{FileHeader, JxlHeader};
+
+        let tests = discover_codec_corpus_tests();
+        let test_case = tests.iter().find(|t| t.name == "cmyk_layers");
+
+        let Some(test_case) = test_case else {
+            eprintln!("Skipping: cmyk_layers.jxl not found");
+            return;
+        };
+
+        // Parse file header to see extra channel info
+        let data = std::fs::read(&test_case.jxl_path).expect("Failed to read file");
+        let offset = if data.len() >= 12
+            && &data[0..4] == b"\x00\x00\x00\x0C"
+            && &data[4..8] == b"JXL "
+        {
+            let mut pos = 0;
+            let mut found_offset = 0;
+            while pos + 8 <= data.len() {
+                let box_size =
+                    u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
+                        as usize;
+                let box_type = &data[pos + 4..pos + 8];
+                if box_type == b"jxlc" || box_type == b"jxlp" {
+                    found_offset = pos + 8;
+                    break;
+                }
+                if box_size == 0 {
+                    break;
+                }
+                pos += box_size;
+            }
+            found_offset
+        } else {
+            0
+        };
+
+        let mut br = BitReader::new(&data[offset..]);
+        let file_header = FileHeader::read(&mut br).expect("Failed to parse file header");
+
+        eprintln!(
+            "Image size: {}x{}",
+            file_header.size.xsize(),
+            file_header.size.ysize()
+        );
+        eprintln!("XYB encoded: {}", file_header.image_metadata.xyb_encoded);
+        eprintln!(
+            "Color space: {:?}",
+            file_header.image_metadata.color_encoding.color_space
+        );
+        eprintln!(
+            "want_icc: {}",
+            file_header.image_metadata.color_encoding.want_icc
+        );
+        eprintln!(
+            "Extra channels: {}",
+            file_header.image_metadata.extra_channel_info.len()
+        );
+        for (i, info) in file_header
+            .image_metadata
+            .extra_channel_info
+            .iter()
+            .enumerate()
+        {
+            eprintln!("  Channel {}: type={:?}", i, info.ec_type);
+        }
+
+        // Load reference
+        let ref_path = test_case.reference_path.as_ref().unwrap();
+        let reference = ReferenceImage::load(ref_path).expect("Failed to load reference");
+        eprintln!(
+            "Reference: {}x{}, {} channels",
+            reference.width, reference.height, reference.channels
+        );
+
+        // Decode with jxl-rs
+        let (width, height, channels, actual) =
+            decode_jxl_to_pixels(&test_case.jxl_path).expect("Decode failed");
+        eprintln!("jxl-rs output: {}x{}, {} channels", width, height, channels);
+
+        // Compute overall error stats
+        let mut max_error = 0u8;
+        let mut total_error = 0u64;
+        let mut error_count = 0usize;
+        let mut channel_errors = [0u64; 4]; // Per-channel error sums
+
+        for y in 0..height.min(reference.height) {
+            for x in 0..width.min(reference.width) {
+                let ref_idx = (y * reference.width + x) * reference.channels;
+                let act_idx = (y * width + x) * channels;
+
+                for c in 0..channels.min(reference.channels) {
+                    let ref_val = reference.pixels[ref_idx + c];
+                    let act_val = actual[act_idx + c];
+                    let diff = ref_val.abs_diff(act_val);
+                    if diff > 0 {
+                        error_count += 1;
+                        total_error += diff as u64;
+                        channel_errors[c] += diff as u64;
+                        if diff > max_error {
+                            max_error = diff;
+                        }
+                    }
+                }
+            }
+        }
+
+        let total_pixels = width * height * channels;
+        eprintln!("Error stats:");
+        eprintln!("  max_error: {}", max_error);
+        eprintln!("  error_count: {}/{}", error_count, total_pixels);
+        eprintln!(
+            "  avg_error: {:.2}",
+            if error_count > 0 {
+                total_error as f64 / error_count as f64
+            } else {
+                0.0
+            }
+        );
+        eprintln!(
+            "  per-channel total error: R={}, G={}, B={}, A={}",
+            channel_errors[0], channel_errors[1], channel_errors[2], channel_errors[3]
+        );
+
+        // Print first 10 pixels with differences
+        eprintln!("\nFirst 10 pixel differences:");
+        let mut count = 0;
+        'outer: for y in 0..height.min(reference.height) {
+            for x in 0..width.min(reference.width) {
+                let ref_idx = (y * reference.width + x) * reference.channels;
+                let act_idx = (y * width + x) * channels;
+
+                let ref_pix: Vec<u8> =
+                    reference.pixels[ref_idx..ref_idx + reference.channels].to_vec();
+                let act_pix: Vec<u8> = actual[act_idx..act_idx + channels].to_vec();
+
+                if ref_pix != act_pix {
+                    eprintln!("  ({},{}) ref={:?} jxl-rs={:?}", x, y, ref_pix, act_pix);
+                    count += 1;
+                    if count >= 10 {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+    }
+
     /// Debug test to compare frame headers for noise tests
     #[test]
     fn test_debug_noise_upsampling() {

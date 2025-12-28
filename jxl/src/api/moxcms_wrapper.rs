@@ -99,13 +99,39 @@ fn to_moxcms_profile(profile: &JxlColorProfile) -> Result<moxcms::ColorProfile> 
     }
 }
 
+/// ICC profile color space signatures (bytes 16-19 of ICC header)
+const ICC_CMYK_SIGNATURE: &[u8; 4] = b"CMYK";
+const ICC_GRAY_SIGNATURE: &[u8; 4] = b"GRAY";
+const ICC_RGB_SIGNATURE: &[u8; 4] = b"RGB ";
+
+/// Detect the color space from an ICC profile header.
+/// The color space signature is at bytes 16-19.
+fn detect_icc_color_space(icc_data: &[u8]) -> Option<&'static str> {
+    if icc_data.len() < 20 {
+        return None;
+    }
+    let sig = &icc_data[16..20];
+    if sig == ICC_CMYK_SIGNATURE {
+        Some("CMYK")
+    } else if sig == ICC_GRAY_SIGNATURE {
+        Some("GRAY")
+    } else if sig == ICC_RGB_SIGNATURE {
+        Some("RGB")
+    } else {
+        None
+    }
+}
+
 /// Determine the moxcms Layout for a given profile.
 fn get_layout(profile: &JxlColorProfile) -> moxcms::Layout {
     match profile {
-        JxlColorProfile::Icc(_) => {
-            // For ICC profiles, we assume RGB. A more complete implementation
-            // would parse the ICC header to determine the color space.
-            moxcms::Layout::Rgb
+        JxlColorProfile::Icc(icc_data) => {
+            // Parse ICC header to determine color space
+            match detect_icc_color_space(icc_data) {
+                Some("CMYK") => moxcms::Layout::Rgba, // CMYK uses Rgba layout in moxcms
+                Some("GRAY") => moxcms::Layout::Gray,
+                _ => moxcms::Layout::Rgb, // Default to RGB
+            }
         }
         JxlColorProfile::Simple(encoding) => match encoding {
             JxlColorEncoding::RgbColorSpace { .. } | JxlColorEncoding::XYB { .. } => {
