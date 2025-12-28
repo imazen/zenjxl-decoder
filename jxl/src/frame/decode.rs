@@ -182,6 +182,7 @@ impl Frame {
                 self.header.size_padded().1,
                 self.decoder_state.extra_channel_info().len(),
                 &self.decoder_state.reference_frames[..],
+                self.decoder_state.limits.max_patches,
             )?)
         } else {
             None

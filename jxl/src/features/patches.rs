@@ -360,6 +360,7 @@ impl PatchesDictionary {
         ysize: usize,
         num_extra_channels: usize,
         reference_frames: &[Option<ReferenceFrame>],
+        max_patches_limit: Option<usize>,
     ) -> Result<PatchesDictionary> {
         let blendings_stride = num_extra_channels + 1;
         let patches_histograms = Histograms::decode(PatchContext::NUM, br, true)?;
@@ -377,9 +378,14 @@ impl PatchesDictionary {
         let max_ref_patches = 1024usize
             .checked_add(num_pixels / 4)
             .ok_or(Error::ArithmeticOverflow)?;
-        let max_patches = max_ref_patches
+        // Use image-size-based limit, but allow user to set a stricter limit
+        let max_patches_calculated = max_ref_patches
             .checked_mul(4)
             .ok_or(Error::ArithmeticOverflow)?;
+        let max_patches = match max_patches_limit {
+            Some(limit) => max_patches_calculated.min(limit),
+            None => max_patches_calculated,
+        };
         let max_blending_infos = max_patches
             .checked_mul(4)
             .ok_or(Error::ArithmeticOverflow)?;
@@ -778,6 +784,7 @@ mod tests {
                 1024,
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
+                None,
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![PatchPosition {
@@ -826,6 +833,7 @@ mod tests {
                 1024,
                 2,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
+                None,
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![
@@ -924,6 +932,7 @@ mod tests {
                 1024,
                 1,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
+                None,
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![PatchPosition {
@@ -984,6 +993,7 @@ mod tests {
                 1024,
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
+                None,
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![PatchPosition {
@@ -1028,6 +1038,7 @@ mod tests {
                 1024,
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
+                None,
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![
