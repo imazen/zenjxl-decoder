@@ -206,6 +206,7 @@ fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
     qblock: &[&[i32]; 3],
     dequant_matrices: &DequantMatrices,
 ) -> Result<(), Error> {
+    crate::profile!(dequant_transform);
     dequant_block::<D>(
         d,
         transform_type,
@@ -328,6 +329,7 @@ pub fn decode_vardct_group(
     br: &mut BitReader,
     buffers: &mut VarDctBuffers,
 ) -> Result<(), Error> {
+    crate::profile!(entropy_decode);
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
     let b_dm_multiplier = (1.0 / (1.25)).powf(frame_header.b_qm_scale as f32 - 2.0);
 

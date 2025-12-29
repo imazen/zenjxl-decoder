@@ -78,6 +78,7 @@ impl RenderPipelineInOutStage for HorizontalChromaUpsample {
         output_rows: &mut ChannelsMut<f32>,
         _state: Option<&mut dyn std::any::Any>,
     ) {
+        crate::profile!(chroma_upsample);
         let input = &input_rows[0];
         let output = &mut output_rows[0];
         hchroma_upsample_simd_dispatch(input[0], output[0], xsize);
@@ -165,6 +166,7 @@ impl RenderPipelineInOutStage for VerticalChromaUpsample {
         output_rows: &mut ChannelsMut<f32>,
         _state: Option<&mut dyn std::any::Any>,
     ) {
+        crate::profile!(chroma_upsample);
         let input = &input_rows[0];
         let output = &mut output_rows[0];
         let (output_up, output_down) = output.split_at_mut(1);

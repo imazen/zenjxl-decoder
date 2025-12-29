@@ -35,6 +35,7 @@ jxl_macros = { path = "../jxl_macros", version = "=0.2.2", features = ["test"] }
 
 [features]
 all-simd = ["jxl_simd/all-simd"]
+profiling = []
 sse42 = ["jxl_simd/sse42"]
 avx = ["jxl_simd/avx"]
 avx512 = ["jxl_simd/avx512"]
