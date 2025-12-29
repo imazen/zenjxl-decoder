@@ -39,6 +39,7 @@ avx = ["jxl_simd/avx"]
 avx512 = ["jxl_simd/avx512"]
 neon = ["jxl_simd/neon"]
 parallel = ["rayon"]
+parallel-threads = []  # Lightweight alternative using std::thread::scope
 
 [lints]
 workspace = true

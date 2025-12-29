@@ -194,15 +194,12 @@ impl Frame {
             }
         }
 
-        // Process HF groups
+        // Process HF groups - choose parallel implementation based on features
         #[cfg(feature = "parallel")]
         {
-            // For parallel decode: restructure to be pass-major
-            // This allows parallelizing all groups within each pass
             if self.header.encoding == Encoding::VarDCT && !self.header.has_noise() {
-                self.decode_hf_groups_parallel(groups, &mut buffer_splitter)?;
+                self.decode_hf_groups_parallel_rayon(groups, &mut buffer_splitter)?;
             } else {
-                // Fall back to sequential for modular or noise
                 for (group, passes) in groups {
                     for (pass, br) in passes {
                         self.decode_hf_group(group, pass, br, &mut buffer_splitter)?;
@@ -211,9 +208,21 @@ impl Frame {
             }
         }
 
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(all(feature = "parallel-threads", not(feature = "parallel")))]
+        {
+            if self.header.encoding == Encoding::VarDCT && !self.header.has_noise() {
+                self.decode_hf_groups_parallel_threads(groups, &mut buffer_splitter)?;
+            } else {
+                for (group, passes) in groups {
+                    for (pass, br) in passes {
+                        self.decode_hf_group(group, pass, br, &mut buffer_splitter)?;
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(any(feature = "parallel", feature = "parallel-threads")))]
         for (group, passes) in groups {
-            // TODO(veluca): render all the available passes at once.
             for (pass, br) in passes {
                 self.decode_hf_group(group, pass, br, &mut buffer_splitter)?;
             }
@@ -225,19 +234,19 @@ impl Frame {
         Ok(())
     }
 
-    /// Decode HF groups in parallel for VarDCT-only frames.
+    /// Decode HF groups in parallel using rayon's work-stealing thread pool.
     ///
     /// This restructures the decode to be pass-major, allowing all groups
     /// within each pass to be decoded in parallel.
     #[cfg(feature = "parallel")]
-    fn decode_hf_groups_parallel(
+    fn decode_hf_groups_parallel_rayon(
         &mut self,
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
         buffer_splitter: &mut BufferSplitter,
     ) -> Result<()> {
+        use super::group::VarDctBuffers;
         use rayon::prelude::*;
         use std::cell::RefCell;
-        use super::group::VarDctBuffers;
 
         // Thread-local VarDctBuffers
         thread_local! {
@@ -255,8 +264,8 @@ impl Frame {
         }
 
         // Process each pass sequentially (coefficients accumulate across passes)
-        for pass in 0..num_passes {
-            let groups_for_pass = std::mem::take(&mut groups_by_pass[pass]);
+        for (pass, groups_for_pass_slot) in groups_by_pass.iter_mut().enumerate().take(num_passes) {
+            let groups_for_pass = std::mem::take(groups_for_pass_slot);
             if groups_for_pass.is_empty() {
                 continue;
             }
@@ -355,7 +364,177 @@ impl Frame {
                         pipeline!(
                             self,
                             p,
-                            p.set_buffer_for_group(chan, group, num_passes, image, buffer_splitter)?
+                            p.set_buffer_for_group(
+                                chan,
+                                group,
+                                num_passes,
+                                image,
+                                buffer_splitter
+                            )?
+                        );
+                        Ok(())
+                    },
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Decode HF groups in parallel using std::thread::scope (lightweight alternative to rayon).
+    ///
+    /// This uses simple thread spawning without work-stealing overhead.
+    #[cfg(feature = "parallel-threads")]
+    fn decode_hf_groups_parallel_threads(
+        &mut self,
+        groups: Vec<(usize, Vec<(usize, BitReader)>)>,
+        buffer_splitter: &mut BufferSplitter,
+    ) -> Result<()> {
+        use super::group::VarDctBuffers;
+        use std::sync::Mutex;
+
+        // Reorganize groups by pass
+        let num_passes = self.header.passes.num_passes as usize;
+        let mut groups_by_pass: Vec<Vec<(usize, BitReader)>> = vec![vec![]; num_passes];
+
+        for (group, passes) in groups {
+            for (pass, br) in passes {
+                groups_by_pass[pass].push((group, br));
+            }
+        }
+
+        // Get number of threads from environment or default to available parallelism
+        let num_threads = std::env::var("JXL_NUM_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|p| p.get())
+                    .unwrap_or(4)
+            });
+
+        // Process each pass sequentially
+        for (pass, groups_for_pass_slot) in groups_by_pass.iter_mut().enumerate().take(num_passes) {
+            let groups_for_pass = std::mem::take(groups_for_pass_slot);
+            if groups_for_pass.is_empty() {
+                continue;
+            }
+
+            // Allocate pixel buffers for all groups
+            let pixel_buffers: Vec<(usize, [Image<f32>; 3])> = groups_for_pass
+                .iter()
+                .map(|(group, _)| {
+                    let pixels = [
+                        pipeline!(self, p, p.get_buffer::<f32>(0))?,
+                        pipeline!(self, p, p.get_buffer::<f32>(1))?,
+                        pipeline!(self, p, p.get_buffer::<f32>(2))?,
+                    ];
+                    Ok((*group, pixels))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            // Prepare shared immutable state
+            let frame_header = &self.header;
+            let lf_global = self.lf_global.as_ref().unwrap();
+            let hf_meta = self.hf_meta.as_ref().unwrap();
+            let hf_global = self.hf_global.as_ref().unwrap();
+            let lf_image = &self.lf_image;
+            let quant_lf = &self.quant_lf;
+            let quant_biases = &self
+                .decoder_state
+                .file_header
+                .transform_data
+                .opsin_inverse_matrix
+                .quant_biases;
+            let pass_info = &hf_global.passes[pass];
+            let num_histograms = hf_global.num_histograms;
+            let dequant_matrices = &hf_global.dequant_matrices;
+
+            // Create work items
+            let mut work_items: Vec<(usize, BitReader, [Image<f32>; 3])> = groups_for_pass
+                .into_iter()
+                .zip(pixel_buffers.into_iter())
+                .map(|((group, br), (_, pixels))| (group, br, pixels))
+                .collect();
+
+            // Split work among threads
+            let chunk_size = work_items.len().div_ceil(num_threads);
+            let errors: Mutex<Option<crate::error::Error>> = Mutex::new(None);
+
+            std::thread::scope(|s| {
+                for chunk in work_items.chunks_mut(chunk_size) {
+                    s.spawn(|| {
+                        let mut buffers = VarDctBuffers::new();
+                        for (group, br, pixels) in chunk {
+                            if errors.lock().unwrap().is_some() {
+                                return; // Early exit if another thread failed
+                            }
+                            let result = super::group::decode_vardct_group_inner(
+                                *group,
+                                pass,
+                                frame_header,
+                                lf_global,
+                                hf_meta,
+                                lf_image,
+                                quant_lf,
+                                quant_biases,
+                                pixels,
+                                br,
+                                &mut buffers,
+                                None,
+                                num_histograms,
+                                pass_info,
+                                dequant_matrices,
+                            );
+                            if let Err(e) = result {
+                                *errors.lock().unwrap() = Some(e);
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Check for errors
+            if let Some(e) = errors.into_inner().unwrap() {
+                return Err(e);
+            }
+
+            // Sequential: set pixel buffers to pipeline and decode modular HF
+            let lf_global_mut = self.lf_global.as_mut().unwrap();
+            for (group, mut br, pixels) in work_items {
+                if self.decoder_state.enable_output
+                    && pass + 1 == self.header.passes.num_passes as usize
+                {
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        pipeline!(
+                            self,
+                            p,
+                            p.set_buffer_for_group(c, group, 1, img, buffer_splitter)?
+                        );
+                    }
+                }
+
+                lf_global_mut.modular_global.read_stream(
+                    super::modular::ModularStreamId::ModularHF { group, pass },
+                    &self.header,
+                    &lf_global_mut.tree,
+                    &mut br,
+                )?;
+                lf_global_mut.modular_global.process_output(
+                    2 + pass,
+                    group,
+                    &self.header,
+                    &mut |chan, group, num_passes, image| {
+                        pipeline!(
+                            self,
+                            p,
+                            p.set_buffer_for_group(
+                                chan,
+                                group,
+                                num_passes,
+                                image,
+                                buffer_splitter
+                            )?
                         );
                         Ok(())
                     },

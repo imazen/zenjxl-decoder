@@ -323,11 +323,13 @@ pub fn decode_vardct_group(
 ) -> Result<(), Error> {
     // Extract coefficients and read-only data, avoiding borrow conflicts
     let (coeffs, num_histograms, pass_info, dequant_matrices) = {
-        let coeffs = hf_global.hf_coefficients.as_mut().map(|hf_coefficients| [
-            hf_coefficients.0.row_mut(group),
-            hf_coefficients.1.row_mut(group),
-            hf_coefficients.2.row_mut(group),
-        ]);
+        let coeffs = hf_global.hf_coefficients.as_mut().map(|hf_coefficients| {
+            [
+                hf_coefficients.0.row_mut(group),
+                hf_coefficients.1.row_mut(group),
+                hf_coefficients.2.row_mut(group),
+            ]
+        });
         (
             coeffs,
             hf_global.num_histograms,
@@ -337,9 +339,21 @@ pub fn decode_vardct_group(
     };
 
     decode_vardct_group_inner(
-        group, pass, frame_header, lf_global, hf_meta,
-        lf_image, quant_lf, quant_biases, pixels, br, buffers, coeffs,
-        num_histograms, pass_info, dequant_matrices,
+        group,
+        pass,
+        frame_header,
+        lf_global,
+        hf_meta,
+        lf_image,
+        quant_lf,
+        quant_biases,
+        pixels,
+        br,
+        buffers,
+        coeffs,
+        num_histograms,
+        pass_info,
+        dequant_matrices,
     )
 }
 
