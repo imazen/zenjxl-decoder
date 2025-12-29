@@ -305,30 +305,6 @@ simd_function!(
     }
 );
 
-/// Shared immutable state for VarDCT group decoding.
-/// This struct allows parallel decoding by grouping all read-only references.
-pub struct VarDctDecodeContext<'a> {
-    pub frame_header: &'a FrameHeader,
-    pub color_correlation_params: &'a super::color_correlation_map::ColorCorrelationParams,
-    pub quant_params: &'a super::quantizer::QuantizerParams,
-    pub block_context_map: &'a super::block_context_map::BlockContextMap,
-    pub hf_meta: &'a HfMetadata,
-    pub lf_image: &'a Option<[Image<f32>; 3]>,
-    pub quant_lf: &'a Image<u8>,
-    pub quant_biases: &'a [f32; 4],
-    pub pass_info: &'a super::PassState,
-    pub dequant_matrices: &'a super::quant_weights::DequantMatrices,
-    pub num_histograms: u32,
-}
-
-/// Coefficients storage for a group - either from shared multi-pass storage or thread-local.
-pub enum GroupCoeffs<'a> {
-    /// Coefficients from shared multi-pass storage (each group has its own row).
-    Shared([&'a mut [i32]; 3]),
-    /// Thread-local coefficients from VarDctBuffers.
-    Local,
-}
-
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn decode_vardct_group(
@@ -371,7 +347,7 @@ pub fn decode_vardct_group(
 /// This enables parallel decoding by allowing each thread to receive its own coefficient slice.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn decode_vardct_group_inner(
+pub(crate) fn decode_vardct_group_inner(
     group: usize,
     pass: usize,
     frame_header: &FrameHeader,
@@ -626,63 +602,4 @@ fn decode_vardct_group_inner(
     }
     reader.check_final_state(&pass_info.histograms, br)?;
     Ok(())
-}
-
-/// Input data for parallel VarDCT decode of a single group.
-#[cfg(feature = "parallel")]
-pub struct VarDctGroupInput<'a> {
-    pub group: usize,
-    pub pass: usize,
-    pub br: &'a mut BitReader<'a>,
-    pub pixels: &'a mut [Image<f32>; 3],
-    pub coeffs: Option<[&'a mut [i32]; 3]>,
-}
-
-/// Decode multiple VarDCT groups in parallel for a single pass.
-///
-/// All groups must be for the same pass, as passes must be processed sequentially
-/// (coefficients accumulate across passes).
-#[cfg(feature = "parallel")]
-#[allow(clippy::too_many_arguments)]
-pub fn decode_vardct_groups_parallel(
-    inputs: &mut [VarDctGroupInput],
-    frame_header: &FrameHeader,
-    lf_global: &LfGlobalState,
-    hf_meta: &HfMetadata,
-    lf_image: &Option<[Image<f32>; 3]>,
-    quant_lf: &Image<u8>,
-    quant_biases: &[f32; 4],
-    num_histograms: u32,
-    pass_info: &super::PassState,
-    dequant_matrices: &super::quant_weights::DequantMatrices,
-) -> Result<(), Error> {
-    use rayon::prelude::*;
-    use std::cell::RefCell;
-
-    // Thread-local VarDctBuffers to avoid allocation per group
-    thread_local! {
-        static BUFFERS: RefCell<VarDctBuffers> = RefCell::new(VarDctBuffers::new());
-    }
-
-    inputs.par_iter_mut().try_for_each(|input| {
-        BUFFERS.with_borrow_mut(|buffers| {
-            decode_vardct_group_inner(
-                input.group,
-                input.pass,
-                frame_header,
-                lf_global,
-                hf_meta,
-                lf_image,
-                quant_lf,
-                quant_biases,
-                input.pixels,
-                input.br,
-                buffers,
-                input.coeffs.take(),
-                num_histograms,
-                pass_info,
-                dequant_matrices,
-            )
-        })
-    })
 }

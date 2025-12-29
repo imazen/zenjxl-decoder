@@ -5,9 +5,6 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
 use crate::api::JxlCms;
 use crate::api::JxlColorType;
 use crate::api::JxlDataFormat;
@@ -197,6 +194,24 @@ impl Frame {
             }
         }
 
+        // Process HF groups
+        #[cfg(feature = "parallel")]
+        {
+            // For parallel decode: restructure to be pass-major
+            // This allows parallelizing all groups within each pass
+            if self.header.encoding == Encoding::VarDCT && !self.header.has_noise() {
+                self.decode_hf_groups_parallel(groups, &mut buffer_splitter)?;
+            } else {
+                // Fall back to sequential for modular or noise
+                for (group, passes) in groups {
+                    for (pass, br) in passes {
+                        self.decode_hf_group(group, pass, br, &mut buffer_splitter)?;
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(feature = "parallel"))]
         for (group, passes) in groups {
             // TODO(veluca): render all the available passes at once.
             for (pass, br) in passes {
@@ -206,6 +221,147 @@ impl Frame {
 
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
+
+        Ok(())
+    }
+
+    /// Decode HF groups in parallel for VarDCT-only frames.
+    ///
+    /// This restructures the decode to be pass-major, allowing all groups
+    /// within each pass to be decoded in parallel.
+    #[cfg(feature = "parallel")]
+    fn decode_hf_groups_parallel(
+        &mut self,
+        groups: Vec<(usize, Vec<(usize, BitReader)>)>,
+        buffer_splitter: &mut BufferSplitter,
+    ) -> Result<()> {
+        use rayon::prelude::*;
+        use std::cell::RefCell;
+        use super::group::VarDctBuffers;
+
+        // Thread-local VarDctBuffers
+        thread_local! {
+            static BUFFERS: RefCell<VarDctBuffers> = RefCell::new(VarDctBuffers::new());
+        }
+
+        // Reorganize groups by pass
+        let num_passes = self.header.passes.num_passes as usize;
+        let mut groups_by_pass: Vec<Vec<(usize, BitReader)>> = vec![vec![]; num_passes];
+
+        for (group, passes) in groups {
+            for (pass, br) in passes {
+                groups_by_pass[pass].push((group, br));
+            }
+        }
+
+        // Process each pass sequentially (coefficients accumulate across passes)
+        for pass in 0..num_passes {
+            let groups_for_pass = std::mem::take(&mut groups_by_pass[pass]);
+            if groups_for_pass.is_empty() {
+                continue;
+            }
+
+            // Allocate pixel buffers for all groups using the pipeline's sizing
+            let pixel_buffers: Vec<(usize, [Image<f32>; 3])> = groups_for_pass
+                .iter()
+                .map(|(group, _)| {
+                    // Use pipeline to get correctly sized buffers
+                    let pixels = [
+                        pipeline!(self, p, p.get_buffer::<f32>(0))?,
+                        pipeline!(self, p, p.get_buffer::<f32>(1))?,
+                        pipeline!(self, p, p.get_buffer::<f32>(2))?,
+                    ];
+                    Ok((*group, pixels))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            // Prepare shared immutable state
+            let frame_header = &self.header;
+            let lf_global = self.lf_global.as_ref().unwrap();
+            let hf_meta = self.hf_meta.as_ref().unwrap();
+            let hf_global = self.hf_global.as_ref().unwrap();
+            let lf_image = &self.lf_image;
+            let quant_lf = &self.quant_lf;
+            let quant_biases = &self
+                .decoder_state
+                .file_header
+                .transform_data
+                .opsin_inverse_matrix
+                .quant_biases;
+            let pass_info = &hf_global.passes[pass];
+            let num_histograms = hf_global.num_histograms;
+            let dequant_matrices = &hf_global.dequant_matrices;
+
+            // Create decode work items - store group index, BitReader, and pixel buffer together
+            let mut work_items: Vec<(usize, BitReader, [Image<f32>; 3])> = groups_for_pass
+                .into_iter()
+                .zip(pixel_buffers.into_iter())
+                .map(|((group, br), (_, pixels))| (group, br, pixels))
+                .collect();
+
+            // Parallel decode
+            work_items
+                .par_iter_mut()
+                .try_for_each(|(group, br, pixels)| {
+                    BUFFERS.with_borrow_mut(|buffers| {
+                        super::group::decode_vardct_group_inner(
+                            *group,
+                            pass,
+                            frame_header,
+                            lf_global,
+                            hf_meta,
+                            lf_image,
+                            quant_lf,
+                            quant_biases,
+                            pixels,
+                            br,
+                            buffers,
+                            None, // coeffs - not using hf_coefficients storage
+                            num_histograms,
+                            pass_info,
+                            dequant_matrices,
+                        )
+                    })
+                })?;
+
+            // Sequential: set pixel buffers to pipeline and decode modular HF
+            let lf_global_mut = self.lf_global.as_mut().unwrap();
+            for (group, mut br, pixels) in work_items {
+                // Only set buffers on the last pass
+                if self.decoder_state.enable_output
+                    && pass + 1 == self.header.passes.num_passes as usize
+                {
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        pipeline!(
+                            self,
+                            p,
+                            p.set_buffer_for_group(c, group, 1, img, buffer_splitter)?
+                        );
+                    }
+                }
+
+                // Decode modular HF stream for this group
+                lf_global_mut.modular_global.read_stream(
+                    super::modular::ModularStreamId::ModularHF { group, pass },
+                    &self.header,
+                    &lf_global_mut.tree,
+                    &mut br,
+                )?;
+                lf_global_mut.modular_global.process_output(
+                    2 + pass,
+                    group,
+                    &self.header,
+                    &mut |chan, group, num_passes, image| {
+                        pipeline!(
+                            self,
+                            p,
+                            p.set_buffer_for_group(chan, group, num_passes, image, buffer_splitter)?
+                        );
+                        Ok(())
+                    },
+                )?;
+            }
+        }
 
         Ok(())
     }
