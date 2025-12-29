@@ -3,6 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#![allow(unsafe_code)]
+
 use std::fmt::Debug;
 
 use crate::bit_reader::BitReader;
@@ -444,15 +446,19 @@ impl Table {
     #[inline]
     pub fn read(&self, br: &mut BitReader) -> u32 {
         let mut pos = br.peek(TABLE_BITS) as usize;
-        let mut n_bits = self.entries[pos].bits as usize;
+        // SAFETY: pos < TABLE_SIZE (256) for first lookup, guaranteed by peek(TABLE_BITS)
+        let mut n_bits = unsafe { self.entries.get_unchecked(pos).bits as usize };
         if n_bits > TABLE_BITS {
             br.consume_optimistic(TABLE_BITS);
             n_bits -= TABLE_BITS;
-            pos += self.entries[pos].value as usize;
+            // SAFETY: entries[pos].value points to valid secondary table offset
+            pos += unsafe { self.entries.get_unchecked(pos).value as usize };
             pos += br.peek(n_bits) as usize;
         }
-        br.consume_optimistic(self.entries[pos].bits as usize);
-        self.entries[pos].value as u32
+        // SAFETY: pos is within entries bounds by table construction
+        let entry = unsafe { self.entries.get_unchecked(pos) };
+        br.consume_optimistic(entry.bits as usize);
+        entry.value as u32
     }
 }
 
@@ -480,6 +486,13 @@ impl HuffmanCodes {
     #[inline]
     pub fn read(&self, br: &mut BitReader, ctx: usize) -> u32 {
         self.tables[ctx].read(br)
+    }
+
+    /// Unsafe version that skips bounds check on tables.
+    /// SAFETY: ctx must be < self.tables.len()
+    #[inline]
+    pub unsafe fn read_unchecked(&self, br: &mut BitReader, ctx: usize) -> u32 {
+        unsafe { self.tables.get_unchecked(ctx).read(br) }
     }
 
     pub fn single_symbol(&self, ctx: usize) -> Option<u32> {

@@ -3,6 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#![allow(unsafe_code)]
+
 use num_traits::Float;
 
 use jxl_transforms::{transform::*, transform_map::*};
@@ -520,18 +522,25 @@ pub fn decode_vardct_group(
                 let mut prev = if nonzeros > num_coeffs / 16 { 0 } else { 1 };
                 let permutation = &pass_info.coeff_orders[shape_id * 3 + c];
                 let current_coeffs = &mut coeffs[c][coeffs_offset..coeffs_offset + num_coeffs];
+                // Fast path: VarDCT doesn't use LZ77, so always use unsafe path
+                debug_assert!(!reader.uses_lz77());
+                // SAFETY: context values are bounded by histograms.context_map.len()
+                // permutation[k] is bounded by num_coeffs
+                // current_coeffs has exactly num_coeffs elements
                 for k in num_blocks..num_coeffs {
                     if nonzeros == 0 {
                         break;
                     }
                     let ctx =
                         histo_offset + zero_density_context(nonzeros, k, log_num_blocks, prev);
-                    let coeff =
-                        reader.read_signed(&pass_info.histograms, br, ctx) << shift_for_pass;
+                    let coeff = unsafe {
+                        reader.read_signed_unchecked(&pass_info.histograms, br, ctx)
+                    } << shift_for_pass;
                     prev = if coeff != 0 { 1 } else { 0 };
                     nonzeros -= prev;
-                    let coeff_index = permutation[k] as usize;
-                    current_coeffs[coeff_index] += coeff;
+                    // SAFETY: permutation[k] < num_coeffs and current_coeffs.len() == num_coeffs
+                    let coeff_index = unsafe { *permutation.get_unchecked(k) } as usize;
+                    unsafe { *current_coeffs.get_unchecked_mut(coeff_index) += coeff };
                 }
                 if nonzeros != 0 {
                     return Err(Error::EndOfBlockResidualNonZeros(nonzeros));

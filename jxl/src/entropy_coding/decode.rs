@@ -3,6 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#![allow(unsafe_code)]
+
 use jxl_macros::UnconditionalCoder;
 
 use crate::bit_reader::BitReader;
@@ -278,6 +280,12 @@ impl SymbolReader {
 }
 
 impl SymbolReader {
+    /// Returns true if this reader uses LZ77/RLE.
+    #[inline]
+    pub fn uses_lz77(&self) -> bool {
+        !matches!(self.state, SymbolReaderState::None)
+    }
+
     #[inline]
     pub fn read_unsigned(
         &mut self,
@@ -297,6 +305,43 @@ impl SymbolReader {
         context: usize,
     ) -> i32 {
         let unsigned = self.read_unsigned(histograms, br, context);
+        unpack_signed(unsigned)
+    }
+
+    /// Unsafe fast path for non-LZ77 reads. Skips all bounds checks.
+    /// SAFETY:
+    /// - Must only be called when uses_lz77() returns false
+    /// - context must be valid for histograms.context_map
+    /// - cluster must be valid for codes
+    #[inline(always)]
+    pub unsafe fn read_unsigned_unchecked(
+        &mut self,
+        histograms: &Histograms,
+        br: &mut BitReader,
+        context: usize,
+    ) -> u32 {
+        debug_assert!(!self.uses_lz77());
+        // SAFETY: Caller guarantees context is valid
+        let cluster = unsafe { histograms.map_context_to_cluster_unchecked(context) };
+        let token = match &histograms.codes {
+            // SAFETY: Caller guarantees cluster is valid
+            Codes::Huffman(hc) => unsafe { hc.read_unchecked(br, cluster) },
+            Codes::Ans(ans) => unsafe { self.ans_reader.read_unchecked(ans, br, cluster) },
+        };
+        // SAFETY: Caller guarantees cluster is valid
+        unsafe { histograms.read_uint_unchecked(cluster, token, br) }
+    }
+
+    /// Unsafe fast path for signed reads.
+    #[inline(always)]
+    pub unsafe fn read_signed_unchecked(
+        &mut self,
+        histograms: &Histograms,
+        br: &mut BitReader,
+        context: usize,
+    ) -> i32 {
+        // SAFETY: Caller guarantees preconditions
+        let unsigned = unsafe { self.read_unsigned_unchecked(histograms, br, context) };
         unpack_signed(unsigned)
     }
 
@@ -546,8 +591,23 @@ impl Histograms {
         })
     }
 
+    #[inline]
     pub fn map_context_to_cluster(&self, context: usize) -> usize {
         self.context_map[context] as usize
+    }
+
+    /// Unsafe version that skips bounds check.
+    /// SAFETY: context must be < self.context_map.len()
+    #[inline]
+    pub unsafe fn map_context_to_cluster_unchecked(&self, context: usize) -> usize {
+        unsafe { *self.context_map.get_unchecked(context) as usize }
+    }
+
+    /// Unsafe version that skips bounds check on uint_configs.
+    /// SAFETY: cluster must be < self.uint_configs.len()
+    #[inline]
+    pub unsafe fn read_uint_unchecked(&self, cluster: usize, token: u32, br: &mut BitReader) -> u32 {
+        unsafe { self.uint_configs.get_unchecked(cluster).read(token, br) }
     }
 
     pub fn num_histograms(&self) -> usize {

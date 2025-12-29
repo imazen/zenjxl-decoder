@@ -5,6 +5,8 @@
 //
 // Originally written for jxl-oxide.
 
+#![allow(unsafe_code)]
+
 use crate::bit_reader::BitReader;
 use crate::error::{Error, Result};
 
@@ -356,7 +358,9 @@ impl AnsHistogram {
         let pos = idx & self.bucket_mask;
 
         debug_assert!(self.buckets.len().is_power_of_two());
-        let bucket = self.buckets[i & (self.buckets.len() - 1)];
+        // SAFETY: buckets.len() is a power of 2, so (i & (len - 1)) is always < len
+        let bucket_idx = i & (self.buckets.len() - 1);
+        let bucket = unsafe { *self.buckets.get_unchecked(bucket_idx) };
         let alias_symbol = bucket.alias_symbol as u32;
         let alias_cutoff = bucket.alias_cutoff as u32;
         let dist = bucket.dist as u32;
@@ -421,6 +425,13 @@ impl AnsReader {
     #[inline]
     pub fn read(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
         codes.histograms[ctx].read(br, &mut self.0)
+    }
+
+    /// Unsafe version that skips bounds check on histograms.
+    /// SAFETY: ctx must be < codes.histograms.len()
+    #[inline]
+    pub unsafe fn read_unchecked(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
+        unsafe { codes.histograms.get_unchecked(ctx).read(br, &mut self.0) }
     }
 
     pub fn check_final_state(self) -> Result<()> {
