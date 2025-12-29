@@ -349,7 +349,7 @@ impl AnsHistogram {
 }
 
 impl AnsHistogram {
-    #[inline(always)]
+    #[inline]
     pub fn read(&self, br: &mut BitReader, state: &mut u32) -> u32 {
         let idx = *state & 0xfff;
         let i = (idx >> self.log_bucket_size) as usize;
@@ -418,7 +418,7 @@ impl AnsReader {
         Ok(Self(initial_state))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn read(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
         codes.histograms[ctx].read(br, &mut self.0)
     }

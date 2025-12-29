@@ -441,7 +441,7 @@ impl Table {
         Ok(Table { entries })
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn read(&self, br: &mut BitReader) -> u32 {
         let mut pos = br.peek(TABLE_BITS) as usize;
         let mut n_bits = self.entries[pos].bits as usize;
@@ -477,7 +477,7 @@ impl HuffmanCodes {
         Ok(HuffmanCodes { tables })
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn read(&self, br: &mut BitReader, ctx: usize) -> u32 {
         self.tables[ctx].read(br)
     }

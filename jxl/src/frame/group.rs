@@ -520,35 +520,18 @@ pub fn decode_vardct_group(
                 let mut prev = if nonzeros > num_coeffs / 16 { 0 } else { 1 };
                 let permutation = &pass_info.coeff_orders[shape_id * 3 + c];
                 let current_coeffs = &mut coeffs[c][coeffs_offset..coeffs_offset + num_coeffs];
-                // Use the fast path when LZ77/RLE is not enabled (common case for VarDCT)
-                if reader.is_simple() {
-                    for k in num_blocks..num_coeffs {
-                        if nonzeros == 0 {
-                            break;
-                        }
-                        let ctx =
-                            histo_offset + zero_density_context(nonzeros, k, log_num_blocks, prev);
-                        let coeff = reader.read_signed_simple(&pass_info.histograms, br, ctx)
-                            << shift_for_pass;
-                        prev = if coeff != 0 { 1 } else { 0 };
-                        nonzeros -= prev;
-                        let coeff_index = permutation[k] as usize;
-                        current_coeffs[coeff_index] += coeff;
+                for k in num_blocks..num_coeffs {
+                    if nonzeros == 0 {
+                        break;
                     }
-                } else {
-                    for k in num_blocks..num_coeffs {
-                        if nonzeros == 0 {
-                            break;
-                        }
-                        let ctx =
-                            histo_offset + zero_density_context(nonzeros, k, log_num_blocks, prev);
-                        let coeff =
-                            reader.read_signed(&pass_info.histograms, br, ctx) << shift_for_pass;
-                        prev = if coeff != 0 { 1 } else { 0 };
-                        nonzeros -= prev;
-                        let coeff_index = permutation[k] as usize;
-                        current_coeffs[coeff_index] += coeff;
-                    }
+                    let ctx =
+                        histo_offset + zero_density_context(nonzeros, k, log_num_blocks, prev);
+                    let coeff =
+                        reader.read_signed(&pass_info.histograms, br, ctx) << shift_for_pass;
+                    prev = if coeff != 0 { 1 } else { 0 };
+                    nonzeros -= prev;
+                    let coeff_index = permutation[k] as usize;
+                    current_coeffs[coeff_index] += coeff;
                 }
                 if nonzeros != 0 {
                     return Err(Error::EndOfBlockResidualNonZeros(nonzeros));
