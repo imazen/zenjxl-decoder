@@ -305,6 +305,30 @@ simd_function!(
     }
 );
 
+/// Shared immutable state for VarDCT group decoding.
+/// This struct allows parallel decoding by grouping all read-only references.
+pub struct VarDctDecodeContext<'a> {
+    pub frame_header: &'a FrameHeader,
+    pub color_correlation_params: &'a super::color_correlation_map::ColorCorrelationParams,
+    pub quant_params: &'a super::quantizer::QuantizerParams,
+    pub block_context_map: &'a super::block_context_map::BlockContextMap,
+    pub hf_meta: &'a HfMetadata,
+    pub lf_image: &'a Option<[Image<f32>; 3]>,
+    pub quant_lf: &'a Image<u8>,
+    pub quant_biases: &'a [f32; 4],
+    pub pass_info: &'a super::PassState,
+    pub dequant_matrices: &'a super::quant_weights::DequantMatrices,
+    pub num_histograms: u32,
+}
+
+/// Coefficients storage for a group - either from shared multi-pass storage or thread-local.
+pub enum GroupCoeffs<'a> {
+    /// Coefficients from shared multi-pass storage (each group has its own row).
+    Shared([&'a mut [i32]; 3]),
+    /// Thread-local coefficients from VarDctBuffers.
+    Local,
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn decode_vardct_group(
@@ -321,13 +345,56 @@ pub fn decode_vardct_group(
     br: &mut BitReader,
     buffers: &mut VarDctBuffers,
 ) -> Result<(), Error> {
+    // Extract coefficients and read-only data, avoiding borrow conflicts
+    let (coeffs, num_histograms, pass_info, dequant_matrices) = {
+        let coeffs = hf_global.hf_coefficients.as_mut().map(|hf_coefficients| [
+            hf_coefficients.0.row_mut(group),
+            hf_coefficients.1.row_mut(group),
+            hf_coefficients.2.row_mut(group),
+        ]);
+        (
+            coeffs,
+            hf_global.num_histograms,
+            &hf_global.passes[pass],
+            &hf_global.dequant_matrices,
+        )
+    };
+
+    decode_vardct_group_inner(
+        group, pass, frame_header, lf_global, hf_meta,
+        lf_image, quant_lf, quant_biases, pixels, br, buffers, coeffs,
+        num_histograms, pass_info, dequant_matrices,
+    )
+}
+
+/// Inner decode function that takes pre-split coefficient slices.
+/// This enables parallel decoding by allowing each thread to receive its own coefficient slice.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn decode_vardct_group_inner(
+    group: usize,
+    pass: usize,
+    frame_header: &FrameHeader,
+    lf_global: &LfGlobalState,
+    hf_meta: &HfMetadata,
+    lf_image: &Option<[Image<f32>; 3]>,
+    quant_lf: &Image<u8>,
+    quant_biases: &[f32; 4],
+    pixels: &mut [Image<f32>; 3],
+    br: &mut BitReader,
+    buffers: &mut VarDctBuffers,
+    coeffs: Option<[&mut [i32]; 3]>,
+    num_histograms: u32,
+    pass_info: &super::PassState,
+    dequant_matrices: &super::quant_weights::DequantMatrices,
+) -> Result<(), Error> {
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
     let b_dm_multiplier = (1.0 / (1.25)).powf(frame_header.b_qm_scale as f32 - 2.0);
 
-    let num_histo_bits = hf_global.num_histograms.ceil_log2();
+    let num_histo_bits = num_histograms.ceil_log2();
     let histogram_index: usize = br.read(num_histo_bits as usize)? as usize;
     debug!(?histogram_index);
-    let mut reader = SymbolReader::new(&hf_global.passes[pass].histograms, br, None)?;
+    let mut reader = SymbolReader::new(&pass_info.histograms, br, None)?;
     let block_group_rect = frame_header.block_group_rect(group);
     debug!(?block_group_rect);
     // Reset and use pooled buffers
@@ -365,14 +432,11 @@ pub fn decode_vardct_group(
         ))?,
     ];
     let quant_lf_rect = quant_lf.get_rect(block_group_rect);
-    let block_context_map = lf_global.block_context_map.as_mut().unwrap();
+    let block_context_map = lf_global.block_context_map.as_ref().unwrap();
     let context_offset = histogram_index * block_context_map.num_ac_contexts();
-    let coeffs = match hf_global.hf_coefficients.as_mut() {
-        Some(hf_coefficients) => [
-            hf_coefficients.0.row_mut(group),
-            hf_coefficients.1.row_mut(group),
-            hf_coefficients.2.row_mut(group),
-        ],
+    // Use passed coefficients if available, otherwise use pooled buffer
+    let coeffs = match coeffs {
+        Some(c) => c,
         None => {
             // Use pooled buffer (already reset to zero in buffers.reset() above)
             let (coeffs_x, coeffs_y_b) = buffers.coeffs_storage.split_at_mut(GROUP_DIM * GROUP_DIM);
@@ -474,7 +538,6 @@ pub fn decode_vardct_group(
             let num_blocks = cx * cy;
             let num_coeffs = num_blocks * BLOCK_SIZE;
             let log_num_blocks = num_blocks.ilog2() as usize;
-            let pass_info = &hf_global.passes[pass];
             for c in [1, 0, 2] {
                 if (sbx[c] << hshift[c]) != bx || (sby[c] << vshift[c] != by) {
                     continue;
@@ -533,7 +596,6 @@ pub fn decode_vardct_group(
                 &coeffs[1][coeffs_offset..],
                 &coeffs[2][coeffs_offset..],
             ];
-            let dequant_matrices = &hf_global.dequant_matrices;
             dequant_and_transform_to_pixels_dispatch(
                 quant_biases,
                 x_dm_multiplier,
@@ -562,6 +624,6 @@ pub fn decode_vardct_group(
             coeffs_offset += num_coeffs;
         }
     }
-    reader.check_final_state(&hf_global.passes[pass].histograms, br)?;
+    reader.check_final_state(&pass_info.histograms, br)?;
     Ok(())
 }
