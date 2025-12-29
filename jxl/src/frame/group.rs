@@ -627,3 +627,62 @@ fn decode_vardct_group_inner(
     reader.check_final_state(&pass_info.histograms, br)?;
     Ok(())
 }
+
+/// Input data for parallel VarDCT decode of a single group.
+#[cfg(feature = "parallel")]
+pub struct VarDctGroupInput<'a> {
+    pub group: usize,
+    pub pass: usize,
+    pub br: &'a mut BitReader<'a>,
+    pub pixels: &'a mut [Image<f32>; 3],
+    pub coeffs: Option<[&'a mut [i32]; 3]>,
+}
+
+/// Decode multiple VarDCT groups in parallel for a single pass.
+///
+/// All groups must be for the same pass, as passes must be processed sequentially
+/// (coefficients accumulate across passes).
+#[cfg(feature = "parallel")]
+#[allow(clippy::too_many_arguments)]
+pub fn decode_vardct_groups_parallel(
+    inputs: &mut [VarDctGroupInput],
+    frame_header: &FrameHeader,
+    lf_global: &LfGlobalState,
+    hf_meta: &HfMetadata,
+    lf_image: &Option<[Image<f32>; 3]>,
+    quant_lf: &Image<u8>,
+    quant_biases: &[f32; 4],
+    num_histograms: u32,
+    pass_info: &super::PassState,
+    dequant_matrices: &super::quant_weights::DequantMatrices,
+) -> Result<(), Error> {
+    use rayon::prelude::*;
+    use std::cell::RefCell;
+
+    // Thread-local VarDctBuffers to avoid allocation per group
+    thread_local! {
+        static BUFFERS: RefCell<VarDctBuffers> = RefCell::new(VarDctBuffers::new());
+    }
+
+    inputs.par_iter_mut().try_for_each(|input| {
+        BUFFERS.with_borrow_mut(|buffers| {
+            decode_vardct_group_inner(
+                input.group,
+                input.pass,
+                frame_header,
+                lf_global,
+                hf_meta,
+                lf_image,
+                quant_lf,
+                quant_biases,
+                input.pixels,
+                input.br,
+                buffers,
+                input.coeffs.take(),
+                num_histograms,
+                pass_info,
+                dequant_matrices,
+            )
+        })
+    })
+}
