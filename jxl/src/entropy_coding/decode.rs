@@ -278,6 +278,57 @@ impl SymbolReader {
 }
 
 impl SymbolReader {
+    /// Returns true if this reader has no LZ77/RLE state (the common case for VarDCT).
+    /// When true, callers can use the faster `read_unsigned_simple` methods.
+    #[inline]
+    pub fn is_simple(&self) -> bool {
+        matches!(self.state, SymbolReaderState::None)
+    }
+
+    /// Fast path for reading unsigned values when LZ77/RLE is not used.
+    /// SAFETY: Only call when `is_simple()` returns true.
+    #[inline(always)]
+    pub fn read_unsigned_simple(
+        &mut self,
+        histograms: &Histograms,
+        br: &mut BitReader,
+        context: usize,
+    ) -> u32 {
+        debug_assert!(self.is_simple());
+        let cluster = histograms.map_context_to_cluster(context);
+        self.read_unsigned_simple_clustered(histograms, br, cluster)
+    }
+
+    /// Fast path for reading signed values when LZ77/RLE is not used.
+    /// SAFETY: Only call when `is_simple()` returns true.
+    #[inline(always)]
+    pub fn read_signed_simple(
+        &mut self,
+        histograms: &Histograms,
+        br: &mut BitReader,
+        context: usize,
+    ) -> i32 {
+        debug_assert!(self.is_simple());
+        let unsigned = self.read_unsigned_simple(histograms, br, context);
+        unpack_signed(unsigned)
+    }
+
+    /// Fast path for clustered reading when LZ77/RLE is not used.
+    #[inline(always)]
+    pub fn read_unsigned_simple_clustered(
+        &mut self,
+        histograms: &Histograms,
+        br: &mut BitReader,
+        cluster: usize,
+    ) -> u32 {
+        debug_assert!(self.is_simple());
+        let token = match &histograms.codes {
+            Codes::Huffman(hc) => hc.read(br, cluster),
+            Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
+        };
+        histograms.uint_configs[cluster].read(token, br)
+    }
+
     #[inline]
     pub fn read_unsigned(
         &mut self,
@@ -546,6 +597,7 @@ impl Histograms {
         })
     }
 
+    #[inline]
     pub fn map_context_to_cluster(&self, context: usize) -> usize {
         self.context_map[context] as usize
     }
