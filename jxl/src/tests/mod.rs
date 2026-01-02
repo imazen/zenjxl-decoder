@@ -15,3 +15,4 @@ pub mod entropy;
 pub mod feature_tests;
 pub mod parity;
 pub mod streaming;
+pub mod synthetic;
