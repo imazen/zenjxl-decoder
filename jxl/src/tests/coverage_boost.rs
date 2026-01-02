@@ -37,12 +37,11 @@ fn codec_corpus_path() -> Option<PathBuf> {
 
 fn get_test_file(category: &str, name: &str) -> Option<PathBuf> {
     let corpus = codec_corpus_path()?;
-    let path = corpus.join("jxl").join(category).join(format!("{}.jxl", name));
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
+    let path = corpus
+        .join("jxl")
+        .join(category)
+        .join(format!("{}.jxl", name));
+    if path.exists() { Some(path) } else { None }
 }
 
 fn decode_file(path: &PathBuf) -> Result<(usize, usize), String> {
@@ -85,9 +84,21 @@ macro_rules! coverage_test {
 }
 
 // Color encoding coverage (headers/color_encoding.rs)
-coverage_test!(test_colorspace_display_p3, "features", "colorspace_DisplayP3");
-coverage_test!(test_colorspace_rec2100_hlg, "features", "colorspace_Rec2100HLG");
-coverage_test!(test_colorspace_rec2100_pq, "features", "colorspace_Rec2100PQ");
+coverage_test!(
+    test_colorspace_display_p3,
+    "features",
+    "colorspace_DisplayP3"
+);
+coverage_test!(
+    test_colorspace_rec2100_hlg,
+    "features",
+    "colorspace_Rec2100HLG"
+);
+coverage_test!(
+    test_colorspace_rec2100_pq,
+    "features",
+    "colorspace_Rec2100PQ"
+);
 
 // Container parsing coverage (container/parse.rs)
 coverage_test!(test_container_forced, "features", "container_forced");
@@ -111,22 +122,58 @@ coverage_test!(test_modular_predictor_1, "features", "modular_predictor_1");
 coverage_test!(test_modular_predictor_2, "features", "modular_predictor_2");
 coverage_test!(test_modular_predictor_5, "features", "modular_predictor_5");
 coverage_test!(test_modular_predictor_6, "features", "modular_predictor_6");
-coverage_test!(test_modular_predictor_14, "features", "modular_predictor_14");
-coverage_test!(test_modular_predictor_15, "features", "modular_predictor_15");
+coverage_test!(
+    test_modular_predictor_14,
+    "features",
+    "modular_predictor_14"
+);
+coverage_test!(
+    test_modular_predictor_15,
+    "features",
+    "modular_predictor_15"
+);
 
 // ICC coverage (icc/tag.rs)
 coverage_test!(test_custom_icc_profile, "features", "custom_icc_profile");
 
 // Modular colorspace coverage
-coverage_test!(test_modular_colorspace_0, "features", "modular_colorspace_0");
-coverage_test!(test_modular_colorspace_1, "features", "modular_colorspace_1");
-coverage_test!(test_modular_colorspace_6, "features", "modular_colorspace_6");
+coverage_test!(
+    test_modular_colorspace_0,
+    "features",
+    "modular_colorspace_0"
+);
+coverage_test!(
+    test_modular_colorspace_1,
+    "features",
+    "modular_colorspace_1"
+);
+coverage_test!(
+    test_modular_colorspace_6,
+    "features",
+    "modular_colorspace_6"
+);
 
 // Modular group size coverage
-coverage_test!(test_modular_group_size_0, "features", "modular_group_size_0");
-coverage_test!(test_modular_group_size_1, "features", "modular_group_size_1");
-coverage_test!(test_modular_group_size_2, "features", "modular_group_size_2");
-coverage_test!(test_modular_group_size_3, "features", "modular_group_size_3");
+coverage_test!(
+    test_modular_group_size_0,
+    "features",
+    "modular_group_size_0"
+);
+coverage_test!(
+    test_modular_group_size_1,
+    "features",
+    "modular_group_size_1"
+);
+coverage_test!(
+    test_modular_group_size_2,
+    "features",
+    "modular_group_size_2"
+);
+coverage_test!(
+    test_modular_group_size_3,
+    "features",
+    "modular_group_size_3"
+);
 
 // Extra channels resampling
 coverage_test!(test_ec_resampling_1x, "features", "ec_resampling_1x");
@@ -151,5 +198,13 @@ coverage_test!(test_gaborish_1, "features", "gaborish_1");
 
 // Animation variants
 coverage_test!(test_animation_modular, "features", "animation_modular");
-coverage_test!(test_animation_progressive, "features", "animation_progressive");
-coverage_test!(test_animation_with_patches, "features", "animation_with_patches");
+coverage_test!(
+    test_animation_progressive,
+    "features",
+    "animation_progressive"
+);
+coverage_test!(
+    test_animation_with_patches,
+    "features",
+    "animation_with_patches"
+);

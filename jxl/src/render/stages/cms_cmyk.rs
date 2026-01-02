@@ -92,6 +92,7 @@ impl RenderPipelineInPlaceStage for CmsCmykToRgbStage {
 
         // Transform CMYK → RGB through ICC profile
         let mut transformer = self.transformer.lock().unwrap();
+
         match transformer.do_transform(&cmyk_input, &mut rgb_output) {
             Ok(()) => {
                 // Unpack RGB output

@@ -8,7 +8,7 @@
 //! These small images are designed to exercise specific code paths
 //! that may have low coverage from other test suites.
 
-use crate::api::{states, JxlDecoder, JxlDecoderOptions, ProcessingResult};
+use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
 
 fn decode_synthetic(name: &str) -> Result<(usize, usize), String> {
     let path = format!(

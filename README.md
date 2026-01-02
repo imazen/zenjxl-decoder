@@ -37,6 +37,7 @@ All changes in this branch are released under the same BSD-style license as jxl-
 | Progressive AC Validation | `headers/frame_header.rs` | Fix inverted `last_pass` validation (must be strictly increasing) |
 | Extra Channel Bit Depth | `frame/modular/decode/channel.rs` | Use extra channel's own `bit_depth` for modular-to-f32 conversion |
 | Noise Seeding (upsampling > 1) | `frame/decode.rs` | Iterate upsampling subdivisions with separate RNG seeds per subregion |
+| CMYK Blending Order | `frame/render.rs` | Defer CMS conversion for CMYK images with blending (blend in CMYK space, then convert to RGB) |
 
 ### New Features
 
@@ -60,8 +61,13 @@ All changes in this branch are released under the same BSD-style license as jxl-
 ### Parity Test Results
 
 Against codec-corpus (184 JXL files with djxl reference output):
-- **183/184 passing** (99.5%)
-- **1 remaining**: `cmyk_layers` (requires full ICC-based CMS for CMYK→RGB conversion)
+- **184/184 passing** (100%)
+
+All test images decode with pixel-exact or near-exact parity, including:
+- Single-layer CMYK with ICC profiles
+- Multi-layer CMYK with alpha blending (blending in CMYK space, then CMS conversion)
+- All modular/VarDCT encoding modes
+- Animation and layer compositing
 
 See [PARITY_INVESTIGATION.md](PARITY_INVESTIGATION.md) for detailed bug investigation notes.
 

@@ -614,8 +614,38 @@ mod tests {
             eprintln!("  Channel {}: type={:?}", i, info.ec_type);
         }
 
+        // Parse frame headers - cmyk_layers has 4 frames!
+        use crate::headers::encodings::UnconditionalCoder;
+        use crate::headers::frame_header::FrameHeader;
+        let nonserialized = file_header.frame_header_nonserialized();
+        let mut frame_idx = 0;
+        loop {
+            match FrameHeader::read_unconditional(&(), &mut br, &nonserialized) {
+                Ok(frame_header) => {
+                    eprintln!("\nFrame {}:", frame_idx);
+                    eprintln!("  name: {:?}", frame_header.name);
+                    eprintln!("  is_last: {}", frame_header.is_last);
+                    eprintln!("  needs_blending: {}", frame_header.needs_blending());
+                    eprintln!("  blending_info: {:?}", frame_header.blending_info);
+                    eprintln!("  size: {:?}", frame_header.size());
+                    eprintln!("  origin: {:?}", (frame_header.x0, frame_header.y0));
+                    if frame_header.is_last {
+                        break;
+                    }
+                    frame_idx += 1;
+                    // Skip to next frame (very rough - might not work properly)
+                    // This is just for debugging
+                }
+                Err(e) => {
+                    eprintln!("Error parsing frame {}: {:?}", frame_idx, e);
+                    break;
+                }
+            }
+        }
+
         // Load reference
         let ref_path = test_case.reference_path.as_ref().unwrap();
+        eprintln!("Reference path: {:?}", ref_path);
         let reference = ReferenceImage::load(ref_path).expect("Failed to load reference");
         eprintln!(
             "Reference: {}x{}, {} channels",
@@ -688,6 +718,37 @@ mod tests {
                     count += 1;
                     if count >= 10 {
                         break 'outer;
+                    }
+                }
+            }
+        }
+
+        // Find and print worst errors (those matching max_error)
+        eprintln!("\nWorst errors (diff >= {}):", max_error.saturating_sub(5));
+        let mut worst_count = 0;
+        for y in 0..height.min(reference.height) {
+            for x in 0..width.min(reference.width) {
+                let ref_idx = (y * reference.width + x) * reference.channels;
+                let act_idx = (y * width + x) * channels;
+
+                for c in 0..channels.min(reference.channels) {
+                    let ref_val = reference.pixels[ref_idx + c];
+                    let act_val = actual[act_idx + c];
+                    let diff = ref_val.abs_diff(act_val);
+
+                    if diff >= max_error.saturating_sub(5) {
+                        let ref_pix: Vec<u8> =
+                            reference.pixels[ref_idx..ref_idx + reference.channels].to_vec();
+                        let act_pix: Vec<u8> = actual[act_idx..act_idx + channels].to_vec();
+                        eprintln!(
+                            "  ({},{}) ch={} diff={}: ref={:?} jxl-rs={:?}",
+                            x, y, c, diff, ref_pix, act_pix
+                        );
+                        worst_count += 1;
+                        if worst_count >= 10 {
+                            return;
+                        }
+                        break; // Only print once per pixel
                     }
                 }
             }
@@ -839,5 +900,168 @@ mod tests {
         if failed > 0 {
             panic!("{} parity tests failed. DO NOT WEAKEN TOLERANCES.", failed);
         }
+    }
+
+    /// Debug test to extract CMYK ICC profile and test moxcms behavior.
+    /// This generates a standalone repro case for moxcms CMYK issues.
+    #[test]
+    #[ignore] // Run with: cargo test --features cms extract_cmyk_icc_repro -- --ignored --nocapture
+    #[cfg(feature = "cms")]
+    fn extract_cmyk_icc_repro() {
+        use crate::api::JxlColorProfile;
+        use std::io::Write;
+
+        // Find cmyk_layers.jxl
+        let tests = discover_codec_corpus_tests();
+        let cmyk_test = tests.iter().find(|t| t.name == "cmyk_layers");
+        let Some(test_case) = cmyk_test else {
+            panic!("cmyk_layers test not found. Set CODEC_CORPUS_PATH.");
+        };
+
+        // Decode the JXL file to get the embedded ICC profile
+        let data = std::fs::read(&test_case.jxl_path).expect("Failed to read JXL");
+        let mut input = data.as_slice();
+
+        let options = JxlDecoderOptions {
+            cms: Some(Box::new(MoxCms::new())),
+            ..JxlDecoderOptions::default()
+        };
+        let mut decoder = JxlDecoder::<states::Initialized>::new(options);
+
+        let decoder = loop {
+            match decoder.process(&mut input) {
+                Ok(ProcessingResult::Complete { result }) => break result,
+                Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                    if input.is_empty() {
+                        panic!("Unexpected end of input");
+                    }
+                    decoder = fallback;
+                }
+                Err(e) => panic!("Decode error: {:?}", e),
+            }
+        };
+
+        // Get the embedded ICC profile
+        let embedded = decoder.embedded_color_profile().clone();
+        let icc_data = match embedded {
+            JxlColorProfile::Icc(ref data) => data.clone(),
+            _ => panic!("Expected ICC profile, got simple encoding"),
+        };
+
+        // Write ICC profile to file
+        let icc_path = "/tmp/cmyk_layers.icc";
+        let mut file = std::fs::File::create(icc_path).expect("Failed to create ICC file");
+        file.write_all(&icc_data).expect("Failed to write ICC");
+        eprintln!(
+            "Wrote ICC profile ({} bytes) to {}",
+            icc_data.len(),
+            icc_path
+        );
+
+        // Load reference to find pixel values that differ
+        let ref_path = test_case.reference_path.as_ref().expect("No reference");
+        let reference = ReferenceImage::load(ref_path).expect("Failed to load reference");
+
+        // Decode with jxl-rs
+        let (_, _, _, actual) = decode_jxl_to_pixels(&test_case.jxl_path).expect("Decode failed");
+
+        // Find first differing pixel
+        let mut sample_pixels: Vec<(usize, usize, [u8; 4], [u8; 4])> = Vec::new();
+        for y in 0..reference.height.min(100) {
+            for x in 0..reference.width.min(100) {
+                let ref_idx = (y * reference.width + x) * reference.channels;
+                let act_idx = (y * reference.width + x) * reference.channels;
+
+                let ref_rgba = [
+                    reference.pixels[ref_idx],
+                    reference.pixels[ref_idx + 1],
+                    reference.pixels[ref_idx + 2],
+                    if reference.channels > 3 {
+                        reference.pixels[ref_idx + 3]
+                    } else {
+                        255
+                    },
+                ];
+                let act_rgba = [
+                    actual[act_idx],
+                    actual[act_idx + 1],
+                    actual[act_idx + 2],
+                    if reference.channels > 3 {
+                        actual[act_idx + 3]
+                    } else {
+                        255
+                    },
+                ];
+
+                let max_diff = ref_rgba
+                    .iter()
+                    .zip(&act_rgba)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .unwrap_or(0);
+
+                if max_diff > 1 && sample_pixels.len() < 20 {
+                    sample_pixels.push((x, y, ref_rgba, act_rgba));
+                }
+            }
+        }
+
+        // Print moxcms repro test
+        eprintln!("\n=== MOXCMS REPRO TEST ===");
+        eprintln!("Add this test to moxcms/tests/cmyk_test.rs:\n");
+        eprintln!(
+            r#"#[test]
+fn test_cmyk_jxl_layers_profile() {{
+    // ICC profile from cmyk_layers.jxl (conformance test image)
+    // Profile: US Web Coated (SWOP) v2 or similar CMYK profile
+    let icc_data = include_bytes!("cmyk_layers.icc");
+
+    let profile = moxcms::ColorProfile::new_from_slice(icc_data).unwrap();
+    let srgb = moxcms::ColorProfile::new_srgb();
+
+    let options = moxcms::TransformOptions::default();
+    let transform = profile
+        .create_transform_f32(
+            moxcms::Layout::Rgba, // CMYK uses Rgba layout (4 channels)
+            &srgb,
+            moxcms::Layout::Rgb,
+            options,
+        )
+        .unwrap();
+
+    // Sample CMYK values that produce incorrect RGB in moxcms
+    // JXL uses reflectance convention: 1.0 = no ink, 0.0 = full ink
+    // ICC uses: 0.0 = no ink, 1.0 = max ink
+    // Values below are already converted to ICC convention
+    let test_cases = ["#
+        );
+
+        for (i, (x, y, ref_rgba, act_rgba)) in sample_pixels.iter().enumerate() {
+            // We need to figure out what CMYK values produced these
+            // For now, just print the expected vs actual RGB
+            eprintln!(
+                "        // Pixel ({}, {}): expected RGB [{}, {}, {}], got [{}, {}, {}]",
+                x, y, ref_rgba[0], ref_rgba[1], ref_rgba[2], act_rgba[0], act_rgba[1], act_rgba[2]
+            );
+            if i >= 5 {
+                eprintln!("        // ... ({} more samples)", sample_pixels.len() - 6);
+                break;
+            }
+        }
+
+        eprintln!(
+            r#"    ];
+
+    // The issue: moxcms clips near-white CMYK values to pure white
+    // Expected: slight color tints preserved
+    // Actual: clipped to [255, 255, 255]
+}}"#
+        );
+
+        eprintln!("\n=== END REPRO TEST ===");
+        eprintln!(
+            "\nTo use: copy {} to moxcms/tests/ and add the test above",
+            icc_path
+        );
     }
 }

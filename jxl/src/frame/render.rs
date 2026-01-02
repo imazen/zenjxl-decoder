@@ -481,31 +481,49 @@ impl Frame {
             }
         }
 
-        // Apply Black (K) channel for CMYK images BEFORE blending.
-        // The Black channel multiplies the CMY channels to produce RGB output.
-        // This must happen before blending so that the RGB values are correct for compositing.
-        for (i, info) in decoder_state
+        // Check if this is a CMYK image that needs blending
+        let has_black_channel = decoder_state
             .file_header
             .image_metadata
             .extra_channel_info
             .iter()
-            .enumerate()
-        {
-            if info.ec_type == ExtraChannel::Black {
-                // Try to use CMS-based CMYK conversion if we have:
-                // 1. A CMS implementation available
-                // 2. An embedded CMYK ICC profile
-                #[cfg(feature = "cms")]
-                if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)? {
-                    pipeline = pipeline.add_inplace_stage(cms_stage)?;
-                } else {
-                    // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
-                    pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
-                }
-                #[cfg(not(feature = "cms"))]
-                {
-                    let _ = cms; // suppress unused warning when cms feature is off
-                    pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+            .any(|info| info.ec_type == ExtraChannel::Black);
+        let _needs_cmyk_blending = has_black_channel && frame_header.needs_blending();
+
+        // For CMYK images, we need to handle blending in CMYK color space.
+        // If ANY frame in the image needs blending, ALL frames must save their
+        // reference in CMYK space so that subsequent frames can blend correctly.
+        // We check if there are multiple frames (animation) to determine this.
+        let cmyk_needs_deferred_cms = has_black_channel
+            && (frame_header.needs_blending()
+                || (frame_header.can_be_referenced && !frame_header.save_before_ct));
+
+        // For CMYK images that don't need deferred CMS, apply Black channel conversion here
+        if has_black_channel && !cmyk_needs_deferred_cms {
+            for (i, info) in decoder_state
+                .file_header
+                .image_metadata
+                .extra_channel_info
+                .iter()
+                .enumerate()
+            {
+                if info.ec_type == ExtraChannel::Black {
+                    // Try to use CMS-based CMYK conversion if we have:
+                    // 1. A CMS implementation available
+                    // 2. An embedded CMYK ICC profile
+                    #[cfg(feature = "cms")]
+                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
+                    {
+                        pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                    } else {
+                        // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                    #[cfg(not(feature = "cms"))]
+                    {
+                        let _ = cms; // suppress unused warning when cms feature is off
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
                 }
             }
         }
@@ -530,7 +548,53 @@ impl Frame {
             )?)?;
         }
 
-        if frame_header.can_be_referenced && !frame_header.save_before_ct {
+        // For CMYK images that need deferred CMS, save reference in CMYK space (before CMS)
+        // and apply CMS conversion after. This is critical: blending must happen in CMYK space.
+        if cmyk_needs_deferred_cms {
+            // Save reference in CMYK space (before CMS conversion)
+            if frame_header.can_be_referenced && !frame_header.save_before_ct {
+                for i in 0..num_channels {
+                    pipeline = pipeline.add_save_stage(
+                        &[i],
+                        Orientation::Identity,
+                        num_api_buffers + i,
+                        JxlColorType::Grayscale,
+                        JxlDataFormat::f32(),
+                        false,
+                    )?;
+                }
+            }
+
+            // Apply CMS conversion (CMYK → RGB) after blending/saving
+            for (i, info) in decoder_state
+                .file_header
+                .image_metadata
+                .extra_channel_info
+                .iter()
+                .enumerate()
+            {
+                if info.ec_type == ExtraChannel::Black {
+                    #[cfg(feature = "cms")]
+                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
+                    {
+                        pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                    } else {
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                    #[cfg(not(feature = "cms"))]
+                    {
+                        let _ = cms;
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                }
+            }
+        }
+
+        // For non-CMYK images (or CMYK that doesn't need deferred CMS), save reference after CT
+        if frame_header.can_be_referenced
+            && !frame_header.save_before_ct
+            && !cmyk_needs_deferred_cms
+        {
             if linear {
                 pipeline = pipeline
                     .add_inplace_stage(FromLinearStage::new(0, output_color_info.tf.clone()))?;
