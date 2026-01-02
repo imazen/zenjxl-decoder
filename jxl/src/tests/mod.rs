@@ -9,6 +9,7 @@
 //! Tests that fail indicate implementation bugs - DO NOT WEAKEN TOLERANCES.
 
 pub mod codec_corpus;
+pub mod coverage_boost;
 pub mod decode_api;
 pub mod entropy;
 pub mod feature_tests;
