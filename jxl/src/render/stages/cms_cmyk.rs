@@ -80,8 +80,8 @@ impl RenderPipelineInPlaceStage for CmsCmykToRgbStage {
 
         // Pack CMYK data with inversion
         // JXL uses reflectance convention: 1.0 = no ink (white), 0.0 = full ink
-        // moxcms/ICC uses: 0.0 = no ink, 1.0 = max ink
-        // skcms (used by libjxl reference) auto-inverts internally for CMYK.
+        // ICC/moxcms uses: 0.0 = no ink, 1.0 = max ink
+        // skcms (used by libjxl) auto-inverts for CMYK profiles.
         // We must invert to match ICC convention before passing to moxcms.
         for idx in 0..xsize {
             cmyk_input[idx * 4] = 1.0 - row_c[idx];

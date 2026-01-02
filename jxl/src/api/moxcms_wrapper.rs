@@ -170,8 +170,8 @@ impl JxlCms for MoxCms {
         let input_channels = layout_channels(src_layout);
         let output_channels = layout_channels(dst_layout);
 
-        // Use default transform options (perceptual intent)
-        // This produces fewer error pixels than RelativeColorimetric or AbsoluteColorimetric
+        // Use Perceptual intent as default - this tends to work better for most images.
+        // Note: skcms may use profile's embedded intent, which we don't currently extract.
         let options = moxcms::TransformOptions::default();
 
         let mut transforms: Vec<Box<dyn JxlCmsTransformer>> = Vec::with_capacity(n);
