@@ -523,8 +523,9 @@ impl Histograms {
             br.read(2)? as usize + 5
         };
         let num_histograms = *context_map.iter().max().unwrap() + 1;
-        let uint_configs = ((0..num_histograms).map(|_| HybridUint::decode(log_alpha_size, br)))
-            .collect::<Result<_>>()?;
+        let uint_configs: Vec<HybridUint> = ((0..num_histograms)
+            .map(|_| HybridUint::decode(log_alpha_size, br)))
+        .collect::<Result<_>>()?;
 
         let codes = if use_prefix_code {
             Codes::Huffman(HuffmanCodes::decode(num_histograms as usize, br)?)
