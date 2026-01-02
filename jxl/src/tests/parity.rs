@@ -9,6 +9,8 @@
 //! DO NOT WEAKEN TOLERANCES to make tests pass. If a test fails, the implementation
 //! is wrong and must be fixed.
 
+#![allow(dead_code)] // Test utilities may not all be used yet
+
 use std::path::Path;
 
 /// Maximum allowed absolute error for pixel values in [0, 1] range.
@@ -345,7 +347,6 @@ pub fn load_ppm(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> 
     }
 
     let dims: Vec<usize> = line
-        .trim()
         .split_whitespace()
         .map(|s| s.parse().unwrap())
         .collect();
@@ -417,7 +418,6 @@ pub fn load_pgm(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> 
     }
 
     let dims: Vec<usize> = line
-        .trim()
         .split_whitespace()
         .map(|s| s.parse().unwrap())
         .collect();
@@ -491,7 +491,7 @@ pub fn load_png(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> 
 
     let (channels, pixels) = match info.color_type {
         png::ColorType::Grayscale => {
-            let byte_count = width * height * 1 * bytes_per_sample;
+            let byte_count = width * height * bytes_per_sample;
             let pixels = buf[..byte_count].to_vec();
             (1, pixels)
         }

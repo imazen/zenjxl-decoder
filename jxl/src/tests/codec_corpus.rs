@@ -360,10 +360,10 @@ mod tests {
 
         // Also load reference for comparison
         let ref_path = corpus_dir.join("reference/edge-cases/basic.png");
-        if ref_path.exists() {
-            if let Ok(reference) = ReferenceImage::load(&ref_path) {
-                eprintln!("djxl reference: {:?}", reference.pixels);
-            }
+        if ref_path.exists()
+            && let Ok(reference) = ReferenceImage::load(&ref_path)
+        {
+            eprintln!("djxl reference: {:?}", reference.pixels);
         }
     }
 

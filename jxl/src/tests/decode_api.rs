@@ -47,7 +47,7 @@ mod signature_tests {
     #[test]
     fn test_signature_invalid_starts_with_a() {
         // No JPEGXL header starts with 'a'
-        let result = check_signature(&[b'a']);
+        let result = check_signature(b"a");
         assert!(matches!(
             result,
             ProcessingResult::Complete { result: None }
@@ -56,7 +56,7 @@ mod signature_tests {
 
     #[test]
     fn test_signature_invalid_abcdef() {
-        let result = check_signature(&[b'a', b'b', b'c', b'd', b'e', b'f']);
+        let result = check_signature(b"abcdef");
         assert!(matches!(
             result,
             ProcessingResult::Complete { result: None }
@@ -327,7 +327,7 @@ mod extra_channel_tests {
         let info = decoder.basic_info();
         // Should have alpha as extra channel
         assert!(
-            info.extra_channels.len() >= 1,
+            !info.extra_channels.is_empty(),
             "Should have at least one extra channel (alpha)"
         );
     }
@@ -346,7 +346,7 @@ mod extra_channel_tests {
         let info = decoder.basic_info();
         // Spot color image should have extra channels
         assert!(
-            info.extra_channels.len() >= 1,
+            !info.extra_channels.is_empty(),
             "Spot color image should have extra channels"
         );
     }
