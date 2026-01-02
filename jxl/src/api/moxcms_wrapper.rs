@@ -128,7 +128,7 @@ fn get_layout(profile: &JxlColorProfile) -> moxcms::Layout {
         JxlColorProfile::Icc(icc_data) => {
             // Parse ICC header to determine color space
             match detect_icc_color_space(icc_data) {
-                Some("CMYK") => moxcms::Layout::Rgba, // CMYK uses Rgba layout in moxcms
+                Some("CMYK") => moxcms::Layout::Rgba, // CMYK uses Rgba layout (4 channels)
                 Some("GRAY") => moxcms::Layout::Gray,
                 _ => moxcms::Layout::Rgb, // Default to RGB
             }
@@ -149,6 +149,8 @@ fn layout_channels(layout: moxcms::Layout) -> usize {
         moxcms::Layout::Rgba => 4,
         moxcms::Layout::Gray => 1,
         moxcms::Layout::GrayAlpha => 2,
+        // Multi-ink layouts (not used in JXL but must be handled for exhaustiveness)
+        _ => 4, // Default to 4 channels for unknown layouts
     }
 }
 
