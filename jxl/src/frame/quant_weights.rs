@@ -1299,7 +1299,7 @@ mod test {
                 .iter()
                 .zip(DequantMatrices::REQUIRED_SIZE_Y)
                 .map(|(&x, y)| x * y)
-                .sum()
+                .sum::<usize>()
         );
     }
 
