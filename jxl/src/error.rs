@@ -271,6 +271,14 @@ pub enum Error {
     SaveDifferentDownsample((u8, u8), (u8, u8)),
     #[error("Image has {0} extra channels, more than the maximum of 256")]
     TooManyExtraChannels(usize),
+    #[error("Security limit exceeded: {resource} is {actual}, limit is {limit}")]
+    LimitExceeded {
+        resource: &'static str,
+        actual: u64,
+        limit: u64,
+    },
+    #[error("Decoding cancelled")]
+    Cancelled,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

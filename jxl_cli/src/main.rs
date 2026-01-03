@@ -289,5 +289,8 @@ fn main() -> Result<()> {
 
     image_result.unwrap_or(Ok(()))?;
 
+    #[cfg(feature = "profiling")]
+    jxl::util::print_profile_report();
+
     Ok(())
 }

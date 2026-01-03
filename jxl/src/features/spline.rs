@@ -172,7 +172,11 @@ fn validate_spline_point_pos<T: num_traits::ToPrimitive>(x: T, y: T) -> Result<(
 const CHANNEL_WEIGHT: [f32; 4] = [0.0042, 0.075, 0.07, 0.3333];
 
 fn area_limit(image_size: u64) -> u64 {
-    (1024 * image_size + (1u64 << 32)).min(1u64 << 42)
+    // Use saturating arithmetic to prevent overflow
+    1024u64
+        .saturating_mul(image_size)
+        .saturating_add(1u64 << 32)
+        .min(1u64 << 42)
 }
 
 impl QuantizedSpline {
@@ -671,14 +675,16 @@ impl Splines {
     ) -> Result<()> {
         let mut total_estimated_area_reached = 0u64;
         let mut splines = Vec::new();
-        let area_limit = area_limit(image_xsize * image_ysize);
+        // Use saturating_mul to prevent overflow with malicious image dimensions
+        let image_area = image_xsize.saturating_mul(image_ysize);
+        let area_limit = area_limit(image_area);
         for (index, qspline) in self.splines.iter().enumerate() {
             let spline = qspline.dequantize(
                 &self.starting_points[index],
                 self.quantization_adjustment,
                 color_correlation_params.y_to_x_lf(),
                 color_correlation_params.y_to_b_lf(),
-                image_xsize * image_ysize,
+                image_area,
             )?;
             total_estimated_area_reached += spline.estimated_area_reached;
             if total_estimated_area_reached > area_limit {
@@ -751,15 +757,21 @@ impl Splines {
     }
 
     #[instrument(level = "debug", skip(br), ret, err)]
-    pub fn read(br: &mut BitReader, num_pixels: u32) -> Result<Splines> {
+    pub fn read(
+        br: &mut BitReader,
+        num_pixels: u32,
+        max_spline_points: Option<u32>,
+    ) -> Result<Splines> {
         trace!(pos = br.total_bits_read());
         let splines_histograms = Histograms::decode(NUM_SPLINE_CONTEXTS, br, true)?;
         let mut splines_reader = SymbolReader::new(&splines_histograms, br, None)?;
         let num_splines = splines_reader
             .read_unsigned(&splines_histograms, br, NUM_SPLINES_CONTEXT)
             .saturating_add(1);
+        // Use configured limit if set, otherwise use default 2^20
+        let hard_limit = max_spline_points.unwrap_or(MAX_NUM_CONTROL_POINTS);
         let max_control_points =
-            MAX_NUM_CONTROL_POINTS.min(num_pixels / MAX_NUM_CONTROL_POINTS_PER_PIXEL_RATIO);
+            hard_limit.min(num_pixels / MAX_NUM_CONTROL_POINTS_PER_PIXEL_RATIO);
         if num_splines > max_control_points {
             return Err(Error::SplinesTooMany(num_splines, max_control_points));
         }

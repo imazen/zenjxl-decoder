@@ -5,6 +5,168 @@
 
 use crate::api::JxlCms;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// A cancellation token that can be used to abort decoding.
+///
+/// Based on the [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API)
+/// pattern where decoders support `reset()` to abort pending operations.
+///
+/// # Example
+/// ```
+/// use jxl::api::CancellationToken;
+/// use std::thread;
+///
+/// let token = CancellationToken::new();
+/// let token_clone = token.clone();
+///
+/// // Cancel from another thread after timeout
+/// thread::spawn(move || {
+///     thread::sleep(std::time::Duration::from_secs(5));
+///     token_clone.cancel();
+/// });
+///
+/// // Pass token to decoder options
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationToken {
+    /// Creates a new cancellation token.
+    pub fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Signals cancellation. All decoders using this token will abort.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Checks if cancellation has been requested.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    /// Resets the token, allowing reuse after cancellation.
+    pub fn reset(&self) {
+        self.cancelled.store(false, Ordering::Release);
+    }
+
+    /// Checks if cancelled and returns an error if so.
+    /// Use this at cancellation check points in the decoder.
+    pub fn check(&self) -> crate::error::Result<()> {
+        if self.is_cancelled() {
+            Err(crate::error::Error::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Security limits for the JXL decoder to prevent resource exhaustion attacks.
+///
+/// These limits protect against "JXL bombs" - maliciously crafted files designed
+/// to exhaust memory or CPU. All limits are optional; `None` means use the default.
+///
+/// # Example
+/// ```
+/// use jxl::api::JxlDecoderLimits;
+///
+/// // Use restrictive preset for untrusted input
+/// let limits = JxlDecoderLimits::restrictive();
+///
+/// // Or use defaults for normal operation
+/// let defaults = JxlDecoderLimits::default();
+///
+/// // Or unlimited for trusted input (use with caution)
+/// let unlimited = JxlDecoderLimits::unlimited();
+/// ```
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct JxlDecoderLimits {
+    /// Maximum total pixels (width × height). Default: 2^30 (~1 billion).
+    /// This is checked early during header parsing.
+    pub max_pixels: Option<usize>,
+
+    /// Maximum number of extra channels (alpha, depth, etc.). Default: 256.
+    /// Each extra channel requires memory proportional to image size.
+    pub max_extra_channels: Option<usize>,
+
+    /// Maximum ICC profile size in bytes. Default: 2^28 (256 MB).
+    pub max_icc_size: Option<usize>,
+
+    /// Maximum modular tree size (number of nodes). Default: 2^22.
+    /// Limits memory and CPU for tree-based entropy coding.
+    pub max_tree_size: Option<usize>,
+
+    /// Maximum number of patches. Default: derived from image size.
+    /// Set to limit patch-based attacks.
+    pub max_patches: Option<usize>,
+
+    /// Maximum number of spline control points. Default: 2^20.
+    pub max_spline_points: Option<u32>,
+
+    /// Maximum number of reference frames stored. Default: 4.
+    /// Each reference frame consumes memory equal to the image size.
+    pub max_reference_frames: Option<usize>,
+
+    /// Maximum total memory budget in bytes. Default: None (unlimited).
+    /// When set, the decoder tracks allocations and fails if budget exceeded.
+    /// This provides defense-in-depth against memory exhaustion attacks.
+    pub max_memory_bytes: Option<u64>,
+}
+
+impl Default for JxlDecoderLimits {
+    fn default() -> Self {
+        Self {
+            max_pixels: Some(1 << 30),        // ~1 billion pixels
+            max_extra_channels: Some(256),    // 256 extra channels
+            max_icc_size: Some(1 << 28),      // 256 MB
+            max_tree_size: Some(1 << 22),     // 4M nodes
+            max_patches: None,                // Use image-size-based default
+            max_spline_points: Some(1 << 20), // 1M points
+            max_reference_frames: Some(4),    // 4 reference frames
+            max_memory_bytes: None,           // No overall memory limit by default
+        }
+    }
+}
+
+impl JxlDecoderLimits {
+    /// Returns limits with no restrictions (all None).
+    /// Use with caution - only for trusted input.
+    pub fn unlimited() -> Self {
+        Self {
+            max_pixels: None,
+            max_extra_channels: None,
+            max_icc_size: None,
+            max_tree_size: None,
+            max_patches: None,
+            max_spline_points: None,
+            max_reference_frames: None,
+            max_memory_bytes: None,
+        }
+    }
+
+    /// Returns restrictive limits suitable for untrusted web content.
+    pub fn restrictive() -> Self {
+        Self {
+            max_pixels: Some(100_000_000),    // 100 megapixels
+            max_extra_channels: Some(16),     // 16 extra channels
+            max_icc_size: Some(1 << 20),      // 1 MB
+            max_tree_size: Some(1 << 20),     // 1M nodes
+            max_patches: Some(1 << 16),       // 64K patches
+            max_spline_points: Some(1 << 16), // 64K points
+            max_reference_frames: Some(2),    // 2 reference frames
+            max_memory_bytes: Some(1 << 30),  // 1 GB total memory
+        }
+    }
+}
+
 pub enum JxlProgressiveMode {
     /// Renders all pixels in every call to Process.
     Eager,
@@ -29,6 +191,8 @@ pub struct JxlDecoderOptions {
     /// more than this number of pixels. The limit counts the product of pixels and
     /// channels, so for example an image with 1 extra channel of size 1024x1024 has 4
     /// million pixels.
+    ///
+    /// **Deprecated**: Use `limits.max_pixels` instead.
     pub pixel_limit: Option<usize>,
     /// Use high precision mode for decoding.
     /// When false (default), uses lower precision settings that match libjxl's default.
@@ -41,6 +205,12 @@ pub struct JxlDecoderOptions {
     /// This produces premultiplied alpha output, which is useful for compositing.
     /// Default: false (output straight alpha)
     pub premultiply_output: bool,
+    /// Security limits to prevent resource exhaustion attacks.
+    /// Use `JxlDecoderLimits::restrictive()` for untrusted input.
+    pub limits: JxlDecoderLimits,
+    /// Optional cancellation token for cooperative cancellation.
+    /// When cancelled, the decoder will abort at the next check point.
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 impl Default for JxlDecoderOptions {
@@ -58,6 +228,8 @@ impl Default for JxlDecoderOptions {
             pixel_limit: None,
             high_precision: false,
             premultiply_output: false,
+            limits: JxlDecoderLimits::default(),
+            cancellation_token: None,
         }
     }
 }

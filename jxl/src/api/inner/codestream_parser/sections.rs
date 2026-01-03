@@ -220,6 +220,8 @@ impl CodestreamParser {
                 new_state.xyb_output_linear = decode_options.xyb_output_linear;
                 new_state.render_spotcolors = decode_options.render_spot_colors;
                 new_state.enable_output = decode_options.enable_output;
+                new_state.limits = decode_options.limits.clone();
+                new_state.cancellation_token = decode_options.cancellation_token.clone();
                 self.decoder_state = Some(new_state);
             }
         } else {

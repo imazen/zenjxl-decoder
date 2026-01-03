@@ -115,10 +115,16 @@ pub struct IncrementalIccReader {
 }
 
 impl IncrementalIccReader {
-    pub fn new(br: &mut BitReader) -> Result<Self> {
+    pub fn new(br: &mut BitReader, max_icc_size: Option<usize>) -> Result<Self> {
         let len = u64::read_unconditional(&(), br, &Empty {})?;
-        if len > 1u64 << 20 {
-            return Err(Error::IccTooLarge);
+        // Use provided limit or fall back to default 256MB
+        let limit = max_icc_size.unwrap_or(1 << 28) as u64;
+        if len > limit {
+            return Err(Error::LimitExceeded {
+                resource: "icc_size",
+                actual: len,
+                limit,
+            });
         }
 
         let len = len as usize;
