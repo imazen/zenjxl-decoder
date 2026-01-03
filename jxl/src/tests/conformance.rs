@@ -9,9 +9,17 @@
 //! test suite reference images (NPY format).
 //!
 //! To run these tests:
-//! 1. Clone the conformance repo: `git clone https://github.com/libjxl/conformance`
-//! 2. Download reference data: `cd conformance && bash scripts/download_and_symlink_using_curl.sh`
-//! 3. Run tests: `CONFORMANCE_PATH=/path/to/conformance cargo test --features cms conformance -- --ignored`
+//! ```sh
+//! cargo test --features cms conformance -- --ignored --nocapture
+//! ```
+//!
+//! The conformance repo will be automatically cloned to `target/conformance/`
+//! and reference data downloaded on first run. This may take a few minutes.
+//!
+//! To use a custom location, set `CONFORMANCE_PATH`:
+//! ```sh
+//! CONFORMANCE_PATH=/path/to/conformance cargo test --features cms conformance -- --ignored
+//! ```
 //!
 //! IMPORTANT: DO NOT WEAKEN TOLERANCES. If a test fails, the implementation
 //! is wrong and must be fixed.
@@ -24,10 +32,139 @@ use crate::api::{
 };
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Once;
 
-/// Get the conformance test directory from environment variable.
+/// One-time initialization for auto-fetching conformance data.
+static INIT: Once = Once::new();
+
+/// Get the conformance test directory.
+/// Priority: CONFORMANCE_PATH env var > target/conformance
 fn conformance_dir() -> Option<PathBuf> {
-    std::env::var("CONFORMANCE_PATH").ok().map(PathBuf::from)
+    // Check env var first
+    if let Ok(path) = std::env::var("CONFORMANCE_PATH") {
+        return Some(PathBuf::from(path));
+    }
+
+    // Use target/conformance as default (gitignored)
+    let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()? // jxl-rs root
+        .join("target")
+        .join("conformance");
+
+    Some(target_dir)
+}
+
+/// Ensure the conformance repo is cloned and reference data downloaded.
+/// This is called once per test run.
+fn ensure_conformance_data() -> Result<PathBuf, String> {
+    let dir = conformance_dir().ok_or("Could not determine conformance directory")?;
+
+    INIT.call_once(|| {
+        if let Err(e) = setup_conformance_repo(&dir) {
+            eprintln!("Warning: Failed to setup conformance repo: {}", e);
+        }
+    });
+
+    if !dir.join("testcases").exists() {
+        return Err(format!(
+            "Conformance testcases not found at {:?}. Setup may have failed.",
+            dir
+        ));
+    }
+
+    Ok(dir)
+}
+
+/// Clone the conformance repo and download reference data if needed.
+fn setup_conformance_repo(dir: &Path) -> Result<(), String> {
+    let testcases_dir = dir.join("testcases");
+
+    // Check if already set up
+    if testcases_dir.exists() {
+        // Check if reference data is downloaded (look for any .npy symlinks)
+        let has_npy = std::fs::read_dir(&testcases_dir)
+            .ok()
+            .map(|entries| {
+                entries.filter_map(|e| e.ok()).any(|e| {
+                    std::fs::read_dir(e.path())
+                        .ok()
+                        .map(|inner| {
+                            inner.filter_map(|f| f.ok()).any(|f| {
+                                f.path().extension().is_some_and(|ext| ext == "npy")
+                            })
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if has_npy {
+            return Ok(()); // Already fully set up
+        }
+
+        // Need to download reference data
+        eprintln!("Downloading conformance reference data...");
+        return run_download_script(dir);
+    }
+
+    // Clone the repo
+    eprintln!("Cloning libjxl/conformance to {:?}...", dir);
+
+    // Create parent directory
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    let output = Command::new("git")
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            "https://github.com/libjxl/conformance",
+        ])
+        .arg(dir)
+        .output()
+        .map_err(|e| format!("Failed to run git clone: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "git clone failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // Download reference data
+    eprintln!("Downloading conformance reference data (this may take a few minutes)...");
+    run_download_script(dir)
+}
+
+/// Run the download script to fetch reference NPY files.
+fn run_download_script(dir: &Path) -> Result<(), String> {
+    let script = dir
+        .join("scripts")
+        .join("download_and_symlink_using_curl.sh");
+
+    if !script.exists() {
+        return Err(format!("Download script not found: {:?}", script));
+    }
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("Failed to run download script: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Download script failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    eprintln!("Conformance data ready.");
+    Ok(())
 }
 
 /// Metadata for a conformance test frame.
@@ -121,14 +258,16 @@ fn parse_test_json(path: &Path) -> Option<ConformanceTestCase> {
 
 /// Discover all conformance test cases.
 fn discover_conformance_tests() -> Vec<ConformanceTestCase> {
-    let Some(conformance_dir) = conformance_dir() else {
-        return vec![];
+    // Ensure conformance data is available (auto-fetch if needed)
+    let conformance_dir = match ensure_conformance_data() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("Conformance data not available: {}", e);
+            return vec![];
+        }
     };
 
     let testcases_dir = conformance_dir.join("testcases");
-    if !testcases_dir.exists() {
-        return vec![];
-    }
 
     // Read main_level5.txt to get the list of tests
     let corpus_path = testcases_dir.join("main_level5.txt");
