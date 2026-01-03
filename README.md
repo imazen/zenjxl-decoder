@@ -103,24 +103,74 @@ cargo test --features cms conformance -- --ignored --nocapture
    - `progressive_5` has many pixels with HDR (> 1.0) values differing from reference
    - May be related to XYB-to-RGB matrix or opsin inverse handling of extreme values
 
-### Files Changed
+### Full Changelog (vs upstream)
+
+**84 files changed, 8813 insertions(+), 664 deletions(-)**
+
+#### New Files
+
+| File | Description |
+|------|-------------|
+| `jxl/src/api/moxcms_wrapper.rs` | Optional moxcms CMS integration for ICC profile transforms |
+| `jxl/src/render/stages/black.rs` | CMYK K-channel application stage |
+| `jxl/src/render/stages/cms_cmyk.rs` | CMS-based CMYK→RGB conversion using embedded ICC |
+| `jxl/src/render/stages/unpremultiply_alpha.rs` | Alpha unpremultiplication pipeline stage |
+| `jxl/src/tests/codec_corpus.rs` | 184-image corpus parity tests with djxl reference |
+| `jxl/src/tests/conformance.rs` | Official libjxl/conformance test suite (1143 lines) |
+| `jxl/src/tests/coverage_boost.rs` | Additional tests for code coverage gaps |
+| `jxl/src/tests/decode_api.rs` | API tests ported from libjxl decode_test.cc |
+| `jxl/src/tests/entropy.rs` | ANS and Huffman codec edge case tests |
+| `jxl/src/tests/feature_tests.rs` | Comprehensive JXL encoder option tests |
+| `jxl/src/tests/parity.rs` | Parity test infrastructure and helpers |
+| `jxl/src/tests/streaming.rs` | Chunked/progressive decoding tests |
+| `jxl/src/tests/synthetic.rs` | Synthetic test image generation |
+| `scripts/coverage.sh` | Local code coverage analysis |
+| `scripts/coverage_gaps.py` | Coverage gap detection and reporting |
+| `scripts/generate_synthetic_tests.py` | Test image generator script |
+| `PARITY_INVESTIGATION.md` | Detailed bug investigation notes |
+| `TEST_GAP_ANALYSIS.md` | Test coverage analysis document |
+
+#### Modified Files
+
+| File | Changes |
+|------|---------|
+| `jxl/src/api/color.rs` | Grayscale ICC detection fix |
+| `jxl/src/frame/decode.rs` | Noise seeding fix for upsampling > 1 |
+| `jxl/src/frame/modular/decode/channel.rs` | Extra channel bit_depth fix |
+| `jxl/src/frame/modular/transforms/rct.rs` | Wrapping arithmetic to prevent panic |
+| `jxl/src/frame/quant_weights.rs` | Minor fix |
+| `jxl/src/frame/render.rs` | sRGB transfer function, extra channel slots, CMYK blending order |
+| `jxl/src/headers/frame_header.rs` | Progressive AC last_pass validation fix |
+| `jxl_simd/src/*.rs` | SIMD improvements across all platforms |
+
+#### Commit History
 
 ```
-39 files changed, 5783 insertions(+), 649 deletions(-)
-
-New files:
-  jxl/src/api/moxcms_wrapper.rs        - Optional CMS integration
-  jxl/src/render/stages/black.rs       - CMYK K-channel stage
-  jxl/src/render/stages/cms_cmyk.rs    - CMS-based CMYK conversion
-  jxl/src/render/stages/unpremultiply_alpha.rs
-  jxl/src/tests/codec_corpus.rs        - Corpus parity tests
-  jxl/src/tests/decode_api.rs          - API tests from libjxl
-  jxl/src/tests/entropy.rs             - Entropy coding tests
-  jxl/src/tests/feature_tests.rs       - Feature coverage tests
-  jxl/src/tests/parity.rs              - Parity test infrastructure
-  jxl/src/tests/streaming.rs           - Streaming decode tests
-  PARITY_INVESTIGATION.md              - Bug investigation notes
-  TEST_GAP_ANALYSIS.md                 - Test coverage analysis
+5095a2a fix: improve conformance test ICC handling, 16/23 -> 17/23 passing
+7959f04 docs: add conformance test status and TODOs to README
+3b42220 feat: auto-fetch conformance test data on first run
+26cdc9e feat: add official JPEG XL conformance test infrastructure
+b8cff3c fix: CMYK blending order - blend in CMYK space then convert to RGB
+375c5ef chore: upgrade moxcms from 0.5 to 0.7
+a638443 feat: add synthetic test images for code coverage
+1eb382e feat: add coverage boost tests and gap analysis script
+8d5bd24 docs: add issue #610 (noise seeding) to upstream PR table
+a154cc2 chore: remove debug eprintln statements
+87a5625 docs: document develop branch changes and goals
+9c0cc6b docs: document CMS parity gap with GitHub issue reference
+590adb8 feat: add CMS-based CMYK to RGB conversion stage
+11c510f fix: correct noise generation seeding for upsampled frames
+c4ee8f1 feat: add BlackChannelStage for CMYK to RGB conversion
+908170c fix: use extra channel's own bit_depth for modular-to-f32 conversion
+4bad28f feat: add optional moxcms CMS integration
+16ff26e feat: add UnpremultiplyAlphaStage for future alpha handling
+f594118 fix: correct last_pass validation to require strictly increasing
+b87a384 fix: detect grayscale from default pixel format, not output profile
+9cfce3f fix: detect linear gamma from reference PNG gAMA chunk
+6d49aee fix: extra channel format slots allocation
+dfa374f fix: apply sRGB transfer function for XYB-encoded images
+5d8e1ff fix: RCT transform overflow panic with wrapping arithmetic
+... (earlier commits establishing test infrastructure)
 ```
 
 ### Upstream PRs
