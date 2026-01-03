@@ -75,7 +75,7 @@ See [PARITY_INVESTIGATION.md](PARITY_INVESTIGATION.md) for detailed bug investig
 ### Official Conformance Tests
 
 Against [libjxl/conformance](https://github.com/libjxl/conformance) test suite (Level 5):
-- **15/23 passing** (65%)
+- **17/23 passing** (74%)
 
 ```bash
 # Run conformance tests (auto-fetches test data on first run)
@@ -84,9 +84,9 @@ cargo test --features cms conformance -- --ignored --nocapture
 
 | Status | Tests |
 |--------|-------|
-| ✅ Pass | alpha_nonpremultiplied, alpha_triangles, bench_oriented_brg_5, bicycles, blendmodes_5, cafe_5, delta_palette, grayscale_jpeg_5, grayscale_public_university, lz77_flower, noise_5, opsin_inverse_5, patches_lossless, sunset_logo, upsampling_5 |
+| ✅ Pass | alpha_nonpremultiplied, alpha_triangles, bench_oriented_brg_5, bicycles, blendmodes_5, cafe_5, delta_palette, grayscale_5, grayscale_jpeg_5, grayscale_public_university, lz77_flower, noise_5, opsin_inverse_5, patches_5, patches_lossless, sunset_logo, upsampling_5 |
 | ⏭️ Skip | animation_icos4d_5, animation_newtons_cradle, animation_spline_5 (animation not yet supported) |
-| ❌ Fail | bike_5, grayscale_5, patches_5, progressive_5 (ICC color space), spot (6-channel output) |
+| ❌ Fail | bike_5, progressive_5 (out-of-gamut/HDR decode), spot (6-channel output) |
 
 #### TODOs to Reach Full Conformance
 
@@ -98,14 +98,10 @@ cargo test --features cms conformance -- --ignored --nocapture
    - `spot` test expects 6 channels (RGB + 2 spot colors)
    - Currently only outputting 4 channels (RGBA)
 
-3. **ICC color space preservation** - Option to output in original ICC space
-   - Some tests fail because we convert to sRGB
-   - Conformance expects output in the image's native ICC space
-   - May need `preserve_icc_colorspace` option or similar
-
-4. **Investigate remaining failures** - Debug why some VarDCT images fail
-   - `bike_5`, `grayscale_5`, `patches_5`, `progressive_5` have high peak errors
-   - Could be ICC-related or a decode bug
+3. **Investigate remaining decode bugs** - Debug out-of-gamut/HDR value differences
+   - `bike_5` has 13 pixels with out-of-gamut (negative) values differing from reference
+   - `progressive_5` has many pixels with HDR (> 1.0) values differing from reference
+   - May be related to XYB-to-RGB matrix or opsin inverse handling of extreme values
 
 ### Files Changed
 
