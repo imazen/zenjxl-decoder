@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::{
-    api::JxlColorProfile,
+    api::{JxlColorProfile, Stop, Unstoppable},
     entropy_coding::decode::Histograms,
     error::Result,
     features::{noise::Noise, patches::PatchesDictionary, spline::Splines},
@@ -110,7 +110,6 @@ impl ReferenceFrame {
     }
 }
 
-#[derive(Debug)]
 pub struct DecoderState {
     pub(super) file_header: FileHeader,
     pub(super) reference_frames: Arc<[Option<ReferenceFrame>; Self::MAX_STORED_FRAMES]>,
@@ -131,10 +130,32 @@ pub struct DecoderState {
     pub embedded_color_profile: Option<JxlColorProfile>,
     /// Security limits for decoding. Stored here to propagate through frame decoding.
     pub limits: crate::api::JxlDecoderLimits,
-    /// Optional cancellation token for cooperative cancellation.
-    pub cancellation_token: Option<crate::api::CancellationToken>,
+    /// Cooperative cancellation for long-running operations.
+    /// Use [`Stop::check()`] to check for cancellation.
+    pub stop: Arc<dyn Stop>,
     /// Memory tracker for enforcing max_memory_bytes limits.
     pub memory_tracker: MemoryTracker,
+}
+
+impl std::fmt::Debug for DecoderState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecoderState")
+            .field("file_header", &self.file_header)
+            .field("reference_frames", &self.reference_frames)
+            .field("lf_frames", &self.lf_frames)
+            .field("xyb_output_linear", &self.xyb_output_linear)
+            .field("enable_output", &self.enable_output)
+            .field("render_spotcolors", &self.render_spotcolors)
+            .field("visible_frame_index", &self.visible_frame_index)
+            .field("nonvisible_frame_index", &self.nonvisible_frame_index)
+            .field("high_precision", &self.high_precision)
+            .field("premultiply_output", &self.premultiply_output)
+            .field("embedded_color_profile", &self.embedded_color_profile)
+            .field("limits", &self.limits)
+            .field("stop", &"<dyn Stop>")
+            .field("memory_tracker", &self.memory_tracker)
+            .finish()
+    }
 }
 
 impl DecoderState {
@@ -156,18 +177,19 @@ impl DecoderState {
             premultiply_output: false,
             embedded_color_profile: None,
             limits: crate::api::JxlDecoderLimits::default(),
-            cancellation_token: None,
+            stop: Arc::new(Unstoppable),
             memory_tracker: MemoryTracker::unlimited(),
         }
     }
 
-    /// Check cancellation status and return error if cancelled.
+    /// Check if the operation should stop (cancelled or timed out).
+    ///
+    /// Call this at appropriate checkpoints during decoding.
+    /// Returns `Ok(())` to continue, `Err` to stop.
+    #[inline]
     pub fn check_cancelled(&self) -> crate::error::Result<()> {
-        if let Some(ref token) = self.cancellation_token {
-            token.check()
-        } else {
-            Ok(())
-        }
+        self.stop.check()?;
+        Ok(())
     }
 
     pub fn extra_channel_info(&self) -> &Vec<ExtraChannelInfo> {

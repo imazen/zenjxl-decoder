@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use crate::{
-    api::{JxlDecoderOptions, JxlOutputBuffer},
+    api::{JxlDecoderOptions, JxlOutputBuffer, Stop},
     bit_reader::BitReader,
     error::Result,
     frame::Section,
@@ -37,9 +37,9 @@ impl SectionState {
 }
 
 impl CodestreamParser {
-    pub(super) fn process_sections(
+    pub(super) fn process_sections<S: Stop + Clone + 'static>(
         &mut self,
-        decode_options: &JxlDecoderOptions,
+        decode_options: &JxlDecoderOptions<S>,
         output_buffers: &mut Option<&mut [JxlOutputBuffer<'_>]>,
     ) -> Result<Option<usize>> {
         let frame = self.frame.as_mut().unwrap();
@@ -221,7 +221,7 @@ impl CodestreamParser {
                 new_state.render_spotcolors = decode_options.render_spot_colors;
                 new_state.enable_output = decode_options.enable_output;
                 new_state.limits = decode_options.limits.clone();
-                new_state.cancellation_token = decode_options.cancellation_token.clone();
+                new_state.stop = decode_options.stop_arc();
                 self.decoder_state = Some(new_state);
             }
         } else {

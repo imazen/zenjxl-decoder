@@ -1071,21 +1071,46 @@ pub(crate) mod tests {
 
     #[test]
     fn test_cancellation_token() {
-        use crate::api::CancellationToken;
+        use crate::api::{CancellationToken, Stop, StopReason};
 
         let token = CancellationToken::new();
         assert!(!token.is_cancelled());
+        assert!(token.check().is_ok()); // Stop trait method
 
         // Cancel the token
         token.cancel();
         assert!(token.is_cancelled());
 
-        // Check returns error when cancelled
-        assert!(token.check().is_err());
+        // Check returns StopReason::Cancelled when cancelled (Stop trait)
+        assert_eq!(token.check(), Err(StopReason::Cancelled));
 
         // Reset allows reuse
         token.reset();
         assert!(!token.is_cancelled());
         assert!(token.check().is_ok());
+    }
+
+    #[test]
+    fn test_unstoppable() {
+        use crate::api::{Stop, Unstoppable};
+
+        // Unstoppable never stops (zero-cost when optimized)
+        let stop = Unstoppable;
+        assert!(!stop.should_stop());
+        assert!(stop.check().is_ok());
+    }
+
+    #[test]
+    fn test_arc_stop() {
+        use crate::api::{CancellationToken, Stop};
+        use std::sync::Arc;
+
+        // Arc<dyn Stop> works for sharing across threads
+        let token = CancellationToken::new();
+        let stop: Arc<dyn Stop> = Arc::new(token.clone());
+
+        assert!(stop.check().is_ok());
+        token.cancel();
+        assert!(stop.check().is_err());
     }
 }

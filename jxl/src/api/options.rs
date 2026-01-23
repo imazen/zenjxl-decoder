@@ -8,14 +8,19 @@ use crate::api::JxlCms;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+// Re-export the cooperative cancellation trait and types from `enough`.
+// Library users can implement `Stop` for custom cancellation logic (timeouts, etc.).
+pub use enough::{Stop, StopReason, Unstoppable};
+
 /// A cancellation token that can be used to abort decoding.
 ///
-/// Based on the [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API)
-/// pattern where decoders support `reset()` to abort pending operations.
+/// This is a concrete implementation of [`Stop`] using an atomic boolean.
+/// For custom cancellation logic (timeouts, integration with async runtimes, etc.),
+/// implement [`Stop`] directly or use types from the [`almost-enough`](https://docs.rs/almost-enough) crate.
 ///
 /// # Example
 /// ```
-/// use jxl::api::CancellationToken;
+/// use jxl::api::{CancellationToken, Stop};
 /// use std::thread;
 ///
 /// let token = CancellationToken::new();
@@ -27,7 +32,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 ///     token_clone.cancel();
 /// });
 ///
-/// // Pass token to decoder options
+/// // Check cancellation status
+/// assert!(!token.should_stop());
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken {
@@ -56,12 +62,12 @@ impl CancellationToken {
     pub fn reset(&self) {
         self.cancelled.store(false, Ordering::Release);
     }
+}
 
-    /// Checks if cancelled and returns an error if so.
-    /// Use this at cancellation check points in the decoder.
-    pub fn check(&self) -> crate::error::Result<()> {
+impl Stop for CancellationToken {
+    fn check(&self) -> Result<(), StopReason> {
         if self.is_cancelled() {
-            Err(crate::error::Error::Cancelled)
+            Err(StopReason::Cancelled)
         } else {
             Ok(())
         }
@@ -176,8 +182,40 @@ pub enum JxlProgressiveMode {
     FullFrame,
 }
 
+/// Decoder options with cooperative cancellation support.
+///
+/// The type parameter `S` is the [`Stop`] implementation for cooperative cancellation.
+/// It defaults to [`Unstoppable`], which has zero runtime overhead.
+///
+/// # Examples
+///
+/// Default (no cancellation, zero overhead):
+/// ```
+/// use jxl::api::JxlDecoderOptions;
+///
+/// let options = JxlDecoderOptions::default();
+/// ```
+///
+/// With cancellation using [`CancellationToken`]:
+/// ```
+/// use jxl::api::{CancellationToken, JxlDecoderOptions};
+///
+/// let token = CancellationToken::new();
+/// let options = JxlDecoderOptions::with_stop(token.clone());
+/// // Later, from another thread: token.cancel();
+/// ```
+///
+/// With a custom [`Stop`] implementation (e.g., from `almost-enough` crate):
+/// ```ignore
+/// use almost_enough::Stopper;
+/// use jxl::api::JxlDecoderOptions;
+///
+/// let stopper = Stopper::new();
+/// let options = JxlDecoderOptions::with_stop(stopper.clone());
+/// // stopper.cancel(); // Cancels from anywhere
+/// ```
 #[non_exhaustive]
-pub struct JxlDecoderOptions {
+pub struct JxlDecoderOptions<S: Stop = Unstoppable> {
     pub adjust_orientation: bool,
     pub render_spot_colors: bool,
     pub coalescing: bool,
@@ -208,13 +246,16 @@ pub struct JxlDecoderOptions {
     /// Security limits to prevent resource exhaustion attacks.
     /// Use `JxlDecoderLimits::restrictive()` for untrusted input.
     pub limits: JxlDecoderLimits,
-    /// Optional cancellation token for cooperative cancellation.
-    /// When cancelled, the decoder will abort at the next check point.
-    pub cancellation_token: Option<CancellationToken>,
+    /// Cooperative cancellation. Defaults to [`Unstoppable`] (zero overhead).
+    ///
+    /// The decoder checks this at various points during decoding and will
+    /// return [`Error::Cancelled`](crate::error::Error::Cancelled) if stopped.
+    pub stop: S,
 }
 
-impl Default for JxlDecoderOptions {
-    fn default() -> Self {
+impl<S: Stop> JxlDecoderOptions<S> {
+    /// Create options with a custom stop implementation.
+    pub fn with_stop(stop: S) -> Self {
         Self {
             adjust_orientation: true,
             render_spot_colors: true,
@@ -229,7 +270,23 @@ impl Default for JxlDecoderOptions {
             high_precision: false,
             premultiply_output: false,
             limits: JxlDecoderLimits::default(),
-            cancellation_token: None,
+            stop,
         }
+    }
+}
+
+impl<S: Stop + Clone + 'static> JxlDecoderOptions<S> {
+    /// Get a type-erased Arc reference to the stop implementation.
+    ///
+    /// This is used internally for storing the stop in decoder state
+    /// without making the entire decoder generic.
+    pub(crate) fn stop_arc(&self) -> Arc<dyn Stop> {
+        Arc::new(self.stop.clone())
+    }
+}
+
+impl Default for JxlDecoderOptions<Unstoppable> {
+    fn default() -> Self {
+        Self::with_stop(Unstoppable)
     }
 }

@@ -9,7 +9,7 @@ use crate::{
     api::{
         Endianness, JxlBasicInfo, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType,
         JxlDataFormat, JxlDecoderOptions, JxlExtraChannel, JxlPixelFormat, JxlPrimaries,
-        JxlTransferFunction, JxlWhitePoint, inner::codestream_parser::SectionState,
+        JxlTransferFunction, JxlWhitePoint, Stop, inner::codestream_parser::SectionState,
     },
     bit_reader::BitReader,
     error::{Error, Result},
@@ -68,7 +68,10 @@ fn check_size_limit(
 
 impl CodestreamParser {
     #[cold]
-    pub(super) fn process_non_section(&mut self, decode_options: &JxlDecoderOptions) -> Result<()> {
+    pub(super) fn process_non_section<S: Stop + Clone + 'static>(
+        &mut self,
+        decode_options: &JxlDecoderOptions<S>,
+    ) -> Result<()> {
         if self.decoder_state.is_none() && self.file_header.is_none() {
             // We don't have a file header yet. Try parsing that.
             let mut br = BitReader::new(&self.non_section_buf);
@@ -265,7 +268,7 @@ impl CodestreamParser {
             decoder_state.premultiply_output = decode_options.premultiply_output;
             decoder_state.embedded_color_profile = self.embedded_color_profile.clone();
             decoder_state.limits = decode_options.limits.clone();
-            decoder_state.cancellation_token = decode_options.cancellation_token.clone();
+            decoder_state.stop = decode_options.stop_arc();
             decoder_state.memory_tracker =
                 MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
             self.decoder_state = Some(decoder_state);

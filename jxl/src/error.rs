@@ -279,6 +279,19 @@ pub enum Error {
     },
     #[error("Decoding cancelled")]
     Cancelled,
+    #[error("Decoding timed out")]
+    TimedOut,
+}
+
+impl From<enough::StopReason> for Error {
+    fn from(reason: enough::StopReason) -> Self {
+        match reason {
+            enough::StopReason::Cancelled => Error::Cancelled,
+            enough::StopReason::TimedOut => Error::TimedOut,
+            // StopReason is #[non_exhaustive], handle future variants
+            _ => Error::Cancelled,
+        }
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

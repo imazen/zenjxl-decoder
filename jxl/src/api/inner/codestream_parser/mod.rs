@@ -15,7 +15,7 @@ use crate::api::FrameCallback;
 use crate::{
     api::{
         JxlBasicInfo, JxlBitstreamInput, JxlColorProfile, JxlDecoderOptions, JxlOutputBuffer,
-        JxlPixelFormat,
+        JxlPixelFormat, Stop,
         inner::{box_parser::BoxParser, process::SmallBuffer},
     },
     error::{Error, Result},
@@ -151,11 +151,11 @@ impl CodestreamParser {
         pixel_format
     }
 
-    pub(super) fn process(
+    pub(super) fn process<S: Stop + Clone + 'static>(
         &mut self,
         box_parser: &mut BoxParser,
         input: &mut dyn JxlBitstreamInput,
-        decode_options: &JxlDecoderOptions,
+        decode_options: &JxlDecoderOptions<S>,
         mut output_buffers: Option<&mut [JxlOutputBuffer]>,
     ) -> Result<()> {
         if let Some(output_buffers) = &output_buffers {
