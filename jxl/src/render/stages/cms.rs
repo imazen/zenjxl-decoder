@@ -54,12 +54,12 @@ impl CmsStage {
     /// * `black_channel` - Pipeline index of K channel if present (for CMYK)
     /// * `max_pixels` - Maximum pixels per row chunk
     ///
-    /// When input and output channel counts match, uses in-place transform.
-    /// When they differ, uses separate input/output buffers.
+    /// Always uses separate pre-allocated input/output buffers to avoid
+    /// per-call heap allocations in CMS backends.
     ///
     /// # Example
     /// ```ignore
-    /// // RGB -> RGB (in-place)
+    /// // RGB -> RGB (same channel count)
     /// CmsStage::new(transformers, 3, 3, None, max_pixels);
     ///
     /// // CMYK -> RGB where K is at pipeline channel 5
@@ -139,13 +139,9 @@ impl RenderPipelineInPlaceStage for CmsStage {
         // Use thread index modulo transformer count to assign transformer to this thread
         let idx = thread_index % self.transformers.len();
 
-        // When channel counts differ, we need separate input and output buffers.
-        // When they're the same, we use in-place transform (output_buffer unused).
-        let output_buffer = if self.in_channels != self.out_channels {
-            vec![0.0f32; self.output_buffer_size]
-        } else {
-            Vec::new()
-        };
+        // Always allocate separate output buffer to avoid per-call allocations
+        // in CMS backends that don't support true in-place transforms (e.g. moxcms).
+        let output_buffer = vec![0.0f32; self.output_buffer_size];
 
         Ok(Some(Box::new(CmsLocalState {
             transformer_idx: idx,
@@ -165,7 +161,6 @@ impl RenderPipelineInPlaceStage for CmsStage {
             return;
         };
         let state: &mut CmsLocalState = state.downcast_mut().unwrap();
-        let same_channels = self.in_channels == self.out_channels;
 
         debug_assert!(
             xsize * self.in_channels <= state.input_buffer.len(),
@@ -173,12 +168,17 @@ impl RenderPipelineInPlaceStage for CmsStage {
             xsize
         );
 
-        // Single channel: transform directly in place without interleaving
+        // Single channel: use separate buffers to avoid per-call allocations
         if self.in_channels == 1 && self.out_channels == 1 {
+            state.input_buffer[..xsize].copy_from_slice(&row[0][..xsize]);
             let mut transformer = self.transformers[state.transformer_idx].borrow_mut();
             transformer
-                .do_transform_inplace(&mut row[0][..xsize])
+                .do_transform(
+                    &state.input_buffer[..xsize],
+                    &mut state.output_buffer[..xsize],
+                )
                 .expect("CMS transform failed");
+            row[0][..xsize].copy_from_slice(&state.output_buffer[..xsize]);
             return;
         }
 
@@ -215,29 +215,17 @@ impl RenderPipelineInPlaceStage for CmsStage {
             _ => unreachable!("CMS stage only supports 2-4 input channels here"),
         }
 
-        // Apply transform (only on actual pixels, not padding)
+        // Apply transform using separate buffers (avoids per-call allocations
+        // in CMS backends that don't support true in-place transforms).
         let mut transformer = self.transformers[state.transformer_idx].borrow_mut();
-        if same_channels {
-            // In-place transform when channel counts match
-            transformer
-                .do_transform_inplace(&mut state.input_buffer[..xsize * self.in_channels])
-                .expect("CMS transform failed");
-        } else {
-            // Separate buffer transform when channel counts differ
-            transformer
-                .do_transform(
-                    &state.input_buffer[..xsize * self.in_channels],
-                    &mut state.output_buffer[..xsize * self.out_channels],
-                )
-                .expect("CMS transform failed");
-        }
+        transformer
+            .do_transform(
+                &state.input_buffer[..xsize * self.in_channels],
+                &mut state.output_buffer[..xsize * self.out_channels],
+            )
+            .expect("CMS transform failed");
 
-        // Select source buffer for deinterleaving
-        let output_buf = if same_channels {
-            &state.input_buffer
-        } else {
-            &state.output_buffer
-        };
+        let output_buf = &state.output_buffer;
 
         // De-interleave packed -> planar
         // Output goes to row[0..out_channels]

@@ -2,3 +2,7 @@
 *.swp
 perf.data
 perf.data.old
+
+# Coverage reports
+coverage_html/
+coverage.json

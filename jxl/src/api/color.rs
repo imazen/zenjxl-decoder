@@ -1186,7 +1186,7 @@ impl JxlColorEncoding {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum JxlColorProfile {
     Icc(Vec<u8>),
     Simple(JxlColorEncoding),
@@ -1222,8 +1222,8 @@ impl JxlColorProfile {
     /// Returns true if both profiles represent the same color encoding.
     ///
     /// Two profiles are the same if they are both simple color encodings
-    /// with matching color space (primaries, white point) and transfer function.
-    /// ICC profiles are never considered the same (even if identical bytes).
+    /// with matching color space (primaries, white point) and transfer function,
+    /// or if they are both ICC profiles with identical bytes.
     pub fn same_color_encoding(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Simple(a), Self::Simple(b)) => {
@@ -1259,7 +1259,14 @@ impl JxlColorProfile {
                     _ => false,
                 }
             }
-            // ICC profiles require CMS
+            // Identical ICC bytes means identical transform — CMS is a no-op.
+            // This is the dominant case for non-XYB images where no custom output
+            // profile is set (output is a clone of the embedded ICC profile).
+            // Exclude CMYK: CMS is always needed for CMYK even with identical
+            // profiles, because the pipeline may need to consume the K channel.
+            // This matches libjxl's `!cmyk && !other.cmyk` guard.
+            (Self::Icc(a), Self::Icc(b)) => a == b && !self.is_cmyk(),
+            // Mixed types (Simple vs Icc) always differ
             _ => false,
         }
     }
@@ -2736,17 +2743,33 @@ mod test {
 
     #[test]
     fn test_same_color_encoding_icc_profile() {
-        // ICC profiles are never considered same (even with themselves)
         let srgb = JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
             white_point: JxlWhitePoint::D65,
             primaries: JxlPrimaries::SRGB,
             transfer_function: JxlTransferFunction::SRGB,
             rendering_intent: RenderingIntent::Relative,
         });
-        let icc = JxlColorProfile::Icc(vec![0u8; 100]); // Dummy ICC profile
-        assert!(!srgb.same_color_encoding(&icc));
-        assert!(!icc.same_color_encoding(&srgb));
-        assert!(!icc.same_color_encoding(&icc));
+        let icc_a = JxlColorProfile::Icc(vec![0u8; 100]);
+        let icc_b = JxlColorProfile::Icc(vec![0u8; 100]); // Same bytes as icc_a
+        let icc_c = JxlColorProfile::Icc(vec![1u8; 100]); // Different bytes
+
+        // Mixed types never match
+        assert!(!srgb.same_color_encoding(&icc_a));
+        assert!(!icc_a.same_color_encoding(&srgb));
+
+        // Identical ICC bytes → same encoding (CMS is a no-op)
+        assert!(icc_a.same_color_encoding(&icc_a));
+        assert!(icc_a.same_color_encoding(&icc_b));
+
+        // Different ICC bytes → different encoding
+        assert!(!icc_a.same_color_encoding(&icc_c));
+
+        // CMYK ICC profiles are never considered same (CMS always needed for K channel)
+        let mut cmyk_data = vec![0u8; 100];
+        cmyk_data[16..20].copy_from_slice(b"CMYK");
+        let cmyk_a = JxlColorProfile::Icc(cmyk_data.clone());
+        let cmyk_b = JxlColorProfile::Icc(cmyk_data);
+        assert!(!cmyk_a.same_color_encoding(&cmyk_b));
     }
 
     #[test]

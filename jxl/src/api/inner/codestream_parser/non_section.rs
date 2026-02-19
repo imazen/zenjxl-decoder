@@ -19,16 +19,40 @@ use crate::{
         frame_header::FrameHeader, toc::IncrementalTocReader,
     },
     icc::IncrementalIccReader,
+    util::MemoryTracker,
 };
 
 use super::{CodestreamParser, SectionBuffer};
 use crate::api::ToneMapping;
 
 fn check_size_limit(
-    pixel_limit: Option<usize>,
+    limits: &crate::api::JxlDecoderLimits,
+    pixel_limit: Option<usize>, // Deprecated, kept for backwards compatibility
     (xs, ys): (usize, usize),
     num_ec: usize,
 ) -> Result<()> {
+    // Check max_pixels from new limits API
+    let total_pixels = xs.saturating_mul(ys);
+    if let Some(limit) = limits.max_pixels
+        && total_pixels > limit
+    {
+        return Err(Error::LimitExceeded {
+            resource: "pixels",
+            actual: total_pixels as u64,
+            limit: limit as u64,
+        });
+    }
+    // Check extra channels limit
+    if let Some(limit) = limits.max_extra_channels
+        && num_ec > limit
+    {
+        return Err(Error::LimitExceeded {
+            resource: "extra_channels",
+            actual: num_ec as u64,
+            limit: limit as u64,
+        });
+    }
+    // Backwards compatibility: also check deprecated pixel_limit
     if let Some(limit) = pixel_limit {
         let xs = xs.max(16); // xsize is always at least 64 bytes.
         let total_pixels = xs.saturating_mul(ys).saturating_mul(3 + num_ec);
@@ -50,12 +74,14 @@ impl CodestreamParser {
             let xsize = file_header.size.xsize() as usize;
             let ysize = file_header.size.ysize() as usize;
             check_size_limit(
+                &decode_options.limits,
                 decode_options.pixel_limit,
                 (xsize, ysize),
                 file_header.image_metadata.extra_channel_info.len(),
             )?;
             if let Some(preview) = &file_header.image_metadata.preview {
                 check_size_limit(
+                    &decode_options.limits,
                     decode_options.pixel_limit,
                     (preview.xsize() as usize, preview.ysize() as usize),
                     file_header.image_metadata.extra_channel_info.len(),
@@ -123,7 +149,10 @@ impl CodestreamParser {
             br.skip_bits(self.non_section_bit_offset as usize)?;
             let embedded_color_profile = if file_header.image_metadata.color_encoding.want_icc {
                 if self.icc_parser.is_none() {
-                    self.icc_parser = Some(IncrementalIccReader::new(&mut br)?);
+                    self.icc_parser = Some(IncrementalIccReader::new(
+                        &mut br,
+                        decode_options.limits.max_icc_size,
+                    )?);
                 }
                 let icc_parser = self.icc_parser.as_mut().unwrap();
                 let mut bits = br.total_bits_read();
@@ -198,6 +227,11 @@ impl CodestreamParser {
             decoder_state.render_spotcolors = decode_options.render_spot_colors;
             decoder_state.high_precision = decode_options.high_precision;
             decoder_state.premultiply_output = decode_options.premultiply_output;
+            decoder_state.embedded_color_profile = self.embedded_color_profile.clone();
+            decoder_state.limits = decode_options.limits.clone();
+            decoder_state.cancellation_token = decode_options.cancellation_token.clone();
+            decoder_state.memory_tracker =
+                MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
             self.decoder_state = Some(decoder_state);
             // Reset bit offset to 0 since we've consumed everything up to a byte boundary
             self.non_section_bit_offset = 0;
@@ -224,6 +258,7 @@ impl CodestreamParser {
             let mut frame_header = FrameHeader::read_unconditional(&(), &mut br, &nonserialized)?;
             frame_header.postprocess(&nonserialized);
             check_size_limit(
+                &decode_options.limits,
                 decode_options.pixel_limit,
                 frame_header.size(),
                 frame_header.num_extra_channels as usize,

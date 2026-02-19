@@ -172,6 +172,7 @@ pub(super) fn decode_modular_channel(
     reader: &mut SymbolReader,
     br: &mut BitReader,
 ) -> Result<()> {
+    crate::profile!(modular_decode);
     debug!("reading channel");
     let size = buffers[chan].data.size();
     if size.0 <= IMAGE_PADDING.0

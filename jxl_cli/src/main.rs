@@ -240,5 +240,8 @@ fn main() -> Result<()> {
     save_icc(&output_icc, opt.icc_out.as_ref())?;
     save_icc(&embedded_icc, opt.original_icc_out.as_ref())?;
 
+    #[cfg(feature = "profiling")]
+    jxl::util::print_profile_report();
+
     Ok(())
 }

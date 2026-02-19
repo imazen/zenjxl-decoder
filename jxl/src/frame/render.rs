@@ -231,6 +231,8 @@ impl Frame {
         }
 
         for (group, mut passes) in groups {
+            // Check for cancellation between groups
+            self.decoder_state.check_cancelled()?;
             if !self.decode_hf_group(group, &mut passes, &mut buffer_splitter, do_flush)? {
                 self.groups_to_flush.insert(group);
             } else {
@@ -248,6 +250,66 @@ impl Frame {
         self.lf_frame_data = lf_frame_data;
 
         Ok(())
+    }
+
+    /// Helper function to detect CMYK ICC profile from bytes.
+    /// Returns true if the ICC profile has CMYK color space signature.
+    #[cfg(feature = "cms")]
+    fn is_cmyk_icc_profile(icc_data: &[u8]) -> bool {
+        if icc_data.len() < 20 {
+            return false;
+        }
+        // ICC color space signature is at bytes 16-19
+        &icc_data[16..20] == b"CMYK"
+    }
+
+    /// Try to create a CMS-based CMYK->RGB conversion stage.
+    /// Returns Some(stage) if successful, None if we should fall back to simple K multiplication.
+    #[cfg(feature = "cms")]
+    fn try_create_cms_cmyk_stage(
+        decoder_state: &DecoderState,
+        cms: Option<&dyn JxlCms>,
+        black_channel_offset: usize,
+    ) -> Result<Option<CmsCmykToRgbStage>> {
+        // Check if we have a CMS and a CMYK ICC profile
+        let (cms, icc_data) = match (cms, &decoder_state.embedded_color_profile) {
+            (Some(cms), Some(JxlColorProfile::Icc(icc_data))) => (cms, icc_data),
+            _ => return Ok(None),
+        };
+
+        // Check if the ICC profile is CMYK
+        if !Self::is_cmyk_icc_profile(icc_data) {
+            return Ok(None);
+        }
+
+        // Create CMYK -> sRGB transform
+        let cmyk_profile = JxlColorProfile::Icc(icc_data.clone());
+        let srgb_profile = JxlColorProfile::Simple(JxlColorEncoding::srgb(false));
+
+        // Initialize a single transformer for CMYK -> sRGB
+        let (output_channels, mut transformers) = cms.initialize_transforms(
+            1,   // We only need 1 transformer
+            256, // pixels per transform (row chunk size is typically small)
+            cmyk_profile,
+            srgb_profile,
+            decoder_state
+                .file_header
+                .image_metadata
+                .tone_mapping
+                .intensity_target,
+        )?;
+
+        // Verify we got an RGB output (3 channels)
+        if output_channels != 3 || transformers.is_empty() {
+            return Ok(None);
+        }
+
+        // Take the transformer and create the CMS stage
+        let transformer = transformers.remove(0);
+        Ok(Some(CmsCmykToRgbStage::new(
+            black_channel_offset,
+            transformer,
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -283,6 +345,7 @@ impl Frame {
             }
         }
         for i in 3..num_channels {
+            // Use each extra channel's own bit depth, not the image's metadata bit depth
             let ec_bit_depth = metadata.extra_channel_info[i - 3].bit_depth();
             pipeline = pipeline.add_inout_stage(ConvertModularToF32Stage::new(i, ec_bit_depth))?;
         }
@@ -569,11 +632,51 @@ impl Frame {
             }
         }
 
+        // Check if this is a CMYK image that needs blending
+        let has_black_channel = black_channel.is_some();
+
+        // For CMYK images, we need to handle blending in CMYK color space.
+        // If ANY frame in the image needs blending, ALL frames must save their
+        // reference in CMYK space so that subsequent frames can blend correctly.
+        let cmyk_needs_deferred_cms = has_black_channel
+            && (frame_header.needs_blending()
+                || (frame_header.can_be_referenced && !frame_header.save_before_ct));
+
         // XYB output is linear, so apply transfer function:
         // - Only if output is non-linear AND
         // - CMS was not used (CMS already handles the full conversion including TF)
         if xyb_encoded && !output_tf.is_linear() && !cms_used {
             pipeline = pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()))?;
+        }
+
+        // For CMYK images that don't need deferred CMS, apply Black channel conversion here
+        if has_black_channel && !cmyk_needs_deferred_cms {
+            for (i, info) in decoder_state
+                .file_header
+                .image_metadata
+                .extra_channel_info
+                .iter()
+                .enumerate()
+            {
+                if info.ec_type == ExtraChannel::Black {
+                    // Try to use CMS-based CMYK conversion if we have:
+                    // 1. A CMS implementation available
+                    // 2. An embedded CMYK ICC profile
+                    #[cfg(feature = "cms")]
+                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
+                    {
+                        pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                    } else {
+                        // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                    #[cfg(not(feature = "cms"))]
+                    {
+                        let _ = cms; // suppress unused warning when cms feature is off
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                }
+            }
         }
 
         if frame_header.needs_blending() {
@@ -591,7 +694,53 @@ impl Frame {
             )?)?;
         }
 
-        if frame_header.can_be_referenced && !frame_header.save_before_ct {
+        // For CMYK images that need deferred CMS, save reference in CMYK space (before CMS)
+        // and apply CMS conversion after. This is critical: blending must happen in CMYK space.
+        if cmyk_needs_deferred_cms {
+            // Save reference in CMYK space (before CMS conversion)
+            if frame_header.can_be_referenced && !frame_header.save_before_ct {
+                for i in 0..num_channels {
+                    pipeline = pipeline.add_save_stage(
+                        &[i],
+                        Orientation::Identity,
+                        num_api_buffers + i,
+                        JxlColorType::Grayscale,
+                        JxlDataFormat::f32(),
+                        false,
+                    )?;
+                }
+            }
+
+            // Apply CMS conversion (CMYK -> RGB) after blending/saving
+            for (i, info) in decoder_state
+                .file_header
+                .image_metadata
+                .extra_channel_info
+                .iter()
+                .enumerate()
+            {
+                if info.ec_type == ExtraChannel::Black {
+                    #[cfg(feature = "cms")]
+                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
+                    {
+                        pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                    } else {
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                    #[cfg(not(feature = "cms"))]
+                    {
+                        let _ = cms;
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                    }
+                }
+            }
+        }
+
+        // For non-CMYK images (or CMYK that doesn't need deferred CMS), save reference after CT
+        if frame_header.can_be_referenced
+            && !frame_header.save_before_ct
+            && !cmyk_needs_deferred_cms
+        {
             for i in 0..num_channels {
                 pipeline = pipeline.add_save_stage(
                     &[i],
@@ -661,6 +810,11 @@ impl Frame {
             let should_premultiply = decoder_state.premultiply_output
                 && alpha_in_color.is_some()
                 && !source_alpha_associated;
+
+            // Note: We don't unpremultiply by default because djxl also doesn't by default.
+            // When source has alpha_associated=true (premultiplied), we output premultiplied
+            // unless explicitly requested otherwise via premultiply_output=false + cms option.
+            // This matches libjxl's JxlDecoderSetUnpremultiplyAlpha default of false.
 
             let color_source_channels: &[usize] =
                 match (pixel_format.color_type.is_grayscale(), alpha_in_color) {

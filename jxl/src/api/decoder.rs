@@ -1325,4 +1325,75 @@ pub(crate) mod tests {
             let _ = profile.try_as_icc();
         }
     }
+
+    #[test]
+    fn test_pixel_limit_enforcement() {
+        // Load a test image - green_queen is 256x256 = 65536 pixels
+        let input = std::fs::read("resources/test/green_queen_vardct_e3.jxl").unwrap();
+
+        // Create options with a very restrictive pixel limit (smaller than the image)
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_pixels = Some(100); // Only 100 pixels allowed
+
+        let decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut input_slice = &input[..];
+
+        // The decoder should fail when parsing the header with LimitExceeded error
+        let result = decoder.process(&mut input_slice);
+        match result {
+            Err(err) => {
+                assert!(
+                    matches!(
+                        err,
+                        Error::LimitExceeded {
+                            resource: "pixels",
+                            ..
+                        }
+                    ),
+                    "Expected LimitExceeded for pixels, got {:?}",
+                    err
+                );
+            }
+            Ok(ProcessingResult::NeedsMoreInput { .. }) => {
+                panic!("Expected error, got needs more input");
+            }
+            Ok(ProcessingResult::Complete { .. }) => {
+                panic!("Expected error, got success");
+            }
+        }
+    }
+
+    #[test]
+    fn test_restrictive_limits_preset() {
+        // Verify the restrictive preset is reasonable
+        let limits = crate::api::JxlDecoderLimits::restrictive();
+        assert_eq!(limits.max_pixels, Some(100_000_000));
+        assert_eq!(limits.max_extra_channels, Some(16));
+        assert_eq!(limits.max_icc_size, Some(1 << 20));
+        assert_eq!(limits.max_tree_size, Some(1 << 20));
+        assert_eq!(limits.max_patches, Some(1 << 16));
+        assert_eq!(limits.max_spline_points, Some(1 << 16));
+        assert_eq!(limits.max_reference_frames, Some(2));
+        assert_eq!(limits.max_memory_bytes, Some(1 << 30));
+    }
+
+    #[test]
+    fn test_cancellation_token() {
+        use crate::api::CancellationToken;
+
+        let token = CancellationToken::new();
+        assert!(!token.is_cancelled());
+
+        // Cancel the token
+        token.cancel();
+        assert!(token.is_cancelled());
+
+        // Check returns error when cancelled
+        assert!(token.check().is_err());
+
+        // Reset allows reuse
+        token.reset();
+        assert!(!token.is_cancelled());
+        assert!(token.check().is_ok());
+    }
 }

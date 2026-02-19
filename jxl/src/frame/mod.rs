@@ -6,6 +6,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use crate::{
+    api::JxlColorProfile,
     entropy_coding::decode::Histograms,
     error::Result,
     features::{noise::Noise, patches::PatchesDictionary, spline::Splines},
@@ -17,7 +18,7 @@ use crate::{
         toc::Toc,
     },
     image::Image,
-    util::tracing_wrappers::*,
+    util::{MemoryTracker, tracing_wrappers::*},
 };
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;
@@ -121,6 +122,15 @@ pub struct DecoderState {
     pub nonvisible_frame_index: usize,
     pub high_precision: bool,
     pub premultiply_output: bool,
+    /// The embedded color profile from the JXL file (ICC or simple color encoding).
+    /// This is needed for CMS-based color space conversion (e.g., CMYK → RGB).
+    pub embedded_color_profile: Option<JxlColorProfile>,
+    /// Security limits for decoding. Stored here to propagate through frame decoding.
+    pub limits: crate::api::JxlDecoderLimits,
+    /// Optional cancellation token for cooperative cancellation.
+    pub cancellation_token: Option<crate::api::CancellationToken>,
+    /// Memory tracker for enforcing max_memory_bytes limits.
+    pub memory_tracker: MemoryTracker,
 }
 
 impl DecoderState {
@@ -138,6 +148,19 @@ impl DecoderState {
             nonvisible_frame_index: 0,
             high_precision: false,
             premultiply_output: false,
+            embedded_color_profile: None,
+            limits: crate::api::JxlDecoderLimits::default(),
+            cancellation_token: None,
+            memory_tracker: MemoryTracker::unlimited(),
+        }
+    }
+
+    /// Check cancellation status and return error if cancelled.
+    pub fn check_cancelled(&self) -> crate::error::Result<()> {
+        if let Some(ref token) = self.cancellation_token {
+            token.check()
+        } else {
+            Ok(())
         }
     }
 
@@ -249,10 +272,21 @@ impl Frame {
         if self.header.can_be_referenced
             && let Some(frame_data) = self.reference_frame_data
         {
+            let slot = self.header.save_as_reference as usize;
+            // Check reference frame limit
+            if let Some(limit) = self.decoder_state.limits.max_reference_frames
+                && slot >= limit
+            {
+                return Err(crate::error::Error::LimitExceeded {
+                    resource: "reference_frames",
+                    actual: (slot + 1) as u64,
+                    limit: limit as u64,
+                });
+            }
             info!("Saving frame in slot {}", self.header.save_as_reference);
             let rf = Arc::get_mut(&mut self.decoder_state.reference_frames)
                 .expect("remaining references to reference_frames");
-            rf[self.header.save_as_reference as usize] = Some(ReferenceFrame {
+            rf[slot] = Some(ReferenceFrame {
                 frame: frame_data,
                 saved_before_color_transform: self.header.save_before_ct,
             });

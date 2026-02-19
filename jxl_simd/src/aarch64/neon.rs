@@ -681,6 +681,16 @@ impl I32SimdVec for I32VecNeon {
             let h = vreinterpretq_s32_s64(h);
             I32VecNeon(vuzp2q_s32(l, h), this.1)
         }
+
+        fn wrapping_add(this: I32VecNeon, rhs: I32VecNeon) -> I32VecNeon {
+            // SIMD integer addition already wraps
+            this + rhs
+        }
+
+        fn wrapping_sub(this: I32VecNeon, rhs: I32VecNeon) -> I32VecNeon {
+            // SIMD integer subtraction already wraps
+            this - rhs
+        }
     }
 
     #[inline(always)]

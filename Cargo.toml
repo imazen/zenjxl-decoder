@@ -1,8 +1,13 @@
 [profile.release]
 debug = true
+lto = "thin"
+codegen-units = 1
+opt-level = 3
 
 [profile.bench]
 debug = true
+lto = "thin"
+codegen-units = 1
 
 [workspace]
 members = ["jxl", "jxl_cli", "jxl_macros", "jxl_simd", "jxl_transforms"]
