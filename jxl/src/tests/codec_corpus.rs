@@ -14,8 +14,8 @@
 #[cfg(feature = "cms")]
 use crate::api::MoxCms;
 use crate::api::{
-    JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
-    ProcessingResult, states,
+    JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer,
+    JxlPixelFormat, ProcessingResult, states,
 };
 use crate::image::{Image, Rect};
 
@@ -33,7 +33,7 @@ fn decode_jxl_to_pixels(path: &std::path::Path) -> Result<(usize, usize, usize, 
 /// Decode a JXL file with optional linear output.
 fn decode_jxl_to_pixels_with_options(
     path: &std::path::Path,
-    _output_linear: bool,
+    output_linear: bool,
 ) -> Result<(usize, usize, usize, Vec<u8>), String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read JXL: {}", e))?;
     let mut input = data.as_slice();
@@ -106,6 +106,16 @@ fn decode_jxl_to_pixels_with_options(
         extra_channel_format,
     };
     decoder.set_pixel_format(pixel_format);
+
+    // If linear output is requested (reference PNG has gAMA=100000), set output
+    // color profile to linear TF so decoded values match the linear reference.
+    if output_linear {
+        if let JxlColorProfile::Simple(enc) = decoder.output_color_profile().clone() {
+            decoder
+                .set_output_color_profile(JxlColorProfile::Simple(enc.with_linear_tf()))
+                .map_err(|e| format!("Failed to set linear output profile: {:?}", e))?;
+        }
+    }
 
     // Advance to frame info
     let mut decoder = loop {
