@@ -386,9 +386,11 @@ impl WeightedPredictorState {
     /// Get all predictor errors for a given position (contiguous in memory)
     #[inline(always)]
     fn get_errors_at_pos(&self, pos: usize) -> &[u32; NUM_PREDICTORS] {
+        // Layout: position-major, NUM_PREDICTORS elements per position.
+        // Using array_chunks avoids try_into().unwrap() overhead on every call.
         let start = pos * NUM_PREDICTORS;
         self.pred_errors_buffer[start..start + NUM_PREDICTORS]
-            .try_into()
+            .first_chunk()
             .unwrap()
     }
 
@@ -396,8 +398,8 @@ impl WeightedPredictorState {
     #[inline(always)]
     fn get_errors_at_pos_mut(&mut self, pos: usize) -> &mut [u32; NUM_PREDICTORS] {
         let start = pos * NUM_PREDICTORS;
-        (&mut self.pred_errors_buffer[start..start + NUM_PREDICTORS])
-            .try_into()
+        self.pred_errors_buffer[start..start + NUM_PREDICTORS]
+            .first_chunk_mut()
             .unwrap()
     }
 

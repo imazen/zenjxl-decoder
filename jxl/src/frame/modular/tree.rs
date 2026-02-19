@@ -43,6 +43,9 @@ pub(super) struct FlatTreeNode {
     splitvals_or_multiplier: [i32; 2], // Child splitvals, or multiplier if leaf
     child_id: u32,                     // Index to first grandchild, or context if leaf
     properties_or_offset: [i16; 2],    // Child properties, or offset if leaf
+    /// Pre-validated predictor enum for leaf nodes (avoids per-pixel try_from + unwrap).
+    /// Only valid when property0 < 0 (leaf node).
+    predictor: Predictor,
 }
 
 impl FlatTreeNode {
@@ -54,6 +57,7 @@ impl FlatTreeNode {
             splitvals_or_multiplier: [multiplier as i32, 0],
             child_id: context,
             properties_or_offset: [offset as i16, 0],
+            predictor,
         }
     }
 }
@@ -232,6 +236,9 @@ fn compute_properties(
         toprightright: _,
     } = prediction_data;
 
+    // Assert length so the compiler can eliminate bounds checks for constant indices 0..16.
+    assert!(property_buffer.len() >= NUM_NONREF_PROPERTIES);
+
     // Position
     property_buffer[2] = y as i32;
     property_buffer[3] = x as i32;
@@ -369,18 +376,13 @@ pub(super) fn predict_flat(
         let node = &flat_tree[pos];
 
         if node.property0 < 0 {
-            // Leaf node
-            let predictor = Predictor::try_from(node.splitval0_or_predictor as u32).unwrap();
-            let offset = node.properties_or_offset[0] as i32;
-            let multiplier = node.splitvals_or_multiplier[0] as u32;
-            let context = node.child_id;
-
-            let pred = predictor.predict_one(prediction_data, wp_pred);
+            // Leaf node — predictor was pre-validated at tree build time
+            let pred = node.predictor.predict_one(prediction_data, wp_pred);
 
             return PredictionResult {
-                guess: pred + offset as i64,
-                multiplier,
-                context,
+                guess: pred + node.properties_or_offset[0] as i64,
+                multiplier: node.splitvals_or_multiplier[0] as u32,
+                context: node.child_id,
             };
         }
 
@@ -524,6 +526,7 @@ impl Tree {
                         splitvals_or_multiplier: [0, 0],
                         child_id,
                         properties_or_offset: [0, 0],
+                        predictor: Predictor::Zero, // unused for split nodes
                     };
 
                     // Process left (i=0) and right (i=1) children

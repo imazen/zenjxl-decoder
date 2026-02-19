@@ -47,11 +47,14 @@ fn decode_modular_channel_small(
 
     const { assert!(IMAGE_OFFSET.1 == 2) };
 
+    let mut property_buffer: Vec<i32> = vec![0; num_properties];
+    property_buffer[0] = chan as i32;
+    property_buffer[1] = stream_id as i32;
+
     for y in 0..size.1 {
         precompute_references(buffers, chan, y, &mut references);
-        let mut property_buffer: Vec<i32> = vec![0; num_properties];
-        property_buffer[0] = chan as i32;
-        property_buffer[1] = stream_id as i32;
+        // Reset non-static properties for each row (keep chan/stream_id in [0] and [1])
+        property_buffer[2..].fill(0);
         let [row, row_top, row_toptop] =
             buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1, y]);
         let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
@@ -95,6 +98,7 @@ pub(super) trait ModularChannelDecoder {
 }
 
 #[inline(never)]
+#[allow(clippy::needless_range_loop)] // Iterator chain (.enumerate().skip().take()) measured 1% overhead
 fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     buffers: &mut [&mut ModularChannel],
     chan: usize,
@@ -137,7 +141,7 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
                 row[x] = val;
             }
         } else {
-            for (x, r) in row.iter_mut().enumerate().skip(2).take(size.0 - 4) {
+            for x in 2..size.0 - 2 {
                 prediction_data = prediction_data.update_for_interior_row(
                     row_top,
                     row_toptop,
@@ -148,7 +152,7 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
                 );
                 let val =
                     decoder.decode_one(prediction_data, (x, y), size.0, reader, br, histograms);
-                *r = val;
+                row[x] = val;
                 last = val;
             }
         }
