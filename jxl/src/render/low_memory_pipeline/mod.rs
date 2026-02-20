@@ -21,9 +21,9 @@ use crate::util::{ShiftRightCeil, tracing_wrappers::*};
 use super::RenderPipeline;
 use super::internal::{RenderPipelineShared, RunInOutStage, RunInPlaceStage};
 
-mod group_scheduler;
+pub(crate) mod group_scheduler;
 mod helpers;
-mod render_group;
+pub(crate) mod render_group;
 pub(super) mod row_buffers;
 mod run_stage;
 mod save;
@@ -31,15 +31,51 @@ mod save;
 /// Per-thread mutable state used during group rendering.
 /// Extracting this from LowMemoryRenderPipeline enables parallel rendering
 /// with multiple GroupRenderContexts sharing the same immutable pipeline data.
-pub(super) struct GroupRenderContext {
+pub(crate) struct GroupRenderContext {
     pub(super) row_buffers: Vec<Vec<RowBuffer>>,
     pub(super) local_states: Vec<Option<Box<dyn Any + Send>>>,
+}
+
+/// Factory for creating `GroupRenderContext` from any thread.
+/// Captures only `Sync` data (row buffer dimensions + stage definitions).
+#[cfg(feature = "threads")]
+pub(crate) struct ContextFactory<'a> {
+    row_buffer_template: &'a [Vec<RowBuffer>],
+    shared: &'a RenderPipelineShared<RowBuffer>,
+}
+
+#[cfg(feature = "threads")]
+impl ContextFactory<'_> {
+    pub(crate) fn create(&self, thread_index: usize) -> Result<GroupRenderContext> {
+        let row_buffers = self
+            .row_buffer_template
+            .iter()
+            .map(|stage_bufs| {
+                stage_bufs
+                    .iter()
+                    .map(|buf| buf.new_like())
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let local_states = self
+            .shared
+            .stages
+            .iter()
+            .map(|x| x.init_local_state(thread_index))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(GroupRenderContext {
+            row_buffers,
+            local_states,
+        })
+    }
 }
 
 /// Immutable view of pipeline data needed during rendering.
 /// Bundles all read-only references so render functions can operate
 /// without borrowing the entire pipeline.
-pub(super) struct PipelineReadView<'a> {
+pub(crate) struct PipelineReadView<'a> {
     pub(super) shared: &'a RenderPipelineShared<RowBuffer>,
     pub(in crate::render::low_memory_pipeline) input_buffers: &'a [InputBuffer],
     pub(super) stage_input_buffer_index: &'a [Vec<(usize, usize)>],
@@ -467,5 +503,68 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         stage: S,
     ) -> Box<dyn RunInPlaceStage<Self::Buffer> + Send + Sync> {
         Box::new(stage)
+    }
+}
+
+/// Methods for the parallel rendering path.
+#[cfg(feature = "threads")]
+impl LowMemoryRenderPipeline {
+    /// Stores a buffer for a group/channel without triggering rendering.
+    pub(crate) fn store_buffer_only<T: ImageDataType>(
+        &mut self,
+        channel: usize,
+        group_id: usize,
+        complete: bool,
+        buf: Image<T>,
+    ) {
+        self.input_buffers[group_id].set_buffer(channel, buf.into_raw());
+        self.shared.group_chan_complete[group_id][channel] = complete;
+    }
+
+    /// Creates a PipelineReadView borrowing the immutable state.
+    pub(crate) fn read_view(&self) -> PipelineReadView<'_> {
+        PipelineReadView {
+            shared: &self.shared,
+            input_buffers: &self.input_buffers,
+            stage_input_buffer_index: &self.stage_input_buffer_index,
+            downsampling_for_stage: &self.downsampling_for_stage,
+            stage_output_border_pixels: &self.stage_output_border_pixels,
+            input_border_pixels: &self.input_border_pixels,
+            border_size: self.border_size,
+            opaque_alpha_buffers: &self.opaque_alpha_buffers,
+            sorted_buffer_indices: &self.sorted_buffer_indices,
+        }
+    }
+
+    /// Returns the frame origin and full image size from the extend stage,
+    /// or defaults for non-extend pipelines.
+    pub(crate) fn extend_origin_size(&self) -> ((isize, isize), (usize, usize)) {
+        if let Some(e) = self.shared.extend_stage_index {
+            let Stage::Extend(e) = &self.shared.stages[e] else {
+                unreachable!("extend stage is not an extend stage");
+            };
+            (e.frame_origin, e.image_size)
+        } else {
+            ((0, 0), self.shared.input_size)
+        }
+    }
+
+    /// Returns a factory that can create GroupRenderContexts from any thread.
+    /// The returned factory is Send + Sync (captures only Sync data).
+    pub(crate) fn context_factory(&self) -> ContextFactory<'_> {
+        ContextFactory {
+            row_buffer_template: &self.render_ctx.row_buffers,
+            shared: &self.shared,
+        }
+    }
+
+    /// Returns the save buffer info for computing output sub-views.
+    pub(crate) fn save_buffer_info(&self) -> &[Option<SaveStageBufferInfo>] {
+        &self.save_buffer_info
+    }
+
+    /// Returns the input (frame) size.
+    pub(crate) fn input_size(&self) -> (usize, usize) {
+        self.shared.input_size
     }
 }

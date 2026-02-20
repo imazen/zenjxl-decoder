@@ -17,6 +17,8 @@ mod typed;
 pub use data_type::DataTypeTag;
 pub use data_type::ImageDataType;
 pub use output_buffer::JxlOutputBuffer;
+#[cfg(feature = "threads")]
+pub(crate) use output_buffer::SharedOutputView;
 pub use raw::{OwnedRawImage, RawImageRect, RawImageRectMut};
 pub use rect::Rect;
 pub use typed::{Image, ImageRect, ImageRectMut};

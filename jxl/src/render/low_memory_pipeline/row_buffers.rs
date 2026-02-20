@@ -51,6 +51,19 @@ impl RowBuffer {
         })
     }
 
+    /// Creates a new zeroed row buffer with the same dimensions as this one.
+    #[cfg(feature = "threads")]
+    pub fn new_like(&self) -> Result<Self> {
+        let mut buffer = Vec::<CacheLine>::new();
+        buffer.try_reserve_exact(self.buffer.len())?;
+        buffer.resize(self.buffer.len(), CacheLine::default());
+        Ok(Self {
+            buffer: buffer.into_boxed_slice(),
+            row_stride: self.row_stride,
+            num_rows: self.num_rows,
+        })
+    }
+
     /// Creates a new row buffer with a single row filled with a repeating pattern.
     /// Used for constant values like opaque alpha.
     pub fn new_filled(data_type: DataTypeTag, row_len: usize, fill_pattern: &[u8]) -> Result<Self> {

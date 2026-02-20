@@ -176,7 +176,7 @@ fn fill_initial_buffers(
 // In particular, renders the sub-rectangle given in `image_area`, where (1, 1) refers to
 // the center of the group, and 0 and 2 include data from the neighbouring group (if any).
 #[instrument(skip(ctx, view, buffers))]
-pub(super) fn render(
+pub(crate) fn render(
     ctx: &mut GroupRenderContext,
     view: &PipelineReadView,
     (gx, gy): (usize, usize),

@@ -19,9 +19,11 @@ use crate::image::Rect;
 use crate::render::SimpleRenderPipeline;
 use crate::render::buffer_splitter::BufferSplitter;
 use crate::render::{LowMemoryRenderPipeline, RenderPipeline, RenderPipelineBuilder, stages::*};
+#[cfg(feature = "threads")]
+use crate::frame::decode::upsample_lf_group;
 use crate::{
     api::JxlPixelFormat,
-    frame::{DecoderState, Frame, LfGlobalState, decode::upsample_lf_group},
+    frame::{DecoderState, Frame, LfGlobalState},
     headers::frame_header::FrameHeader,
 };
 
@@ -230,9 +232,14 @@ impl Frame {
             pipeline!(self, p, p.mark_group_to_rerender(*g));
         }
 
-        #[cfg(feature = "threads")]
+        #[cfg(all(feature = "threads", not(test)))]
         let use_parallel =
             groups.len() > 1 && !self.header.has_noise() && self.hf_coefficients.is_none();
+        #[cfg(all(feature = "threads", test))]
+        let use_parallel = groups.len() > 1
+            && !self.header.has_noise()
+            && self.hf_coefficients.is_none()
+            && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
@@ -280,7 +287,22 @@ impl Frame {
     /// - `hf_coefficients.is_none()` (single-pass, so HfGlobalState is read-only)
     /// - No noise (noise generation needs pipeline interaction)
     /// - More than 1 group
+    ///
+    /// Parallel decode + render path for both VarDCT and Modular frames.
+    ///
+    /// Groups are processed in batches of `MAX_DECODE_THREADS` to limit peak memory:
+    /// pixel buffers allocated for one batch are recycled by the pipeline before the next
+    /// batch allocates new ones.
+    ///
+    /// Each batch runs four phases:
+    /// 1. Sequential: compute render decisions and allocate pixel buffers
+    /// 2. Parallel: entropy decode + dequant + IDCT (VarDCT) / read_stream (Modular)
+    /// 3. Store, render, recycle:
+    ///    - 3a. Sequential: store decoded buffers + extract borders + compute renderable work items
+    ///    - 3b. Parallel: render all work items through the pipeline (EPF, color, save)
+    ///    - 3c. Sequential: recycle buffers + update flush state
     #[cfg(feature = "threads")]
+    #[allow(unsafe_code)]
     fn decode_groups_parallel(
         &mut self,
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
@@ -290,8 +312,45 @@ impl Frame {
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
         use crate::image::Image;
+        use crate::render::buffer_splitter::SharedOutputBuffers;
+        use crate::render::low_memory_pipeline::render_group;
         use crate::util::SmallVec;
         use rayon::prelude::*;
+
+        // Helper macros to get &mut / & LowMemoryRenderPipeline from the pipeline field.
+        // In non-test builds the field is Box<LMP>; in test builds it's Box<dyn Any>.
+        macro_rules! lmp_mut {
+            () => {{
+                #[cfg(not(test))]
+                {
+                    self.render_pipeline.as_mut().unwrap()
+                }
+                #[cfg(test)]
+                {
+                    self.render_pipeline
+                        .as_mut()
+                        .unwrap()
+                        .downcast_mut::<LowMemoryRenderPipeline>()
+                        .unwrap()
+                }
+            }};
+        }
+        macro_rules! lmp_ref {
+            () => {{
+                #[cfg(not(test))]
+                {
+                    self.render_pipeline.as_ref().unwrap()
+                }
+                #[cfg(test)]
+                {
+                    self.render_pipeline
+                        .as_ref()
+                        .unwrap()
+                        .downcast_ref::<LowMemoryRenderPipeline>()
+                        .unwrap()
+                }
+            }};
+        }
 
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
@@ -408,8 +467,17 @@ impl Frame {
                 })?;
             }
 
-            // Phase 3: Sequential render — push decoded buffers through pipeline.
-            // This recycles pixel buffers for the next batch.
+            // Phase 3: Store decoded data, prepare work items, render in parallel, recycle.
+
+            // Phase 3a: Sequential — store buffers and compute renderable work items.
+            struct GroupRenderInfo {
+                group: usize,
+                do_render: bool,
+                has_items: bool,
+            }
+            let mut all_items = Vec::new();
+            let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(work.len());
+
             for gw in work {
                 self.decoder_state.check_cancelled()?;
 
@@ -428,55 +496,120 @@ impl Frame {
                             &self.decoder_state.file_header.transform_data,
                         )?;
                         for (c, img) in pixels.into_iter().enumerate() {
-                            pipeline!(
-                                self,
-                                p,
-                                p.set_buffer_for_group(
-                                    c,
-                                    gw.group,
-                                    gw.complete,
-                                    img,
-                                    buffer_splitter
-                                )?
-                            );
+                            lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
                         }
                     } else if let Some(pixels) = gw.pixels {
                         for (c, img) in pixels.into_iter().enumerate() {
-                            pipeline!(
-                                self,
-                                p,
-                                p.set_buffer_for_group(
-                                    c,
-                                    gw.group,
-                                    gw.complete,
-                                    img,
-                                    buffer_splitter
-                                )?
-                            );
+                            lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
                         }
                     }
                 }
 
-                let lf_global = self.lf_global.as_mut().unwrap();
-                let sections: SmallVec<_, 4> = gw.passes.iter().map(|x| x.0 + 2).collect();
-                lf_global.modular_global.process_output(
-                    &sections,
-                    gw.group,
-                    &self.header,
-                    &mut |chan, group, image| {
-                        pipeline!(
-                            self,
-                            p,
-                            p.set_buffer_for_group(chan, group, true, image, buffer_splitter)?
-                        );
-                        Ok(())
-                    },
-                )?;
+                // Track all groups that receive data from process_output.
+                // Squeeze and other transforms can output to groups other than gw.group.
+                let mut groups_with_data: SmallVec<usize, 8> = SmallVec::new();
+                groups_with_data.push(gw.group);
+                {
+                    let lf_global = self.lf_global.as_mut().unwrap();
+                    let sections: SmallVec<_, 4> = gw.passes.iter().map(|x| x.0 + 2).collect();
+                    lf_global.modular_global.process_output(
+                        &sections,
+                        gw.group,
+                        &self.header,
+                        &mut |chan, group, image| {
+                            lmp_mut!().store_buffer_only(chan, group, true, image);
+                            if !groups_with_data.contains(&group) {
+                                groups_with_data.push(group);
+                            }
+                            Ok(())
+                        },
+                    )?;
+                }
 
-                if gw.do_render {
-                    self.groups_to_flush.remove(&gw.group);
+                // Prepare work items for ALL groups that received data.
+                for g in groups_with_data.iter().copied() {
+                    let items = lmp_mut!().prepare_group(g)?;
+                    let has_items = !items.is_empty();
+                    all_items.extend(items);
+                    if g == gw.group {
+                        render_infos.push(GroupRenderInfo {
+                            group: gw.group,
+                            do_render: gw.do_render,
+                            has_items,
+                        });
+                    } else if has_items {
+                        // Other groups that received data from transforms also need
+                        // buffer recycling. Mark them as do_render since their data
+                        // was stored with complete=true.
+                        render_infos.push(GroupRenderInfo {
+                            group: g,
+                            do_render: true,
+                            has_items,
+                        });
+                    }
+                }
+            }
+
+            // Phase 3b: Parallel render — render all work items across threads.
+            if !all_items.is_empty() {
+                // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
+                // output buffers. We don't use buffer_splitter while shared_bufs is alive,
+                // and all sub-views access non-overlapping regions (guaranteed by the
+                // non-overlapping work items from prepare_group).
+                let shared_bufs =
+                    unsafe { SharedOutputBuffers::from_buffer_splitter(buffer_splitter) };
+
+                {
+                    let p = lmp_ref!();
+                    let view = p.read_view();
+                    let (frame_origin, full_image_size) = p.extend_origin_size();
+                    let sbi = p.save_buffer_info();
+                    let input_size = p.input_size();
+                    let factory = p.context_factory();
+
+                    super::decode_thread_pool().install(|| {
+                        // Rayon's try_for_each_init may call init more than once
+                        // per thread (work-splitting), so we create contexts on
+                        // demand via the factory (which is Sync).
+                        all_items.par_iter().try_for_each_init(
+                            || {
+                                factory
+                                    .create(1)
+                                    .expect("failed to allocate render context")
+                            },
+                            |ctx, item| -> Result<()> {
+                                // SAFETY: Each work item covers a non-overlapping region.
+                                let mut local_buffers = unsafe {
+                                    shared_bufs.get_local_buffers(
+                                        sbi,
+                                        item.image_area,
+                                        input_size,
+                                        full_image_size,
+                                        frame_origin,
+                                    )
+                                };
+                                render_group::render(
+                                    ctx,
+                                    &view,
+                                    (item.gx, item.gy),
+                                    item.image_area,
+                                    &mut local_buffers,
+                                )
+                            },
+                        )
+                    })?;
+                }
+            }
+
+            // Phase 3c: Sequential — recycle buffers and update flush state.
+            for ri in &render_infos {
+                if ri.has_items {
+                    lmp_mut!().recycle_group_buffers(ri.group);
+                }
+                if ri.do_render {
+                    self.groups_to_flush.remove(&ri.group);
                 } else {
-                    self.groups_to_flush.insert(gw.group);
+                    self.groups_to_flush.insert(ri.group);
                 }
             }
         }
@@ -824,8 +957,13 @@ impl Frame {
             // Use CMS input profile's channel count, matching libjxl's c_src_.Channels()
             // For CMYK, channels() returns 4; for RGB, 3; for grayscale, 1.
             let in_channels = cms_input.channels();
+            // Create enough transformers for parallel rendering threads.
+            #[cfg(feature = "threads")]
+            let num_transforms = super::MAX_DECODE_THREADS + 2;
+            #[cfg(not(feature = "threads"))]
+            let num_transforms = 1;
             let (out_channels, transformers) = cms.initialize_transforms(
-                1, // num transforms (1 for single-threaded)
+                num_transforms,
                 max_pixels,
                 cms_input,
                 output_profile.clone(),

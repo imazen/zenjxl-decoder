@@ -17,10 +17,10 @@ use super::{PipelineReadView, render_group};
 /// A renderable sub-rect of a group, produced by `prepare_group`.
 /// The parallel render path collects these across multiple groups
 /// and renders them concurrently.
-pub(super) struct RenderWorkItem {
-    pub(super) gx: usize,
-    pub(super) gy: usize,
-    pub(super) image_area: Rect,
+pub(crate) struct RenderWorkItem {
+    pub(crate) gx: usize,
+    pub(crate) gy: usize,
+    pub(crate) image_area: Rect,
 }
 
 pub(super) struct InputBuffer {
@@ -129,7 +129,7 @@ impl LowMemoryRenderPipeline {
 
     /// Extracts border data from a group and computes renderable work items.
     /// Returns an empty vec if not all channels for the group are ready yet.
-    pub(super) fn prepare_group(&mut self, g: usize) -> Result<Vec<RenderWorkItem>> {
+    pub(crate) fn prepare_group(&mut self, g: usize) -> Result<Vec<RenderWorkItem>> {
         let buf = &mut self.input_buffers[g];
         if buf.ready_channels != buf.data.len() {
             return Ok(vec![]);
@@ -273,7 +273,7 @@ impl LowMemoryRenderPipeline {
     }
 
     /// Recycles data and border buffers after rendering a group.
-    pub(super) fn recycle_group_buffers(&mut self, g: usize) {
+    pub(crate) fn recycle_group_buffers(&mut self, g: usize) {
         let (gx, gy) = self.shared.group_position(g);
 
         // Recycle center data buffers.
@@ -320,7 +320,7 @@ impl LowMemoryRenderPipeline {
     }
 
     /// Process a group: prepare borders, render all ready sub-rects, recycle buffers.
-    pub(super) fn render_with_new_group(
+    pub(crate) fn render_with_new_group(
         &mut self,
         g: usize,
         buffer_splitter: &mut BufferSplitter,

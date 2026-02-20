@@ -112,4 +112,41 @@ impl<'a> JxlOutputBuffer<'a> {
             _ph: PhantomData,
         }
     }
+
+    /// Creates a shared view for parallel access to non-overlapping sub-regions.
+    ///
+    /// # Safety
+    /// - The returned SharedOutputView must not outlive this buffer's backing memory
+    /// - This JxlOutputBuffer should not be used while SharedOutputView sub-views exist
+    /// - All sub-views created from the SharedOutputView must access non-overlapping regions
+    #[cfg(feature = "threads")]
+    pub(crate) unsafe fn shared_view(&self) -> SharedOutputView {
+        SharedOutputView { inner: self.inner }
+    }
+}
+
+/// Thread-safe shared access to an output buffer for parallel rendering.
+/// Allows creating sub-views for non-overlapping byte-coordinate regions.
+///
+/// # Safety
+/// The backing memory must remain valid while this view exists.
+/// Callers must ensure all sub-views created via `sub_view` access non-overlapping regions.
+#[cfg(feature = "threads")]
+pub(crate) struct SharedOutputView {
+    inner: RawImageBuffer,
+}
+
+#[cfg(feature = "threads")]
+impl SharedOutputView {
+    /// Creates a sub-view for a rectangle (coordinates in bytes).
+    ///
+    /// # Safety
+    /// The rectangle must not overlap with any other concurrently-accessed sub-view
+    /// created from this SharedOutputView.
+    pub(crate) unsafe fn sub_view(&self, rect: Rect) -> JxlOutputBuffer<'_> {
+        JxlOutputBuffer {
+            inner: self.inner.rect(rect),
+            _ph: PhantomData,
+        }
+    }
 }
