@@ -38,6 +38,26 @@ mod quant_weights;
 pub mod quantizer;
 pub mod render;
 
+/// Maximum number of threads used for parallel group decoding.
+/// Diminishing returns above 6 threads for typical images, and avoids
+/// monopolizing all cores on large machines.
+#[cfg(feature = "threads")]
+const MAX_DECODE_THREADS: usize = 6;
+
+/// Returns a shared rayon thread pool capped at MAX_DECODE_THREADS.
+#[cfg(feature = "threads")]
+fn decode_thread_pool() -> &'static rayon::ThreadPool {
+    use std::sync::OnceLock;
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(MAX_DECODE_THREADS)
+            .thread_name(|i| format!("jxl-decode-{i}"))
+            .build()
+            .expect("failed to create jxl decode thread pool")
+    })
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Section {
     LfGlobal,

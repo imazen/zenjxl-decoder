@@ -293,22 +293,24 @@ impl Frame {
         {
             let lf_global = self.lf_global.as_ref().unwrap();
             let header = &self.header;
-            groups
-                .par_iter_mut()
-                .try_for_each(|(group, passes)| -> Result<()> {
-                    for (pass, br) in passes.iter_mut() {
-                        lf_global.modular_global.read_stream(
-                            ModularStreamId::ModularHF {
-                                group: *group,
-                                pass: *pass,
-                            },
-                            header,
-                            &lf_global.tree,
-                            br,
-                        )?;
-                    }
-                    Ok(())
-                })?;
+            super::decode_thread_pool().install(|| {
+                groups
+                    .par_iter_mut()
+                    .try_for_each(|(group, passes)| -> Result<()> {
+                        for (pass, br) in passes.iter_mut() {
+                            lf_global.modular_global.read_stream(
+                                ModularStreamId::ModularHF {
+                                    group: *group,
+                                    pass: *pass,
+                                },
+                                header,
+                                &lf_global.tree,
+                                br,
+                            )?;
+                        }
+                        Ok(())
+                    })
+            })?;
         }
 
         // Phase 2: Sequential render — push decoded buffers through pipeline.
