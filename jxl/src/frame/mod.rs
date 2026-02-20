@@ -87,7 +87,6 @@ pub struct HfGlobalState {
     num_histograms: u32,
     passes: Vec<PassState>,
     dequant_matrices: DequantMatrices,
-    hf_coefficients: Option<(Image<i32>, Image<i32>, Image<i32>)>,
 }
 
 #[derive(Debug)]
@@ -214,6 +213,10 @@ pub struct Frame {
     color_channels: usize,
     lf_global: Option<LfGlobalState>,
     hf_global: Option<HfGlobalState>,
+    /// Multi-pass HF coefficient accumulation buffer. Separate from HfGlobalState
+    /// so that `&HfGlobalState` and `&mut hf_coefficients` can be borrowed independently,
+    /// enabling parallel VarDCT group decode for single-pass frames.
+    hf_coefficients: Option<(Image<i32>, Image<i32>, Image<i32>)>,
     lf_image: Option<[Image<f32>; 3]>,
     quant_lf: Image<u8>,
     hf_meta: Option<HfMetadata>,

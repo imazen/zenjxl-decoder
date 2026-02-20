@@ -48,7 +48,7 @@ use crate::render::RenderPipelineInOutStage;
 use crate::render::stages::Upsample8x;
 use crate::render::{Channels, ChannelsMut};
 
-fn upsample_lf_group(
+pub(super) fn upsample_lf_group(
     group: usize,
     pixels: &mut [Image<f32>; 3],
     lf_image: &[Image<f32>; 3],
@@ -237,6 +237,7 @@ impl Frame {
             toc,
             lf_global: None,
             hf_global: None,
+            hf_coefficients: None,
             lf_image,
             quant_lf,
             hf_meta,
@@ -441,10 +442,7 @@ impl Frame {
     /// Each LF group's modular data is decoded in parallel using rayon.
     /// Only valid for Encoding::Modular (VarDCT LF groups have shared mutable state).
     #[cfg(feature = "threads")]
-    pub fn decode_lf_groups_modular_parallel(
-        &self,
-        sections: Vec<(usize, Vec<u8>)>,
-    ) -> Result<()> {
+    pub fn decode_lf_groups_modular_parallel(&self, sections: Vec<(usize, Vec<u8>)>) -> Result<()> {
         use rayon::prelude::*;
 
         assert_eq!(self.header.encoding, Encoding::Modular);
@@ -505,7 +503,7 @@ impl Frame {
                 histograms,
             });
         }
-        let hf_coefficients = if passes.len() <= 1 {
+        self.hf_coefficients = if passes.len() <= 1 {
             None
         } else {
             let xs = GROUP_DIM * GROUP_DIM;
@@ -521,7 +519,6 @@ impl Frame {
             num_histograms,
             passes,
             dequant_matrices,
-            hf_coefficients,
         });
         Ok(())
     }
@@ -667,11 +664,15 @@ impl Frame {
             );
         }
 
-        let lf_global = self.lf_global.as_mut().unwrap();
+        let lf_global = self.lf_global.as_ref().unwrap();
         if self.header.encoding == Encoding::VarDCT {
             info!("Decoding VarDCT group {group}");
-            let hf_global = self.hf_global.as_mut().unwrap();
-            let hf_meta = self.hf_meta.as_mut().unwrap();
+            let hf_global = self.hf_global.as_ref().unwrap();
+            let hf_meta = self.hf_meta.as_ref().unwrap();
+            let hf_coeffs = self
+                .hf_coefficients
+                .as_mut()
+                .map(|(a, b, c)| [a.row_mut(group), b.row_mut(group), c.row_mut(group)]);
             let mut pixels = if do_render {
                 Some([
                     pipeline!(self, p, p.get_buffer(0))?,
@@ -709,6 +710,7 @@ impl Frame {
                         .transform_data
                         .opsin_inverse_matrix
                         .quant_biases,
+                    hf_coeffs,
                     &mut pixels,
                     buffers,
                 )?;
@@ -724,15 +726,19 @@ impl Frame {
             }
         }
 
-        for (pass, br) in passes.iter_mut() {
-            lf_global.modular_global.read_stream(
-                ModularStreamId::ModularHF { group, pass: *pass },
-                &self.header,
-                &lf_global.tree,
-                br,
-            )?;
+        {
+            let lf_global = self.lf_global.as_ref().unwrap();
+            for (pass, br) in passes.iter_mut() {
+                lf_global.modular_global.read_stream(
+                    ModularStreamId::ModularHF { group, pass: *pass },
+                    &self.header,
+                    &lf_global.tree,
+                    br,
+                )?;
+            }
         }
         let sections: SmallVec<_, 4> = passes.iter().map(|x| x.0 + 2).collect();
+        let lf_global = self.lf_global.as_mut().unwrap();
         lf_global.modular_global.process_output(
             &sections,
             group,

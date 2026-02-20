@@ -378,11 +378,12 @@ pub fn decode_vardct_group(
     passes: &mut [(usize, BitReader)],
     frame_header: &FrameHeader,
     lf_global: &LfGlobalState,
-    hf_global: &mut HfGlobalState,
+    hf_global: &HfGlobalState,
     hf_meta: &HfMetadata,
     lf_image: &Option<[Image<f32>; 3]>,
     quant_lf: &Image<u8>,
     quant_biases: &[f32; 4],
+    hf_coefficients: Option<[&mut [i32]; 3]>,
     pixels: &mut Option<[Image<f32>; 3]>,
     buffers: &mut VarDctBuffers,
 ) -> Result<(), Error> {
@@ -420,12 +421,8 @@ pub fn decode_vardct_group(
     let quant_lf_rect = quant_lf.get_rect(block_group_rect);
     let block_context_map = lf_global.block_context_map.as_ref().unwrap();
     // TODO(veluca): improve coefficient storage (smaller allocations, use 16 bits if possible).
-    let coeffs = match hf_global.hf_coefficients.as_mut() {
-        Some(hf_coefficients) => [
-            hf_coefficients.0.row_mut(group),
-            hf_coefficients.1.row_mut(group),
-            hf_coefficients.2.row_mut(group),
-        ],
+    let coeffs = match hf_coefficients {
+        Some(rows) => rows,
         None => {
             // Use pooled buffer (already reset to zero in buffers.reset() above)
             let (coeffs_x, coeffs_y_b) = buffers.coeffs_storage.split_at_mut(GROUP_DIM * GROUP_DIM);

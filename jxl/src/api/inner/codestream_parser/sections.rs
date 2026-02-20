@@ -144,10 +144,7 @@ impl CodestreamParser {
                         let Section::Lf { group } = lf_section.section else {
                             unreachable!()
                         };
-                        frame.decode_lf_group(
-                            group,
-                            &mut BitReader::new(&lf_section.data),
-                        )?;
+                        frame.decode_lf_group(group, &mut BitReader::new(&lf_section.data))?;
                         processed_section = true;
                         self.section_state.remaining_lf -= 1;
                     }

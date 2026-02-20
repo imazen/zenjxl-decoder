@@ -21,7 +21,7 @@ use crate::render::buffer_splitter::BufferSplitter;
 use crate::render::{LowMemoryRenderPipeline, RenderPipeline, RenderPipelineBuilder, stages::*};
 use crate::{
     api::JxlPixelFormat,
-    frame::{DecoderState, Frame, LfGlobalState},
+    frame::{DecoderState, Frame, LfGlobalState, decode::upsample_lf_group},
     headers::frame_header::FrameHeader,
 };
 
@@ -231,20 +231,15 @@ impl Frame {
         }
 
         #[cfg(feature = "threads")]
-        let use_parallel = self.header.encoding == Encoding::Modular
-            && groups.len() > 1
-            && !self.header.has_noise();
+        let use_parallel =
+            groups.len() > 1 && !self.header.has_noise() && self.hf_coefficients.is_none();
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
         if use_parallel {
             #[cfg(feature = "threads")]
             {
-                self.decode_modular_groups_parallel(
-                    groups,
-                    &mut buffer_splitter,
-                    do_flush,
-                )?;
+                self.decode_groups_parallel(groups, &mut buffer_splitter, do_flush)?;
             }
         } else {
             for (group, mut passes) in groups {
@@ -270,61 +265,51 @@ impl Frame {
         Ok(())
     }
 
-    /// Parallel decode path for modular (lossless) frames.
+    /// Parallel decode path for both VarDCT and Modular frames.
     ///
-    /// Phase 1: Decode all groups' modular bitstreams in parallel using rayon.
-    ///          read_stream takes &self, so multiple threads can decode concurrently.
-    /// Phase 2: Sequentially push decoded data through the render pipeline.
-    ///          process_output + set_buffer_for_group require &mut self.
+    /// Phase 1 (sequential): Compute per-group render decisions and allocate pixel buffers
+    ///          for VarDCT groups that need rendering.
+    /// Phase 2 (parallel): Each thread decodes its group independently:
+    ///          - VarDCT: entropy decode + dequant + IDCT → pixel buffers (with thread-local VarDctBuffers)
+    ///          - Modular: read_stream for extra channels
+    /// Phase 3 (sequential): Push pixel buffers through the render pipeline.
+    ///
+    /// Requirements for parallel path:
+    /// - `hf_coefficients.is_none()` (single-pass, so HfGlobalState is read-only)
+    /// - No noise (noise generation needs pipeline interaction)
+    /// - More than 1 group
     #[cfg(feature = "threads")]
-    fn decode_modular_groups_parallel(
+    fn decode_groups_parallel(
         &mut self,
         mut groups: Vec<(usize, Vec<(usize, BitReader)>)>,
         buffer_splitter: &mut BufferSplitter,
         do_flush: bool,
     ) -> Result<()> {
-        use rayon::prelude::*;
+        use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
+        use crate::image::Image;
         use crate::util::SmallVec;
+        use rayon::prelude::*;
 
-        // Phase 1: Parallel modular bitstream decode.
-        // read_stream(&self) accesses buffer_info and section_buffer_indices (read-only),
-        // and writes to per-grid ModularBuffer data via AtomicRefCell (thread-safe).
-        {
-            let lf_global = self.lf_global.as_ref().unwrap();
-            let header = &self.header;
-            super::decode_thread_pool().install(|| {
-                groups
-                    .par_iter_mut()
-                    .try_for_each(|(group, passes)| -> Result<()> {
-                        for (pass, br) in passes.iter_mut() {
-                            lf_global.modular_global.read_stream(
-                                ModularStreamId::ModularHF {
-                                    group: *group,
-                                    pass: *pass,
-                                },
-                                header,
-                                &lf_global.tree,
-                                br,
-                            )?;
-                        }
-                        Ok(())
-                    })
-            })?;
+        let last_pass_in_file = self.header.passes.num_passes as usize - 1;
+        let is_vardct = self.header.encoding == Encoding::VarDCT;
+
+        // Phase 1: Sequential — compute render decisions and allocate pixel buffers.
+        struct GroupWork<'a> {
+            group: usize,
+            passes: Vec<(usize, BitReader<'a>)>,
+            complete: bool,
+            do_render: bool,
+            pixels: Option<[Image<f32>; 3]>,
         }
 
-        // Phase 2: Sequential render — push decoded buffers through pipeline.
-        let last_pass_in_file = self.header.passes.num_passes as usize - 1;
-        for (group, passes) in groups {
-            self.decoder_state.check_cancelled()?;
-
-            // Track which passes have been decoded for this group.
+        let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
+        for (group, passes) in groups.drain(..) {
             if let Some((p, _)) = passes.last() {
                 self.last_rendered_pass[group] = Some(*p);
             }
             let pass_to_render = self.last_rendered_pass[group];
             let complete = pass_to_render.is_some_and(|p| p >= last_pass_in_file);
-
             let do_render = if complete {
                 true
             } else if do_flush {
@@ -333,17 +318,130 @@ impl Frame {
                 false
             };
 
-            if !do_render && passes.is_empty() {
-                continue;
+            let pixels = if is_vardct && do_render {
+                Some([
+                    pipeline!(self, p, p.get_buffer(0))?,
+                    pipeline!(self, p, p.get_buffer(1))?,
+                    pipeline!(self, p, p.get_buffer(2))?,
+                ])
+            } else {
+                None
+            };
+
+            work.push(GroupWork {
+                group,
+                passes,
+                complete,
+                do_render,
+                pixels,
+            });
+        }
+
+        // Phase 2: Parallel decode.
+        // For VarDCT: &HfGlobalState is read-only, each thread has its own VarDctBuffers.
+        // For Modular: read_stream(&self) uses AtomicRefCell for thread-safe buffer access.
+        {
+            let lf_global = self.lf_global.as_ref().unwrap();
+            let header = &self.header;
+            let hf_global = self.hf_global.as_ref();
+            let hf_meta = self.hf_meta.as_ref();
+            let lf_image = &self.lf_image;
+            let quant_lf = &self.quant_lf;
+            let quant_biases = &self
+                .decoder_state
+                .file_header
+                .transform_data
+                .opsin_inverse_matrix
+                .quant_biases;
+            super::decode_thread_pool().install(|| {
+                work.par_iter_mut().try_for_each(|gw| -> Result<()> {
+                    // VarDCT entropy decode + dequant + IDCT
+                    if is_vardct && !gw.passes.is_empty() {
+                        let hf_global = hf_global.unwrap();
+                        let hf_meta = hf_meta.unwrap();
+                        let mut buffers = VarDctBuffers::new()?;
+
+                        if gw.pixels.is_none() && gw.do_render {
+                            // LF upsample case — not parallelized (rare)
+                        } else {
+                            decode_vardct_group(
+                                gw.group,
+                                &mut gw.passes,
+                                header,
+                                lf_global,
+                                hf_global,
+                                hf_meta,
+                                lf_image,
+                                quant_lf,
+                                quant_biases,
+                                None, // single-pass: no hf_coefficients
+                                &mut gw.pixels,
+                                &mut buffers,
+                            )?;
+                        }
+                    }
+
+                    // Modular extra channel decode
+                    for (pass, br) in gw.passes.iter_mut() {
+                        lf_global.modular_global.read_stream(
+                            ModularStreamId::ModularHF {
+                                group: gw.group,
+                                pass: *pass,
+                            },
+                            header,
+                            &lf_global.tree,
+                            br,
+                        )?;
+                    }
+                    Ok(())
+                })
+            })?;
+        }
+
+        // Phase 3: Sequential render — push decoded buffers through pipeline.
+        for gw in work {
+            self.decoder_state.check_cancelled()?;
+
+            // VarDCT: push pixel buffers through pipeline
+            if is_vardct {
+                if gw.pixels.is_none() && gw.do_render && gw.passes.is_empty() {
+                    // LF upsample case that wasn't handled in parallel — handle sequentially
+                    let mut pixels = [
+                        pipeline!(self, p, p.get_buffer(0))?,
+                        pipeline!(self, p, p.get_buffer(1))?,
+                        pipeline!(self, p, p.get_buffer(2))?,
+                    ];
+                    upsample_lf_group(
+                        gw.group,
+                        &mut pixels,
+                        self.lf_image.as_ref().unwrap(),
+                        &self.header,
+                        &self.decoder_state.file_header.transform_data,
+                    )?;
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        pipeline!(
+                            self,
+                            p,
+                            p.set_buffer_for_group(c, gw.group, gw.complete, img, buffer_splitter)?
+                        );
+                    }
+                } else if let Some(pixels) = gw.pixels {
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        pipeline!(
+                            self,
+                            p,
+                            p.set_buffer_for_group(c, gw.group, gw.complete, img, buffer_splitter)?
+                        );
+                    }
+                }
             }
 
-            // read_stream was already done in parallel phase — proceed to render.
-            // Note: noise frames are excluded from parallel path (handled sequentially).
+            // Modular: push decoded data through pipeline
             let lf_global = self.lf_global.as_mut().unwrap();
-            let sections: SmallVec<_, 4> = passes.iter().map(|x| x.0 + 2).collect();
+            let sections: SmallVec<_, 4> = gw.passes.iter().map(|x| x.0 + 2).collect();
             lf_global.modular_global.process_output(
                 &sections,
-                group,
+                gw.group,
                 &self.header,
                 &mut |chan, group, image| {
                     pipeline!(
@@ -355,10 +453,10 @@ impl Frame {
                 },
             )?;
 
-            if do_render {
-                self.groups_to_flush.remove(&group);
+            if gw.do_render {
+                self.groups_to_flush.remove(&gw.group);
             } else {
-                self.groups_to_flush.insert(group);
+                self.groups_to_flush.insert(gw.group);
             }
         }
         Ok(())
