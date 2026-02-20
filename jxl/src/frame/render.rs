@@ -230,13 +230,31 @@ impl Frame {
             pipeline!(self, p, p.mark_group_to_rerender(*g));
         }
 
-        for (group, mut passes) in groups {
-            // Check for cancellation between groups
-            self.decoder_state.check_cancelled()?;
-            if !self.decode_hf_group(group, &mut passes, &mut buffer_splitter, do_flush)? {
-                self.groups_to_flush.insert(group);
-            } else {
-                self.groups_to_flush.remove(&group);
+        #[cfg(feature = "threads")]
+        let use_parallel = self.header.encoding == Encoding::Modular
+            && groups.len() > 1
+            && !self.header.has_noise();
+        #[cfg(not(feature = "threads"))]
+        let use_parallel = false;
+
+        if use_parallel {
+            #[cfg(feature = "threads")]
+            {
+                self.decode_modular_groups_parallel(
+                    groups,
+                    &mut buffer_splitter,
+                    do_flush,
+                )?;
+            }
+        } else {
+            for (group, mut passes) in groups {
+                // Check for cancellation between groups
+                self.decoder_state.check_cancelled()?;
+                if !self.decode_hf_group(group, &mut passes, &mut buffer_splitter, do_flush)? {
+                    self.groups_to_flush.insert(group);
+                } else {
+                    self.groups_to_flush.remove(&group);
+                }
             }
         }
 
@@ -249,6 +267,98 @@ impl Frame {
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
 
+        Ok(())
+    }
+
+    /// Parallel decode path for modular (lossless) frames.
+    ///
+    /// Phase 1: Decode all groups' modular bitstreams in parallel using rayon.
+    ///          read_stream takes &self, so multiple threads can decode concurrently.
+    /// Phase 2: Sequentially push decoded data through the render pipeline.
+    ///          process_output + set_buffer_for_group require &mut self.
+    #[cfg(feature = "threads")]
+    fn decode_modular_groups_parallel(
+        &mut self,
+        mut groups: Vec<(usize, Vec<(usize, BitReader)>)>,
+        buffer_splitter: &mut BufferSplitter,
+        do_flush: bool,
+    ) -> Result<()> {
+        use rayon::prelude::*;
+        use super::modular::ModularStreamId;
+        use crate::util::SmallVec;
+
+        // Phase 1: Parallel modular bitstream decode.
+        // read_stream(&self) accesses buffer_info and section_buffer_indices (read-only),
+        // and writes to per-grid ModularBuffer data via AtomicRefCell (thread-safe).
+        {
+            let lf_global = self.lf_global.as_ref().unwrap();
+            let header = &self.header;
+            groups
+                .par_iter_mut()
+                .try_for_each(|(group, passes)| -> Result<()> {
+                    for (pass, br) in passes.iter_mut() {
+                        lf_global.modular_global.read_stream(
+                            ModularStreamId::ModularHF {
+                                group: *group,
+                                pass: *pass,
+                            },
+                            header,
+                            &lf_global.tree,
+                            br,
+                        )?;
+                    }
+                    Ok(())
+                })?;
+        }
+
+        // Phase 2: Sequential render — push decoded buffers through pipeline.
+        let last_pass_in_file = self.header.passes.num_passes as usize - 1;
+        for (group, passes) in groups {
+            self.decoder_state.check_cancelled()?;
+
+            // Track which passes have been decoded for this group.
+            if let Some((p, _)) = passes.last() {
+                self.last_rendered_pass[group] = Some(*p);
+            }
+            let pass_to_render = self.last_rendered_pass[group];
+            let complete = pass_to_render.is_some_and(|p| p >= last_pass_in_file);
+
+            let do_render = if complete {
+                true
+            } else if do_flush {
+                self.allow_rendering_before_last_pass()
+            } else {
+                false
+            };
+
+            if !do_render && passes.is_empty() {
+                continue;
+            }
+
+            // read_stream was already done in parallel phase — proceed to render.
+            // Note: noise frames are excluded from parallel path (handled sequentially).
+            let lf_global = self.lf_global.as_mut().unwrap();
+            let sections: SmallVec<_, 4> = passes.iter().map(|x| x.0 + 2).collect();
+            lf_global.modular_global.process_output(
+                &sections,
+                group,
+                &self.header,
+                &mut |chan, group, image| {
+                    pipeline!(
+                        self,
+                        p,
+                        p.set_buffer_for_group(chan, group, true, image, buffer_splitter)?
+                    );
+                    Ok(())
+                },
+            )?;
+
+            if do_render {
+                self.groups_to_flush.remove(&group);
+            } else {
+                self.groups_to_flush.insert(group);
+            }
+        }
         Ok(())
     }
 

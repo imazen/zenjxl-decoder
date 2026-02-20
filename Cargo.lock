@@ -689,6 +689,7 @@ dependencies = [
  "png 0.17.16",
  "rand",
  "rand_xorshift",
+ "rayon",
  "serde_json",
  "test-log",
  "thiserror",
