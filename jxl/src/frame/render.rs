@@ -12,6 +12,8 @@ use crate::api::JxlOutputBuffer;
 use crate::bit_reader::BitReader;
 use crate::error::{Error, Result};
 use crate::features::epf::SigmaSource;
+#[cfg(feature = "threads")]
+use crate::frame::decode::upsample_lf_group;
 use crate::headers::frame_header::Encoding;
 use crate::headers::{Orientation, color_encoding::ColorSpace, extra_channels::ExtraChannel};
 use crate::image::Rect;
@@ -19,8 +21,6 @@ use crate::image::Rect;
 use crate::render::SimpleRenderPipeline;
 use crate::render::buffer_splitter::BufferSplitter;
 use crate::render::{LowMemoryRenderPipeline, RenderPipeline, RenderPipelineBuilder, stages::*};
-#[cfg(feature = "threads")]
-use crate::frame::decode::upsample_lf_group;
 use crate::{
     api::JxlPixelFormat,
     frame::{DecoderState, Frame, LfGlobalState},
@@ -233,13 +233,10 @@ impl Frame {
         }
 
         #[cfg(all(feature = "threads", not(test)))]
-        let use_parallel =
-            groups.len() > 1 && !self.header.has_noise() && self.hf_coefficients.is_none();
+        let use_parallel = groups.len() > 1 && self.hf_coefficients.is_none();
         #[cfg(all(feature = "threads", test))]
-        let use_parallel = groups.len() > 1
-            && !self.header.has_noise()
-            && self.hf_coefficients.is_none()
-            && !self.use_simple_pipeline;
+        let use_parallel =
+            groups.len() > 1 && self.hf_coefficients.is_none() && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
@@ -285,7 +282,6 @@ impl Frame {
     ///
     /// Requirements:
     /// - `hf_coefficients.is_none()` (single-pass, so HfGlobalState is read-only)
-    /// - No noise (noise generation needs pipeline interaction)
     /// - More than 1 group
     ///
     /// Parallel decode + render path for both VarDCT and Modular frames.
@@ -314,7 +310,7 @@ impl Frame {
         use crate::image::Image;
         use crate::render::buffer_splitter::SharedOutputBuffers;
         use crate::render::low_memory_pipeline::render_group;
-        use crate::util::SmallVec;
+        use crate::util::{SmallVec, Xorshift128Plus};
         use rayon::prelude::*;
 
         // Helper macros to get &mut / & LowMemoryRenderPipeline from the pipeline field.
@@ -503,6 +499,85 @@ impl Frame {
                             lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
                         }
                     }
+                }
+
+                // Generate noise buffers for this group if needed.
+                if self.header.has_noise() && gw.do_render {
+                    let num_channels = self.header.num_extra_channels as usize + 3;
+                    let group_dim = self.header.group_dim() as u32;
+                    let xsize_groups = self.header.size_groups().0;
+                    let gx = (gw.group % xsize_groups) as u32;
+                    let gy = (gw.group / xsize_groups) as u32;
+                    let upsampling = self.header.upsampling;
+                    let upsampled_size = self.header.size_upsampled();
+
+                    let buf_x1 = ((gx + 1) * upsampling * group_dim) as usize;
+                    let buf_y1 = ((gy + 1) * upsampling * group_dim) as usize;
+                    let buf_xsize =
+                        buf_x1.min(upsampled_size.0) - (gx * upsampling * group_dim) as usize;
+                    let buf_ysize =
+                        buf_y1.min(upsampled_size.1) - (gy * upsampling * group_dim) as usize;
+
+                    let bits_to_float = |bits: u32| f32::from_bits((bits >> 9) | 0x3F800000);
+
+                    let mut bufs = [
+                        pipeline!(self, p, p.get_buffer(num_channels)?),
+                        pipeline!(self, p, p.get_buffer(num_channels + 1)?),
+                        pipeline!(self, p, p.get_buffer(num_channels + 2)?),
+                    ];
+
+                    const FLOATS_PER_BATCH: usize = Xorshift128Plus::N * std::mem::size_of::<u64>()
+                        / std::mem::size_of::<f32>();
+                    let mut batch = [0u64; Xorshift128Plus::N];
+
+                    for iy in 0..upsampling {
+                        for ix in 0..upsampling {
+                            let x0 = (gx * upsampling + ix) * group_dim;
+                            let y0 = (gy * upsampling + iy) * group_dim;
+                            let mut rng = Xorshift128Plus::new_with_seeds(
+                                self.decoder_state.visible_frame_index as u32,
+                                self.decoder_state.nonvisible_frame_index as u32,
+                                x0,
+                                y0,
+                            );
+                            let sub_x0 = (ix * group_dim) as usize;
+                            let sub_y0 = (iy * group_dim) as usize;
+                            let sub_x1 = ((ix + 1) * group_dim) as usize;
+                            let sub_y1 = ((iy + 1) * group_dim) as usize;
+                            let sub_xsize = sub_x1.min(buf_xsize).saturating_sub(sub_x0);
+                            let sub_ysize = sub_y1.min(buf_ysize).saturating_sub(sub_y0);
+                            if sub_xsize == 0 || sub_ysize == 0 {
+                                continue;
+                            }
+                            for buf in &mut bufs {
+                                for y in 0..sub_ysize {
+                                    let row = buf.row_mut(sub_y0 + y);
+                                    for batch_index in 0..sub_xsize.div_ceil(FLOATS_PER_BATCH) {
+                                        rng.fill(&mut batch);
+                                        let batch_size = (sub_xsize
+                                            - batch_index * FLOATS_PER_BATCH)
+                                            .min(FLOATS_PER_BATCH);
+                                        for i in 0..batch_size {
+                                            let x = sub_x0 + FLOATS_PER_BATCH * batch_index + i;
+                                            let k = i / 2;
+                                            let high_bytes = i % 2 != 0;
+                                            let bits = if high_bytes {
+                                                ((batch[k] & 0xFFFFFFFF00000000) >> 32) as u32
+                                            } else {
+                                                (batch[k] & 0xFFFFFFFF) as u32
+                                            };
+                                            row[x] = bits_to_float(bits);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let [buf0, buf1, buf2] = bufs;
+                    lmp_mut!().store_buffer_only(num_channels, gw.group, gw.complete, buf0);
+                    lmp_mut!().store_buffer_only(num_channels + 1, gw.group, gw.complete, buf1);
+                    lmp_mut!().store_buffer_only(num_channels + 2, gw.group, gw.complete, buf2);
                 }
 
                 // Track all groups that receive data from process_output.

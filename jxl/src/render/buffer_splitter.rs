@@ -3,9 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::{api::JxlOutputBuffer, headers::Orientation, image::Rect, util::ShiftRightCeil};
 #[cfg(feature = "threads")]
 use crate::image::SharedOutputView;
+use crate::{api::JxlOutputBuffer, headers::Orientation, image::Rect, util::ShiftRightCeil};
 
 // Information for splitting the output buffers.
 #[derive(Debug)]
