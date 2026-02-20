@@ -339,8 +339,8 @@ pub fn decode_jbrd(
 
     let _ = data_pos; // May have trailing bytes from Brotli padding
 
-    // Set component block dimensions (all 4:4:4 for now)
-    // For subsampled JPEG, these would differ per component
+    // Initial block dimensions assuming 4:4:4. For subsampled images,
+    // jpeg_reconstruct() overrides these using the frame header's jpeg_upsampling.
     let xsize_blocks = (width + 7) / 8;
     let ysize_blocks = (height + 7) / 8;
     for comp in &mut components {

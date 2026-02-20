@@ -168,6 +168,28 @@ fn test_jpeg_reconstruction_64x64_420() {
     assert_jpeg_match(&reconstructed, &reference, "64x64 (4:2:0)");
 }
 
+/// 128x128 JPEG with 4:4:4 — encoded by libjxl cjxl v0.12.0.
+#[test]
+fn test_jpeg_reconstruction_libjxl_128x128_444() {
+    let jxl_data =
+        std::fs::read("resources/test/test_128x128_444_libjxl.jxl").unwrap();
+    let reference = std::fs::read("resources/test/test_128x128_444_libjxl.jpg").unwrap();
+    let reconstructed = decode_jpeg_reconstruction(&jxl_data)
+        .expect("JPEG reconstruction should succeed for libjxl 128x128 4:4:4");
+    assert_jpeg_match(&reconstructed, &reference, "128x128 libjxl (4:4:4)");
+}
+
+/// 128x128 JPEG with 4:2:0 — encoded by libjxl cjxl v0.12.0.
+#[test]
+fn test_jpeg_reconstruction_libjxl_128x128_420() {
+    let jxl_data =
+        std::fs::read("resources/test/test_128x128_420_libjxl.jxl").unwrap();
+    let reference = std::fs::read("resources/test/test_128x128_420_libjxl.jpg").unwrap();
+    let reconstructed = decode_jpeg_reconstruction(&jxl_data)
+        .expect("JPEG reconstruction should succeed for libjxl 128x128 4:2:0");
+    assert_jpeg_match(&reconstructed, &reference, "128x128 libjxl (4:2:0)");
+}
+
 /// A regular JXL file without jbrd box should not produce JPEG reconstruction.
 #[test]
 fn test_no_jpeg_reconstruction_for_non_jpeg_jxl() {
