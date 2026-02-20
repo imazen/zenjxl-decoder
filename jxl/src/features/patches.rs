@@ -14,7 +14,7 @@ use crate::{
     features::blending::perform_blending,
     frame::{DecoderState, ReferenceFrame},
     headers::extra_channels::ExtraChannelInfo,
-    util::{NewWithCapacity, slice, tracing_wrappers::*},
+    util::{NewWithCapacity, SmallVec, tracing_wrappers::*},
 };
 
 // Context numbers as specified in Section C.4.5, Listing C.2:
@@ -698,67 +698,57 @@ impl PatchesDictionary {
         reference_frames: &[Option<ReferenceFrame>],
         patches_for_row_result: &mut Vec<usize>,
     ) {
-        // TODO(zond): Allocate a buffer for this when building the stage instead of when executing it.
-        let mut out = row
-            .iter_mut()
-            .map(|s| &mut s[..xsize])
-            .collect::<Vec<&mut [f32]>>();
         let num_ec = extra_channel_info.len();
         assert!(num_ec + 1 == self.blendings_stride);
-        let dummy_fg = vec![0f32];
-        let mut fg = vec![dummy_fg.as_slice(); 3 + num_ec];
+        let num_channels = 3 + num_ec;
+        let dummy_fg = [0f32];
+        let mut fg: SmallVec<&[f32], 8> = SmallVec::new();
+        for _ in 0..num_channels {
+            fg.push(&dummy_fg[..]);
+        }
         self.set_patches_for_row(row_pos.1, &mut *patches_for_row_result);
         for pos_idx in patches_for_row_result.iter() {
             let pos = &self.positions[*pos_idx];
             assert!(row_pos.1 >= pos.y); // assert patch starts at or before current row
-            if pos.x >= row_pos.0 + out[0].len() {
-                // if patch starts before end of current chunk, continue
+            if pos.x >= row_pos.0 + xsize {
                 continue;
             }
 
             let ref_pos = &self.ref_positions[pos.ref_pos_idx];
             assert!(pos.y + ref_pos.ysize > row_pos.1); // assert patch ends after current row
             if pos.x + ref_pos.xsize < row_pos.0 {
-                // if patch ends before current chunk, continue
                 continue;
             }
 
             let (ref_x0, out_x0, ref_xsize) = if pos.x < row_pos.0 {
-                // if patch starts before current chunk
-                // crop the first part of the patch and use the first part of the chunk
                 (
                     ref_pos.x0 + row_pos.0 - pos.x,
                     0,
                     ref_pos.xsize + pos.x - row_pos.0,
                 )
             } else {
-                // otherwise
-                // use the first part of the patch and crop the first part of the chunk
                 (ref_pos.x0, pos.x - row_pos.0, ref_pos.xsize)
             };
-            let (ref_x1, out_x1) = if out[0].len() - out_x0 < ref_xsize {
-                // if rest of chunk is smaller than patch
-                // crop the last part of the patch and use the last part of the chunk
-                (ref_x0 + out[0].len() - out_x0, out[0].len())
+            let (ref_x1, out_x1) = if xsize - out_x0 < ref_xsize {
+                (ref_x0 + xsize - out_x0, xsize)
             } else {
-                // otherwise
-                // use the last part of the patch and crop the last part of the chunk
                 (ref_x0 + ref_xsize, out_x0 + ref_xsize)
             };
             let ref_pos_y = ref_pos.y0 + row_pos.1 - pos.y;
 
+            let ref_frame = reference_frames[ref_pos.reference].as_ref().unwrap();
             for (c, fg_ptr) in fg.iter_mut().enumerate().take(3) {
-                *fg_ptr = &(reference_frames[ref_pos.reference].as_ref().unwrap().frame[c]
-                    .row(ref_pos_y)[ref_x0..ref_x1]);
+                *fg_ptr = &ref_frame.frame[c].row(ref_pos_y)[ref_x0..ref_x1];
             }
             for i in 0..num_ec {
-                fg[3 + i] = &(reference_frames[ref_pos.reference].as_ref().unwrap().frame[3 + i]
-                    .row(ref_pos_y)[ref_x0..ref_x1]);
+                fg[3 + i] = &ref_frame.frame[3 + i].row(ref_pos_y)[ref_x0..ref_x1];
             }
 
             let blending_idx = pos_idx * self.blendings_stride;
+            let mut bg: SmallVec<&mut [f32], 8> =
+                row.iter_mut().map(|s| &mut s[out_x0..out_x1]).collect();
             perform_blending(
-                &mut slice!(&mut out, .., out_x0..out_x1),
+                &mut bg,
                 &fg,
                 &self.blendings[blending_idx],
                 &self.blendings[blending_idx + 1..],

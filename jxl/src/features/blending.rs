@@ -26,8 +26,12 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
         .any(|info| info.ec_type == ExtraChannel::Alpha);
     let num_ec = extra_channel_info.len();
     let xsize = bg[0].as_mut().len();
+    let num_channels = 3 + num_ec;
 
-    let mut tmp = vec![vec![0.0f32; xsize]; 3 + num_ec];
+    // Flat temporary buffer: tmp[c * xsize + x] instead of tmp[c][x].
+    // Single allocation instead of (1 + num_channels) allocations.
+    let mut tmp = vec![0.0f32; num_channels * xsize];
+    let t = |c: usize, x: usize| c * xsize + x;
 
     for i in 0..num_ec {
         let alpha = ec_blending[i].alpha_channel;
@@ -37,26 +41,27 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
         match ec_blending[i].mode {
             PatchBlendMode::Add => {
                 for x in 0..xsize {
-                    tmp[3 + i][x] = bg[3 + i].as_mut()[x] + fg[3 + i].as_ref()[x];
+                    tmp[t(3 + i, x)] = bg[3 + i].as_mut()[x] + fg[3 + i].as_ref()[x];
                 }
             }
             PatchBlendMode::BlendAbove => {
                 if i == alpha {
                     for x in 0..xsize {
                         let fa = maybe_clamp(fg[3 + alpha].as_ref()[x], clamp);
-                        tmp[3 + i][x] = 1.0 - (1.0 - fa) * (1.0 - bg[3 + i].as_mut()[x]);
+                        tmp[t(3 + i, x)] = 1.0 - (1.0 - fa) * (1.0 - bg[3 + i].as_mut()[x]);
                     }
                 } else if alpha_associated {
                     for x in 0..xsize {
                         let fa = maybe_clamp(fg[3 + alpha].as_ref()[x], clamp);
-                        tmp[3 + i][x] = fg[3 + i].as_ref()[x] + bg[3 + i].as_mut()[x] * (1.0 - fa);
+                        tmp[t(3 + i, x)] =
+                            fg[3 + i].as_ref()[x] + bg[3 + i].as_mut()[x] * (1.0 - fa);
                     }
                 } else {
                     for x in 0..xsize {
                         let fa = maybe_clamp(fg[3 + alpha].as_ref()[x], clamp);
                         let new_a = 1.0 - (1.0 - fa) * (1.0 - bg[3 + alpha].as_mut()[x]);
                         let rnew_a = if new_a > 0.0 { 1.0 / new_a } else { 0.0 };
-                        tmp[3 + i][x] = (fg[3 + i].as_ref()[x] * fa
+                        tmp[t(3 + i, x)] = (fg[3 + i].as_ref()[x] * fa
                             + bg[3 + i].as_mut()[x] * bg[3 + alpha].as_mut()[x] * (1.0 - fa))
                             * rnew_a;
                     }
@@ -66,19 +71,20 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
                 if i == alpha {
                     for x in 0..xsize {
                         let ba = maybe_clamp(bg[3 + alpha].as_mut()[x], clamp);
-                        tmp[3 + i][x] = 1.0 - (1.0 - ba) * (1.0 - fg[3 + i].as_ref()[x]);
+                        tmp[t(3 + i, x)] = 1.0 - (1.0 - ba) * (1.0 - fg[3 + i].as_ref()[x]);
                     }
                 } else if alpha_associated {
                     for x in 0..xsize {
                         let ba = maybe_clamp(bg[3 + alpha].as_mut()[x], clamp);
-                        tmp[3 + i][x] = bg[3 + i].as_mut()[x] + fg[3 + i].as_ref()[x] * (1.0 - ba);
+                        tmp[t(3 + i, x)] =
+                            bg[3 + i].as_mut()[x] + fg[3 + i].as_ref()[x] * (1.0 - ba);
                     }
                 } else {
                     for x in 0..xsize {
                         let ba = maybe_clamp(bg[3 + alpha].as_mut()[x], clamp);
                         let new_a = 1.0 - (1.0 - ba) * (1.0 - fg[3 + alpha].as_ref()[x]);
                         let rnew_a = if new_a > 0.0 { 1.0 / new_a } else { 0.0 };
-                        tmp[3 + i][x] = (bg[3 + i].as_mut()[x] * ba
+                        tmp[t(3 + i, x)] = (bg[3 + i].as_mut()[x] * ba
                             + fg[3 + i].as_ref()[x] * fg[3 + alpha].as_ref()[x] * (1.0 - ba))
                             * rnew_a;
                     }
@@ -86,30 +92,34 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
             }
             PatchBlendMode::AlphaWeightedAddAbove => {
                 if i == alpha {
-                    tmp[3 + i].copy_from_slice(bg[3 + i].as_mut());
+                    for x in 0..xsize {
+                        tmp[t(3 + i, x)] = bg[3 + i].as_mut()[x];
+                    }
                 } else if clamp {
                     for x in 0..xsize {
-                        tmp[3 + i][x] = bg[3 + i].as_mut()[x]
+                        tmp[t(3 + i, x)] = bg[3 + i].as_mut()[x]
                             + fg[3 + i].as_ref()[x] * fg[3 + alpha].as_ref()[x].clamp(0.0, 1.0);
                     }
                 } else {
                     for x in 0..xsize {
-                        tmp[3 + i][x] = bg[3 + i].as_mut()[x]
+                        tmp[t(3 + i, x)] = bg[3 + i].as_mut()[x]
                             + fg[3 + i].as_ref()[x] * fg[3 + alpha].as_ref()[x];
                     }
                 }
             }
             PatchBlendMode::AlphaWeightedAddBelow => {
                 if i == alpha {
-                    tmp[3 + i].copy_from_slice(fg[3 + i].as_ref());
+                    for x in 0..xsize {
+                        tmp[t(3 + i, x)] = fg[3 + i].as_ref()[x];
+                    }
                 } else if clamp {
                     for x in 0..xsize {
-                        tmp[3 + i][x] = fg[3 + i].as_ref()[x]
+                        tmp[t(3 + i, x)] = fg[3 + i].as_ref()[x]
                             + bg[3 + i].as_mut()[x] * bg[3 + alpha].as_mut()[x].clamp(0.0, 1.0);
                     }
                 } else {
                     for x in 0..xsize {
-                        tmp[3 + i][x] = fg[3 + i].as_ref()[x]
+                        tmp[t(3 + i, x)] = fg[3 + i].as_ref()[x]
                             + bg[3 + i].as_mut()[x] * bg[3 + alpha].as_mut()[x];
                     }
                 }
@@ -117,20 +127,24 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
             PatchBlendMode::Mul => {
                 if clamp {
                     for x in 0..xsize {
-                        tmp[3 + i][x] =
+                        tmp[t(3 + i, x)] =
                             bg[3 + i].as_mut()[x] * fg[3 + i].as_ref()[x].clamp(0.0, 1.0);
                     }
                 } else {
                     for x in 0..xsize {
-                        tmp[3 + i][x] = bg[3 + i].as_mut()[x] * fg[3 + i].as_ref()[x];
+                        tmp[t(3 + i, x)] = bg[3 + i].as_mut()[x] * fg[3 + i].as_ref()[x];
                     }
                 }
             }
             PatchBlendMode::Replace => {
-                tmp[3 + i].copy_from_slice(fg[3 + i].as_ref());
+                for x in 0..xsize {
+                    tmp[t(3 + i, x)] = fg[3 + i].as_ref()[x];
+                }
             }
             PatchBlendMode::None => {
-                tmp[3 + i].copy_from_slice(bg[3 + i].as_mut());
+                for x in 0..xsize {
+                    tmp[t(3 + i, x)] = bg[3 + i].as_mut()[x];
+                }
             }
         }
     }
@@ -142,7 +156,7 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
         PatchBlendMode::Add => {
             for c in 0..3 {
                 for x in 0..xsize {
-                    tmp[c][x] = bg[c].as_mut()[x] + fg[c].as_ref()[x];
+                    tmp[t(c, x)] = bg[c].as_mut()[x] + fg[c].as_ref()[x];
                 }
             }
         }
@@ -150,16 +164,16 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
             for c in 0..3 {
                 if !has_alpha {
                     for x in 0..xsize {
-                        tmp[c][x] = bg[c].as_mut()[x] + fg[c].as_ref()[x];
+                        tmp[t(c, x)] = bg[c].as_mut()[x] + fg[c].as_ref()[x];
                     }
                 } else if clamp {
                     for x in 0..xsize {
-                        tmp[c][x] = bg[c].as_mut()[x]
+                        tmp[t(c, x)] = bg[c].as_mut()[x]
                             + fg[c].as_ref()[x] * fg[3 + alpha].as_ref()[x].clamp(0.0, 1.0);
                     }
                 } else {
                     for x in 0..xsize {
-                        tmp[c][x] =
+                        tmp[t(c, x)] =
                             bg[c].as_mut()[x] + fg[c].as_ref()[x] * fg[3 + alpha].as_ref()[x];
                     }
                 }
@@ -169,16 +183,16 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
             for c in 0..3 {
                 if !has_alpha {
                     for x in 0..xsize {
-                        tmp[c][x] = bg[c].as_mut()[x] + fg[c].as_ref()[x];
+                        tmp[t(c, x)] = bg[c].as_mut()[x] + fg[c].as_ref()[x];
                     }
                 } else if clamp {
                     for x in 0..xsize {
-                        tmp[c][x] = fg[c].as_ref()[x]
+                        tmp[t(c, x)] = fg[c].as_ref()[x]
                             + bg[c].as_mut()[x] * bg[3 + alpha].as_mut()[x].clamp(0.0, 1.0);
                     }
                 } else {
                     for x in 0..xsize {
-                        tmp[c][x] =
+                        tmp[t(c, x)] =
                             fg[c].as_ref()[x] + bg[c].as_mut()[x] * bg[3 + alpha].as_mut()[x];
                     }
                 }
@@ -187,15 +201,18 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
         PatchBlendMode::BlendAbove => {
             if !has_alpha {
                 for c in 0..3 {
-                    tmp[c].copy_from_slice(fg[c].as_ref());
+                    for x in 0..xsize {
+                        tmp[t(c, x)] = fg[c].as_ref()[x];
+                    }
                 }
             } else if extra_channel_info[alpha].alpha_associated() {
                 for x in 0..xsize {
                     let fa = maybe_clamp(fg[3 + alpha].as_ref()[x], clamp);
                     for c in 0..3 {
-                        tmp[c][x] = fg[c].as_ref()[x] + bg[c].as_mut()[x] * (1.0 - fa);
+                        tmp[t(c, x)] = fg[c].as_ref()[x] + bg[c].as_mut()[x] * (1.0 - fa);
                     }
-                    tmp[3 + alpha][x] = 1.0 - (1.0 - fa) * (1.0 - bg[3 + alpha].as_mut()[x]);
+                    tmp[t(3 + alpha, x)] =
+                        1.0 - (1.0 - fa) * (1.0 - bg[3 + alpha].as_mut()[x]);
                 }
             } else {
                 for x in 0..xsize {
@@ -203,26 +220,29 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
                     let new_a = 1.0 - (1.0 - fa) * (1.0 - bg[3 + alpha].as_mut()[x]);
                     let rnew_a = if new_a > 0.0 { 1.0 / new_a } else { 0.0 };
                     for c in 0..3 {
-                        tmp[c][x] = (fg[c].as_ref()[x] * fa
+                        tmp[t(c, x)] = (fg[c].as_ref()[x] * fa
                             + bg[c].as_mut()[x] * bg[3 + alpha].as_mut()[x] * (1.0 - fa))
                             * rnew_a;
                     }
-                    tmp[3 + alpha][x] = new_a;
+                    tmp[t(3 + alpha, x)] = new_a;
                 }
             }
         }
         PatchBlendMode::BlendBelow => {
             if !has_alpha {
                 for c in 0..3 {
-                    tmp[c].copy_from_slice(bg[c].as_mut());
+                    for x in 0..xsize {
+                        tmp[t(c, x)] = bg[c].as_mut()[x];
+                    }
                 }
             } else if extra_channel_info[alpha].alpha_associated() {
                 for x in 0..xsize {
                     let ba = maybe_clamp(bg[3 + alpha].as_mut()[x], clamp);
                     for c in 0..3 {
-                        tmp[c][x] = bg[c].as_mut()[x] + fg[c].as_ref()[x] * (1.0 - ba);
+                        tmp[t(c, x)] = bg[c].as_mut()[x] + fg[c].as_ref()[x] * (1.0 - ba);
                     }
-                    tmp[3 + alpha][x] = 1.0 - (1.0 - ba) * (1.0 - fg[3 + alpha].as_ref()[x]);
+                    tmp[t(3 + alpha, x)] =
+                        1.0 - (1.0 - ba) * (1.0 - fg[3 + alpha].as_ref()[x]);
                 }
             } else {
                 for x in 0..xsize {
@@ -230,34 +250,39 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
                     let new_a = 1.0 - (1.0 - ba) * (1.0 - fg[3 + alpha].as_ref()[x]);
                     let rnew_a = if new_a > 0.0 { 1.0 / new_a } else { 0.0 };
                     for c in 0..3 {
-                        tmp[c][x] = (bg[c].as_mut()[x] * ba
+                        tmp[t(c, x)] = (bg[c].as_mut()[x] * ba
                             + fg[c].as_ref()[x] * fg[3 + alpha].as_ref()[x] * (1.0 - ba))
                             * rnew_a;
                     }
-                    tmp[3 + alpha][x] = new_a;
+                    tmp[t(3 + alpha, x)] = new_a;
                 }
             }
         }
         PatchBlendMode::Mul => {
             for c in 0..3 {
                 for x in 0..xsize {
-                    tmp[c][x] = bg[c].as_mut()[x] * maybe_clamp(fg[c].as_ref()[x], clamp);
+                    tmp[t(c, x)] = bg[c].as_mut()[x] * maybe_clamp(fg[c].as_ref()[x], clamp);
                 }
             }
         }
         PatchBlendMode::Replace => {
             for c in 0..3 {
-                tmp[c].copy_from_slice(fg[c].as_ref());
+                for x in 0..xsize {
+                    tmp[t(c, x)] = fg[c].as_ref()[x];
+                }
             }
         }
         PatchBlendMode::None => {
             for c in 0..3 {
-                tmp[c].copy_from_slice(bg[c].as_mut());
+                for x in 0..xsize {
+                    tmp[t(c, x)] = bg[c].as_mut()[x];
+                }
             }
         }
     }
-    for i in 0..(3 + num_ec) {
-        bg[i].as_mut().copy_from_slice(&tmp[i]);
+    for c in 0..num_channels {
+        let row = &tmp[c * xsize..(c + 1) * xsize];
+        bg[c].as_mut().copy_from_slice(row);
     }
 }
 
