@@ -54,6 +54,14 @@ impl<S: JxlState> JxlDecoder<S> {
         self.inner.decoded_frames()
     }
 
+    /// Returns the reconstructed JPEG bytes if the file contained a JBRD box.
+    /// Call after decoding a frame. Returns `None` if no JBRD box was present
+    /// or the `jpeg` feature is not enabled.
+    #[cfg(feature = "jpeg")]
+    pub fn take_jpeg_reconstruction(&mut self) -> Option<Vec<u8>> {
+        self.inner.take_jpeg_reconstruction()
+    }
+
     /// Rewinds a decoder to the start of the file, allowing past frames to be displayed again.
     pub fn rewind(mut self) -> JxlDecoder<Initialized> {
         self.inner.rewind();

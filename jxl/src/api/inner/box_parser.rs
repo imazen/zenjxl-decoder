@@ -15,6 +15,8 @@ enum ParseState {
     BoxNeeded,
     CodestreamBox(u64),
     SkippableBox(u64),
+    #[cfg(feature = "jpeg")]
+    JbrdBox(u64),
 }
 
 enum CodestreamBoxType {
@@ -28,6 +30,8 @@ pub(super) struct BoxParser {
     pub(super) box_buffer: SmallBuffer,
     state: ParseState,
     box_type: CodestreamBoxType,
+    #[cfg(feature = "jpeg")]
+    jbrd_data: Option<Vec<u8>>,
 }
 
 impl BoxParser {
@@ -36,7 +40,15 @@ impl BoxParser {
             box_buffer: SmallBuffer::new(128),
             state: ParseState::SignatureNeeded,
             box_type: CodestreamBoxType::None,
+            #[cfg(feature = "jpeg")]
+            jbrd_data: None,
         }
+    }
+
+    /// Take the accumulated JBRD box data, if any was found.
+    #[cfg(feature = "jpeg")]
+    pub(super) fn take_jbrd_data(&mut self) -> Option<Vec<u8>> {
+        self.jbrd_data.take()
     }
 
     // Reads input until the next byte of codestream is available.
@@ -81,6 +93,37 @@ impl BoxParser {
                         self.state = ParseState::BoxNeeded;
                     } else {
                         self.state = ParseState::SkippableBox(s);
+                    }
+                }
+                #[cfg(feature = "jpeg")]
+                ParseState::JbrdBox(mut remaining) => {
+                    // Read jbrd box content into buffer
+                    let num = remaining.min(usize::MAX as u64) as usize;
+                    let jbrd = self.jbrd_data.get_or_insert_with(Vec::new);
+                    if !self.box_buffer.is_empty() {
+                        let avail = self.box_buffer.len().min(num);
+                        jbrd.extend_from_slice(&self.box_buffer[..avail]);
+                        self.box_buffer.consume(avail);
+                        remaining -= avail as u64;
+                    } else {
+                        // Read from input using IoSliceMut
+                        let chunk_size = num.min(65536);
+                        let start = jbrd.len();
+                        jbrd.resize(start + chunk_size, 0);
+                        let read = input.read(
+                            &mut [std::io::IoSliceMut::new(&mut jbrd[start..])],
+                        )?;
+                        if read == 0 {
+                            jbrd.truncate(start);
+                            return Err(Error::OutOfBounds(num));
+                        }
+                        jbrd.truncate(start + read);
+                        remaining -= read as u64;
+                    }
+                    if remaining == 0 {
+                        self.state = ParseState::BoxNeeded;
+                    } else {
+                        self.state = ParseState::JbrdBox(remaining);
                     }
                 }
                 ParseState::BoxNeeded => {
@@ -147,6 +190,10 @@ impl BoxParser {
                                 CodestreamBoxType::Jxlp(idx)
                             };
                             self.state = ParseState::CodestreamBox(content_len);
+                        }
+                        #[cfg(feature = "jpeg")]
+                        b"jbrd" => {
+                            self.state = ParseState::JbrdBox(content_len);
                         }
                         _ => {
                             self.state = ParseState::SkippableBox(content_len);

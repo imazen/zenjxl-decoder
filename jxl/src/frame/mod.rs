@@ -232,6 +232,10 @@ pub struct Frame {
     lf_global_was_rendered: bool,
     /// Reusable buffers for VarDCT group decoding.
     vardct_buffers: Option<group::VarDctBuffers>,
+    /// JPEG coefficient storage for JPEG reconstruction.
+    /// Per-channel arrays of i16 coefficients at image-wide block positions.
+    #[cfg(feature = "jpeg")]
+    jpeg_coeffs: Option<[Vec<i16>; 3]>,
     // Last pass rendered so far for each HF group.
     last_rendered_pass: Vec<Option<usize>>,
     // Groups that should be rendered on the next call to flush().
@@ -332,6 +336,147 @@ impl Frame {
         } else {
             self.color_channels
         }
+    }
+
+    /// Enable JPEG coefficient capture for JPEG reconstruction.
+    /// Must be called before any HF group decode.
+    #[cfg(feature = "jpeg")]
+    pub fn enable_jpeg_reconstruction(&mut self) {
+        let xsize_blocks = (self.header.width as usize + 7) / 8;
+        let ysize_blocks = (self.header.height as usize + 7) / 8;
+        let block_count = xsize_blocks * ysize_blocks;
+        self.jpeg_coeffs = Some([
+            vec![0i16; block_count * 64],
+            vec![0i16; block_count * 64],
+            vec![0i16; block_count * 64],
+        ]);
+    }
+
+    /// Reconstruct the original JPEG from captured coefficients and JBRD metadata.
+    ///
+    /// Must be called after all LF and HF groups have been decoded.
+    /// Returns the byte-exact original JPEG file.
+    #[cfg(feature = "jpeg")]
+    pub fn jpeg_reconstruct(&self, jbrd_data: &[u8]) -> crate::error::Result<Vec<u8>> {
+        use crate::jpeg::data::JpegComponentType;
+        use crate::jpeg::{decode_jbrd, write_jpeg};
+
+        let mut jpeg = decode_jbrd(
+            jbrd_data,
+            self.header.width,
+            self.header.height,
+        )?;
+        let num_components = jpeg.components.len();
+
+        // Get raw quant table from HF global (stored during Raw quant decode)
+        let hf_global = self
+            .hf_global
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::InvalidJbrd("no HF global state".into()))?;
+        let (raw_qt, _qtable_den) = hf_global
+            .dequant_matrices
+            .raw_qtable
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::InvalidJbrd("no raw quant table".into()))?;
+
+        // Channel mapping: JPEG component index → JXL channel index
+        // Encoder uses: jpeg_c_map[jxl_c] = jpeg_c (JXL c0←JPEG Cb, c1←JPEG Y, c2←JPEG Cr)
+        // We need the same mapping to go from JPEG component → JXL channel
+        let jpeg_to_jxl: Vec<usize> = match jpeg.component_type {
+            JpegComponentType::YCbCr => vec![1, 0, 2], // JPEG Y→JXL c1, Cb→JXL c0, Cr→JXL c2
+            _ => (0..num_components).collect(),
+        };
+
+        // Fill quant table values from raw_qtable (transpose JXL→JPEG natural order)
+        for (jpeg_c, &jxl_c) in jpeg_to_jxl.iter().enumerate() {
+            if jpeg_c >= jpeg.components.len() {
+                break;
+            }
+            let quant_idx = jpeg.components[jpeg_c].quant_idx as usize;
+            if quant_idx < jpeg.quant.len() {
+                for y in 0..8 {
+                    for x in 0..8 {
+                        // JXL stores transposed: raw_qt[c*64 + x*8+y] = JPEG qt[y*8+x]
+                        jpeg.quant[quant_idx].values[y * 8 + x] =
+                            raw_qt[jxl_c * 64 + x * 8 + y];
+                    }
+                }
+            }
+        }
+
+        // DC recovery parameters
+        let lf_global = self
+            .lf_global
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::InvalidJbrd("no LF global state".into()))?;
+        let quant_params = lf_global
+            .quant_params
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::InvalidJbrd("no quant params".into()))?;
+        let inv_quant_lf = (quantizer::GLOBAL_SCALE_DENOM as f32)
+            / (quant_params.global_scale as f32 * quant_params.quant_lf as f32);
+        let lf_factors =
+            lf_global
+                .lf_quant
+                .quant_factors
+                .map(|f| f * inv_quant_lf);
+
+        let lf_image = self
+            .lf_image
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::InvalidJbrd("no lf_image".into()))?;
+        let jpeg_coeffs = self
+            .jpeg_coeffs
+            .as_ref()
+            .ok_or_else(|| {
+                crate::error::Error::InvalidJbrd("JPEG coefficient capture not enabled".into())
+            })?;
+
+        let xsize_blocks = (self.header.width as usize + 7) / 8;
+
+        // Build per-component coefficient arrays
+        for (jpeg_c, &jxl_c) in jpeg_to_jxl.iter().enumerate() {
+            if jpeg_c >= jpeg.components.len() {
+                break;
+            }
+            let comp = &mut jpeg.components[jpeg_c];
+            let wb = comp.width_in_blocks as usize;
+            let hb = comp.height_in_blocks as usize;
+            let num_blocks = wb * hb;
+            comp.coeffs = vec![0i16; num_blocks * 64];
+
+            // DC quant value (position [0,0] is transpose-invariant)
+            let q_dc = raw_qt[jxl_c * 64] as i32;
+            let dcoff = if q_dc != 0 { 1024 / q_dc } else { 0 };
+            let fac = lf_factors[jxl_c];
+
+            for by in 0..hb {
+                for bx in 0..wb {
+                    let block_idx = by * wb + bx;
+
+                    // DC recovery from lf_image
+                    // lf_image stores: quant_dc_int * fac_c
+                    // So: quant_dc_int = round(lf_image / fac_c)
+                    // And: jpeg_dc = quant_dc_int - dcoff
+                    let dc_float = lf_image[jxl_c].row(by)[bx];
+                    let quant_dc_int = (dc_float / fac).round() as i32;
+                    let jpeg_dc = quant_dc_int - dcoff;
+                    comp.coeffs[block_idx * 64] = jpeg_dc as i16;
+
+                    // AC coefficients from captured data (already transposed to JPEG order)
+                    let src_block = by * xsize_blocks + bx;
+                    let src_offset = src_block * 64;
+                    if src_offset + 64 <= jpeg_coeffs[jxl_c].len() {
+                        for k in 1..64 {
+                            comp.coeffs[block_idx * 64 + k] =
+                                jpeg_coeffs[jxl_c][src_offset + k];
+                        }
+                    }
+                }
+            }
+        }
+
+        write_jpeg(&jpeg)
     }
 }
 

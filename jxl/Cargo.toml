@@ -25,6 +25,7 @@ jxl_simd = { path = "../jxl_simd", version = "=0.3.0" }
 moxcms = { version = "0.7", optional = true }
 rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
+brotli = { version = "8.0", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 arbtest = "0.3.2"
@@ -44,6 +45,7 @@ avx = ["jxl_simd/avx"]
 avx512 = ["jxl_simd/avx512"]
 neon = ["jxl_simd/neon"]
 cms = ["moxcms"]
+jpeg = ["dep:brotli"]
 threads = ["rayon"]
 
 [lints]

@@ -86,6 +86,13 @@ pub(super) struct CodestreamParser {
     pub frame_callback: Option<Box<FrameCallback>>,
     #[cfg(test)]
     pub decoded_frames: usize,
+
+    /// JBRD box data for JPEG reconstruction.
+    #[cfg(feature = "jpeg")]
+    pub(super) jbrd_data: Option<Vec<u8>>,
+    /// Reconstructed JPEG bytes (populated after decode if jbrd present).
+    #[cfg(feature = "jpeg")]
+    pub(super) jpeg_bytes: Option<Vec<u8>>,
 }
 
 impl CodestreamParser {
@@ -125,6 +132,10 @@ impl CodestreamParser {
             frame_callback: None,
             #[cfg(test)]
             decoded_frames: 0,
+            #[cfg(feature = "jpeg")]
+            jbrd_data: None,
+            #[cfg(feature = "jpeg")]
+            jpeg_bytes: None,
         }
     }
 
@@ -178,6 +189,17 @@ impl CodestreamParser {
         // If we have sections to read, read into sections; otherwise, read into the local buffer.
         loop {
             if !self.sections.is_empty() {
+                // Try to pick up JBRD data that may have arrived during box parsing
+                #[cfg(feature = "jpeg")]
+                if self.jbrd_data.is_none() {
+                    if let Some(data) = box_parser.take_jbrd_data() {
+                        self.jbrd_data = Some(data);
+                        if let Some(frame) = &mut self.frame {
+                            frame.enable_jpeg_reconstruction();
+                        }
+                    }
+                }
+
                 let regular_frame = self.has_visible_frame();
                 // Only skip sections if we don't need the frame data. Frames that can be
                 // referenced must be decoded because they serve as sources for patches,
@@ -372,6 +394,20 @@ impl CodestreamParser {
                     return Ok(());
                 }
                 if self.frame.is_some() {
+                    // Transfer JBRD data from box parser and enable JPEG reconstruction
+                    #[cfg(feature = "jpeg")]
+                    if self.jbrd_data.is_none() {
+                        if let Some(data) = box_parser.take_jbrd_data() {
+                            self.jbrd_data = Some(data);
+                        }
+                    }
+                    #[cfg(feature = "jpeg")]
+                    if self.jbrd_data.is_some() {
+                        if let Some(frame) = &mut self.frame {
+                            frame.enable_jpeg_reconstruction();
+                        }
+                    }
+
                     // Check if this is a preview frame that should be skipped
                     let is_preview_frame = !self.preview_done
                         && self

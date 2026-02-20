@@ -255,6 +255,17 @@ impl CodestreamParser {
             .is_some_and(|info| info.preview_size.is_some());
         let might_be_preview = self.process_without_output && has_preview;
 
+        // Reconstruct JPEG if we have JBRD data (before frame is consumed by finalize)
+        #[cfg(feature = "jpeg")]
+        if let Some(jbrd_data) = &self.jbrd_data {
+            if let Some(frame) = &self.frame {
+                match frame.jpeg_reconstruct(jbrd_data) {
+                    Ok(bytes) => self.jpeg_bytes = Some(bytes),
+                    Err(_) => {} // Reconstruction failed; normal decode continues
+                }
+            }
+        }
+
         let decoder_state = self.frame.take().unwrap().finalize()?;
         if let Some(state) = decoder_state {
             self.decoder_state = Some(state);

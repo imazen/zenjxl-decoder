@@ -247,6 +247,8 @@ impl Frame {
             lf_frame_data,
             lf_global_was_rendered: false,
             vardct_buffers: None,
+            #[cfg(feature = "jpeg")]
+            jpeg_coeffs: None,
             groups_to_flush: BTreeSet::new(),
         })
     }
@@ -713,6 +715,8 @@ impl Frame {
                     hf_coeffs,
                     &mut pixels,
                     buffers,
+                    #[cfg(feature = "jpeg")]
+                    self.jpeg_coeffs.as_mut(),
                 )?;
             }
             if let Some(pixels) = pixels {

@@ -135,6 +135,12 @@ impl JxlDecoderInner {
         self.codestream_parser.has_more_frames
     }
 
+    /// Returns the reconstructed JPEG bytes if the file contained a JBRD box.
+    #[cfg(feature = "jpeg")]
+    pub fn take_jpeg_reconstruction(&mut self) -> Option<Vec<u8>> {
+        self.codestream_parser.jpeg_bytes.take()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.codestream_parser.set_use_simple_pipeline(u);

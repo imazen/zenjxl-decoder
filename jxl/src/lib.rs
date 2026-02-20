@@ -18,6 +18,9 @@ pub mod image;
 pub mod render;
 pub mod util;
 
+#[cfg(feature = "jpeg")]
+pub mod jpeg;
+
 #[cfg(test)]
 mod tests;
 

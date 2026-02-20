@@ -385,6 +385,8 @@ impl Frame {
                                         None,
                                         &mut gw.pixels,
                                         buffers,
+                                        #[cfg(feature = "jpeg")]
+                                        None,
                                     )?;
                                 }
                             }

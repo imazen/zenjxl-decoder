@@ -297,6 +297,9 @@ pub enum Error {
     },
     #[error("Decoding cancelled")]
     Cancelled,
+    #[cfg(feature = "jpeg")]
+    #[error("Invalid JBRD box: {0}")]
+    InvalidJbrd(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

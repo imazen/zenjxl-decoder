@@ -374,6 +374,10 @@ pub struct DequantMatrices {
     /// 17 separate tables, one per QuantTable type.
     /// Uses Cow to allow zero-copy borrowing from static cache for library tables.
     tables: [Cow<'static, [f32]>; QuantTable::CARDINALITY],
+    /// Raw quantization table data for JPEG reconstruction.
+    /// Only stored when table 0 uses Raw encoding and jpeg feature is enabled.
+    #[cfg(feature = "jpeg")]
+    pub raw_qtable: Option<(Vec<i32>, f32)>,
 }
 
 /// Cached computed library tables per QuantTable type.
@@ -1119,6 +1123,9 @@ impl DequantMatrices {
         let all_default = br.read(1)? == 1;
 
         // Compute all tables during decode
+        #[cfg(feature = "jpeg")]
+        let mut raw_qtable: Option<(Vec<i32>, f32)> = None;
+
         let tables: [Cow<'static, [f32]>; QuantTable::CARDINALITY] = if all_default {
             // All library tables - borrow from static cache (zero-copy)
             std::array::from_fn(|idx| Cow::Borrowed(Self::get_library_table(idx)))
@@ -1139,6 +1146,15 @@ impl DequantMatrices {
                     lf_global,
                     br,
                 )?;
+
+                // Save raw quant table for JPEG reconstruction (table 0 = DCT8)
+                #[cfg(feature = "jpeg")]
+                if i == 0 {
+                    if let QuantEncoding::Raw { qtable, qtable_den } = &encoding {
+                        raw_qtable = Some((qtable.clone(), *qtable_den));
+                    }
+                }
+
                 let table = match encoding {
                     QuantEncoding::Library => Cow::Borrowed(Self::get_library_table(i)),
                     _ => Cow::Owned(Self::compute_table(&encoding, i)?.into_vec()),
@@ -1148,7 +1164,11 @@ impl DequantMatrices {
             tables_vec.try_into().unwrap()
         };
 
-        Ok(Self { tables })
+        Ok(Self {
+            tables,
+            #[cfg(feature = "jpeg")]
+            raw_qtable,
+        })
     }
 
     pub const REQUIRED_SIZE_X: [usize; QuantTable::CARDINALITY] =
@@ -1251,6 +1271,8 @@ mod test {
             tables: std::array::from_fn(|idx| {
                 Cow::Borrowed(DequantMatrices::get_library_table(idx))
             }),
+            #[cfg(feature = "jpeg")]
+            raw_qtable: None,
         };
 
         // Golden data produced by libjxl.

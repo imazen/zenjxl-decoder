@@ -386,6 +386,8 @@ pub fn decode_vardct_group(
     hf_coefficients: Option<[&mut [i32]; 3]>,
     pixels: &mut Option<[Image<f32>; 3]>,
     buffers: &mut VarDctBuffers,
+    #[cfg(feature = "jpeg")]
+    mut jpeg_coeffs: Option<&mut [Vec<i16>; 3]>,
 ) -> Result<(), Error> {
     crate::profile!(entropy_decode);
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
@@ -584,6 +586,34 @@ pub fn decode_vardct_group(
                     }
                 }
             }
+            // Capture quantized AC coefficients for JPEG reconstruction
+            #[cfg(feature = "jpeg")]
+            if let Some(ref mut jpeg_coeffs) = jpeg_coeffs {
+                // Only DCT8 (8x8) blocks for JPEG
+                if cx == 1 && cy == 1 {
+                    let abs_bx = block_group_rect.origin.0 + bx;
+                    let abs_by = block_group_rect.origin.1 + by;
+                    let xsize_blocks =
+                        (frame_header.width as usize + BLOCK_DIM - 1) / BLOCK_DIM;
+                    for c in 0..3 {
+                        let src = &coeffs[c][coeffs_offset..coeffs_offset + BLOCK_SIZE];
+                        let dst_offset = (abs_by * xsize_blocks + abs_bx) * BLOCK_SIZE;
+                        if dst_offset + BLOCK_SIZE <= jpeg_coeffs[c].len() {
+                            // Transpose: JPEG natural[y*8+x] = JXL[x*8+y]
+                            for y in 0..BLOCK_DIM {
+                                for x in 0..BLOCK_DIM {
+                                    if x == 0 && y == 0 {
+                                        continue; // DC handled separately
+                                    }
+                                    jpeg_coeffs[c][dst_offset + y * BLOCK_DIM + x] =
+                                        src[x * BLOCK_DIM + y] as i16;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Some(pixels) = pixels {
                 let qblock = [
                     &coeffs[0][coeffs_offset..],
