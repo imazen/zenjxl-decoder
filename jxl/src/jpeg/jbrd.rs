@@ -17,11 +17,7 @@ use super::data::*;
 /// The `jbrd_data` is the raw content of the `jbrd` ISOBMFF box.
 /// The `width` and `height` are taken from the JXL image header since
 /// the JBRD box doesn't redundantly store them.
-pub fn decode_jbrd(
-    jbrd_data: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<JpegData> {
+pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData> {
     let mut reader = BitReader::new(jbrd_data);
 
     // is_gray determines number of components
@@ -54,9 +50,8 @@ pub fn decode_jbrd(
     let mut app_data_lengths = Vec::with_capacity(num_app as usize);
     for _ in 0..num_app {
         let app_type = read_u32_jbrd(&mut reader, &[0, 1], &[(1, 2), (2, 4)])?;
-        let app_mt = AppMarkerType::from_u32(app_type).ok_or_else(|| {
-            Error::InvalidJbrd(format!("invalid app marker type: {app_type}"))
-        })?;
+        let app_mt = AppMarkerType::from_u32(app_type)
+            .ok_or_else(|| Error::InvalidJbrd(format!("invalid app marker type: {app_type}")))?;
         app_marker_type.push(app_mt);
 
         let len = reader.read(16)? as u32 + 1;
@@ -87,9 +82,8 @@ pub fn decode_jbrd(
 
     // Component type
     let comp_type_val = reader.read(2)? as u32;
-    let component_type = JpegComponentType::from_u32(comp_type_val).ok_or_else(|| {
-        Error::InvalidJbrd(format!("invalid component type: {comp_type_val}"))
-    })?;
+    let component_type = JpegComponentType::from_u32(comp_type_val)
+        .ok_or_else(|| Error::InvalidJbrd(format!("invalid component type: {comp_type_val}")))?;
 
     // Component IDs
     let mut components = Vec::with_capacity(num_components);
@@ -228,8 +222,7 @@ pub fn decode_jbrd(
 
     // Scan more info (reset points and extra zero runs)
     for scan in &mut scan_info {
-        let num_reset_points =
-            read_u32_jbrd(&mut reader, &[0], &[(2, 1), (4, 4), (16, 20)])?;
+        let num_reset_points = read_u32_jbrd(&mut reader, &[0], &[(2, 1), (4, 4), (16, 20)])?;
         let mut last_block_idx: i64 = -1;
         for _ in 0..num_reset_points {
             let diff = read_u32_jbrd(&mut reader, &[0], &[(3, 1), (5, 9), (28, 41)])?;
@@ -238,12 +231,10 @@ pub fn decode_jbrd(
             last_block_idx = block_idx as i64;
         }
 
-        let num_extra =
-            read_u32_jbrd(&mut reader, &[0], &[(2, 1), (4, 4), (16, 20)])?;
+        let num_extra = read_u32_jbrd(&mut reader, &[0], &[(2, 1), (4, 4), (16, 20)])?;
         let mut last_block_idx: i64 = -1;
         for _ in 0..num_extra {
-            let num_runs =
-                read_u32_jbrd(&mut reader, &[1], &[(2, 2), (4, 5), (8, 20)])?;
+            let num_runs = read_u32_jbrd(&mut reader, &[1], &[(2, 2), (4, 5), (8, 20)])?;
             let diff = read_u32_jbrd(&mut reader, &[0], &[(3, 1), (5, 9), (28, 41)])?;
             let block_idx = (last_block_idx + 1 + diff as i64) as u32;
             scan.extra_zero_runs.push((block_idx, num_runs));

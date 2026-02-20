@@ -211,8 +211,7 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
                     for c in 0..3 {
                         tmp[t(c, x)] = fg[c].as_ref()[x] + bg[c].as_mut()[x] * (1.0 - fa);
                     }
-                    tmp[t(3 + alpha, x)] =
-                        1.0 - (1.0 - fa) * (1.0 - bg[3 + alpha].as_mut()[x]);
+                    tmp[t(3 + alpha, x)] = 1.0 - (1.0 - fa) * (1.0 - bg[3 + alpha].as_mut()[x]);
                 }
             } else {
                 for x in 0..xsize {
@@ -241,8 +240,7 @@ pub fn perform_blending<T: AsRef<[f32]>, V: AsMut<[f32]>>(
                     for c in 0..3 {
                         tmp[t(c, x)] = bg[c].as_mut()[x] + fg[c].as_ref()[x] * (1.0 - ba);
                     }
-                    tmp[t(3 + alpha, x)] =
-                        1.0 - (1.0 - ba) * (1.0 - fg[3 + alpha].as_ref()[x]);
+                    tmp[t(3 + alpha, x)] = 1.0 - (1.0 - ba) * (1.0 - fg[3 + alpha].as_ref()[x]);
                 }
             } else {
                 for x in 0..xsize {

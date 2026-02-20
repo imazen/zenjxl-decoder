@@ -94,13 +94,9 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
                 0xFF => {
                     // Inter-marker data
                     if intermarker_idx >= jpeg.inter_marker_data.len() {
-                        return Err(Error::InvalidJbrd(
-                            "too many inter-marker data".into(),
-                        ));
+                        return Err(Error::InvalidJbrd("too many inter-marker data".into()));
                     }
-                    writer.write_intermarker_data(
-                        &jpeg.inter_marker_data[intermarker_idx],
-                    );
+                    writer.write_intermarker_data(&jpeg.inter_marker_data[intermarker_idx]);
                     intermarker_idx += 1;
                 }
                 _ => {
@@ -202,7 +198,8 @@ impl<'a> JpegWriter<'a> {
             } else {
                 // 16-bit values in zigzag order
                 for &zi in &ZIGZAG {
-                    self.out.extend_from_slice(&(qt.values[zi] as u16).to_be_bytes());
+                    self.out
+                        .extend_from_slice(&(qt.values[zi] as u16).to_be_bytes());
                 }
             }
         }
@@ -332,8 +329,18 @@ impl<'a> JpegWriter<'a> {
 
         // Calculate MCU dimensions
         let (mcu_rows, mcu_cols) = if is_interleaved {
-            let max_h: u32 = jpeg.components.iter().map(|c| c.h_samp_factor).max().unwrap_or(1);
-            let max_v: u32 = jpeg.components.iter().map(|c| c.v_samp_factor).max().unwrap_or(1);
+            let max_h: u32 = jpeg
+                .components
+                .iter()
+                .map(|c| c.h_samp_factor)
+                .max()
+                .unwrap_or(1);
+            let max_v: u32 = jpeg
+                .components
+                .iter()
+                .map(|c| c.v_samp_factor)
+                .max()
+                .unwrap_or(1);
             let mcu_cols = (jpeg.width + max_h * 8 - 1) / (max_h * 8);
             let mcu_rows = (jpeg.height + max_v * 8 - 1) / (max_v * 8);
             (mcu_rows, mcu_cols)
@@ -400,18 +407,14 @@ impl<'a> JpegWriter<'a> {
                                 encode_dc(&mut bw, 0, &mut dc_pred[comp_idx], dc_table);
                                 encode_ac_eob(&mut bw, ac_table);
                             } else {
-                                let block_offset =
-                                    (by * comp.width_in_blocks + bx) as usize * 64;
-                                let coeffs =
-                                    &comp.coeffs[block_offset..block_offset + 64];
+                                let block_offset = (by * comp.width_in_blocks + bx) as usize * 64;
+                                let coeffs = &comp.coeffs[block_offset..block_offset + 64];
 
                                 // Check for extra zero runs before this block
                                 while extra_zero_idx < scan.extra_zero_runs.len()
-                                    && scan.extra_zero_runs[extra_zero_idx].0
-                                        == block_count
+                                    && scan.extra_zero_runs[extra_zero_idx].0 == block_count
                                 {
-                                    let num_runs =
-                                        scan.extra_zero_runs[extra_zero_idx].1;
+                                    let num_runs = scan.extra_zero_runs[extra_zero_idx].1;
                                     for _ in 0..num_runs {
                                         // Emit ZRL (15 zero run, zero amplitude)
                                         bw.write_huffman(ac_table, 0xF0);

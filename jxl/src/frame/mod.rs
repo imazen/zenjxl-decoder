@@ -366,11 +366,7 @@ impl Frame {
         // kDefaultColorFactor
         const COLOR_FACTOR: i32 = 84;
 
-        let mut jpeg = decode_jbrd(
-            jbrd_data,
-            self.header.width,
-            self.header.height,
-        )?;
+        let mut jpeg = decode_jbrd(jbrd_data, self.header.width, self.header.height)?;
         let num_components = jpeg.components.len();
 
         // Get raw quant table from HF global (stored during Raw quant decode)
@@ -401,8 +397,7 @@ impl Frame {
                 for y in 0..8 {
                     for x in 0..8 {
                         // JXL stores transposed: raw_qt[c*64 + x*8+y] = JPEG qt[y*8+x]
-                        jpeg.quant[quant_idx].values[y * 8 + x] =
-                            raw_qt[jxl_c * 64 + x * 8 + y];
+                        jpeg.quant[quant_idx].values[y * 8 + x] = raw_qt[jxl_c * 64 + x * 8 + y];
                     }
                 }
             }
@@ -429,11 +424,7 @@ impl Frame {
             .ok_or_else(|| crate::error::Error::InvalidJbrd("no quant params".into()))?;
         let inv_quant_lf = (quantizer::GLOBAL_SCALE_DENOM as f32)
             / (quant_params.global_scale as f32 * quant_params.quant_lf as f32);
-        let lf_factors =
-            lf_global
-                .lf_quant
-                .quant_factors
-                .map(|f| f * inv_quant_lf);
+        let lf_factors = lf_global.lf_quant.quant_factors.map(|f| f * inv_quant_lf);
 
         // DC offset: only applied when color_transform is kNone (not YCbCr).
         // For JPEG YCbCr mode (do_ycbcr=true), dcoff is 0.
@@ -443,20 +434,16 @@ impl Frame {
             .lf_image
             .as_ref()
             .ok_or_else(|| crate::error::Error::InvalidJbrd("no lf_image".into()))?;
-        let jpeg_coeffs = self
-            .jpeg_coeffs
-            .as_ref()
-            .ok_or_else(|| {
-                crate::error::Error::InvalidJbrd("JPEG coefficient capture not enabled".into())
-            })?;
+        let jpeg_coeffs = self.jpeg_coeffs.as_ref().ok_or_else(|| {
+            crate::error::Error::InvalidJbrd("JPEG coefficient capture not enabled".into())
+        })?;
 
         // Frame-level padded block dimensions (accounts for chroma subsampling)
         let (frame_xblocks, _frame_yblocks) = self.header.size_blocks();
 
         // Check if all channels are 4:4:4 (no subsampling)
-        let is_444 = (0..3).all(|c| {
-            self.header.raw_hshift(c) == 0 && self.header.raw_vshift(c) == 0
-        });
+        let is_444 =
+            (0..3).all(|c| self.header.raw_hshift(c) == 0 && self.header.raw_vshift(c) == 0);
 
         // CfL maps for undoing chroma-from-luma decorrelation
         let hf_meta = self.hf_meta.as_ref();
@@ -509,7 +496,11 @@ impl Frame {
             let vshift_c = maxvs - self.header.raw_vshift(jxl_c);
 
             let q_dc = raw_qt[jxl_c * 64] as i32;
-            let dcoff = if use_dcoff && q_dc != 0 { 1024 / q_dc } else { 0 };
+            let dcoff = if use_dcoff && q_dc != 0 {
+                1024 / q_dc
+            } else {
+                0
+            };
             let fac = lf_factors[jxl_c];
 
             for by in 0..hb {
@@ -532,8 +523,7 @@ impl Frame {
                     let src_offset = (frame_by * frame_xblocks + frame_bx) * 64;
                     if src_offset + 64 <= jpeg_coeffs[jxl_c].len() {
                         for k in 1..64 {
-                            comp.coeffs[block_idx * 64 + k] =
-                                jpeg_coeffs[jxl_c][src_offset + k];
+                            comp.coeffs[block_idx * 64 + k] = jpeg_coeffs[jxl_c][src_offset + k];
                         }
                     }
 
@@ -564,8 +554,7 @@ impl Frame {
                                     let y_coeff = jpeg_coeffs[1][y_offset + k] as i32;
                                     let qt = scaled_qtable[jxl_c][k];
                                     let coeff_scale = (qt * scale + round) >> CFL_FP;
-                                    let cfl_factor =
-                                        (y_coeff * coeff_scale + round) >> CFL_FP;
+                                    let cfl_factor = (y_coeff * coeff_scale + round) >> CFL_FP;
                                     comp.coeffs[block_idx * 64 + k] += cfl_factor as i16;
                                 }
                             }

@@ -110,9 +110,8 @@ impl BoxParser {
                         let chunk_size = num.min(65536);
                         let start = jbrd.len();
                         jbrd.resize(start + chunk_size, 0);
-                        let read = input.read(
-                            &mut [std::io::IoSliceMut::new(&mut jbrd[start..])],
-                        )?;
+                        let read =
+                            input.read(&mut [std::io::IoSliceMut::new(&mut jbrd[start..])])?;
                         if read == 0 {
                             jbrd.truncate(start);
                             return Err(Error::OutOfBounds(num));

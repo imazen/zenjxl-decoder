@@ -386,8 +386,7 @@ pub fn decode_vardct_group(
     hf_coefficients: Option<[&mut [i32]; 3]>,
     pixels: &mut Option<[Image<f32>; 3]>,
     buffers: &mut VarDctBuffers,
-    #[cfg(feature = "jpeg")]
-    mut jpeg_coeffs: Option<&mut [Vec<i16>; 3]>,
+    #[cfg(feature = "jpeg")] mut jpeg_coeffs: Option<&mut [Vec<i16>; 3]>,
 ) -> Result<(), Error> {
     crate::profile!(entropy_decode);
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
