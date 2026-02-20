@@ -216,7 +216,7 @@ const NUM_TREE_CONTEXTS: usize = 6;
 
 /// Computes properties for tree traversal. Shared between flat and non-flat prediction.
 /// Returns the weighted predictor prediction value.
-#[inline]
+#[inline(always)]
 fn compute_properties(
     prediction_data: PredictionData,
     xsize: usize,
@@ -348,7 +348,7 @@ pub(super) fn predict(
 }
 
 /// Optimized prediction using flat tree (matches C++ context_predict.h:351-371).
-#[inline]
+#[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn predict_flat(
     flat_tree: &[FlatTreeNode],
