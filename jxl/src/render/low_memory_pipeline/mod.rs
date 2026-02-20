@@ -28,10 +28,33 @@ pub(super) mod row_buffers;
 mod run_stage;
 mod save;
 
+/// Per-thread mutable state used during group rendering.
+/// Extracting this from LowMemoryRenderPipeline enables parallel rendering
+/// with multiple GroupRenderContexts sharing the same immutable pipeline data.
+pub(super) struct GroupRenderContext {
+    pub(super) row_buffers: Vec<Vec<RowBuffer>>,
+    pub(super) local_states: Vec<Option<Box<dyn Any + Send>>>,
+}
+
+/// Immutable view of pipeline data needed during rendering.
+/// Bundles all read-only references so render functions can operate
+/// without borrowing the entire pipeline.
+pub(super) struct PipelineReadView<'a> {
+    pub(super) shared: &'a RenderPipelineShared<RowBuffer>,
+    pub(in crate::render::low_memory_pipeline) input_buffers: &'a [InputBuffer],
+    pub(super) stage_input_buffer_index: &'a [Vec<(usize, usize)>],
+    pub(super) downsampling_for_stage: &'a [(usize, usize)],
+    pub(super) stage_output_border_pixels: &'a [(usize, usize)],
+    pub(super) input_border_pixels: &'a [(usize, usize)],
+    pub(super) border_size: (usize, usize),
+    pub(super) opaque_alpha_buffers: &'a [Option<RowBuffer>],
+    pub(super) sorted_buffer_indices: &'a [Vec<(usize, usize, usize)>],
+}
+
 pub struct LowMemoryRenderPipeline {
     shared: RenderPipelineShared<RowBuffer>,
     input_buffers: Vec<InputBuffer>,
-    row_buffers: Vec<Vec<RowBuffer>>,
+    render_ctx: GroupRenderContext,
     save_buffer_info: Vec<Option<SaveStageBufferInfo>>,
     // The input buffer that each channel of each stage should use.
     // This is indexed both by stage index (0 corresponds to input data, 1 to stage[0], etc) and by
@@ -50,8 +73,6 @@ pub struct LowMemoryRenderPipeline {
     // For every stage, the downsampling level of *any* channel that the stage uses at that point.
     // Note that this must be equal across all the used channels.
     downsampling_for_stage: Vec<(usize, usize)>,
-    // Local states of each stage, if any.
-    local_states: Vec<Option<Box<dyn Any + Send>>>,
     // Pre-filled opaque alpha buffers for stages that need fill_opaque_alpha.
     // Indexed by stage index; None if stage doesn't need alpha fill.
     opaque_alpha_buffers: Vec<Option<RowBuffer>>,
@@ -261,20 +282,24 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                 .max(border_pixels_per_stage[s].1 << downsampling_for_stage[s].1);
         }
 
+        let local_states: Vec<_> = shared
+            .stages
+            .iter()
+            .map(|x| x.init_local_state(0)) // Thread index 0 for single-threaded execution
+            .collect::<Result<_>>()?;
+
         Ok(Self {
             input_buffers,
             stage_input_buffer_index,
-            row_buffers,
+            render_ctx: GroupRenderContext {
+                row_buffers,
+                local_states,
+            },
             padding_was_rendered: false,
             save_buffer_info,
             stage_output_border_pixels: border_pixels_per_stage,
             border_size,
             input_border_pixels: border_pixels,
-            local_states: shared
-                .stages
-                .iter()
-                .map(|x| x.init_local_state(0)) // Thread index 0 for single-threaded execution
-                .collect::<Result<_>>()?,
             shared,
             downsampling_for_stage,
             opaque_alpha_buffers,
@@ -406,7 +431,24 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                 full_image_size,
                 (0, 0),
             );
-            self.render_outside_frame(xrange, yrange, &mut local_buffers)?;
+            let view = PipelineReadView {
+                shared: &self.shared,
+                input_buffers: &self.input_buffers,
+                stage_input_buffer_index: &self.stage_input_buffer_index,
+                downsampling_for_stage: &self.downsampling_for_stage,
+                stage_output_border_pixels: &self.stage_output_border_pixels,
+                input_border_pixels: &self.input_border_pixels,
+                border_size: self.border_size,
+                opaque_alpha_buffers: &self.opaque_alpha_buffers,
+                sorted_buffer_indices: &self.sorted_buffer_indices,
+            };
+            render_group::render_outside(
+                &mut self.render_ctx,
+                &view,
+                xrange,
+                yrange,
+                &mut local_buffers,
+            )?;
         }
         Ok(())
     }

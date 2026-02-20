@@ -12,6 +12,8 @@ use crate::render::buffer_splitter::BufferSplitter;
 use crate::render::internal::{ChannelInfo, Stage};
 use crate::util::tracing_wrappers::*;
 
+use super::{PipelineReadView, render_group};
+
 pub(super) struct InputBuffer {
     // One buffer per channel.
     pub(super) data: Vec<Option<OwnedRawImage>>,
@@ -225,55 +227,71 @@ impl LowMemoryRenderPipeline {
         ready_mask[8] &= ready_mask[5];
         ready_mask[8] &= ready_mask[7];
 
-        foreach_ready_rect(ready_mask, |xrange, yrange| {
-            let y0 = match (gy == 0, yrange.start) {
-                (true, 0) => group_rect.origin.1,
-                (false, 0) => group_rect.origin.1 - self.border_size.1,
-                (_, 1) => group_rect.origin.1 + self.border_size.1,
-                // (_, 2)
-                _ => group_rect.end().1 - self.border_size.1,
+        {
+            let view = PipelineReadView {
+                shared: &self.shared,
+                input_buffers: &self.input_buffers,
+                stage_input_buffer_index: &self.stage_input_buffer_index,
+                downsampling_for_stage: &self.downsampling_for_stage,
+                stage_output_border_pixels: &self.stage_output_border_pixels,
+                input_border_pixels: &self.input_border_pixels,
+                border_size: self.border_size,
+                opaque_alpha_buffers: &self.opaque_alpha_buffers,
+                sorted_buffer_indices: &self.sorted_buffer_indices,
             };
-            let x0 = match (gx == 0, xrange.start) {
-                (true, 0) => group_rect.origin.0,
-                (false, 0) => group_rect.origin.0 - self.border_size.0,
-                (_, 1) => group_rect.origin.0 + self.border_size.0,
-                // (_, 2)
-                _ => group_rect.end().0 - self.border_size.0,
-            };
+            let ctx = &mut self.render_ctx;
+            let save_buffer_info = &self.save_buffer_info;
 
-            let y1 = match (gy + 1 == self.shared.group_count.1, yrange.end) {
-                (true, 3) => group_rect.end().1,
-                (false, 3) => group_rect.end().1 + self.border_size.1,
-                (_, 2) => group_rect.end().1 - self.border_size.1,
-                // (_, 1)
-                _ => group_rect.origin.1 + self.border_size.1,
-            };
+            foreach_ready_rect(ready_mask, |xrange, yrange| {
+                let y0 = match (gy == 0, yrange.start) {
+                    (true, 0) => group_rect.origin.1,
+                    (false, 0) => group_rect.origin.1 - view.border_size.1,
+                    (_, 1) => group_rect.origin.1 + view.border_size.1,
+                    // (_, 2)
+                    _ => group_rect.end().1 - view.border_size.1,
+                };
+                let x0 = match (gx == 0, xrange.start) {
+                    (true, 0) => group_rect.origin.0,
+                    (false, 0) => group_rect.origin.0 - view.border_size.0,
+                    (_, 1) => group_rect.origin.0 + view.border_size.0,
+                    // (_, 2)
+                    _ => group_rect.end().0 - view.border_size.0,
+                };
 
-            let x1 = match (gx + 1 == self.shared.group_count.0, xrange.end) {
-                (true, 3) => group_rect.end().0,
-                (false, 3) => group_rect.end().0 + self.border_size.0,
-                (_, 2) => group_rect.end().0 - self.border_size.0,
-                // (_, 1)
-                _ => group_rect.origin.0 + self.border_size.0,
-            };
+                let y1 = match (gy + 1 == view.shared.group_count.1, yrange.end) {
+                    (true, 3) => group_rect.end().1,
+                    (false, 3) => group_rect.end().1 + view.border_size.1,
+                    (_, 2) => group_rect.end().1 - view.border_size.1,
+                    // (_, 1)
+                    _ => group_rect.origin.1 + view.border_size.1,
+                };
 
-            let image_area = Rect {
-                origin: (x0, y0),
-                size: (x1 - x0, y1 - y0),
-            };
+                let x1 = match (gx + 1 == view.shared.group_count.0, xrange.end) {
+                    (true, 3) => group_rect.end().0,
+                    (false, 3) => group_rect.end().0 + view.border_size.0,
+                    (_, 2) => group_rect.end().0 - view.border_size.0,
+                    // (_, 1)
+                    _ => group_rect.origin.0 + view.border_size.0,
+                };
 
-            let mut local_buffers = buffer_splitter.get_local_buffers(
-                &self.save_buffer_info,
-                image_area,
-                false,
-                self.shared.input_size,
-                size,
-                origin,
-            );
+                let image_area = Rect {
+                    origin: (x0, y0),
+                    size: (x1 - x0, y1 - y0),
+                };
 
-            self.render_group((gx, gy), image_area, &mut local_buffers)?;
-            Ok(())
-        })?;
+                let mut local_buffers = buffer_splitter.get_local_buffers(
+                    save_buffer_info,
+                    image_area,
+                    false,
+                    view.shared.input_size,
+                    size,
+                    origin,
+                );
+
+                render_group::render(ctx, &view, (gx, gy), image_area, &mut local_buffers)?;
+                Ok(())
+            })?;
+        }
 
         for c in 0..self.input_buffers[g].data.len() {
             if let Some(b) = std::mem::take(&mut self.input_buffers[g].data[c]) {
