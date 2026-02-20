@@ -377,7 +377,7 @@ pub fn decode_vardct_group(
     group: usize,
     passes: &mut [(usize, BitReader)],
     frame_header: &FrameHeader,
-    lf_global: &mut LfGlobalState,
+    lf_global: &LfGlobalState,
     hf_global: &mut HfGlobalState,
     hf_meta: &HfMetadata,
     lf_image: &Option<[Image<f32>; 3]>,
@@ -418,7 +418,7 @@ pub fn decode_vardct_group(
     let transform_map = hf_meta.transform_map.get_rect(block_group_rect);
     let raw_quant_map = hf_meta.raw_quant_map.get_rect(block_group_rect);
     let quant_lf_rect = quant_lf.get_rect(block_group_rect);
-    let block_context_map = lf_global.block_context_map.as_mut().unwrap();
+    let block_context_map = lf_global.block_context_map.as_ref().unwrap();
     // TODO(veluca): improve coefficient storage (smaller allocations, use 16 bits if possible).
     let coeffs = match hf_global.hf_coefficients.as_mut() {
         Some(hf_coefficients) => [

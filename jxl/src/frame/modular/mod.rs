@@ -496,7 +496,7 @@ impl FullModularImage {
     #[allow(clippy::type_complexity)]
     #[instrument(level = "debug", skip(self, frame_header, global_tree, br), ret)]
     pub fn read_stream(
-        &mut self,
+        &self,
         stream: ModularStreamId,
         frame_header: &FrameHeader,
         global_tree: &Option<Tree>,

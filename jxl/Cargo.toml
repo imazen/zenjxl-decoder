@@ -23,6 +23,7 @@ tracing = { version = "0.1.40", optional = true }
 jxl_macros = { path = "../jxl_macros", version = "=0.3.0" }
 jxl_simd = { path = "../jxl_simd", version = "=0.3.0" }
 moxcms = { version = "0.7", optional = true }
+rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
 
 [dev-dependencies]
@@ -43,6 +44,7 @@ avx = ["jxl_simd/avx"]
 avx512 = ["jxl_simd/avx512"]
 neon = ["jxl_simd/neon"]
 cms = ["moxcms"]
+threads = ["rayon"]
 
 [lints]
 workspace = true
