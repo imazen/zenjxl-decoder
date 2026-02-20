@@ -593,8 +593,8 @@ pub fn decode_vardct_group(
                 if cx == 1 && cy == 1 {
                     let abs_bx = block_group_rect.origin.0 + bx;
                     let abs_by = block_group_rect.origin.1 + by;
-                    let xsize_blocks =
-                        (frame_header.width as usize + BLOCK_DIM - 1) / BLOCK_DIM;
+                    // Use padded block dimensions (accounts for chroma subsampling)
+                    let (xsize_blocks, _) = frame_header.size_blocks();
                     for c in 0..3 {
                         let src = &coeffs[c][coeffs_offset..coeffs_offset + BLOCK_SIZE];
                         let dst_offset = (abs_by * xsize_blocks + abs_bx) * BLOCK_SIZE;

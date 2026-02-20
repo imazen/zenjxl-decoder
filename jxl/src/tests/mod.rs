@@ -14,6 +14,8 @@ pub mod coverage_boost;
 pub mod decode_api;
 pub mod entropy;
 pub mod feature_tests;
+#[cfg(feature = "jpeg")]
+pub mod jpeg_reconstruction;
 pub mod parity;
 pub mod streaming;
 pub mod synthetic;

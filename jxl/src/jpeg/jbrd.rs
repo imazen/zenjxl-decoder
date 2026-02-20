@@ -283,6 +283,8 @@ pub fn decode_jbrd(
     let mut data_pos = 0;
 
     // APP marker data (only Unknown type stored in data stream)
+    // Encoder format: [marker_byte, len_hi, len_lo, payload...]
+    // We strip the 3-byte prefix to store just the payload.
     let mut app_data = Vec::with_capacity(num_app as usize);
     for i in 0..num_app as usize {
         if app_marker_type[i] != AppMarkerType::Unknown {
@@ -293,18 +295,21 @@ pub fn decode_jbrd(
         if data_pos + len > decompressed.len() {
             return Err(Error::InvalidJbrd("truncated APP data".into()));
         }
-        app_data.push(decompressed[data_pos..data_pos + len].to_vec());
+        // Skip 3-byte prefix (marker_byte + 2-byte length field)
+        let skip = 3.min(len);
+        app_data.push(decompressed[data_pos + skip..data_pos + len].to_vec());
         data_pos += len;
     }
 
-    // COM marker data
+    // COM marker data (same format as APP: [marker_byte, len_hi, len_lo, payload...])
     let mut com_data = Vec::with_capacity(num_com as usize);
     for i in 0..num_com as usize {
         let len = com_data_lengths[i] as usize;
         if data_pos + len > decompressed.len() {
             return Err(Error::InvalidJbrd("truncated COM data".into()));
         }
-        com_data.push(decompressed[data_pos..data_pos + len].to_vec());
+        let skip = 3.min(len);
+        com_data.push(decompressed[data_pos + skip..data_pos + len].to_vec());
         data_pos += len;
     }
 

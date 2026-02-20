@@ -12,6 +12,19 @@ use crate::error::{Error, Result};
 
 use super::data::*;
 
+/// JPEG zigzag scan order: maps zigzag position → natural (row-major) position.
+#[rustfmt::skip]
+const ZIGZAG: [usize; 64] = [
+     0,  1,  8, 16,  9,  2,  3, 10,
+    17, 24, 32, 25, 18, 11,  4,  5,
+    12, 19, 26, 33, 40, 48, 41, 34,
+    27, 20, 13,  6,  7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36,
+    29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46,
+    53, 60, 61, 54, 47, 55, 62, 63,
+];
+
 /// Write a complete JPEG file from reconstructed data.
 ///
 /// Returns the byte-exact original JPEG.
@@ -182,14 +195,14 @@ impl<'a> JpegWriter<'a> {
             let pq_tq = ((qt.precision as u8) << 4) | (qt.index as u8);
             self.out.push(pq_tq);
             if qt.precision == 0 {
-                // 8-bit values
-                for &v in &qt.values {
-                    self.out.push(v as u8);
+                // 8-bit values in zigzag order
+                for &zi in &ZIGZAG {
+                    self.out.push(qt.values[zi] as u8);
                 }
             } else {
-                // 16-bit values
-                for &v in &qt.values {
-                    self.out.extend_from_slice(&(v as u16).to_be_bytes());
+                // 16-bit values in zigzag order
+                for &zi in &ZIGZAG {
+                    self.out.extend_from_slice(&(qt.values[zi] as u16).to_be_bytes());
                 }
             }
         }
@@ -412,7 +425,7 @@ impl<'a> JpegWriter<'a> {
                                     &mut dc_pred[comp_idx],
                                     dc_table,
                                 );
-                                encode_ac(&mut bw, &coeffs[1..], ac_table);
+                                encode_ac(&mut bw, coeffs, ac_table);
                             }
 
                             block_count += 1;
@@ -442,23 +455,28 @@ fn encode_dc(bw: &mut BitWriter, dc: i32, dc_pred: &mut i32, table: &HuffmanEnco
     }
 }
 
-/// Encode AC coefficients (positions 1-63) using run-length + Huffman.
-fn encode_ac(bw: &mut BitWriter, coeffs: &[i16], table: &HuffmanEncodeTable) {
+/// Encode AC coefficients in zigzag order using run-length + Huffman.
+/// `block` is a 64-element block in natural (row-major) order.
+fn encode_ac(bw: &mut BitWriter, block: &[i16], table: &HuffmanEncodeTable) {
     let mut zero_run = 0u32;
-    let mut last_nonzero = 62; // index in coeffs (which is 0-based for positions 1-63)
-    // Find last nonzero
-    while last_nonzero > 0 && coeffs[last_nonzero] == 0 {
-        last_nonzero -= 1;
+    // Find last nonzero in zigzag order (zigzag positions 1-63)
+    let mut last_nonzero_zi = 0usize; // zigzag index (1-based)
+    for zi in (1..64).rev() {
+        if block[ZIGZAG[zi]] != 0 {
+            last_nonzero_zi = zi;
+            break;
+        }
     }
 
-    if coeffs[0] == 0 && last_nonzero == 0 {
-        // All zeros — emit EOB
+    if last_nonzero_zi == 0 {
+        // All AC zeros — emit EOB
         bw.write_huffman(table, 0x00);
         return;
     }
 
-    for i in 0..=last_nonzero {
-        if coeffs[i] == 0 {
+    for zi in 1..=last_nonzero_zi {
+        let coeff = block[ZIGZAG[zi]];
+        if coeff == 0 {
             zero_run += 1;
             continue;
         }
@@ -467,7 +485,7 @@ fn encode_ac(bw: &mut BitWriter, coeffs: &[i16], table: &HuffmanEncodeTable) {
             bw.write_huffman(table, 0xF0); // ZRL
             zero_run -= 16;
         }
-        let (category, extra_bits, extra_len) = categorize(coeffs[i] as i32);
+        let (category, extra_bits, extra_len) = categorize(coeff as i32);
         let symbol = ((zero_run as u8) << 4) | (category as u8);
         bw.write_huffman(table, symbol);
         if extra_len > 0 {
@@ -476,8 +494,8 @@ fn encode_ac(bw: &mut BitWriter, coeffs: &[i16], table: &HuffmanEncodeTable) {
         zero_run = 0;
     }
 
-    // EOB if not at position 63
-    if last_nonzero < 62 {
+    // EOB if not at the last zigzag position (63)
+    if last_nonzero_zi < 63 {
         bw.write_huffman(table, 0x00);
     }
 }

@@ -342,8 +342,8 @@ impl Frame {
     /// Must be called before any HF group decode.
     #[cfg(feature = "jpeg")]
     pub fn enable_jpeg_reconstruction(&mut self) {
-        let xsize_blocks = (self.header.width as usize + 7) / 8;
-        let ysize_blocks = (self.header.height as usize + 7) / 8;
+        // Use padded block dimensions (accounts for chroma subsampling)
+        let (xsize_blocks, ysize_blocks) = self.header.size_blocks();
         let block_count = xsize_blocks * ysize_blocks;
         self.jpeg_coeffs = Some([
             vec![0i16; block_count * 64],
@@ -360,6 +360,11 @@ impl Frame {
     pub fn jpeg_reconstruct(&self, jbrd_data: &[u8]) -> crate::error::Result<Vec<u8>> {
         use crate::jpeg::data::JpegComponentType;
         use crate::jpeg::{decode_jbrd, write_jpeg};
+
+        // kCFLFixedPointPrecision from libjxl — fixed-point precision for CfL
+        const CFL_FP: i32 = 11;
+        // kDefaultColorFactor
+        const COLOR_FACTOR: i32 = 84;
 
         let mut jpeg = decode_jbrd(
             jbrd_data,
@@ -380,10 +385,9 @@ impl Frame {
             .ok_or_else(|| crate::error::Error::InvalidJbrd("no raw quant table".into()))?;
 
         // Channel mapping: JPEG component index → JXL channel index
-        // Encoder uses: jpeg_c_map[jxl_c] = jpeg_c (JXL c0←JPEG Cb, c1←JPEG Y, c2←JPEG Cr)
-        // We need the same mapping to go from JPEG component → JXL channel
+        // JXL c0←JPEG Cb, c1←JPEG Y, c2←JPEG Cr
         let jpeg_to_jxl: Vec<usize> = match jpeg.component_type {
-            JpegComponentType::YCbCr => vec![1, 0, 2], // JPEG Y→JXL c1, Cb→JXL c0, Cr→JXL c2
+            JpegComponentType::YCbCr => vec![1, 0, 2],
             _ => (0..num_components).collect(),
         };
 
@@ -404,6 +408,16 @@ impl Frame {
             }
         }
 
+        // Set sampling factors from frame header's jpeg_upsampling
+        for (jpeg_c, &jxl_c) in jpeg_to_jxl.iter().enumerate() {
+            if jpeg_c >= jpeg.components.len() {
+                break;
+            }
+            let comp = &mut jpeg.components[jpeg_c];
+            comp.h_samp_factor = 1 << self.header.raw_hshift(jxl_c);
+            comp.v_samp_factor = 1 << self.header.raw_vshift(jxl_c);
+        }
+
         // DC recovery parameters
         let lf_global = self
             .lf_global
@@ -421,6 +435,10 @@ impl Frame {
                 .quant_factors
                 .map(|f| f * inv_quant_lf);
 
+        // DC offset: only applied when color_transform is kNone (not YCbCr).
+        // For JPEG YCbCr mode (do_ycbcr=true), dcoff is 0.
+        let use_dcoff = !self.header.do_ycbcr;
+
         let lf_image = self
             .lf_image
             .as_ref()
@@ -432,7 +450,48 @@ impl Frame {
                 crate::error::Error::InvalidJbrd("JPEG coefficient capture not enabled".into())
             })?;
 
-        let xsize_blocks = (self.header.width as usize + 7) / 8;
+        // Frame-level padded block dimensions (accounts for chroma subsampling)
+        let (frame_xblocks, _frame_yblocks) = self.header.size_blocks();
+
+        // Check if all channels are 4:4:4 (no subsampling)
+        let is_444 = (0..3).all(|c| {
+            self.header.raw_hshift(c) == 0 && self.header.raw_vshift(c) == 0
+        });
+
+        // CfL maps for undoing chroma-from-luma decorrelation
+        let hf_meta = self.hf_meta.as_ref();
+
+        // Pre-compute scaled quant table ratios for CfL undo.
+        // scaled_qtable[c][j] = (Y_qt[freq] << CFL_FP) / Chroma_qt[freq]
+        // indexed in JPEG natural order (j = row*8+col).
+        let scaled_qtable: [[i32; 64]; 3] = {
+            let mut sq = [[0i32; 64]; 3];
+            for c in [0usize, 2] {
+                for j in 0..64 {
+                    let jxl_pos = (j % 8) * 8 + (j / 8);
+                    let num = raw_qt[64 + jxl_pos]; // Y channel (JXL c1)
+                    let den = raw_qt[c * 64 + jxl_pos]; // Chroma channel
+                    if num > 0 && den > 0 {
+                        sq[c][j] = ((num as i32) << CFL_FP) / (den as i32);
+                    }
+                }
+            }
+            sq
+        };
+
+        // Set per-component block dimensions from frame header
+        let maxhs = self.header.maxhs as usize;
+        let maxvs = self.header.maxvs as usize;
+        for (jpeg_c, &jxl_c) in jpeg_to_jxl.iter().enumerate() {
+            if jpeg_c >= jpeg.components.len() {
+                break;
+            }
+            let hshift_c = maxhs - self.header.raw_hshift(jxl_c);
+            let vshift_c = maxvs - self.header.raw_vshift(jxl_c);
+            let comp = &mut jpeg.components[jpeg_c];
+            comp.width_in_blocks = (frame_xblocks >> hshift_c) as u32;
+            comp.height_in_blocks = (_frame_yblocks >> vshift_c) as u32;
+        }
 
         // Build per-component coefficient arrays
         for (jpeg_c, &jxl_c) in jpeg_to_jxl.iter().enumerate() {
@@ -445,31 +504,71 @@ impl Frame {
             let num_blocks = wb * hb;
             comp.coeffs = vec![0i16; num_blocks * 64];
 
-            // DC quant value (position [0,0] is transpose-invariant)
+            // HShift/VShift for mapping component blocks to frame-level block grid
+            let hshift_c = maxhs - self.header.raw_hshift(jxl_c);
+            let vshift_c = maxvs - self.header.raw_vshift(jxl_c);
+
             let q_dc = raw_qt[jxl_c * 64] as i32;
-            let dcoff = if q_dc != 0 { 1024 / q_dc } else { 0 };
+            let dcoff = if use_dcoff && q_dc != 0 { 1024 / q_dc } else { 0 };
             let fac = lf_factors[jxl_c];
 
             for by in 0..hb {
                 for bx in 0..wb {
                     let block_idx = by * wb + bx;
 
+                    // Map component block to frame-level block position
+                    // For subsampled channels: frame_bx = comp_bx << hshift
+                    let frame_bx = bx << hshift_c;
+                    let frame_by = by << vshift_c;
+
                     // DC recovery from lf_image
-                    // lf_image stores: quant_dc_int * fac_c
-                    // So: quant_dc_int = round(lf_image / fac_c)
-                    // And: jpeg_dc = quant_dc_int - dcoff
                     let dc_float = lf_image[jxl_c].row(by)[bx];
                     let quant_dc_int = (dc_float / fac).round() as i32;
                     let jpeg_dc = quant_dc_int - dcoff;
-                    comp.coeffs[block_idx * 64] = jpeg_dc as i16;
+                    comp.coeffs[block_idx * 64] = jpeg_dc.clamp(-2047, 2047) as i16;
 
                     // AC coefficients from captured data (already transposed to JPEG order)
-                    let src_block = by * xsize_blocks + bx;
-                    let src_offset = src_block * 64;
+                    // Captured at frame-level block position
+                    let src_offset = (frame_by * frame_xblocks + frame_bx) * 64;
                     if src_offset + 64 <= jpeg_coeffs[jxl_c].len() {
                         for k in 1..64 {
                             comp.coeffs[block_idx * 64 + k] =
                                 jpeg_coeffs[jxl_c][src_offset + k];
+                        }
+                    }
+
+                    // CfL undo for chroma channels (JXL c0=Cb, c2=Cr)
+                    // libjxl's encoder applies integer CfL decorrelation for 4:4:4 JPEGs:
+                    //   stored_chroma = original_chroma - cfl_factor
+                    // We undo it:
+                    //   original_chroma = stored_chroma + cfl_factor
+                    if is_444 && (jxl_c == 0 || jxl_c == 2) {
+                        if let Some(meta) = hf_meta {
+                            let tile_x = frame_bx / color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS;
+                            let tile_y = frame_by / color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS;
+                            let map_val = if jxl_c == 0 {
+                                meta.ytox_map.row(tile_y)[tile_x] as i32
+                            } else {
+                                meta.ytob_map.row(tile_y)[tile_x] as i32
+                            };
+
+                            if map_val != 0 {
+                                // RatioJPEG: factor * (1 << CFL_FP) / kDefaultColorFactor
+                                let scale = map_val * (1 << CFL_FP) / COLOR_FACTOR;
+                                let round = 1i32 << (CFL_FP - 1);
+
+                                // Y coefficients at the same frame block position (JXL c1)
+                                let y_offset = src_offset;
+
+                                for k in 1..64 {
+                                    let y_coeff = jpeg_coeffs[1][y_offset + k] as i32;
+                                    let qt = scaled_qtable[jxl_c][k];
+                                    let coeff_scale = (qt * scale + round) >> CFL_FP;
+                                    let cfl_factor =
+                                        (y_coeff * coeff_scale + round) >> CFL_FP;
+                                    comp.coeffs[block_idx * 64 + k] += cfl_factor as i16;
+                                }
+                            }
                         }
                     }
                 }
