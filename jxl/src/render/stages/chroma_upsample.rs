@@ -76,7 +76,7 @@ impl RenderPipelineInOutStage for HorizontalChromaUpsample {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         crate::profile!(chroma_upsample);
         let input = &input_rows[0];
@@ -164,7 +164,7 @@ impl RenderPipelineInOutStage for VerticalChromaUpsample {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         crate::profile!(chroma_upsample);
         let input = &input_rows[0];

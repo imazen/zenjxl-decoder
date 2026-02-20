@@ -50,7 +50,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
             end_of_row,
         }: ExtraInfo,
         buffers: &mut [&mut RowBuffer],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     ) {
         let x0 = RowBuffer::x0_offset::<T::Type>();
         let xpre = if start_of_row { 0 } else { out_extra_x };
@@ -85,7 +85,7 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
         }: ExtraInfo,
         input_buffers: &[&RowBuffer],
         output_buffers: &mut [RowBuffer],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     ) {
         let ibordery = Self::BORDER.1 as isize;
         let x0 = RowBuffer::x0_offset::<T::InputT>();

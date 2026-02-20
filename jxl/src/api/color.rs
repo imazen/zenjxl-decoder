@@ -1394,7 +1394,7 @@ pub trait JxlCms {
         input: JxlColorProfile,
         output: JxlColorProfile,
         intensity_target: f32,
-    ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send>>)>;
+    ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send + Sync>>)>;
 }
 
 /// Writes a u32 value in big-endian format to the slice at the given position.

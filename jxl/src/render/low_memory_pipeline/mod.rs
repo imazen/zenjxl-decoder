@@ -51,7 +51,7 @@ pub struct LowMemoryRenderPipeline {
     // Note that this must be equal across all the used channels.
     downsampling_for_stage: Vec<(usize, usize)>,
     // Local states of each stage, if any.
-    local_states: Vec<Option<Box<dyn Any>>>,
+    local_states: Vec<Option<Box<dyn Any + Send>>>,
     // Pre-filled opaque alpha buffers for stages that need fill_opaque_alpha.
     // Indexed by stage index; None if stage doesn't need alpha fill.
     opaque_alpha_buffers: Vec<Option<RowBuffer>>,
@@ -415,15 +415,15 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         self.input_buffers[g].is_ready = false;
     }
 
-    fn box_inout_stage<S: super::RenderPipelineInOutStage>(
+    fn box_inout_stage<S: super::RenderPipelineInOutStage + Send + Sync>(
         stage: S,
-    ) -> Box<dyn RunInOutStage<Self::Buffer>> {
+    ) -> Box<dyn RunInOutStage<Self::Buffer> + Send + Sync> {
         Box::new(stage)
     }
 
-    fn box_inplace_stage<S: super::RenderPipelineInPlaceStage>(
+    fn box_inplace_stage<S: super::RenderPipelineInPlaceStage + Send + Sync>(
         stage: S,
-    ) -> Box<dyn RunInPlaceStage<Self::Buffer>> {
+    ) -> Box<dyn RunInPlaceStage<Self::Buffer> + Send + Sync> {
         Box::new(stage)
     }
 }

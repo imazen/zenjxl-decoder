@@ -199,15 +199,15 @@ impl RenderPipeline for SimpleRenderPipeline {
 
     fn mark_group_to_rerender(&mut self, _g: usize) {}
 
-    fn box_inout_stage<S: RenderPipelineInOutStage>(
+    fn box_inout_stage<S: RenderPipelineInOutStage + Send + Sync>(
         stage: S,
-    ) -> Box<dyn super::RunInOutStage<Self::Buffer>> {
+    ) -> Box<dyn super::RunInOutStage<Self::Buffer> + Send + Sync> {
         Box::new(stage)
     }
 
-    fn box_inplace_stage<S: RenderPipelineInPlaceStage>(
+    fn box_inplace_stage<S: RenderPipelineInPlaceStage + Send + Sync>(
         stage: S,
-    ) -> Box<dyn super::RunInPlaceStage<Self::Buffer>> {
+    ) -> Box<dyn super::RunInPlaceStage<Self::Buffer> + Send + Sync> {
         Box::new(stage)
     }
 }

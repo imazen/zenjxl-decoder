@@ -126,7 +126,7 @@ impl RenderPipelineInPlaceStage for ToLinearStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         to_linear_process_dispatch(&self.tf, xsize, row)
     }

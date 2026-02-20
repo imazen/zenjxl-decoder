@@ -237,7 +237,7 @@ impl RenderPipelineInPlaceStage for XybStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let [row_x, row_y, row_b] = row else {
             panic!(

@@ -35,7 +35,7 @@ impl RenderPipelineInPlaceStage for PatchesStage {
         position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     ) {
         let state: &mut Vec<usize> = state.unwrap().downcast_mut().unwrap();
         self.patches.add_one_row(
@@ -48,9 +48,12 @@ impl RenderPipelineInPlaceStage for PatchesStage {
         );
     }
 
-    fn init_local_state(&self, _thread_index: usize) -> crate::error::Result<Option<Box<dyn Any>>> {
+    fn init_local_state(
+        &self,
+        _thread_index: usize,
+    ) -> crate::error::Result<Option<Box<dyn Any + Send>>> {
         let patches_for_row_result = Vec::<usize>::new_with_capacity(self.patches.positions.len())?;
-        Ok(Some(Box::new(patches_for_row_result) as Box<dyn Any>))
+        Ok(Some(Box::new(patches_for_row_result) as Box<dyn Any + Send>))
     }
 }
 

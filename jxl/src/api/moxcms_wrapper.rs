@@ -162,7 +162,7 @@ impl JxlCms for MoxCms {
         input: JxlColorProfile,
         output: JxlColorProfile,
         _intensity_target: f32,
-    ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer>>)> {
+    ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send + Sync>>)> {
         let src_profile = to_moxcms_profile(&input)?;
         let dst_profile = to_moxcms_profile(&output)?;
 
@@ -176,7 +176,7 @@ impl JxlCms for MoxCms {
         // Note: skcms may use profile's embedded intent, which we don't currently extract.
         let options = moxcms::TransformOptions::default();
 
-        let mut transforms: Vec<Box<dyn JxlCmsTransformer>> = Vec::with_capacity(n);
+        let mut transforms: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = Vec::with_capacity(n);
 
         for _ in 0..n {
             let transform = src_profile

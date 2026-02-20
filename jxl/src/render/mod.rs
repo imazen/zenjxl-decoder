@@ -43,7 +43,7 @@ pub(crate) use low_memory_pipeline::LowMemoryRenderPipeline;
 pub(crate) use simple_pipeline::SimpleRenderPipeline;
 
 /// Modifies channels in-place.
-pub trait RenderPipelineInPlaceStage: Any + std::fmt::Display {
+pub trait RenderPipelineInPlaceStage: Any + std::fmt::Display + Send + Sync {
     type Type: ImageDataType;
 
     fn process_row_chunk(
@@ -52,10 +52,10 @@ pub trait RenderPipelineInPlaceStage: Any + std::fmt::Display {
         xsize: usize,
         // one for each channel
         row: &mut [&mut [Self::Type]],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     );
 
-    fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any>>> {
+    fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         Ok(None)
     }
 
@@ -74,7 +74,7 @@ pub trait RenderPipelineInPlaceStage: Any + std::fmt::Display {
 ///    padding on either side.
 ///  - the output slice contains 1 << SHIFT.1 slices, each of length xsize << SHIFT.0, the
 ///    corresponding output pixels.
-pub trait RenderPipelineInOutStage: Any + std::fmt::Display {
+pub trait RenderPipelineInOutStage: Any + std::fmt::Display + Send + Sync {
     type InputT: ImageDataType;
     type OutputT: ImageDataType;
 
@@ -89,10 +89,10 @@ pub trait RenderPipelineInOutStage: Any + std::fmt::Display {
         input_rows: &Channels<Self::InputT>,
         // channel, row, column
         output_rows: &mut ChannelsMut<Self::OutputT>,
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     );
 
-    fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any>>> {
+    fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         Ok(None)
     }
 
@@ -133,11 +133,11 @@ pub(crate) trait RenderPipeline: Sized {
     // Marks a group for being re-rendered later.
     fn mark_group_to_rerender(&mut self, g: usize);
 
-    fn box_inout_stage<S: RenderPipelineInOutStage>(
+    fn box_inout_stage<S: RenderPipelineInOutStage + Send + Sync>(
         stage: S,
-    ) -> Box<dyn RunInOutStage<Self::Buffer>>;
+    ) -> Box<dyn RunInOutStage<Self::Buffer> + Send + Sync>;
 
-    fn box_inplace_stage<S: RenderPipelineInPlaceStage>(
+    fn box_inplace_stage<S: RenderPipelineInPlaceStage + Send + Sync>(
         stage: S,
-    ) -> Box<dyn RunInPlaceStage<Self::Buffer>>;
+    ) -> Box<dyn RunInPlaceStage<Self::Buffer> + Send + Sync>;
 }

@@ -42,7 +42,7 @@ impl RenderPipelineInOutStage for ConvertU8F32Stage {
         xsize: usize,
         input_rows: &Channels<u8>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = &input_rows[0];
         for i in 0..xsize {
@@ -93,7 +93,7 @@ impl RenderPipelineInOutStage for ConvertModularXYBToF32Stage {
         xsize: usize,
         input_rows: &Channels<i32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let [scale_x, scale_y, scale_b] = self.scale;
         assert_eq!(
@@ -273,7 +273,7 @@ impl RenderPipelineInOutStage for ConvertModularToF32Stage {
         xsize: usize,
         input_rows: &Channels<i32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = &input_rows[0];
         if self.bit_depth.floating_point_sample() {
@@ -351,7 +351,7 @@ impl RenderPipelineInOutStage for ConvertF32ToU8Stage {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = input_rows[0][0];
         let output = &mut output_rows[0][0];
@@ -423,7 +423,7 @@ impl RenderPipelineInOutStage for ConvertF32ToU16Stage {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u16>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = input_rows[0][0];
         let output = &mut output_rows[0][0];
@@ -465,7 +465,7 @@ impl RenderPipelineInOutStage for ConvertF32ToF16Stage {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<crate::util::f16>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = &input_rows[0];
         for i in 0..xsize {

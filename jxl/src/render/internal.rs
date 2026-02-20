@@ -15,14 +15,17 @@ use super::stages::ExtendToImageDimensionsStage;
 use super::{RenderPipelineInOutStage, RenderPipelineInPlaceStage};
 
 pub enum Stage<Buffer> {
-    InPlace(Box<dyn RunInPlaceStage<Buffer>>),
-    InOut(Box<dyn RunInOutStage<Buffer>>),
+    InPlace(Box<dyn RunInPlaceStage<Buffer> + Send + Sync>),
+    InOut(Box<dyn RunInOutStage<Buffer> + Send + Sync>),
     Save(SaveStage),
     Extend(ExtendToImageDimensionsStage),
 }
 
 impl<Buffer: 'static> Stage<Buffer> {
-    pub(super) fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any>>> {
+    pub(super) fn init_local_state(
+        &self,
+        thread_index: usize,
+    ) -> Result<Option<Box<dyn Any + Send>>> {
         match self {
             Stage::InPlace(s) => s.init_local_state(thread_index),
             Stage::InOut(s) => s.init_local_state(thread_index),
@@ -166,23 +169,23 @@ pub trait PipelineBuffer {
     type InOutExtraInfo;
 }
 
-pub trait InPlaceStage: Any + Display {
-    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any>>>;
+pub trait InPlaceStage: Any + Display + Send + Sync {
+    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>>;
     fn uses_channel(&self, c: usize) -> bool;
     fn ty(&self) -> DataTypeTag;
 }
 
-pub trait RunInPlaceStage<Buffer: PipelineBuffer>: InPlaceStage {
+pub trait RunInPlaceStage<Buffer: PipelineBuffer>: InPlaceStage + Send + Sync {
     fn run_stage_on(
         &self,
         info: Buffer::InPlaceExtraInfo,
         buffers: &mut [&mut Buffer],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     );
 }
 
-impl<T: RenderPipelineInPlaceStage> InPlaceStage for T {
-    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any>>> {
+impl<T: RenderPipelineInPlaceStage + Send + Sync> InPlaceStage for T {
+    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         self.init_local_state(thread_index)
     }
     fn uses_channel(&self, c: usize) -> bool {
@@ -193,8 +196,8 @@ impl<T: RenderPipelineInPlaceStage> InPlaceStage for T {
     }
 }
 
-pub trait InOutStage: Any + Display {
-    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any>>>;
+pub trait InOutStage: Any + Display + Send + Sync {
+    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>>;
     fn shift(&self) -> (u8, u8);
     fn border(&self) -> (u8, u8);
     fn uses_channel(&self, c: usize) -> bool;
@@ -202,8 +205,8 @@ pub trait InOutStage: Any + Display {
     fn output_type(&self) -> DataTypeTag;
 }
 
-impl<T: RenderPipelineInOutStage> InOutStage for T {
-    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any>>> {
+impl<T: RenderPipelineInOutStage + Send + Sync> InOutStage for T {
+    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         self.init_local_state(thread_index)
     }
     fn uses_channel(&self, c: usize) -> bool {
@@ -223,12 +226,12 @@ impl<T: RenderPipelineInOutStage> InOutStage for T {
     }
 }
 
-pub trait RunInOutStage<Buffer: PipelineBuffer>: InOutStage {
+pub trait RunInOutStage<Buffer: PipelineBuffer>: InOutStage + Send + Sync {
     fn run_stage_on(
         &self,
         info: Buffer::InOutExtraInfo,
         input_buffers: &[&Buffer],
         output_buffers: &mut [Buffer],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     );
 }

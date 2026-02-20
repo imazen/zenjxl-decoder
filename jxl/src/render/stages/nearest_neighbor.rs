@@ -40,7 +40,7 @@ impl RenderPipelineInOutStage for NearestNeighbourUpsample {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = &input_rows[0];
         let output = &mut output_rows[0];

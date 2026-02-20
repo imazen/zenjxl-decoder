@@ -32,7 +32,7 @@ struct CmsLocalState {
 ///
 /// Output is written to row[0..out_channels].
 pub struct CmsStage {
-    transformers: Vec<AtomicRefCell<Box<dyn JxlCmsTransformer + Send>>>,
+    transformers: Vec<AtomicRefCell<Box<dyn JxlCmsTransformer + Send + Sync>>>,
     /// Number of input channels (3 for RGB, 4 for CMYK).
     in_channels: usize,
     /// Number of output channels (typically 3 for RGB output).
@@ -66,7 +66,7 @@ impl CmsStage {
     /// CmsStage::new(transformers, 4, 3, Some(5), max_pixels);
     /// ```
     pub fn new(
-        transformers: Vec<Box<dyn JxlCmsTransformer + Send>>,
+        transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>>,
         in_channels: usize,
         out_channels: usize,
         black_channel: Option<usize>,
@@ -132,7 +132,7 @@ impl RenderPipelineInPlaceStage for CmsStage {
         c < self.in_channels.min(3) || self.black_channel == Some(c)
     }
 
-    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any>>> {
+    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         if self.transformers.is_empty() {
             return Ok(None);
         }
@@ -155,7 +155,7 @@ impl RenderPipelineInPlaceStage for CmsStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        state: Option<&mut dyn Any>,
+        state: Option<&mut (dyn Any + Send)>,
     ) {
         let Some(state) = state else {
             return;
@@ -334,12 +334,13 @@ mod tests {
     #[test]
     fn test_cms_stage_rgb_inplace() {
         // Test 3->3 channel transform (uses in-place)
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> = vec![Box::new(ScaleTransformer)];
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
+            vec![Box::new(ScaleTransformer)];
         let stage = CmsStage::new(transformers, 3, 3, None, 16);
 
         // Initialize state for thread 0
         let state = stage.init_local_state(0).unwrap().unwrap();
-        let mut state_ref: Box<dyn Any> = state;
+        let mut state_ref: Box<dyn Any + Send> = state;
 
         // Create test data: 3 channels, 4 pixels
         let mut ch0 = vec![1.0, 2.0, 3.0, 4.0];
@@ -365,13 +366,13 @@ mod tests {
     fn test_cms_stage_cmyk_to_rgb() {
         // Test 4->3 channel transform (CMYK to RGB)
         // The pipeline passes row[0..4] as CMY + K (re-indexed from 0)
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> =
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
             vec![Box::new(FourToThreeTransformer)];
         // K is at pipeline index 5, but we get it as row[3]
         let stage = CmsStage::new(transformers, 4, 3, Some(5), 16);
 
         let state = stage.init_local_state(0).unwrap().unwrap();
-        let mut state_ref: Box<dyn Any> = state;
+        let mut state_ref: Box<dyn Any + Send> = state;
 
         // Create test data: 4 channels as the pipeline would pass them (re-indexed)
         // row[0]=C, row[1]=M, row[2]=Y, row[3]=K
@@ -398,11 +399,12 @@ mod tests {
     #[test]
     fn test_cms_stage_single_channel() {
         // Test 1->1 channel transform (grayscale)
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> = vec![Box::new(ScaleTransformer)];
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
+            vec![Box::new(ScaleTransformer)];
         let stage = CmsStage::new(transformers, 1, 1, None, 16);
 
         let state = stage.init_local_state(0).unwrap().unwrap();
-        let mut state_ref: Box<dyn Any> = state;
+        let mut state_ref: Box<dyn Any + Send> = state;
 
         let mut ch0 = vec![1.0, 2.0, 3.0, 4.0];
         ch0.resize(16, 0.0);
@@ -420,7 +422,7 @@ mod tests {
     #[test]
     fn test_cms_stage_no_transformers() {
         // Test with empty transformers - should do nothing
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> = vec![];
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = vec![];
         let stage = CmsStage::new(transformers, 3, 3, None, 16);
 
         // init_local_state should return None when no transformers
@@ -441,13 +443,13 @@ mod tests {
 
     #[test]
     fn test_cms_stage_display() {
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> =
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
             vec![Box::new(IdentityTransformer)];
         let stage_rgb = CmsStage::new(transformers, 3, 3, None, 16);
         let display = format!("{}", stage_rgb);
         assert!(display.contains("3 channels -> 3 channels"));
 
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> =
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
             vec![Box::new(IdentityTransformer)];
         let stage_cmyk = CmsStage::new(transformers, 4, 3, Some(5), 16);
         let display = format!("{}", stage_cmyk);
@@ -459,7 +461,7 @@ mod tests {
     #[test]
     fn test_cms_stage_uses_channel() {
         // RGB only (no black channel)
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> =
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
             vec![Box::new(IdentityTransformer)];
         let stage_rgb = CmsStage::new(transformers, 3, 3, None, 16);
         assert!(stage_rgb.uses_channel(0));
@@ -469,7 +471,7 @@ mod tests {
         assert!(!stage_rgb.uses_channel(5));
 
         // CMYK with K at pipeline index 5
-        let transformers: Vec<Box<dyn JxlCmsTransformer + Send>> =
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
             vec![Box::new(IdentityTransformer)];
         let stage_cmyk = CmsStage::new(transformers, 4, 3, Some(5), 16);
         assert!(stage_cmyk.uses_channel(0));

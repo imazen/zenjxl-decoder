@@ -148,7 +148,7 @@ impl RenderPipelineInOutStage for Epf2Stage {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         epf2_process_row_chunk_dispatch(self, (xpos, ypos), xsize, input_rows, output_rows);
     }

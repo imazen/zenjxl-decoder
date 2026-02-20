@@ -8,7 +8,8 @@
 use jxl::api::{JxlCms, JxlCmsTransformer, JxlColorProfile};
 use jxl::error::{Error, Result};
 use lcms2::{
-    AllowCache, ColorSpaceSignatureExt, Intent, PixelFormat, Profile, ThreadContext, Transform,
+    ColorSpaceSignatureExt, DisallowCache, Flags, Intent, PixelFormat, Profile, ThreadContext,
+    Transform,
 };
 
 /// CMS implementation using Little CMS (lcms2).
@@ -22,7 +23,7 @@ impl JxlCms for Lcms2Cms {
         input: JxlColorProfile,
         output: JxlColorProfile,
         _intensity_target: f32,
-    ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send>>)> {
+    ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send + Sync>>)> {
         // Convert profiles to ICC
         let input_icc = input
             .try_as_icc()
@@ -45,7 +46,7 @@ impl JxlCms for Lcms2Cms {
 
         // Create transforms using ThreadContext for thread safety (implements Send).
         // Use u8 pixel type with PixelFormat describing the actual f32 data layout.
-        let mut transforms: Vec<Box<dyn JxlCmsTransformer + Send>> = Vec::with_capacity(n);
+        let mut transforms: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = Vec::with_capacity(n);
 
         for _ in 0..n {
             let context = ThreadContext::new();
@@ -56,15 +57,17 @@ impl JxlCms for Lcms2Cms {
             let output_profile = Profile::new_icc_context(&context, output_icc.as_slice())
                 .map_err(|e| Error::CmsError(format!("lcms2 failed to parse output ICC: {e}")))?;
 
-            let transform: Transform<u8, u8, ThreadContext, AllowCache> = Transform::new_context(
-                context,
-                &input_profile,
-                input_format,
-                &output_profile,
-                output_format,
-                Intent::RelativeColorimetric,
-            )
-            .map_err(|e| Error::CmsError(format!("lcms2 failed to create transform: {e}")))?;
+            let transform: Transform<u8, u8, ThreadContext, DisallowCache> =
+                Transform::new_flags_context(
+                    context,
+                    &input_profile,
+                    input_format,
+                    &output_profile,
+                    output_format,
+                    Intent::RelativeColorimetric,
+                    Flags::NO_CACHE,
+                )
+                .map_err(|e| Error::CmsError(format!("lcms2 failed to create transform: {e}")))?;
 
             transforms.push(Box::new(Lcms2Transformer {
                 transform,
@@ -89,7 +92,7 @@ fn channels_to_pixel_format(channels: usize) -> PixelFormat {
 
 /// Transformer implementation using lcms2 with ThreadContext for thread safety.
 struct Lcms2Transformer {
-    transform: Transform<u8, u8, ThreadContext, AllowCache>,
+    transform: Transform<u8, u8, ThreadContext, DisallowCache>,
     input_channels: usize,
     output_channels: usize,
 }

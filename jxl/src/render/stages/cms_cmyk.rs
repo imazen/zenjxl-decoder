@@ -27,7 +27,7 @@ pub struct CmsCmykToRgbStage {
     /// Black channel index (offset from 3)
     black_c: usize,
     /// The CMS transformer for CMYK → sRGB conversion (uses Mutex for interior mutability)
-    transformer: Mutex<Box<dyn JxlCmsTransformer>>,
+    transformer: Mutex<Box<dyn JxlCmsTransformer + Send + Sync>>,
 }
 
 impl std::fmt::Display for CmsCmykToRgbStage {
@@ -37,7 +37,10 @@ impl std::fmt::Display for CmsCmykToRgbStage {
 }
 
 impl CmsCmykToRgbStage {
-    pub fn new(black_c_offset: usize, transformer: Box<dyn JxlCmsTransformer>) -> Self {
+    pub fn new(
+        black_c_offset: usize,
+        transformer: Box<dyn JxlCmsTransformer + Send + Sync>,
+    ) -> Self {
         Self {
             black_c: 3 + black_c_offset,
             transformer: Mutex::new(transformer),
@@ -57,7 +60,7 @@ impl RenderPipelineInPlaceStage for CmsCmykToRgbStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let [row_c, row_m, row_y, row_k] = row else {
             panic!(

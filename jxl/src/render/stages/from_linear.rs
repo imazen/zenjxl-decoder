@@ -122,7 +122,7 @@ impl RenderPipelineInPlaceStage for FromLinearStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         from_linear_process_dispatch(&self.tf, xsize, row)
     }

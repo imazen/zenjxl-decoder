@@ -95,7 +95,7 @@ impl RenderPipelineInOutStage for ConvolveNoiseStage {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let input = &input_rows[0];
         convolve_noise_simd_dispatch(input, output_rows[0][0], xsize);
@@ -148,7 +148,7 @@ impl RenderPipelineInPlaceStage for AddNoiseStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let norm_const = 0.22;
         let ytox = self.color_correlation.y_to_x_lf();

@@ -26,7 +26,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<Image<f64>> for T {
         &self,
         chunk_size: usize,
         buffers: &mut [&mut Image<f64>],
-        mut state: Option<&mut dyn Any>,
+        mut state: Option<&mut (dyn Any + Send)>,
     ) {
         debug!("running inplace stage '{self}' in simple pipeline");
         let numc = buffers.len();
@@ -72,7 +72,7 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<Image<f64>> for T {
         chunk_size: usize,
         input_buffers: &[&Image<f64>],
         output_buffers: &mut [Image<f64>],
-        mut state: Option<&mut dyn Any>,
+        mut state: Option<&mut (dyn Any + Send)>,
     ) {
         assert_ne!(chunk_size, 0);
         debug!("running inout stage '{self}' in simple pipeline");

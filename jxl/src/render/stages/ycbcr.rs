@@ -91,7 +91,7 @@ impl RenderPipelineInPlaceStage for YcbcrToRgbStage {
         _position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         // pixels are stored in `Cb Y Cr` order to mimic XYB colorspace
         let [row_cb, row_y, row_cr] = row else {

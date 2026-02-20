@@ -81,7 +81,7 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let num_ec = self.extra_channels.len();
         let fg_y0 = self.frame_origin.1 + position.1 as isize;

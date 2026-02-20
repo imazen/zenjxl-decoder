@@ -47,7 +47,7 @@ impl RenderPipelineInPlaceStage for SplinesStage {
         position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         self.splines.draw_segments(row, position, xsize);
     }
