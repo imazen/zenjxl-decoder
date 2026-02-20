@@ -437,6 +437,28 @@ impl Frame {
         Ok(())
     }
 
+    /// Parallel LF group decode for modular frames.
+    /// Each LF group's modular data is decoded in parallel using rayon.
+    /// Only valid for Encoding::Modular (VarDCT LF groups have shared mutable state).
+    #[cfg(feature = "threads")]
+    pub fn decode_lf_groups_modular_parallel(
+        &self,
+        sections: Vec<(usize, Vec<u8>)>,
+    ) -> Result<()> {
+        use rayon::prelude::*;
+
+        assert_eq!(self.header.encoding, Encoding::Modular);
+        let lf_global = self.lf_global.as_ref().unwrap();
+        // Extract shared references to avoid capturing &Frame (which may not be Sync).
+        let modular = &lf_global.modular_global;
+        let tree = &lf_global.tree;
+        let header = &self.header;
+        sections.into_par_iter().try_for_each(|(group, data)| {
+            let mut br = BitReader::new(&data);
+            modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
+        })
+    }
+
     #[instrument(level = "debug", skip_all)]
     pub fn decode_hf_global(&mut self, br: &mut BitReader) -> Result<()> {
         // Check for cancellation at start of major decode step

@@ -114,13 +114,43 @@ impl CodestreamParser {
                     break 'process;
                 }
 
-                for lf_section in self.lf_sections.drain(..) {
-                    let Section::Lf { group } = lf_section.section else {
-                        unreachable!()
-                    };
-                    frame.decode_lf_group(group, &mut BitReader::new(&lf_section.data))?;
-                    processed_section = true;
-                    self.section_state.remaining_lf -= 1;
+                #[cfg(feature = "threads")]
+                let use_parallel_lf = frame.header().encoding
+                    == crate::headers::frame_header::Encoding::Modular
+                    && self.lf_sections.len() > 1;
+                #[cfg(not(feature = "threads"))]
+                let use_parallel_lf = false;
+
+                if use_parallel_lf {
+                    #[cfg(feature = "threads")]
+                    {
+                        let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
+                        let count = lf_sections.len();
+                        let sections: Vec<(usize, Vec<u8>)> = lf_sections
+                            .into_iter()
+                            .map(|s| {
+                                let Section::Lf { group } = s.section else {
+                                    unreachable!()
+                                };
+                                (group, s.data)
+                            })
+                            .collect();
+                        frame.decode_lf_groups_modular_parallel(sections)?;
+                        self.section_state.remaining_lf -= count;
+                        processed_section = true;
+                    }
+                } else {
+                    for lf_section in self.lf_sections.drain(..) {
+                        let Section::Lf { group } = lf_section.section else {
+                            unreachable!()
+                        };
+                        frame.decode_lf_group(
+                            group,
+                            &mut BitReader::new(&lf_section.data),
+                        )?;
+                        processed_section = true;
+                        self.section_state.remaining_lf -= 1;
+                    }
                 }
 
                 if self.section_state.remaining_lf != 0 {
