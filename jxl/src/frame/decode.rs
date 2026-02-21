@@ -453,11 +453,9 @@ impl Frame {
         let modular = &lf_global.modular_global;
         let tree = &lf_global.tree;
         let header = &self.header;
-        super::decode_thread_pool().install(|| {
-            sections.into_par_iter().try_for_each(|(group, data)| {
-                let mut br = BitReader::new(&data);
-                modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
-            })
+        sections.into_par_iter().try_for_each(|(group, data)| {
+            let mut br = BitReader::new(&data);
+            modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
         })
     }
 

@@ -38,26 +38,6 @@ mod quant_weights;
 pub mod quantizer;
 pub mod render;
 
-/// Maximum number of threads used for parallel group decoding.
-/// Diminishing returns above 6 threads for typical images, and avoids
-/// monopolizing all cores on large machines.
-#[cfg(feature = "threads")]
-const MAX_DECODE_THREADS: usize = 6;
-
-/// Returns a shared rayon thread pool capped at MAX_DECODE_THREADS.
-#[cfg(feature = "threads")]
-fn decode_thread_pool() -> &'static rayon::ThreadPool {
-    use std::sync::OnceLock;
-    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
-    POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(MAX_DECODE_THREADS)
-            .thread_name(|i| format!("jxl-decode-{i}"))
-            .build()
-            .expect("failed to create jxl decode thread pool")
-    })
-}
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Section {
     LfGlobal,
@@ -150,6 +130,8 @@ pub struct DecoderState {
     pub cancellation_token: Option<crate::api::CancellationToken>,
     /// Memory tracker for enforcing max_memory_bytes limits.
     pub memory_tracker: MemoryTracker,
+    /// Whether parallel decoding/rendering is enabled.
+    pub(super) parallel: bool,
 }
 
 impl DecoderState {
@@ -171,6 +153,7 @@ impl DecoderState {
             limits: crate::api::JxlDecoderLimits::default(),
             cancellation_token: None,
             memory_tracker: MemoryTracker::unlimited(),
+            parallel: false,
         }
     }
 
@@ -220,7 +203,7 @@ pub struct Frame {
     lf_image: Option<[Image<f32>; 3]>,
     quant_lf: Image<u8>,
     hf_meta: Option<HfMetadata>,
-    decoder_state: DecoderState,
+    pub(crate) decoder_state: DecoderState,
     #[cfg(test)]
     use_simple_pipeline: bool,
     #[cfg(test)]

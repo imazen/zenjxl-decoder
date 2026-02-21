@@ -115,8 +115,9 @@ impl CodestreamParser {
                 }
 
                 #[cfg(feature = "threads")]
-                let use_parallel_lf = frame.header().encoding
-                    == crate::headers::frame_header::Encoding::Modular
+                let use_parallel_lf = frame.decoder_state.parallel
+                    && frame.header().encoding
+                        == crate::headers::frame_header::Encoding::Modular
                     && self.lf_sections.len() > 1;
                 #[cfg(not(feature = "threads"))]
                 let use_parallel_lf = false;

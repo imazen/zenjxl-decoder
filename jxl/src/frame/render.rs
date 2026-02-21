@@ -233,10 +233,14 @@ impl Frame {
         }
 
         #[cfg(all(feature = "threads", not(test)))]
-        let use_parallel = groups.len() > 1 && self.hf_coefficients.is_none();
+        let use_parallel = self.decoder_state.parallel
+            && groups.len() > 1
+            && self.hf_coefficients.is_none();
         #[cfg(all(feature = "threads", test))]
-        let use_parallel =
-            groups.len() > 1 && self.hf_coefficients.is_none() && !self.use_simple_pipeline;
+        let use_parallel = self.decoder_state.parallel
+            && groups.len() > 1
+            && self.hf_coefficients.is_none()
+            && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
@@ -339,7 +343,7 @@ impl Frame {
 
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
-        let batch_size = super::MAX_DECODE_THREADS;
+        let batch_size = rayon::current_num_threads();
 
         struct GroupWork<'a> {
             group: usize,
@@ -409,53 +413,51 @@ impl Frame {
                     .transform_data
                     .opsin_inverse_matrix
                     .quant_biases;
-                super::decode_thread_pool().install(|| {
-                    work.par_iter_mut().try_for_each_init(
-                        || None::<VarDctBuffers>,
-                        |buffers, gw| -> Result<()> {
-                            if is_vardct && !gw.passes.is_empty() {
-                                let hf_global = hf_global.unwrap();
-                                let hf_meta = hf_meta.unwrap();
-                                if buffers.is_none() {
-                                    *buffers = Some(VarDctBuffers::new()?);
-                                }
-                                let buffers = buffers.as_mut().unwrap();
-
-                                if !(gw.pixels.is_none() && gw.do_render) {
-                                    decode_vardct_group(
-                                        gw.group,
-                                        &mut gw.passes,
-                                        header,
-                                        lf_global,
-                                        hf_global,
-                                        hf_meta,
-                                        lf_image,
-                                        quant_lf,
-                                        quant_biases,
-                                        None,
-                                        &mut gw.pixels,
-                                        buffers,
-                                        #[cfg(feature = "jpeg")]
-                                        None,
-                                    )?;
-                                }
+                work.par_iter_mut().try_for_each_init(
+                    || None::<VarDctBuffers>,
+                    |buffers, gw| -> Result<()> {
+                        if is_vardct && !gw.passes.is_empty() {
+                            let hf_global = hf_global.unwrap();
+                            let hf_meta = hf_meta.unwrap();
+                            if buffers.is_none() {
+                                *buffers = Some(VarDctBuffers::new()?);
                             }
+                            let buffers = buffers.as_mut().unwrap();
 
-                            for (pass, br) in gw.passes.iter_mut() {
-                                lf_global.modular_global.read_stream(
-                                    ModularStreamId::ModularHF {
-                                        group: gw.group,
-                                        pass: *pass,
-                                    },
+                            if !(gw.pixels.is_none() && gw.do_render) {
+                                decode_vardct_group(
+                                    gw.group,
+                                    &mut gw.passes,
                                     header,
-                                    &lf_global.tree,
-                                    br,
+                                    lf_global,
+                                    hf_global,
+                                    hf_meta,
+                                    lf_image,
+                                    quant_lf,
+                                    quant_biases,
+                                    None,
+                                    &mut gw.pixels,
+                                    buffers,
+                                    #[cfg(feature = "jpeg")]
+                                    None,
                                 )?;
                             }
-                            Ok(())
-                        },
-                    )
-                })?;
+                        }
+
+                        for (pass, br) in gw.passes.iter_mut() {
+                            lf_global.modular_global.read_stream(
+                                ModularStreamId::ModularHF {
+                                    group: gw.group,
+                                    pass: *pass,
+                                },
+                                header,
+                                &lf_global.tree,
+                                br,
+                            )?;
+                        }
+                        Ok(())
+                    },
+                )?;
             }
 
             // Phase 3a: Sequential — store buffers and compute renderable work items.
@@ -629,37 +631,34 @@ impl Frame {
                     let input_size = p.input_size();
                     let factory = p.context_factory();
 
-                    super::decode_thread_pool().install(|| {
-                        // Rayon's try_for_each_init may call init more than once
-                        // per thread (work-splitting), so we create contexts on
-                        // demand via the factory (which is Sync).
-                        all_items.par_iter().try_for_each_init(
-                            || {
-                                factory
-                                    .create(1)
-                                    .expect("failed to allocate render context")
-                            },
-                            |ctx, item| -> Result<()> {
-                                // SAFETY: Each work item covers a non-overlapping region.
-                                let mut local_buffers = unsafe {
-                                    shared_bufs.get_local_buffers(
-                                        sbi,
-                                        item.image_area,
-                                        input_size,
-                                        full_image_size,
-                                        frame_origin,
-                                    )
-                                };
-                                render_group::render(
-                                    ctx,
-                                    &view,
-                                    (item.gx, item.gy),
+                    // Rayon's try_for_each_init may call init more than once
+                    // per thread (work-splitting), so we create contexts on
+                    // demand via the factory (which is Sync).
+                    all_items.par_iter().try_for_each_init(
+                        || factory.create(1).ok(),
+                        |ctx_opt, item| -> Result<()> {
+                            let ctx = ctx_opt.as_mut().ok_or(
+                                Error::ImageOutOfMemory(0, 0),
+                            )?;
+                            // SAFETY: Each work item covers a non-overlapping region.
+                            let mut local_buffers = unsafe {
+                                shared_bufs.get_local_buffers(
+                                    sbi,
                                     item.image_area,
-                                    &mut local_buffers,
+                                    input_size,
+                                    full_image_size,
+                                    frame_origin,
                                 )
-                            },
-                        )
-                    })?;
+                            };
+                            render_group::render(
+                                ctx,
+                                &view,
+                                (item.gx, item.gy),
+                                item.image_area,
+                                &mut local_buffers,
+                            )
+                        },
+                    )?;
                 }
             }
 
@@ -1021,7 +1020,7 @@ impl Frame {
             let in_channels = cms_input.channels();
             // Create enough transformers for parallel rendering threads.
             #[cfg(feature = "threads")]
-            let num_transforms = super::MAX_DECODE_THREADS + 2;
+            let num_transforms = rayon::current_num_threads() + 2;
             #[cfg(not(feature = "threads"))]
             let num_transforms = 1;
             let (out_channels, transformers) = cms.initialize_transforms(

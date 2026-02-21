@@ -232,6 +232,7 @@ impl CodestreamParser {
             decoder_state.cancellation_token = decode_options.cancellation_token.clone();
             decoder_state.memory_tracker =
                 MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
+            decoder_state.parallel = decode_options.parallel;
             self.decoder_state = Some(decoder_state);
             // Reset bit offset to 0 since we've consumed everything up to a byte boundary
             self.non_section_bit_offset = 0;

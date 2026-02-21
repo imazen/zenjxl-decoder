@@ -209,6 +209,15 @@ pub struct JxlDecoderOptions {
     /// Optional cancellation token for cooperative cancellation.
     /// When cancelled, the decoder will abort at the next check point.
     pub cancellation_token: Option<CancellationToken>,
+    /// Enable parallel decoding and rendering using rayon.
+    ///
+    /// When `true` (the default when the `threads` feature is enabled),
+    /// group decoding and rendering are parallelized across rayon's global
+    /// thread pool. Control thread count via `RAYON_NUM_THREADS` or
+    /// `rayon::ThreadPoolBuilder::build_global()`.
+    ///
+    /// When `false`, all decoding is single-threaded.
+    pub parallel: bool,
 }
 
 impl Default for JxlDecoderOptions {
@@ -226,6 +235,7 @@ impl Default for JxlDecoderOptions {
             premultiply_output: false,
             limits: JxlDecoderLimits::default(),
             cancellation_token: None,
+            parallel: cfg!(feature = "threads"),
         }
     }
 }
