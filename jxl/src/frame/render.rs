@@ -269,21 +269,6 @@ impl Frame {
         Ok(())
     }
 
-    /// Parallel decode path for both VarDCT and Modular frames.
-    ///
-    /// Groups are processed in batches of `MAX_DECODE_THREADS` to limit peak memory:
-    /// pixel buffers allocated for one batch are recycled by the pipeline before the next
-    /// batch allocates new ones.
-    ///
-    /// Each batch runs three phases:
-    /// 1. Sequential: compute render decisions and allocate pixel buffers
-    /// 2. Parallel: entropy decode + dequant + IDCT (VarDCT) / read_stream (Modular)
-    /// 3. Sequential: push pixel buffers through render pipeline (triggers recycling)
-    ///
-    /// Requirements:
-    /// - `hf_coefficients.is_none()` (single-pass, so HfGlobalState is read-only)
-    /// - More than 1 group
-    ///
     /// Parallel decode + render path for both VarDCT and Modular frames.
     ///
     /// Groups are processed in batches of `MAX_DECODE_THREADS` to limit peak memory:
@@ -297,6 +282,10 @@ impl Frame {
     ///    - 3a. Sequential: store decoded buffers + extract borders + compute renderable work items
     ///    - 3b. Parallel: render all work items through the pipeline (EPF, color, save)
     ///    - 3c. Sequential: recycle buffers + update flush state
+    ///
+    /// Requirements:
+    /// - `hf_coefficients.is_none()` (single-pass, so HfGlobalState is read-only)
+    /// - More than 1 group
     #[cfg(feature = "threads")]
     #[allow(unsafe_code)]
     fn decode_groups_parallel(
@@ -358,6 +347,12 @@ impl Frame {
             complete: bool,
             do_render: bool,
             pixels: Option<[Image<f32>; 3]>,
+        }
+
+        struct GroupRenderInfo {
+            group: usize,
+            do_render: bool,
+            has_items: bool,
         }
 
         let mut remaining = groups;
@@ -463,17 +458,9 @@ impl Frame {
                 })?;
             }
 
-            // Phase 3: Store decoded data, prepare work items, render in parallel, recycle.
-
             // Phase 3a: Sequential — store buffers and compute renderable work items.
-            struct GroupRenderInfo {
-                group: usize,
-                do_render: bool,
-                has_items: bool,
-            }
             let mut all_items = Vec::new();
             let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(work.len());
-
             for gw in work {
                 self.decoder_state.check_cancelled()?;
 
