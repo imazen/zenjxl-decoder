@@ -58,6 +58,7 @@ pub struct ConvertModularXYBToF32Stage {
 
 impl ConvertModularXYBToF32Stage {
     pub fn new(first_channel: usize, lf_quant: &LfQuantFactors) -> ConvertModularXYBToF32Stage {
+        eprintln!("DECODER ConvertModularXYBToF32Stage: scale={:?} first_channel={}", lf_quant.quant_factors, first_channel);
         ConvertModularXYBToF32Stage {
             first_channel,
             scale: lf_quant.quant_factors,
@@ -106,6 +107,16 @@ impl RenderPipelineInOutStage for ConvertModularXYBToF32Stage {
         // Output channels: [X, Y, B] (standard XYB order)
         let (input_y, input_x, input_b) = (&input_rows[0], &input_rows[1], &input_rows[2]);
         let (output_x, output_y, output_b) = output_rows.split_first_3_mut();
+        // TEMP DEBUG: print first row values
+        static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) && xsize > 0 {
+            eprintln!("DECODER CONVERT: input_y[0]={} input_x[0]={} input_b[0]={}", input_y[0][0], input_x[0][0], input_b[0][0]);
+            eprintln!("DECODER CONVERT: scale_x={} scale_y={} scale_b={}", scale_x, scale_y, scale_b);
+            let out_x = input_x[0][0] as f32 * scale_x;
+            let out_y = input_y[0][0] as f32 * scale_y;
+            let out_b = (input_b[0][0] + input_y[0][0]) as f32 * scale_b;
+            eprintln!("DECODER CONVERT: output_x={} output_y={} output_b={}", out_x, out_y, out_b);
+        }
         for i in 0..xsize {
             output_x[0][i] = input_x[0][i] as f32 * scale_x;
             output_y[0][i] = input_y[0][i] as f32 * scale_y;

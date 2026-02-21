@@ -1,5 +1,5 @@
 [package]
-name = "jxl"
+name = "zenjxl-decoder"
 description = "High performance Rust implementation of a JPEG XL decoder"
 version = "0.3.0"
 readme = "../README.md"
@@ -11,6 +11,9 @@ edition = "2024"
 license = "BSD-3-Clause"
 
 exclude = ["resources/"]
+
+[lib]
+name = "jxl"
 
 [dependencies]
 jxl_transforms = { path = "../jxl_transforms", version = "0.3.0" }

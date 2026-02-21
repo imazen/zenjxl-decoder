@@ -723,34 +723,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jxl"
-version = "0.3.0"
-dependencies = [
- "aligned-vec",
- "almost-enough",
- "arbtest",
- "array-init",
- "brotli",
- "byteorder",
- "enough",
- "jxl_macros",
- "jxl_simd",
- "jxl_transforms",
- "moxcms",
- "num-derive",
- "num-traits",
- "paste",
- "png 0.17.16",
- "rand",
- "rand_xorshift",
- "rayon",
- "serde_json",
- "test-log",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "jxl_cli"
 version = "0.3.0"
 dependencies = [
@@ -761,12 +733,12 @@ dependencies = [
  "criterion",
  "exr",
  "half",
- "jxl",
  "jxl_macros",
  "lcms2",
  "png 0.18.0",
  "tracing-subscriber",
  "vergen-gitcl",
+ "zenjxl-decoder",
 ]
 
 [[package]]
@@ -1640,6 +1612,34 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "zenjxl-decoder"
+version = "0.3.0"
+dependencies = [
+ "aligned-vec",
+ "almost-enough",
+ "arbtest",
+ "array-init",
+ "brotli",
+ "byteorder",
+ "enough",
+ "jxl_macros",
+ "jxl_simd",
+ "jxl_transforms",
+ "moxcms",
+ "num-derive",
+ "num-traits",
+ "paste",
+ "png 0.17.16",
+ "rand",
+ "rand_xorshift",
+ "rayon",
+ "serde_json",
+ "test-log",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "zerocopy"
