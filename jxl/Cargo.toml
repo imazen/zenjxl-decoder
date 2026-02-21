@@ -12,9 +12,6 @@ license = "BSD-3-Clause"
 
 exclude = ["resources/"]
 
-[lib]
-name = "jxl"
-
 [dependencies]
 jxl_transforms = { package = "zenjxl-decoder-transforms", path = "../jxl_transforms", version = "0.3.0" }
 thiserror = "2.0"

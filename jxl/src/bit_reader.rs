@@ -75,14 +75,14 @@ impl<'a> BitReader<'a> {
 
     /// Reads `num` bits from the buffer.
     /// ```
-    /// # use jxl::bit_reader::BitReader;
+    /// # use zenjxl_decoder::bit_reader::BitReader;
     /// let mut br = BitReader::new(&[0, 1]);
     /// assert_eq!(br.read(8)?, 0);
     /// assert_eq!(br.read(4)?, 1);
     /// assert_eq!(br.read(4)?, 0);
     /// assert_eq!(br.total_bits_read(), 16);
     /// assert!(br.read(1).is_err());
-    /// # Ok::<(), jxl::error::Error>(())
+    /// # Ok::<(), zenjxl_decoder::error::Error>(())
     /// ```
     #[inline]
     pub fn read(&mut self, num: usize) -> Result<u64, Error> {
@@ -124,12 +124,12 @@ impl<'a> BitReader<'a> {
 
     /// Skips `num` bits.
     /// ```
-    /// # use jxl::bit_reader::BitReader;
+    /// # use zenjxl_decoder::bit_reader::BitReader;
     /// let mut br = BitReader::new(&[0, 1]);
     /// assert_eq!(br.read(8)?, 0);
     /// br.skip_bits(4)?;
     /// assert_eq!(br.total_bits_read(), 12);
-    /// # Ok::<(), jxl::error::Error>(())
+    /// # Ok::<(), zenjxl_decoder::error::Error>(())
     /// ```
     #[inline(never)]
     pub fn skip_bits(&mut self, mut n: usize) -> Result<(), Error> {
@@ -185,13 +185,13 @@ impl<'a> BitReader<'a> {
 
     /// Jumps to the next byte boundary. The skipped bytes have to be 0.
     /// ```
-    /// # use jxl::bit_reader::BitReader;
+    /// # use zenjxl_decoder::bit_reader::BitReader;
     /// let mut br = BitReader::new(&[0, 1]);
     /// assert_eq!(br.read(8)?, 0);
     /// br.skip_bits(4)?;
     /// br.jump_to_byte_boundary()?;
     /// assert_eq!(br.total_bits_read(), 16);
-    /// # Ok::<(), jxl::error::Error>(())
+    /// # Ok::<(), zenjxl_decoder::error::Error>(())
     /// ```
     #[inline(never)]
     pub fn jump_to_byte_boundary(&mut self) -> Result<(), Error> {

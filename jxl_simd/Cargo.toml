@@ -10,9 +10,6 @@ repository = "https://github.com/imazen/zenjxl-decoder"
 edition = "2024"
 license = "BSD-3-Clause"
 
-[lib]
-name = "jxl_simd"
-
 [dependencies]
 
 [dev-dependencies]

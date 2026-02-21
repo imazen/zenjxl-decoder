@@ -14,7 +14,7 @@ use std::sync::Arc;
 ///
 /// # Example
 /// ```
-/// use jxl::api::JxlDecoderLimits;
+/// use zenjxl_decoder::api::JxlDecoderLimits;
 ///
 /// // Use restrictive preset for untrusted input
 /// let limits = JxlDecoderLimits::restrictive();
