@@ -6,7 +6,7 @@ readme = "../README.md"
 keywords = ["jpeg-xl", "simd"]
 categories = ["multimedia::images"]
 authors = ["Luca Versari <veluca93@gmail.com>"]
-repository = "https://github.com/libjxl/jxl-rs"
+repository = "https://github.com/imazen/zenjxl-decoder"
 edition = "2024"
 license = "BSD-3-Clause"
 
