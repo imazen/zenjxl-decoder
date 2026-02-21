@@ -733,42 +733,12 @@ dependencies = [
  "criterion",
  "exr",
  "half",
- "jxl_macros",
  "lcms2",
  "png 0.18.0",
  "tracing-subscriber",
  "vergen-gitcl",
  "zenjxl-decoder",
-]
-
-[[package]]
-name = "jxl_macros"
-version = "0.3.0"
-dependencies = [
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "jxl_simd"
-version = "0.3.0"
-dependencies = [
- "arbtest",
- "paste",
-]
-
-[[package]]
-name = "jxl_transforms"
-version = "0.3.0"
-dependencies = [
- "criterion",
- "jxl_simd",
- "paste",
- "rand",
- "rand_chacha",
- "test-log",
+ "zenjxl-decoder-macros",
 ]
 
 [[package]]
@@ -1624,9 +1594,6 @@ dependencies = [
  "brotli",
  "byteorder",
  "enough",
- "jxl_macros",
- "jxl_simd",
- "jxl_transforms",
  "moxcms",
  "num-derive",
  "num-traits",
@@ -1639,6 +1606,39 @@ dependencies = [
  "test-log",
  "thiserror",
  "tracing",
+ "zenjxl-decoder-macros",
+ "zenjxl-decoder-simd",
+ "zenjxl-decoder-transforms",
+]
+
+[[package]]
+name = "zenjxl-decoder-macros"
+version = "0.3.0"
+dependencies = [
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "zenjxl-decoder-simd"
+version = "0.3.0"
+dependencies = [
+ "arbtest",
+ "paste",
+]
+
+[[package]]
+name = "zenjxl-decoder-transforms"
+version = "0.3.0"
+dependencies = [
+ "criterion",
+ "paste",
+ "rand",
+ "rand_chacha",
+ "test-log",
+ "zenjxl-decoder-simd",
 ]
 
 [[package]]

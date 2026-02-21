@@ -19,7 +19,7 @@ exr = { version = "1.73.0", optional = true }
 color-eyre = "0.6.5"
 
 [dev-dependencies]
-jxl_macros = { path = "../jxl_macros", features = ["test"], version = "=0.3.0" }
+jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", features = ["test"], version = "=0.3.0" }
 criterion = { version = "0.7.0", features = ["html_reports"] }
 
 [build-dependencies]

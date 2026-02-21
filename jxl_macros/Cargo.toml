@@ -1,6 +1,6 @@
 [package]
-name = "jxl_macros"
-description = "High performance Rust implementation of a JPEG XL decoder - supporting macros"
+name = "zenjxl-decoder-macros"
+description = "Proc macros for the zenjxl-decoder JPEG XL decoder"
 version = "0.3.0"
 readme = "../README.md"
 keywords = ["jpeg-xl", "decoder"]
@@ -11,6 +11,7 @@ edition = "2024"
 license = "BSD-3-Clause"
 
 [lib]
+name = "jxl_macros"
 proc-macro = true
 
 [dependencies]

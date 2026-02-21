@@ -1,6 +1,6 @@
 [package]
-name = "jxl_transforms"
-description = "High performance Rust implementation of a JPEG XL decoder - Transforms"
+name = "zenjxl-decoder-transforms"
+description = "DCT/IDCT transforms for the zenjxl-decoder JPEG XL decoder"
 version = "0.3.0"
 readme = "../README.md"
 keywords = ["jpeg-xl", "simd", "dct"]
@@ -10,8 +10,11 @@ repository = "https://github.com/imazen/zenjxl-decoder"
 edition = "2021"
 license = "BSD-3-Clause"
 
+[lib]
+name = "jxl_transforms"
+
 [dependencies]
-jxl_simd = { path = "../jxl_simd", version = "=0.3.0" }
+jxl_simd = { package = "zenjxl-decoder-simd", path = "../jxl_simd", version = "=0.3.0" }
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
