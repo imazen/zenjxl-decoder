@@ -25,6 +25,7 @@ jxl_simd = { path = "../jxl_simd", version = "=0.3.0" }
 moxcms = { version = "0.7", optional = true }
 rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
+enough = { version = "0.4", features = ["std"] }
 brotli = { version = "8.0", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
@@ -33,6 +34,7 @@ paste = "1.0.15"
 png = "0.17"
 rand = "0.9.2"
 rand_xorshift = "0.4.0"
+almost-enough = { version = "0.4", features = ["std"] }
 serde_json = "1.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 jxl_macros = { path = "../jxl_macros", version = "=0.3.0", features = ["test"] }

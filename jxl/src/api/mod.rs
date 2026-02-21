@@ -24,6 +24,7 @@ pub use inner::*;
 pub use input::*;
 #[cfg(feature = "cms")]
 pub use moxcms_wrapper::*;
+pub use enough::{Stop, Unstoppable};
 pub use options::*;
 pub use signature::*;
 

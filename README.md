@@ -148,25 +148,26 @@ let zeroed: AlignedVec<f32> = aligned_vec_zeroed(1024)?;
 
 #### Cancellation Support
 
-The `CancellationToken` enables cooperative cancellation for long-running decodes:
+The decoder accepts any `enough::Stop` implementation for cooperative cancellation:
 
 ```rust
-use jxl::api::CancellationToken;
+use almost_enough::Stopper;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-let token = CancellationToken::new();
-let token_clone = token.clone();
+let stop = Arc::new(Stopper::new());
+let stop_clone = Arc::clone(&stop);
 
 // Cancel from another thread after timeout
 thread::spawn(move || {
     thread::sleep(Duration::from_secs(5));
-    token_clone.cancel();
+    stop_clone.cancel();
 });
 
-// Decoder checks token at safe points and returns Error::Cancelled
+// Decoder checks stop at safe points and returns Error::Cancelled
 let options = JxlDecoderOptions {
-    cancellation_token: Some(token),
+    stop: stop,
     ..Default::default()
 };
 ```
@@ -174,14 +175,13 @@ let options = JxlDecoderOptions {
 **API:**
 - `cancel()` - Signal cancellation (atomic, thread-safe)
 - `is_cancelled()` - Check status
-- `reset()` - Clear cancellation for reuse
-- `check()` - Returns `Error::Cancelled` if cancelled
+- `stop.check()` - Returns `Error::Cancelled` if stopped
 
 #### Files
 
 | File | Description |
 |------|-------------|
-| `api/options.rs` | `JxlDecoderLimits`, `CancellationToken`, limit presets |
+| `api/options.rs` | `JxlDecoderLimits`, `stop: Arc<dyn Stop>`, limit presets |
 | `util/memory_tracker.rs` | `MemoryTracker`, `MemoryGuard` for budget tracking |
 | `util/vec_helpers.rs` | `NewWithCapacity`, `TryVecExt`, `AlignedVec` |
 | `error.rs` | `Error::LimitExceeded`, `Error::Cancelled` variants |
@@ -280,12 +280,12 @@ cargo test --features cms conformance -- --ignored --nocapture
 | File | Changes |
 |------|---------|
 | **Security & Limits** | |
-| `jxl/src/api/options.rs` | `JxlDecoderLimits` API, `CancellationToken`, limit presets |
-| `jxl/src/api/decoder.rs` | Wire limits and cancellation token to decoder state |
+| `jxl/src/api/options.rs` | `JxlDecoderLimits` API, `stop: Arc<dyn Stop>`, limit presets |
+| `jxl/src/api/decoder.rs` | Wire limits and stop handle to decoder state |
 | `jxl/src/api/inner/codestream_parser/non_section.rs` | Check limits during header parsing, initialize memory tracker |
 | `jxl/src/api/inner/codestream_parser/sections.rs` | Check cancellation during section decoding |
-| `jxl/src/error.rs` | Add `Error::LimitExceeded` and `Error::Cancelled` variants |
-| `jxl/src/frame/mod.rs` | Store limits, cancellation token, memory tracker in `DecoderState` |
+| `jxl/src/error.rs` | Add `Error::LimitExceeded`, `Error::Cancelled`, `From<StopReason>` |
+| `jxl/src/frame/mod.rs` | Store limits, stop handle, memory tracker in `DecoderState` |
 | `jxl/src/frame/decode.rs` | Noise seeding fix; check limits during decode |
 | `jxl/src/frame/group.rs` | Use fallible allocation for group buffers |
 | `jxl/src/frame/render.rs` | sRGB transfer function, extra channel slots, CMYK blending order |
@@ -324,7 +324,7 @@ ae7ce8f security: implement max_memory_bytes tracking and fallible allocations
 362f109 security: wire up max_patches limit and add aligned allocation utilities
 0c16e7a test: add limit enforcement and cancellation tests
 1bd9b2f feat: enforce security limits and add cancellation support
-4b3b659 feat: add CancellationToken and memory budget limit
+4b3b659 feat: add cancellation support and memory budget limit
 0b7ebec security: add configurable JxlDecoderLimits API
 325414b security: use checked arithmetic instead of saturating for limit calculations
 a6ae2ad security: fix ICC tag and render builder overflow vulnerabilities

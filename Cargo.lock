@@ -51,6 +51,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "almost-enough"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18520c0909bd8c14257b4733b5e4d03e306c5c48bdac4e51ed207ca2072071e2"
+dependencies = [
+ "enough",
+]
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -496,6 +505,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "enough"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "177a59811828ea5dbc8927662d444ffee7b55a44696486f1b1a245ae9e652533"
+
+[[package]]
 name = "env_filter"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -712,10 +727,12 @@ name = "jxl"
 version = "0.3.0"
 dependencies = [
  "aligned-vec",
+ "almost-enough",
  "arbtest",
  "array-init",
  "brotli",
  "byteorder",
+ "enough",
  "jxl_macros",
  "jxl_simd",
  "jxl_transforms",

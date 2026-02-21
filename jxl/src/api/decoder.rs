@@ -1386,22 +1386,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_cancellation_token() {
-        use crate::api::CancellationToken;
+    fn test_stop_cancellation() {
+        use almost_enough::Stopper;
+        use enough::Stop;
 
-        let token = CancellationToken::new();
-        assert!(!token.is_cancelled());
-
-        // Cancel the token
-        token.cancel();
-        assert!(token.is_cancelled());
-
-        // Check returns error when cancelled
-        assert!(token.check().is_err());
-
-        // Reset allows reuse
-        token.reset();
-        assert!(!token.is_cancelled());
-        assert!(token.check().is_ok());
+        let stop = Stopper::new();
+        assert!(!stop.should_stop());
+        stop.cancel();
+        assert!(stop.should_stop());
+        // Verify it integrates with our error type
+        let result: crate::error::Result<()> = stop.check().map_err(Into::into);
+        assert!(matches!(result, Err(crate::error::Error::Cancelled)));
     }
 }

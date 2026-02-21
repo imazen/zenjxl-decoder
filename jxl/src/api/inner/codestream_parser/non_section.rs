@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::io::IoSliceMut;
+use std::sync::Arc;
 
 use crate::{
     api::{
@@ -229,7 +230,7 @@ impl CodestreamParser {
             decoder_state.premultiply_output = decode_options.premultiply_output;
             decoder_state.embedded_color_profile = self.embedded_color_profile.clone();
             decoder_state.limits = decode_options.limits.clone();
-            decoder_state.cancellation_token = decode_options.cancellation_token.clone();
+            decoder_state.stop = Arc::clone(&decode_options.stop);
             decoder_state.memory_tracker =
                 MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
             decoder_state.parallel = decode_options.parallel;

@@ -109,7 +109,6 @@ impl ReferenceFrame {
     }
 }
 
-#[derive(Debug)]
 pub struct DecoderState {
     pub(super) file_header: FileHeader,
     pub(super) reference_frames: Arc<[Option<ReferenceFrame>; Self::MAX_STORED_FRAMES]>,
@@ -126,8 +125,8 @@ pub struct DecoderState {
     pub embedded_color_profile: Option<JxlColorProfile>,
     /// Security limits for decoding. Stored here to propagate through frame decoding.
     pub limits: crate::api::JxlDecoderLimits,
-    /// Optional cancellation token for cooperative cancellation.
-    pub cancellation_token: Option<crate::api::CancellationToken>,
+    /// Cooperative cancellation / timeout handle.
+    pub stop: std::sync::Arc<dyn enough::Stop>,
     /// Memory tracker for enforcing max_memory_bytes limits.
     pub memory_tracker: MemoryTracker,
     /// Whether parallel decoding/rendering is enabled.
@@ -151,7 +150,7 @@ impl DecoderState {
             premultiply_output: false,
             embedded_color_profile: None,
             limits: crate::api::JxlDecoderLimits::default(),
-            cancellation_token: None,
+            stop: std::sync::Arc::new(enough::Unstoppable),
             memory_tracker: MemoryTracker::unlimited(),
             parallel: false,
         }
@@ -159,11 +158,7 @@ impl DecoderState {
 
     /// Check cancellation status and return error if cancelled.
     pub fn check_cancelled(&self) -> crate::error::Result<()> {
-        if let Some(ref token) = self.cancellation_token {
-            token.check()
-        } else {
-            Ok(())
-        }
+        Ok(self.stop.check()?)
     }
 
     pub fn extra_channel_info(&self) -> &Vec<ExtraChannelInfo> {
@@ -178,6 +173,17 @@ impl DecoderState {
     #[cfg(test)]
     pub fn set_use_simple_pipeline(&mut self, u: bool) {
         self.use_simple_pipeline = u;
+    }
+}
+
+impl std::fmt::Debug for DecoderState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecoderState")
+            .field("visible_frame_index", &self.visible_frame_index)
+            .field("nonvisible_frame_index", &self.nonvisible_frame_index)
+            .field("high_precision", &self.high_precision)
+            .field("parallel", &self.parallel)
+            .finish_non_exhaustive()
     }
 }
 

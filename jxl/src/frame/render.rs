@@ -344,6 +344,7 @@ impl Frame {
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
         let batch_size = rayon::current_num_threads();
+        let stop: &dyn enough::Stop = &*self.decoder_state.stop;
 
         struct GroupWork<'a> {
             group: usize,
@@ -416,6 +417,7 @@ impl Frame {
                 work.par_iter_mut().try_for_each_init(
                     || None::<VarDctBuffers>,
                     |buffers, gw| -> Result<()> {
+                        stop.check()?;
                         if is_vardct && !gw.passes.is_empty() {
                             let hf_global = hf_global.unwrap();
                             let hf_meta = hf_meta.unwrap();
@@ -637,6 +639,7 @@ impl Frame {
                     all_items.par_iter().try_for_each_init(
                         || factory.create(1).ok(),
                         |ctx_opt, item| -> Result<()> {
+                            stop.check()?;
                             let ctx = ctx_opt.as_mut().ok_or(
                                 Error::ImageOutOfMemory(0, 0),
                             )?;

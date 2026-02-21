@@ -302,4 +302,12 @@ pub enum Error {
     InvalidJbrd(String),
 }
 
+impl From<enough::StopReason> for Error {
+    fn from(reason: enough::StopReason) -> Self {
+        match reason {
+            enough::StopReason::Cancelled | enough::StopReason::TimedOut | _ => Error::Cancelled,
+        }
+    }
+}
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;

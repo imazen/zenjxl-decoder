@@ -6,67 +6,6 @@
 use crate::api::JxlCms;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// A cancellation token that can be used to abort decoding.
-///
-/// Based on the [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API)
-/// pattern where decoders support `reset()` to abort pending operations.
-///
-/// # Example
-/// ```
-/// use jxl::api::CancellationToken;
-/// use std::thread;
-///
-/// let token = CancellationToken::new();
-/// let token_clone = token.clone();
-///
-/// // Cancel from another thread after timeout
-/// thread::spawn(move || {
-///     thread::sleep(std::time::Duration::from_secs(5));
-///     token_clone.cancel();
-/// });
-///
-/// // Pass token to decoder options
-/// ```
-#[derive(Debug, Clone, Default)]
-pub struct CancellationToken {
-    cancelled: Arc<AtomicBool>,
-}
-
-impl CancellationToken {
-    /// Creates a new cancellation token.
-    pub fn new() -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// Signals cancellation. All decoders using this token will abort.
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-    }
-
-    /// Checks if cancellation has been requested.
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-
-    /// Resets the token, allowing reuse after cancellation.
-    pub fn reset(&self) {
-        self.cancelled.store(false, Ordering::Release);
-    }
-
-    /// Checks if cancelled and returns an error if so.
-    /// Use this at cancellation check points in the decoder.
-    pub fn check(&self) -> crate::error::Result<()> {
-        if self.is_cancelled() {
-            Err(crate::error::Error::Cancelled)
-        } else {
-            Ok(())
-        }
-    }
-}
 
 /// Security limits for the JXL decoder to prevent resource exhaustion attacks.
 ///
@@ -206,9 +145,9 @@ pub struct JxlDecoderOptions {
     /// Security limits to prevent resource exhaustion attacks.
     /// Use `JxlDecoderLimits::restrictive()` for untrusted input.
     pub limits: JxlDecoderLimits,
-    /// Optional cancellation token for cooperative cancellation.
-    /// When cancelled, the decoder will abort at the next check point.
-    pub cancellation_token: Option<CancellationToken>,
+    /// Cooperative cancellation / timeout handle.
+    /// Default: `Arc::new(enough::Unstoppable)` (no cancellation).
+    pub stop: Arc<dyn enough::Stop>,
     /// Enable parallel decoding and rendering using rayon.
     ///
     /// When `true` (the default when the `threads` feature is enabled),
@@ -234,7 +173,7 @@ impl Default for JxlDecoderOptions {
             high_precision: false,
             premultiply_output: false,
             limits: JxlDecoderLimits::default(),
-            cancellation_token: None,
+            stop: Arc::new(enough::Unstoppable),
             parallel: cfg!(feature = "threads"),
         }
     }

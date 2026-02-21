@@ -277,7 +277,7 @@ impl CodestreamParser {
                 let mut new_state = crate::frame::DecoderState::new(fh);
                 new_state.render_spotcolors = decode_options.render_spot_colors;
                 new_state.limits = decode_options.limits.clone();
-                new_state.cancellation_token = decode_options.cancellation_token.clone();
+                new_state.stop = std::sync::Arc::clone(&decode_options.stop);
                 self.decoder_state = Some(new_state);
             }
         } else {
