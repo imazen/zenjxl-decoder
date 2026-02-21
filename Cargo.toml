@@ -11,6 +11,7 @@ codegen-units = 1
 
 [workspace]
 members = ["jxl", "jxl_cli", "jxl_macros", "jxl_simd", "jxl_transforms"]
+# Note: directory names kept as jxl_* for source compatibility
 resolver = "2"
 
 [workspace.lints.clippy]

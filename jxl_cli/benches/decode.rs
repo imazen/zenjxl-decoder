@@ -5,8 +5,8 @@
 
 use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
 use jxl::api::JxlDecoderOptions;
-use jxl_cli::cms::Lcms2Cms;
-use jxl_cli::dec::{OutputDataType, decode_frames, decode_header};
+use zenjxl_decoder_cli::cms::Lcms2Cms;
+use zenjxl_decoder_cli::dec::{OutputDataType, decode_frames, decode_header};
 use std::fs;
 use std::path::{Path, PathBuf};
 

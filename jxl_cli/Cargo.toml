@@ -1,9 +1,11 @@
 [package]
-name = "jxl_cli"
+name = "zenjxl-decoder-cli"
+description = "CLI tool for decoding JPEG XL images using zenjxl-decoder"
 version = "0.3.0"
 edition = "2024"
 license = "BSD-3-Clause"
-default-run = "jxl_cli"
+repository = "https://github.com/imazen/zenjxl-decoder"
+default-run = "zenjxl-decoder-cli"
 
 [dependencies]
 jxl = { package = "zenjxl-decoder", path = "../jxl", version = "=0.3.0" }
