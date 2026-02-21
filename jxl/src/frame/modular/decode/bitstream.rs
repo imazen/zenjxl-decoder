@@ -62,7 +62,11 @@ pub fn decode_modular_subbitstream(
             })
             .sum::<usize>();
         let size_limit = (1024 + num_local_samples).min(1 << 20);
-        Some(Tree::read(br, size_limit)?)
+        Some(Tree::read(
+            br,
+            size_limit,
+            &crate::util::MemoryTracker::default(),
+        )?)
     } else {
         None
     };

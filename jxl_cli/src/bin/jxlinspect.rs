@@ -5,12 +5,11 @@
 
 use clap::{Arg, Command};
 use color_eyre::eyre::{Result, eyre};
+use jxl::api::{ExtraChannel, Image, Rect};
 use jxl::api::{
     JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer,
     ProcessingResult,
 };
-use jxl::headers::extra_channels::ExtraChannel;
-use jxl::image::{Image, Rect};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;

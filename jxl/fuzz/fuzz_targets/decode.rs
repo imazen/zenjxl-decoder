@@ -4,8 +4,10 @@
 // license that can be found in the LICENSE file.
 #![no_main]
 
-use jxl::api::{JxlColorType, JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
-use jxl::image::{Image, JxlOutputBuffer, Rect};
+use jxl::api::{
+    Image, JxlColorType, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, ProcessingResult, Rect,
+    states,
+};
 use libfuzzer_sys::fuzz_target;
 
 fn as_complete<T, U, E>(result: Result<ProcessingResult<T, U>, E>) -> Result<T, ()> {
@@ -18,7 +20,7 @@ fn as_complete<T, U, E>(result: Result<ProcessingResult<T, U>, E>) -> Result<T, 
 // Note: This is adapted from jxl_cli/src/dec/mod.rs
 fn fuzz_decode(mut data: &[u8]) -> Result<(), ()> {
     let mut decoder_options = JxlDecoderOptions::default();
-    decoder_options.pixel_limit = Some(1 << 22);
+    decoder_options.limits.max_pixels = Some(1 << 22);
     let initialized_decoder = JxlDecoder::<states::Initialized>::new(decoder_options);
     let mut decoder_with_image_info = as_complete(initialized_decoder.process(&mut data))?;
 

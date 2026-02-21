@@ -9,7 +9,9 @@ use crate::bit_reader::BitReader;
 use crate::entropy_coding::decode::Histograms;
 use crate::entropy_coding::decode::SymbolReader;
 use crate::error::{Error, Result};
-use crate::util::{CeilLog2, NewWithCapacity, tracing_wrappers::instrument, value_of_lowest_1_bit};
+use crate::util::{
+    CeilLog2, MemoryTracker, NewWithCapacity, tracing_wrappers::instrument, value_of_lowest_1_bit,
+};
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Permutation(pub Cow<'static, [u32]>);
@@ -30,9 +32,10 @@ impl Permutation {
         histograms: &Histograms,
         br: &mut BitReader,
         entropy_reader: &mut SymbolReader,
+        memory_tracker: &MemoryTracker,
     ) -> Result<Self> {
         let end = entropy_reader.read_unsigned(histograms, br, get_context(size));
-        Self::decode_inner(size, skip, end, |ctx| -> Result<u32> {
+        Self::decode_inner(size, skip, end, memory_tracker, |ctx| -> Result<u32> {
             let r = entropy_reader.read_unsigned(histograms, br, ctx);
             br.check_for_error()?;
             Ok(r)
@@ -43,12 +46,15 @@ impl Permutation {
         size: u32,
         skip: u32,
         end: u32,
+        memory_tracker: &MemoryTracker,
         mut read: impl FnMut(usize) -> Result<u32>,
     ) -> Result<Self> {
         if end > size - skip {
             return Err(Error::InvalidPermutationSize { size, skip, end });
         }
 
+        // Check memory budget for permutation allocations (lehmer + permutation vectors)
+        memory_tracker.check_alloc((size as u64) * 4)?;
         let mut lehmer = Vec::new_with_capacity(end as usize)?;
 
         let mut prev_val = 0u32;

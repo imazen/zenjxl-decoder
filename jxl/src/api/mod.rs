@@ -20,15 +20,34 @@ pub use crate::image::JxlOutputBuffer;
 pub use color::*;
 pub use data_types::*;
 pub use decoder::*;
+pub use enough::{Stop, Unstoppable};
 pub use inner::*;
 pub use input::*;
 #[cfg(feature = "cms")]
 pub use moxcms_wrapper::*;
-pub use enough::{Stop, Unstoppable};
 pub use options::*;
 pub use signature::*;
 
-use crate::headers::image_metadata::Orientation;
+// Error types
+pub use crate::error::{Error, Result};
+
+// Image types used by CLI/fuzz for output buffer construction
+pub use crate::image::{
+    DataTypeTag, Image, ImageDataType, ImageRect, ImageRectMut, OwnedRawImage, RawImageRect,
+    RawImageRectMut, Rect,
+};
+
+// Header types that appear in public API structs
+pub use crate::headers::color_encoding::RenderingIntent;
+pub use crate::headers::extra_channels::ExtraChannel;
+pub use crate::headers::image_metadata::Orientation;
+
+// Point type used in Error variants
+pub use crate::features::spline::Point;
+
+// Profiling (feature-gated, used by CLI)
+#[cfg(feature = "profiling")]
+pub use crate::util::profiling::print_profile_report;
 
 /// This type represents the return value of a function that reads input from a bitstream. The
 /// variant `Complete` indicates that the operation was completed successfully, and its return
@@ -59,6 +78,7 @@ impl<T> ProcessingResult<T, ()> {
 }
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ToneMapping {
     pub intensity_target: f32,
     pub min_nits: f32,
@@ -67,6 +87,7 @@ pub struct ToneMapping {
 }
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct JxlBasicInfo {
     pub size: (usize, usize),
     pub bit_depth: JxlBitDepth,

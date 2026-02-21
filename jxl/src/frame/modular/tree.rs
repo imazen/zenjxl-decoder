@@ -13,7 +13,7 @@ use crate::{
     error::{Error, Result},
     frame::modular::predict::PredictionData,
     image::Image,
-    util::{NewWithCapacity, tracing_wrappers::*},
+    util::{MemoryTracker, NewWithCapacity, tracing_wrappers::*},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -408,8 +408,12 @@ pub(super) fn predict_flat(
 }
 
 impl Tree {
-    #[instrument(level = "debug", skip(br), err)]
-    pub fn read(br: &mut BitReader, size_limit: usize) -> Result<Tree> {
+    #[instrument(level = "debug", skip(br, memory_tracker), err)]
+    pub fn read(
+        br: &mut BitReader,
+        size_limit: usize,
+        memory_tracker: &MemoryTracker,
+    ) -> Result<Tree> {
         assert!(size_limit <= u32::MAX as usize);
         trace!(pos = br.total_bits_read());
         let tree_histograms = Histograms::decode(NUM_TREE_CONTEXTS, br, true)?;
@@ -479,6 +483,9 @@ impl Tree {
 
         let num_properties = max_property as usize + 1;
         validate_tree(&tree, num_properties)?;
+
+        // Check memory budget for flat tree allocation
+        memory_tracker.check_alloc((tree.len() * std::mem::size_of::<FlatTreeNode>()) as u64)?;
 
         let histograms = Histograms::decode(tree.len().div_ceil(2), br, true)?;
 

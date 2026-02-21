@@ -14,7 +14,7 @@ use crate::{
     entropy_coding::decode::{Histograms, SymbolReader, unpack_signed},
     error::{Error, Result},
     frame::color_correlation_map::ColorCorrelationParams,
-    util::{CeilLog2, NewWithCapacity, fast_cos, fast_erff, tracing_wrappers::*},
+    util::{CeilLog2, MemoryTracker, NewWithCapacity, fast_cos, fast_erff, tracing_wrappers::*},
 };
 const MAX_NUM_CONTROL_POINTS: u32 = 1 << 20;
 const MAX_NUM_CONTROL_POINTS_PER_PIXEL_RATIO: u32 = 2;
@@ -756,11 +756,12 @@ impl Splines {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(br), ret, err)]
+    #[instrument(level = "debug", skip(br, memory_tracker), ret, err)]
     pub fn read(
         br: &mut BitReader,
         num_pixels: u32,
         max_spline_points: Option<u32>,
+        memory_tracker: &MemoryTracker,
     ) -> Result<Splines> {
         trace!(pos = br.total_bits_read());
         let splines_histograms = Histograms::decode(NUM_SPLINE_CONTEXTS, br, true)?;
@@ -814,6 +815,9 @@ impl Splines {
         let quantization_adjustment =
             splines_reader.read_signed(&splines_histograms, br, QUANTIZATION_ADJUSTMENT_CONTEXT);
 
+        // Check memory budget for worst-case control point allocations
+        memory_tracker
+            .check_alloc(max_control_points as u64 * std::mem::size_of::<Point>() as u64 * 2)?;
         let mut splines = Vec::new();
         let mut num_control_points = 0u32;
         for _ in 0..num_splines {

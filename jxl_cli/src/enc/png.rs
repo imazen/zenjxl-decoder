@@ -9,7 +9,7 @@ use jxl::api::{
 
 use crate::dec::{DecodeOutput, OutputDataType};
 use color_eyre::eyre::{Result, eyre};
-use jxl::headers::color_encoding::RenderingIntent;
+use jxl::api::RenderingIntent;
 
 use std::borrow::Cow;
 use std::io::Write;

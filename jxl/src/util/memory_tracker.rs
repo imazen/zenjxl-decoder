@@ -111,6 +111,26 @@ impl MemoryTracker {
         let current = inner.allocated.load(Ordering::Relaxed);
         current.saturating_add(bytes) > inner.limit
     }
+
+    /// Checks if allocating `bytes` would exceed the budget.
+    /// Unlike `try_allocate`, this does NOT reserve the bytes.
+    /// Use for Vec/temporary allocations where RAII release tracking is impractical.
+    pub fn check_alloc(&self, bytes: u64) -> Result<()> {
+        if self.would_exceed(bytes) {
+            let Some(inner) = &self.inner else {
+                return Ok(());
+            };
+            return Err(Error::LimitExceeded {
+                resource: "memory_bytes",
+                actual: inner
+                    .allocated
+                    .load(Ordering::Relaxed)
+                    .saturating_add(bytes),
+                limit: inner.limit,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// A guard that automatically releases memory when dropped.

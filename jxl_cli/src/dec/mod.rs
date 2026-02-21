@@ -10,14 +10,10 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, eyre};
-use jxl::{
-    api::{
-        Endianness, JxlAnimation, JxlBitDepth, JxlBitstreamInput, JxlColorProfile, JxlColorType,
-        JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
-        ProcessingResult, states::WithImageInfo,
-    },
-    headers::extra_channels::ExtraChannel,
-    image::{OwnedRawImage, Rect},
+use jxl::api::{
+    Endianness, ExtraChannel, JxlAnimation, JxlBitDepth, JxlBitstreamInput, JxlColorProfile,
+    JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
+    OwnedRawImage, ProcessingResult, Rect, states::WithImageInfo,
 };
 
 pub struct ImageFrame {

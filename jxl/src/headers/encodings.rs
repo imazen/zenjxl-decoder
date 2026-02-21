@@ -188,7 +188,14 @@ impl UnconditionalCoder<()> for Permutation {
             let num_contexts = 8;
             let histograms = Histograms::decode(num_contexts, br, /*allow_lz77=*/ true)?;
             let mut reader = SymbolReader::new(&histograms, br, None)?;
-            Permutation::decode(size, 0, &histograms, br, &mut reader)
+            Permutation::decode(
+                size,
+                0,
+                &histograms,
+                br,
+                &mut reader,
+                &crate::util::MemoryTracker::default(),
+            )
         } else {
             Ok(Permutation::default())
         };

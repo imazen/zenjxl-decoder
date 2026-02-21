@@ -1320,10 +1320,7 @@ pub(crate) mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x25, 0x00,
         ];
 
-        let opts = JxlDecoderOptions {
-            pixel_limit: Some(1024 * 1024 * 1024),
-            ..Default::default()
-        };
+        let opts = JxlDecoderOptions::default();
         let mut decoder = JxlDecoderInner::new(opts);
         let mut input = data;
 

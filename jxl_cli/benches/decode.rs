@@ -5,10 +5,10 @@
 
 use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
 use jxl::api::JxlDecoderOptions;
-use zenjxl_decoder_cli::cms::Lcms2Cms;
-use zenjxl_decoder_cli::dec::{OutputDataType, decode_frames, decode_header};
 use std::fs;
 use std::path::{Path, PathBuf};
+use zenjxl_decoder_cli::cms::Lcms2Cms;
+use zenjxl_decoder_cli::dec::{OutputDataType, decode_frames, decode_header};
 
 fn get_test_paths() -> Vec<PathBuf> {
     std::env::var("JXL_FILES").map_or_else(

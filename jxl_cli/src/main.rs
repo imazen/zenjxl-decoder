@@ -6,13 +6,13 @@
 use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use jxl::api::JxlDecoderOptions;
-use zenjxl_decoder_cli::dec::OutputDataType;
-use zenjxl_decoder_cli::enc::OutputFormat;
-use zenjxl_decoder_cli::{cms::Lcms2Cms, dec};
 use std::fs;
 use std::io::{BufReader, Read, Seek};
 use std::path::PathBuf;
 use std::time::Duration;
+use zenjxl_decoder_cli::dec::OutputDataType;
+use zenjxl_decoder_cli::enc::OutputFormat;
+use zenjxl_decoder_cli::{cms::Lcms2Cms, dec};
 
 const VERSION_STRING: &str = concat!(
     env!("VERGEN_GIT_DESCRIBE"),
@@ -241,7 +241,7 @@ fn main() -> Result<()> {
     save_icc(&embedded_icc, opt.original_icc_out.as_ref())?;
 
     #[cfg(feature = "profiling")]
-    jxl::util::print_profile_report();
+    jxl::api::print_profile_report();
 
     Ok(())
 }

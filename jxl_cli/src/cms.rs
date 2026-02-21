@@ -5,8 +5,8 @@
 
 //! Color Management System implementation using lcms2.
 
+use jxl::api::{Error, Result};
 use jxl::api::{JxlCms, JxlCmsTransformer, JxlColorProfile};
-use jxl::error::{Error, Result};
 use lcms2::{
     ColorSpaceSignatureExt, DisallowCache, Flags, Intent, PixelFormat, Profile, ThreadContext,
     Transform,
@@ -139,8 +139,8 @@ impl JxlCmsTransformer for Lcms2Transformer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jxl::api::RenderingIntent;
     use jxl::api::{JxlColorEncoding, JxlPrimaries, JxlTransferFunction, JxlWhitePoint};
-    use jxl::headers::color_encoding::RenderingIntent;
 
     fn srgb_profile() -> JxlColorProfile {
         JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {

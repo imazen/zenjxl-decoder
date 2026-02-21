@@ -18,7 +18,7 @@ use crate::{
     },
     headers::frame_header::FrameHeader,
     image::{Image, ImageRect, Rect},
-    util::{CeilLog2, ShiftRightCeil, SmallVec, TryVecExt, tracing_wrappers::*},
+    util::{CeilLog2, MemoryTracker, ShiftRightCeil, SmallVec, TryVecExt, tracing_wrappers::*},
 };
 use jxl_simd::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, simd_function};
 
@@ -330,6 +330,7 @@ impl<'a, 'b> PassInfo<'a, 'b> {
         block_group_rect: Rect,
         pass: usize,
         br: &'a mut BitReader<'b>,
+        tracker: &MemoryTracker,
     ) -> Result<Self> {
         let num_histo_bits = hf_global.num_histograms.ceil_log2();
         debug!(?pass);
@@ -346,18 +347,27 @@ impl<'a, 'b> PassInfo<'a, 'b> {
             0
         };
         let num_nzeros = [
-            Image::new((
-                block_group_rect.size.0 >> frame_header.hshift(0),
-                block_group_rect.size.1 >> frame_header.vshift(0),
-            ))?,
-            Image::new((
-                block_group_rect.size.0 >> frame_header.hshift(1),
-                block_group_rect.size.1 >> frame_header.vshift(1),
-            ))?,
-            Image::new((
-                block_group_rect.size.0 >> frame_header.hshift(2),
-                block_group_rect.size.1 >> frame_header.vshift(2),
-            ))?,
+            Image::new_tracked(
+                (
+                    block_group_rect.size.0 >> frame_header.hshift(0),
+                    block_group_rect.size.1 >> frame_header.vshift(0),
+                ),
+                tracker,
+            )?,
+            Image::new_tracked(
+                (
+                    block_group_rect.size.0 >> frame_header.hshift(1),
+                    block_group_rect.size.1 >> frame_header.vshift(1),
+                ),
+                tracker,
+            )?,
+            Image::new_tracked(
+                (
+                    block_group_rect.size.0 >> frame_header.hshift(2),
+                    block_group_rect.size.1 >> frame_header.vshift(2),
+                ),
+                tracker,
+            )?,
         ];
 
         Ok(Self {
@@ -386,6 +396,7 @@ pub fn decode_vardct_group(
     hf_coefficients: Option<[&mut [i32]; 3]>,
     pixels: &mut Option<[Image<f32>; 3]>,
     buffers: &mut VarDctBuffers,
+    tracker: &MemoryTracker,
     #[cfg(feature = "jpeg")] mut jpeg_coeffs: Option<&mut [Vec<i16>; 3]>,
 ) -> Result<(), Error> {
     crate::profile!(entropy_decode);
@@ -396,7 +407,16 @@ pub fn decode_vardct_group(
     debug!(?block_group_rect);
     let mut pass_info = passes
         .iter_mut()
-        .map(|(pass, br)| PassInfo::new(hf_global, frame_header, block_group_rect, *pass, br))
+        .map(|(pass, br)| {
+            PassInfo::new(
+                hf_global,
+                frame_header,
+                block_group_rect,
+                *pass,
+                br,
+                tracker,
+            )
+        })
         .collect::<Result<SmallVec<_, 4>>>()?;
 
     // Reset and use pooled buffers

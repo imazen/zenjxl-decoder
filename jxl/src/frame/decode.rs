@@ -171,14 +171,20 @@ impl Frame {
                 // TEMP DEBUG: print loaded LfFrame values
                 if let Some(ref imgs) = loaded {
                     let (w, h) = imgs[0].size();
-                    eprintln!("DECODER MAIN: loaded lf_image from lf_frames[{}], size={}x{}", frame_header.lf_level, w, h);
+                    eprintln!(
+                        "DECODER MAIN: loaded lf_image from lf_frames[{}], size={}x{}",
+                        frame_header.lf_level, w, h
+                    );
                     if w > 0 && h > 0 {
                         eprintln!("DECODER MAIN: lf_image[0][0,0]={} (X)", imgs[0].row(0)[0]);
                         eprintln!("DECODER MAIN: lf_image[1][0,0]={} (Y)", imgs[1].row(0)[0]);
                         eprintln!("DECODER MAIN: lf_image[2][0,0]={} (B)", imgs[2].row(0)[0]);
                     }
                 } else {
-                    eprintln!("DECODER MAIN: lf_frames[{}] is None!", frame_header.lf_level);
+                    eprintln!(
+                        "DECODER MAIN: lf_frames[{}] is None!",
+                        frame_header.lf_level
+                    );
                 }
                 loaded
             } else {
@@ -324,6 +330,7 @@ impl Frame {
                 self.decoder_state.extra_channel_info().len(),
                 &self.decoder_state.reference_frames[..],
                 self.decoder_state.limits.max_patches,
+                &self.decoder_state.memory_tracker,
             )?)
         } else {
             None
@@ -335,6 +342,7 @@ impl Frame {
                 br,
                 self.header.width * self.header.height,
                 self.decoder_state.limits.max_spline_points,
+                &self.decoder_state.memory_tracker,
             )?)
         } else {
             None
@@ -384,7 +392,11 @@ impl Frame {
             // Use configured limit if set, otherwise use 2^22 default
             let configured_limit = self.decoder_state.limits.max_tree_size.unwrap_or(1 << 22);
             let size_limit = dynamic_limit.min(configured_limit);
-            Some(Tree::read(br, size_limit)?)
+            Some(Tree::read(
+                br,
+                size_limit,
+                &self.decoder_state.memory_tracker,
+            )?)
         } else {
             None
         };
@@ -728,6 +740,7 @@ impl Frame {
                     hf_coeffs,
                     &mut pixels,
                     buffers,
+                    &self.decoder_state.memory_tracker,
                     #[cfg(feature = "jpeg")]
                     self.jpeg_coeffs.as_mut(),
                 )?;

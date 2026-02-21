@@ -139,7 +139,14 @@ pub fn decode_coeff_orders(used_orders: u32, br: &mut BitReader) -> Result<Vec<P
         let num_blocks = covered_blocks_x(*transform_type) * covered_blocks_y(*transform_type);
         for c in 0..3 {
             let size = num_blocks * BLOCK_SIZE as u32;
-            let permutation = Permutation::decode(size, num_blocks, &histograms, br, &mut reader)?;
+            let permutation = Permutation::decode(
+                size,
+                num_blocks,
+                &histograms,
+                br,
+                &mut reader,
+                &crate::util::MemoryTracker::default(),
+            )?;
             let index = 3 * ord + c;
             permutations[index].compose(&permutation);
         }

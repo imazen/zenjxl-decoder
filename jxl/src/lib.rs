@@ -4,22 +4,27 @@
 // license that can be found in the LICENSE file.
 
 #![deny(unsafe_code)]
+// Internal modules expose items that are used across the crate but not
+// externally.  Some items are kept for future use (container, color TFs,
+// render stages) — suppress dead-code noise so clippy -D warnings passes.
+#![allow(dead_code, unused_imports)]
+
 pub mod api;
-pub mod bit_reader;
-pub mod color;
-pub mod container;
-pub mod entropy_coding;
-pub mod error;
-pub mod features;
-pub mod frame;
-pub mod headers;
-pub mod icc;
-pub mod image;
-pub mod render;
-pub mod util;
+pub(crate) mod bit_reader;
+pub(crate) mod color;
+pub(crate) mod container;
+pub(crate) mod entropy_coding;
+pub(crate) mod error;
+pub(crate) mod features;
+pub(crate) mod frame;
+pub(crate) mod headers;
+pub(crate) mod icc;
+pub(crate) mod image;
+pub(crate) mod render;
+pub(crate) mod util;
 
 #[cfg(feature = "jpeg")]
-pub mod jpeg;
+pub(crate) mod jpeg;
 
 #[cfg(test)]
 mod tests;

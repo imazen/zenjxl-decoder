@@ -14,7 +14,7 @@ use crate::{
     features::blending::perform_blending,
     frame::{DecoderState, ReferenceFrame},
     headers::extra_channels::ExtraChannelInfo,
-    util::{NewWithCapacity, SmallVec, tracing_wrappers::*},
+    util::{MemoryTracker, NewWithCapacity, SmallVec, tracing_wrappers::*},
 };
 
 // Context numbers as specified in Section C.4.5, Listing C.2:
@@ -353,7 +353,7 @@ impl PatchesDictionary {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(br), ret, err)]
+    #[instrument(level = "debug", skip(br, memory_tracker), ret, err)]
     pub fn read(
         br: &mut BitReader,
         xsize: usize,
@@ -361,6 +361,7 @@ impl PatchesDictionary {
         num_extra_channels: usize,
         reference_frames: &[Option<ReferenceFrame>],
         max_patches_limit: Option<usize>,
+        memory_tracker: &MemoryTracker,
     ) -> Result<PatchesDictionary> {
         let blendings_stride = num_extra_channels + 1;
         let patches_histograms = Histograms::decode(PatchContext::NUM, br, true)?;
@@ -400,6 +401,8 @@ impl PatchesDictionary {
         let mut next_size = 1;
         let mut positions: Vec<PatchPosition> = Vec::new();
         let mut blendings = Vec::new();
+        memory_tracker
+            .check_alloc((num_ref_patch * std::mem::size_of::<PatchReferencePosition>()) as u64)?;
         let mut ref_positions = Vec::new_with_capacity(num_ref_patch)?;
         for _ in 0..num_ref_patch {
             let reference = patches_reader.read_unsigned(
@@ -763,6 +766,7 @@ mod tests {
 
     mod read_patches_tests {
         use super::super::*;
+        use crate::util::MemoryTracker;
         use test_log::test;
 
         #[test]
@@ -775,6 +779,7 @@ mod tests {
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![PatchPosition {
@@ -824,6 +829,7 @@ mod tests {
                 2,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![
@@ -923,6 +929,7 @@ mod tests {
                 1,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![PatchPosition {
@@ -984,6 +991,7 @@ mod tests {
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![PatchPosition {
@@ -1029,6 +1037,7 @@ mod tests {
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
                 positions: vec![

@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use crate::dec::DecodeOutput;
-use jxl::error::Result;
+use jxl::api::Result;
 use std::io::Write;
 
 fn numpy_header<Writer: Write>(

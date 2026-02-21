@@ -154,7 +154,7 @@ impl<'a, T: ?Sized> AtomicRef<'a, T> {
         }
     }
 
-    #[expect(clippy::should_implement_trait)]
+    #[allow(clippy::should_implement_trait)]
     #[inline]
     pub fn clone(orig: &Self) -> Self {
         // Safety note: The invariants hold trivially, from the invariants of `orig`.

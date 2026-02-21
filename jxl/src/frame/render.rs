@@ -233,9 +233,8 @@ impl Frame {
         }
 
         #[cfg(all(feature = "threads", not(test)))]
-        let use_parallel = self.decoder_state.parallel
-            && groups.len() > 1
-            && self.hf_coefficients.is_none();
+        let use_parallel =
+            self.decoder_state.parallel && groups.len() > 1 && self.hf_coefficients.is_none();
         #[cfg(all(feature = "threads", test))]
         let use_parallel = self.decoder_state.parallel
             && groups.len() > 1
@@ -414,6 +413,7 @@ impl Frame {
                     .transform_data
                     .opsin_inverse_matrix
                     .quant_biases;
+                let tracker = &self.decoder_state.memory_tracker;
                 work.par_iter_mut().try_for_each_init(
                     || None::<VarDctBuffers>,
                     |buffers, gw| -> Result<()> {
@@ -440,6 +440,7 @@ impl Frame {
                                     None,
                                     &mut gw.pixels,
                                     buffers,
+                                    tracker,
                                     #[cfg(feature = "jpeg")]
                                     None,
                                 )?;
@@ -640,9 +641,7 @@ impl Frame {
                         || factory.create(1).ok(),
                         |ctx_opt, item| -> Result<()> {
                             stop.check()?;
-                            let ctx = ctx_opt.as_mut().ok_or(
-                                Error::ImageOutOfMemory(0, 0),
-                            )?;
+                            let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
                             // SAFETY: Each work item covers a non-overlapping region.
                             let mut local_buffers = unsafe {
                                 shared_bufs.get_local_buffers(

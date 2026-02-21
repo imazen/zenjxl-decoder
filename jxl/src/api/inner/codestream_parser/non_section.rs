@@ -28,7 +28,6 @@ use crate::api::ToneMapping;
 
 fn check_size_limit(
     limits: &crate::api::JxlDecoderLimits,
-    pixel_limit: Option<usize>, // Deprecated, kept for backwards compatibility
     (xs, ys): (usize, usize),
     num_ec: usize,
 ) -> Result<()> {
@@ -53,14 +52,6 @@ fn check_size_limit(
             limit: limit as u64,
         });
     }
-    // Backwards compatibility: also check deprecated pixel_limit
-    if let Some(limit) = pixel_limit {
-        let xs = xs.max(16); // xsize is always at least 64 bytes.
-        let total_pixels = xs.saturating_mul(ys).saturating_mul(3 + num_ec);
-        if total_pixels >= limit {
-            return Err(Error::ImageSizeTooLarge(xs, ys));
-        }
-    };
     Ok(())
 }
 
@@ -76,14 +67,12 @@ impl CodestreamParser {
             let ysize = file_header.size.ysize() as usize;
             check_size_limit(
                 &decode_options.limits,
-                decode_options.pixel_limit,
                 (xsize, ysize),
                 file_header.image_metadata.extra_channel_info.len(),
             )?;
             if let Some(preview) = &file_header.image_metadata.preview {
                 check_size_limit(
                     &decode_options.limits,
-                    decode_options.pixel_limit,
                     (preview.xsize() as usize, preview.ysize() as usize),
                     file_header.image_metadata.extra_channel_info.len(),
                 )?;
@@ -261,7 +250,6 @@ impl CodestreamParser {
             frame_header.postprocess(&nonserialized);
             check_size_limit(
                 &decode_options.limits,
-                decode_options.pixel_limit,
                 frame_header.size(),
                 frame_header.num_extra_channels as usize,
             )?;
