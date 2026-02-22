@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::any::Any;
+use std::sync::Mutex;
 
 use crate::api::JxlCmsTransformer;
 use crate::error::Result;
@@ -13,11 +14,11 @@ use crate::render::simd_utils::{
     deinterleave_2_dispatch, deinterleave_3_dispatch, deinterleave_4_dispatch,
     interleave_2_dispatch, interleave_3_dispatch, interleave_4_dispatch,
 };
-use crate::util::AtomicRefCell;
 
 /// Thread-local state for CMS transform.
+/// Each thread exclusively owns its transformer — no shared mutable state.
 struct CmsLocalState {
-    transformer_idx: usize,
+    transformer: Box<dyn JxlCmsTransformer + Send + Sync>,
     /// Buffer for interleaved input pixels (always used).
     input_buffer: Vec<f32>,
     /// Buffer for interleaved output pixels (only used when in_channels != out_channels).
@@ -32,7 +33,9 @@ struct CmsLocalState {
 ///
 /// Output is written to row[0..out_channels].
 pub struct CmsStage {
-    transformers: Vec<AtomicRefCell<Box<dyn JxlCmsTransformer + Send + Sync>>>,
+    /// Pool of transformers dispensed to threads via `init_local_state`.
+    /// Each `init_local_state` call pops one; the thread then owns it exclusively.
+    transformer_pool: Mutex<Vec<Box<dyn JxlCmsTransformer + Send + Sync>>>,
     /// Number of input channels (3 for RGB, 4 for CMYK).
     in_channels: usize,
     /// Number of output channels (typically 3 for RGB output).
@@ -92,7 +95,7 @@ impl CmsStage {
         // Pad buffer to SIMD alignment (max vector length is 16)
         let padded_pixels = max_pixels.next_multiple_of(16);
         Self {
-            transformers: transformers.into_iter().map(AtomicRefCell::new).collect(),
+            transformer_pool: Mutex::new(transformers),
             in_channels,
             out_channels,
             black_channel,
@@ -132,21 +135,17 @@ impl RenderPipelineInPlaceStage for CmsStage {
         c < self.in_channels.min(3) || self.black_channel == Some(c)
     }
 
-    fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
-        if self.transformers.is_empty() {
+    fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
+        let transformer = self.transformer_pool.lock().unwrap().pop();
+        let Some(transformer) = transformer else {
+            // Pool exhausted — no transformer available for this thread.
             return Ok(None);
-        }
-        // Use thread index modulo transformer count to assign transformer to this thread
-        let idx = thread_index % self.transformers.len();
-
-        // Always allocate separate output buffer to avoid per-call allocations
-        // in CMS backends that don't support true in-place transforms (e.g. moxcms).
-        let output_buffer = vec![0.0f32; self.output_buffer_size];
+        };
 
         Ok(Some(Box::new(CmsLocalState {
-            transformer_idx: idx,
+            transformer,
             input_buffer: vec![0.0f32; self.input_buffer_size],
-            output_buffer,
+            output_buffer: vec![0.0f32; self.output_buffer_size],
         })))
     }
 
@@ -171,8 +170,8 @@ impl RenderPipelineInPlaceStage for CmsStage {
         // Single channel: use separate buffers to avoid per-call allocations
         if self.in_channels == 1 && self.out_channels == 1 {
             state.input_buffer[..xsize].copy_from_slice(&row[0][..xsize]);
-            let mut transformer = self.transformers[state.transformer_idx].borrow_mut();
-            transformer
+            state
+                .transformer
                 .do_transform(
                     &state.input_buffer[..xsize],
                     &mut state.output_buffer[..xsize],
@@ -217,8 +216,8 @@ impl RenderPipelineInPlaceStage for CmsStage {
 
         // Apply transform using separate buffers (avoids per-call allocations
         // in CMS backends that don't support true in-place transforms).
-        let mut transformer = self.transformers[state.transformer_idx].borrow_mut();
-        transformer
+        state
+            .transformer
             .do_transform(
                 &state.input_buffer[..xsize * self.in_channels],
                 &mut state.output_buffer[..xsize * self.out_channels],
