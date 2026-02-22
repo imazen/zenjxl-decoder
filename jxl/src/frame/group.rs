@@ -51,12 +51,10 @@ impl VarDctBuffers {
         })
     }
 
-    /// Reset buffers to zero for reuse.
+    /// Reset buffers for reuse. Only coeffs_storage needs zeroing because
+    /// coefficients are accumulated with `+=`. scratch and transform_buffer are
+    /// fully written by dequant_block/copy_from_slice before each read.
     pub fn reset(&mut self) {
-        self.scratch.fill(0.0);
-        for buf in &mut self.transform_buffer {
-            buf.fill(0.0);
-        }
         self.coeffs_storage.fill(0);
     }
 }
