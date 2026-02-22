@@ -30,14 +30,16 @@ pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 
     for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
         let x = D::F32Vec::load(d, vec);
-        let a = x.abs();
+        // Per ICC parametric curve type 3 semantics: the linear segment applies
+        // for ALL values below the threshold, including negatives. This preserves
+        // sign naturally (12.92 * negative = negative) without needing copysign.
+        // The gamma branch is only used for x >= 0.0031308 (always positive).
         D::F32Vec::splat(d, 0.0031308)
-            .gt(a)
+            .gt(x)
             .if_then_else_f32(
-                a * D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, a.sqrt(), P, Q),
+                x * D::F32Vec::splat(d, 12.92),
+                eval_rational_poly_simd(d, x.sqrt(), P, Q),
             )
-            .copysign(x)
             .store(vec);
     }
 }
@@ -63,13 +65,13 @@ pub fn srgb_to_linear(samples: &mut [f32]) {
     ];
 
     for x in samples {
-        let a = x.abs();
-        *x = if a <= 0.04045 {
-            a / 12.92
+        // Per ICC parametric curve type 3: linear segment for all values below
+        // threshold, including negatives. Gamma branch only for x >= 0.04045.
+        *x = if *x <= 0.04045 {
+            *x / 12.92
         } else {
-            eval_rational_poly(a, P, Q)
-        }
-        .copysign(*x);
+            eval_rational_poly(*x, P, Q)
+        };
     }
 }
 
@@ -95,14 +97,14 @@ pub fn srgb_to_linear_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 
     for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
         let x = D::F32Vec::load(d, vec);
-        let a = x.abs();
+        // Per ICC parametric curve type 3: linear segment for all values below
+        // threshold, including negatives. Gamma branch only for x >= 0.04045.
         D::F32Vec::splat(d, 0.04045)
-            .gt(a)
+            .gt(x)
             .if_then_else_f32(
-                a / D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, a, P, Q),
+                x / D::F32Vec::splat(d, 12.92),
+                eval_rational_poly_simd(d, x, P, Q),
             )
-            .copysign(x)
             .store(vec);
     }
 }
@@ -134,14 +136,14 @@ pub fn linear_to_bt709_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 
     for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
         let x = D::F32Vec::load(d, vec);
-        let a = x.abs();
+        // Per ICC parametric curve type 3: linear segment for all values below
+        // threshold, including negatives. Gamma branch only for x >= 0.018.
         D::F32Vec::splat(d, 0.018)
-            .gt(a)
+            .gt(x)
             .if_then_else_f32(
-                a * D::F32Vec::splat(d, 4.5),
-                eval_rational_poly_simd(d, a.sqrt(), P, Q),
+                x * D::F32Vec::splat(d, 4.5),
+                eval_rational_poly_simd(d, x.sqrt(), P, Q),
             )
-            .copysign(x)
             .store(vec);
     }
 }
@@ -149,13 +151,13 @@ pub fn linear_to_bt709_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 /// Converts samples in BT.709 transfer curve to linear. Inverse of `linear_to_bt709_simd`.
 pub fn bt709_to_linear(samples: &mut [f32]) {
     for s in samples {
-        let a = s.abs();
-        *s = if a <= 0.081 {
-            a / 4.5
+        // Per ICC parametric curve type 3: linear segment for all values below
+        // threshold, including negatives. Gamma branch only for s >= 0.081.
+        *s = if *s <= 0.081 {
+            *s / 4.5
         } else {
-            crate::util::fast_powf(a.mul_add(1.0 / 1.099, 0.099 / 1.099), 1.0 / 0.45)
-        }
-        .copysign(*s);
+            crate::util::fast_powf(s.mul_add(1.0 / 1.099, 0.099 / 1.099), 1.0 / 0.45)
+        };
     }
 }
 
@@ -173,13 +175,13 @@ pub fn bt709_to_linear_simd<D: SimdDescriptor>(d: D, xsize: usize, samples: &mut
         .take(xsize.div_ceil(D::F32Vec::LEN))
     {
         let x = D::F32Vec::load(d, vec);
-        let a = x.abs();
-        let linear_part = a * inv_4_5;
-        let gamma_part = crate::util::fast_powf_simd(d, a.mul_add(scale, offset), exp);
+        // Per ICC parametric curve type 3: linear segment for all values below
+        // threshold, including negatives. Gamma branch only for x >= 0.081.
+        let linear_part = x * inv_4_5;
+        let gamma_part = crate::util::fast_powf_simd(d, x.mul_add(scale, offset), exp);
         threshold
-            .gt(a)
+            .gt(x)
             .if_then_else_f32(linear_part, gamma_part)
-            .copysign(x)
             .store(vec);
     }
 }
@@ -547,26 +549,24 @@ mod test {
     /// Naive linear to sRGB using actual pow for testing.
     fn linear_to_srgb_naive(samples: &mut [f32]) {
         for x in samples {
-            let a = x.abs();
-            *x = if a <= 0.0031308 {
-                a * 12.92
+            // ICC type 3: linear segment for all x < threshold (including negatives)
+            *x = if *x <= 0.0031308 {
+                *x * 12.92
             } else {
-                a.powf(1.0 / 2.4).mul_add(1.055, -0.055)
-            }
-            .copysign(*x);
+                (*x).powf(1.0 / 2.4).mul_add(1.055, -0.055)
+            };
         }
     }
 
     /// Naive linear to BT.709 using actual pow for testing.
     fn linear_to_bt709_naive(samples: &mut [f32]) {
         for x in samples {
-            let a = x.abs();
-            *x = if a <= 0.018 {
-                a * 4.5
+            // ICC type 3: linear segment for all x < threshold (including negatives)
+            *x = if *x <= 0.018 {
+                *x * 4.5
             } else {
-                a.powf(0.45).mul_add(1.099, -0.099)
-            }
-            .copysign(*x);
+                (*x).powf(0.45).mul_add(1.099, -0.099)
+            };
         }
     }
 

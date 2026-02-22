@@ -818,10 +818,8 @@ fn compare_conformance(
         let ref_frame_start = frame_idx * frame_size_ref;
 
         let mut max_error: f32 = 0.0;
-        let mut max_error_loc: (usize, usize, usize, f32, f32) = (0, 0, 0, 0.0, 0.0); // x, y, channel, dec, ref
         let mut sum_sq_errors: Vec<f64> = vec![0.0; compare_channels];
         let pixel_count = dec_height * dec_width;
-        let mut high_error_count = 0usize;
 
         for y in 0..dec_height {
             for x in 0..dec_width {
@@ -833,26 +831,12 @@ fn compare_conformance(
                     let ref_val = reference[ref_idx + c];
                     let error = (dec_val - ref_val).abs();
 
-                    if error > 0.06 {
-                        high_error_count += 1;
-                    }
-
                     if error > max_error {
                         max_error = error;
-                        max_error_loc = (x, y, c, dec_val, ref_val);
                     }
                     sum_sq_errors[c] += (error as f64) * (error as f64);
                 }
             }
-        }
-
-        // Debug output for high error locations
-        if max_error > 0.06 {
-            eprintln!(
-                "  Max error location: ({}, {}) channel {} - decoded: {:.6}, reference: {:.6}",
-                max_error_loc.0, max_error_loc.1, max_error_loc.2, max_error_loc.3, max_error_loc.4
-            );
-            eprintln!("  Total pixels with error > 0.06: {}", high_error_count);
         }
 
         // Compute per-channel RMSE and take max
