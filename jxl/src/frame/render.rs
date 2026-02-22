@@ -400,6 +400,9 @@ impl Frame {
             }
 
             // Phase 2: Parallel decode.
+            // Seed the buffer pool from self.vardct_buffers so buffers persist across
+            // calls. The streaming API calls this function once per group (batch_size=1),
+            // so without persistence we'd allocate+zero a fresh 1.5MB buffer per group.
             {
                 let lf_global = self.lf_global.as_ref().unwrap();
                 let header = &self.header;
@@ -414,53 +417,61 @@ impl Frame {
                     .opsin_inverse_matrix
                     .quant_biases;
                 let tracker = &self.decoder_state.memory_tracker;
-                work.par_iter_mut().try_for_each_init(
-                    || None::<VarDctBuffers>,
-                    |buffers, gw| -> Result<()> {
-                        stop.check()?;
-                        if is_vardct && !gw.passes.is_empty() {
-                            let hf_global = hf_global.unwrap();
-                            let hf_meta = hf_meta.unwrap();
-                            if buffers.is_none() {
-                                *buffers = Some(VarDctBuffers::new()?);
+                let mut pool: Vec<VarDctBuffers> = Vec::new();
+                if let Some(buf) = self.vardct_buffers.take() {
+                    pool.push(buf);
+                }
+                let buffer_pool = std::sync::Mutex::new(pool);
+                work.par_iter_mut().try_for_each(|gw| -> Result<()> {
+                    stop.check()?;
+                    if is_vardct && !gw.passes.is_empty() {
+                        let hf_global = hf_global.unwrap();
+                        let hf_meta = hf_meta.unwrap();
+                        let mut buffers = match buffer_pool.lock().unwrap().pop() {
+                            Some(mut b) => {
+                                b.reset();
+                                b
                             }
-                            let buffers = buffers.as_mut().unwrap();
+                            None => VarDctBuffers::new()?,
+                        };
 
-                            if !(gw.pixels.is_none() && gw.do_render) {
-                                decode_vardct_group(
-                                    gw.group,
-                                    &mut gw.passes,
-                                    header,
-                                    lf_global,
-                                    hf_global,
-                                    hf_meta,
-                                    lf_image,
-                                    quant_lf,
-                                    quant_biases,
-                                    None,
-                                    &mut gw.pixels,
-                                    buffers,
-                                    tracker,
-                                    #[cfg(feature = "jpeg")]
-                                    None,
-                                )?;
-                            }
-                        }
-
-                        for (pass, br) in gw.passes.iter_mut() {
-                            lf_global.modular_global.read_stream(
-                                ModularStreamId::ModularHF {
-                                    group: gw.group,
-                                    pass: *pass,
-                                },
+                        if !(gw.pixels.is_none() && gw.do_render) {
+                            decode_vardct_group(
+                                gw.group,
+                                &mut gw.passes,
                                 header,
-                                &lf_global.tree,
-                                br,
+                                lf_global,
+                                hf_global,
+                                hf_meta,
+                                lf_image,
+                                quant_lf,
+                                quant_biases,
+                                None,
+                                &mut gw.pixels,
+                                &mut buffers,
+                                tracker,
+                                #[cfg(feature = "jpeg")]
+                                None,
                             )?;
                         }
-                        Ok(())
-                    },
-                )?;
+                        buffer_pool.lock().unwrap().push(buffers);
+                    }
+
+                    for (pass, br) in gw.passes.iter_mut() {
+                        lf_global.modular_global.read_stream(
+                            ModularStreamId::ModularHF {
+                                group: gw.group,
+                                pass: *pass,
+                            },
+                            header,
+                            &lf_global.tree,
+                            br,
+                        )?;
+                    }
+                    Ok(())
+                })?;
+                // Save one buffer for reuse in next call
+                self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
             }
 
             // Phase 3a: Sequential — store buffers and compute renderable work items.
