@@ -400,6 +400,10 @@ struct DecodeResult {
 /// Decode a JXL file to f32 pixels for conformance testing.
 /// Supports both single-frame and animated (multi-frame) images.
 /// Pixels are returned as a flat buffer with shape [N, H, W, C].
+///
+/// All extra channels (alpha, spot colors, depth, etc.) are output as separate
+/// planar buffers and interleaved into the final pixel array. This ensures the
+/// output matches the NPY reference layout which includes all channels.
 #[cfg(feature = "cms")]
 fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
     use crate::image::{Image, Rect};
@@ -407,8 +411,10 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read JXL: {}", e))?;
     let mut input = data.as_slice();
 
+    // Don't render spot colors into RGB — conformance references have raw channel data
     let options = JxlDecoderOptions {
         cms: Some(Box::new(MoxCms::new())),
+        render_spot_colors: false,
         ..JxlDecoderOptions::default()
     };
 
@@ -431,35 +437,30 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
     let basic_info = decoder_with_image_info.basic_info().clone();
     let (width, height) = basic_info.size;
 
-    // Determine format based on color space and alpha
+    // Use RGB/Grayscale as color type (no alpha in color buffer).
+    // All extra channels (including alpha) get separate planar buffers
+    // so we can interleave them to match the NPY reference layout.
     let default_format = decoder_with_image_info.current_pixel_format();
     let is_grayscale = matches!(
         default_format.color_type,
         JxlColorType::Grayscale | JxlColorType::GrayscaleAlpha
     );
 
-    let has_alpha = basic_info.extra_channels.iter().any(|ec| {
-        matches!(
-            ec.ec_type,
-            crate::headers::extra_channels::ExtraChannel::Alpha
-        )
-    });
-
-    let (color_type, channels) = match (is_grayscale, has_alpha) {
-        (true, true) => (JxlColorType::GrayscaleAlpha, 2),
-        (true, false) => (JxlColorType::Grayscale, 1),
-        (false, true) => (JxlColorType::Rgba, 4),
-        (false, false) => (JxlColorType::Rgb, 3),
+    let color_type = if is_grayscale {
+        JxlColorType::Grayscale
+    } else {
+        JxlColorType::Rgb
     };
+    let color_channels = color_type.samples_per_pixel();
 
-    // Request f32 output
+    // Request f32 output for color + all extra channels
     let num_extra_channels = basic_info.extra_channels.len();
-    let extra_channel_format = vec![None; num_extra_channels];
+    let total_channels = color_channels + num_extra_channels;
 
     let format = JxlPixelFormat {
         color_type,
         color_data_format: Some(JxlDataFormat::f32()),
-        extra_channel_format,
+        extra_channel_format: vec![Some(JxlDataFormat::f32()); num_extra_channels],
     };
 
     decoder_with_image_info.set_pixel_format(format);
@@ -467,7 +468,7 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
     // Capture output color profile before advancing to frame info
     let output_profile = decoder_with_image_info.output_color_profile().clone();
 
-    let frame_pixels = width * height * channels;
+    let frame_pixels = width * height * total_channels;
     let mut all_pixels = Vec::new();
     let mut frame_count = 0usize;
 
@@ -487,18 +488,33 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
             }
         };
 
-        // Create output buffer for this frame
-        let mut output_image = Image::<f32>::new((width * channels, height))
-            .map_err(|e| format!("Buffer error: {:?}", e))?;
+        // Create output buffers: buffer 0 = interleaved color, buffers 1..N = planar extra channels
+        let mut color_image = Image::<f32>::new((width * color_channels, height))
+            .map_err(|e| format!("Color buffer error: {:?}", e))?;
+        let mut extra_images: Vec<Image<f32>> = (0..num_extra_channels)
+            .map(|_| Image::<f32>::new((width, height)))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| format!("Extra channel buffer error: {:?}", e))?;
 
-        let mut buffers = vec![JxlOutputBuffer::from_image_rect_mut(
-            output_image
+        let mut buffers = Vec::with_capacity(1 + num_extra_channels);
+        buffers.push(JxlOutputBuffer::from_image_rect_mut(
+            color_image
                 .get_rect_mut(Rect {
                     origin: (0, 0),
-                    size: (width * channels, height),
+                    size: (width * color_channels, height),
                 })
                 .into_raw(),
-        )];
+        ));
+        for ec_image in &mut extra_images {
+            buffers.push(JxlOutputBuffer::from_image_rect_mut(
+                ec_image
+                    .get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size: (width, height),
+                    })
+                    .into_raw(),
+            ));
+        }
 
         // Decode frame pixels
         decoder_with_image_info = loop {
@@ -514,11 +530,20 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
             }
         };
 
-        // Extract pixels from this frame
+        // Interleave color + extra channels into [C0, C1, C2, EC0, EC1, ...] per pixel
         all_pixels.reserve(frame_pixels);
         for y in 0..height {
-            let row = output_image.row(y);
-            all_pixels.extend_from_slice(row);
+            let color_row = color_image.row(y);
+            for x in 0..width {
+                // Color channels (interleaved in color_row)
+                for c in 0..color_channels {
+                    all_pixels.push(color_row[x * color_channels + c]);
+                }
+                // Extra channels (each is planar)
+                for ec_image in &extra_images {
+                    all_pixels.push(ec_image.row(y)[x]);
+                }
+            }
         }
         frame_count += 1;
 
@@ -532,7 +557,7 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
         frames: frame_count,
         height,
         width,
-        channels,
+        channels: total_channels,
         pixels: all_pixels,
         output_profile,
     })
@@ -1148,4 +1173,7 @@ mod tests {
     conformance_test!(patches_5);
     conformance_test!(patches_lossless);
     conformance_test!(progressive_5);
+    conformance_test!(spot);
+    conformance_test!(sunset_logo);
+    conformance_test!(upsampling_5);
 }
