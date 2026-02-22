@@ -162,31 +162,12 @@ impl Frame {
         let tracker = &decoder_state.memory_tracker;
         let lf_image = if frame_header.encoding == Encoding::VarDCT {
             if frame_header.has_lf_frame() {
-                let loaded = decoder_state.lf_frames[frame_header.lf_level as usize]
+                decoder_state.lf_frames[frame_header.lf_level as usize]
                     .as_ref()
                     .map(|[a, b, c]| {
                         Ok::<_, Error>([a.try_clone()?, b.try_clone()?, c.try_clone()?])
                     })
-                    .transpose()?;
-                // TEMP DEBUG: print loaded LfFrame values
-                if let Some(ref imgs) = loaded {
-                    let (w, h) = imgs[0].size();
-                    eprintln!(
-                        "DECODER MAIN: loaded lf_image from lf_frames[{}], size={}x{}",
-                        frame_header.lf_level, w, h
-                    );
-                    if w > 0 && h > 0 {
-                        eprintln!("DECODER MAIN: lf_image[0][0,0]={} (X)", imgs[0].row(0)[0]);
-                        eprintln!("DECODER MAIN: lf_image[1][0,0]={} (Y)", imgs[1].row(0)[0]);
-                        eprintln!("DECODER MAIN: lf_image[2][0,0]={} (B)", imgs[2].row(0)[0]);
-                    }
-                } else {
-                    eprintln!(
-                        "DECODER MAIN: lf_frames[{}] is None!",
-                        frame_header.lf_level
-                    );
-                }
-                loaded
+                    .transpose()?
             } else {
                 Some([
                     Image::new_tracked(size_blocks, tracker)?,

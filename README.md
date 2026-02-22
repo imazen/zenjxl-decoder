@@ -137,18 +137,19 @@ cargo test --features cms conformance -- --ignored --nocapture
 
 Against codec-corpus (184 JXL files with djxl reference output): **184/184 passing** (100%).
 
-## Upstream PRs
+## Upstream Contributions
 
-Bug fixes submitted to [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs):
+Bug fixes reported to [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs):
 
-| PR | Status | Description |
-|----|--------|-------------|
-| [#602](https://github.com/libjxl/jxl-rs/pull/602) | Open | Integer overflow handling |
-| [#603](https://github.com/libjxl/jxl-rs/pull/603) | Open | Patches: saturating arithmetic for position calculations |
-| [#604](https://github.com/libjxl/jxl-rs/pull/604) | Approved | Extra channel bit_depth fix |
-| [#607](https://github.com/libjxl/jxl-rs/pull/607) | Open | ICC tag parsing overflow fix |
-| [#609](https://github.com/libjxl/jxl-rs/issues/609) | Issue | Progressive AC last_pass validation bug |
-| [#610](https://github.com/libjxl/jxl-rs/issues/610) | Issue | Noise seeding wrong when upsampling > 1 |
+| # | Type | Status | Description |
+|---|------|--------|-------------|
+| [#607](https://github.com/libjxl/jxl-rs/pull/607) | PR | Merged | ICC tag parsing overflow fix |
+| [#637](https://github.com/libjxl/jxl-rs/pull/637) | PR | Merged | Extra channel bit_depth fix (from our [#604](https://github.com/libjxl/jxl-rs/pull/604)) |
+| [#632](https://github.com/libjxl/jxl-rs/pull/632) | PR | Merged | RCT wrapping arithmetic (from our [#603](https://github.com/libjxl/jxl-rs/pull/603)) |
+| [#609](https://github.com/libjxl/jxl-rs/issues/609) | Issue | Fixed | Progressive AC last_pass validation bug |
+| [#610](https://github.com/libjxl/jxl-rs/issues/610) | Issue | Fixed | Noise seeding wrong when upsampling > 1 |
+| [#660](https://github.com/libjxl/jxl-rs/pull/660) | PR | Open | Conformance test infrastructure |
+| [#602](https://github.com/libjxl/jxl-rs/pull/602) | PR | Closed | Integer overflow handling (ICC part merged as #607; rest declined) |
 
 ## License
 
