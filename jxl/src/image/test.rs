@@ -6,6 +6,7 @@
 use arbtest::arbitrary::Arbitrary;
 
 use crate::error::Result;
+use crate::util::MemoryTracker;
 
 use super::{Image, ImageDataType, Rect};
 
@@ -114,4 +115,81 @@ fn f32_f64_conv() {
         }
         Ok(())
     });
+}
+
+#[test]
+fn tracked_image_releases_on_drop() {
+    let tracker = MemoryTracker::with_limit(1_000_000);
+    {
+        let _img = Image::<f32>::new_tracked((100, 100), &tracker).unwrap();
+        assert!(tracker.allocated() > 0, "budget should be reserved");
+    }
+    assert_eq!(tracker.allocated(), 0, "budget should be released on drop");
+}
+
+#[test]
+fn tracked_image_budget_is_accurate() {
+    let tracker = MemoryTracker::with_limit(1_000_000);
+    let expected = Image::<f32>::allocation_size((64, 64));
+    let _img = Image::<f32>::new_tracked((64, 64), &tracker).unwrap();
+    assert_eq!(tracker.allocated(), expected);
+}
+
+#[test]
+fn tracked_image_try_clone_reserves_and_releases() {
+    let tracker = MemoryTracker::with_limit(1_000_000);
+    let alloc_size = Image::<f32>::allocation_size((50, 50));
+    let img = Image::<f32>::new_tracked((50, 50), &tracker).unwrap();
+    assert_eq!(tracker.allocated(), alloc_size);
+
+    let clone = img.try_clone().unwrap();
+    assert_eq!(tracker.allocated(), alloc_size * 2);
+
+    drop(clone);
+    assert_eq!(tracker.allocated(), alloc_size);
+
+    drop(img);
+    assert_eq!(tracker.allocated(), 0);
+}
+
+#[test]
+fn tracked_image_exceeds_budget() {
+    let tracker = MemoryTracker::with_limit(1000);
+    // A 100x100 f32 image needs ~40000 bytes, well over the 1000 byte limit
+    assert!(Image::<f32>::new_tracked((100, 100), &tracker).is_err());
+    assert_eq!(
+        tracker.allocated(),
+        0,
+        "budget should be rolled back on failure"
+    );
+}
+
+#[test]
+fn tracked_try_clone_exceeds_budget() {
+    let alloc_size = Image::<f32>::allocation_size((50, 50));
+    // Budget for exactly one image
+    let tracker = MemoryTracker::with_limit(alloc_size);
+    let img = Image::<f32>::new_tracked((50, 50), &tracker).unwrap();
+    assert_eq!(tracker.allocated(), alloc_size);
+
+    // Clone should fail — no budget left
+    assert!(img.try_clone().is_err());
+    assert_eq!(tracker.allocated(), alloc_size, "original still tracked");
+
+    drop(img);
+    assert_eq!(tracker.allocated(), 0);
+}
+
+#[test]
+fn untracked_image_ignores_tracker() {
+    let tracker = MemoryTracker::with_limit(1_000_000);
+    {
+        let _img = Image::<f32>::new((100, 100)).unwrap();
+        assert_eq!(
+            tracker.allocated(),
+            0,
+            "untracked image should not affect tracker"
+        );
+    }
+    assert_eq!(tracker.allocated(), 0);
 }

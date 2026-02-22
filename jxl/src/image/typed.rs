@@ -8,7 +8,7 @@ use std::{fmt::Debug, marker::PhantomData};
 use crate::{
     error::Result,
     image::internal::DistinctRowsIndexes,
-    util::{CACHE_LINE_BYTE_SIZE, MemoryTracker, tracing_wrappers::*},
+    util::{CACHE_LINE_BYTE_SIZE, MemoryGuard, MemoryTracker, tracing_wrappers::*},
 };
 
 use super::{ImageDataType, OwnedRawImage, RawImageRect, RawImageRectMut, Rect};
@@ -66,18 +66,21 @@ impl<T: ImageDataType> Image<T> {
     }
 
     /// Creates a new image after checking the memory tracker budget.
-    /// This is the preferred method when decoding with memory limits.
+    /// The image tracks its allocation and releases the budget on drop.
     #[instrument(ret, err)]
     pub fn new_tracked(size: (usize, usize), tracker: &MemoryTracker) -> Result<Image<T>> {
         let alloc_size = Self::allocation_size(size);
         tracker.try_allocate(alloc_size)?;
-        // If allocation fails, the memory is already "released" since we won't
-        // actually have allocated it. The tracker just checks budget, it doesn't
-        // auto-release on drop.
-        Self::new(size)
+        // Guard ensures budget is rolled back if the allocation below fails.
+        let guard = MemoryGuard::new(tracker.clone(), alloc_size);
+        let mut img = Self::new(size)?;
+        img.raw.set_tracker(tracker.clone(), alloc_size);
+        guard.forget(); // Ownership transferred to OwnedRawImage's Drop.
+        Ok(img)
     }
 
     /// Creates a new image with padding after checking the memory tracker budget.
+    /// The image tracks its allocation and releases the budget on drop.
     #[instrument(ret, err)]
     pub fn new_with_padding_tracked(
         size: (usize, usize),
@@ -85,12 +88,15 @@ impl<T: ImageDataType> Image<T> {
         padding: (usize, usize),
         tracker: &MemoryTracker,
     ) -> Result<Image<T>> {
-        // Compute total size including padding
         let total_width = size.0.saturating_add(offset.0).saturating_add(padding.0);
         let total_height = size.1.saturating_add(offset.1).saturating_add(padding.1);
         let alloc_size = Self::allocation_size((total_width, total_height));
         tracker.try_allocate(alloc_size)?;
-        Self::new_with_padding(size, offset, padding)
+        let guard = MemoryGuard::new(tracker.clone(), alloc_size);
+        let mut img = Self::new_with_padding(size, offset, padding)?;
+        img.raw.set_tracker(tracker.clone(), alloc_size);
+        guard.forget();
+        Ok(img)
     }
 
     pub fn size(&self) -> (usize, usize) {

@@ -5,7 +5,10 @@
 
 use std::{fmt::Debug, marker::PhantomData};
 
-use crate::{error::Result, util::CACHE_LINE_BYTE_SIZE};
+use crate::{
+    error::Result,
+    util::{CACHE_LINE_BYTE_SIZE, MemoryGuard, MemoryTracker},
+};
 
 use super::{Rect, internal::RawImageBuffer};
 
@@ -17,6 +20,10 @@ pub struct OwnedRawImage {
     pub(super) data: RawImageBuffer,
     offset: (usize, usize),
     padding: (usize, usize),
+    /// If set, this image's allocation is tracked against a memory budget.
+    /// On drop, `tracked_bytes` will be released back to the tracker.
+    tracker: Option<MemoryTracker>,
+    tracked_bytes: u64,
 }
 
 impl OwnedRawImage {
@@ -43,6 +50,8 @@ impl OwnedRawImage {
             )?,
             offset,
             padding,
+            tracker: None,
+            tracked_bytes: 0,
         })
     }
 
@@ -117,20 +126,49 @@ impl OwnedRawImage {
         self.padding
     }
 
+    /// Sets memory tracking on this image so that `tracked_bytes` are released
+    /// back to `tracker` when this image is dropped.
+    pub(super) fn set_tracker(&mut self, tracker: MemoryTracker, bytes: u64) {
+        self.tracker = Some(tracker);
+        self.tracked_bytes = bytes;
+    }
+
     pub fn try_clone(&self) -> Result<OwnedRawImage> {
-        Ok(Self {
+        // If tracked, reserve budget for the clone before allocating.
+        if let Some(tracker) = &self.tracker {
+            tracker.try_allocate(self.tracked_bytes)?;
+        }
+        // Guard ensures rollback if the raw data clone fails.
+        let guard: Option<MemoryGuard> = self
+            .tracker
+            .as_ref()
+            .map(|t| MemoryGuard::new(t.clone(), self.tracked_bytes));
+
+        let clone = Self {
             // SAFETY: we own the data that self.data references, so it is all accessible.
             // Moreover, it is initialized and try_clone creates a copy, so the resulting data is
             // owned and initialized.
             data: unsafe { self.data.try_clone()? },
             offset: self.offset,
             padding: self.padding,
-        })
+            tracker: self.tracker.clone(),
+            tracked_bytes: self.tracked_bytes,
+        };
+
+        // Transfer budget ownership from guard to the clone's Drop.
+        if let Some(g) = guard {
+            g.forget();
+        }
+
+        Ok(clone)
     }
 }
 
 impl Drop for OwnedRawImage {
     fn drop(&mut self) {
+        if let Some(tracker) = &self.tracker {
+            tracker.release(self.tracked_bytes);
+        }
         // SAFETY: we own the data referenced by self.data, and it was allocated by
         // RawImageBuffer::try_allocate.
         unsafe {
