@@ -64,11 +64,47 @@ fn epf1_process_row_chunk(
     assert_eq!(input_rows.len(), 3);
     assert_eq!(output_rows.len(), 3);
 
+    // Extract all row references upfront and assert lengths once.
+    // This lets LLVM prove bounds checks are unnecessary in the hot loop.
+    // EPF1 has BORDER=2, so 5 input rows per channel (indices 0-4).
+    // Max column access: row[4 + x] where x goes up to xsize - VEC_LEN,
+    // and load reads VEC_LEN elements. So min row len = 4 + xsize.
+    let min_in_len = 4 + xsize;
+    let min_out_len = xsize;
+
+    let rows = &input_rows.row_data;
+    let rpc = input_rows.rows_per_channel;
+    assert!(rpc >= 5);
+    assert!(rows.len() >= 3 * rpc);
+
+    // Extract channel row slices (5 rows each) with length assertions.
+    // Indexing with constants after the assertion lets LLVM eliminate
+    // bounds checks on row selection in the hot loop.
+    let ch0 = &rows[..rpc];
+    let ch1 = &rows[rpc..2 * rpc];
+    let ch2 = &rows[2 * rpc..3 * rpc];
+    let channels: [&[&[f32]]; 3] = [ch0, ch1, ch2];
+    for ch in &channels {
+        for r in 0..5 {
+            assert!(ch[r].len() >= min_in_len);
+        }
+    }
+
+    let out_rows = &mut output_rows.row_data;
+    let out_rpc = output_rows.rows_per_channel;
+    assert!(out_rpc >= 1);
+    assert!(out_rows.len() >= 3 * out_rpc);
+    for c in 0..3 {
+        assert!(out_rows[c * out_rpc].len() >= min_out_len);
+    }
+
     let row_sigma = stage.sigma.row(ypos / BLOCK_DIM);
 
     let sm = stage.sigma_scale * 1.65;
     let bsm = sm * stage.border_sad_mul;
     let sad_mul_storage = prepare_sad_mul_storage(xpos, ypos, sm, bsm);
+
+    let scale_vec: [D::F32Vec; 3] = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
 
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
         let sigma = get_sigma(d, x + xpos, row_sigma);
@@ -76,29 +112,31 @@ fn epf1_process_row_chunk(
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
-            for (input_c, output_c) in input_rows.iter().zip(output_rows.iter_mut()) {
-                D::F32Vec::load(d, &input_c[2][2 + x..]).store(&mut output_c[0][x..]);
+            for c in 0..3 {
+                D::F32Vec::load(d, &channels[c][2][2 + x..])
+                    .store(&mut out_rows[c * out_rpc][x..]);
             }
             continue;
         }
 
-        // Compute SADs
+        // Compute SADs across all 3 channels
         let mut sads = [D::F32Vec::splat(d, 0.0); 4];
-        for (input_c, scale) in input_rows.iter().zip(stage.channel_scale) {
-            let scale = D::F32Vec::splat(d, scale);
-            let p20 = D::F32Vec::load(d, &input_c[0][2 + x..]);
-            let p11 = D::F32Vec::load(d, &input_c[1][1 + x..]);
-            let p21 = D::F32Vec::load(d, &input_c[1][2 + x..]);
-            let p31 = D::F32Vec::load(d, &input_c[1][3 + x..]);
-            let p02 = D::F32Vec::load(d, &input_c[2][x..]);
-            let p12 = D::F32Vec::load(d, &input_c[2][1 + x..]);
-            let p22 = D::F32Vec::load(d, &input_c[2][2 + x..]);
-            let p32 = D::F32Vec::load(d, &input_c[2][3 + x..]);
-            let p42 = D::F32Vec::load(d, &input_c[2][4 + x..]);
-            let p13 = D::F32Vec::load(d, &input_c[3][1 + x..]);
-            let p23 = D::F32Vec::load(d, &input_c[3][2 + x..]);
-            let p33 = D::F32Vec::load(d, &input_c[3][3 + x..]);
-            let p24 = D::F32Vec::load(d, &input_c[4][2 + x..]);
+        for c in 0..3 {
+            let ch = channels[c];
+            let scale = scale_vec[c];
+            let p20 = D::F32Vec::load(d, &ch[0][2 + x..]);
+            let p11 = D::F32Vec::load(d, &ch[1][1 + x..]);
+            let p21 = D::F32Vec::load(d, &ch[1][2 + x..]);
+            let p31 = D::F32Vec::load(d, &ch[1][3 + x..]);
+            let p02 = D::F32Vec::load(d, &ch[2][x..]);
+            let p12 = D::F32Vec::load(d, &ch[2][1 + x..]);
+            let p22 = D::F32Vec::load(d, &ch[2][2 + x..]);
+            let p32 = D::F32Vec::load(d, &ch[2][3 + x..]);
+            let p42 = D::F32Vec::load(d, &ch[2][4 + x..]);
+            let p13 = D::F32Vec::load(d, &ch[3][1 + x..]);
+            let p23 = D::F32Vec::load(d, &ch[3][2 + x..]);
+            let p33 = D::F32Vec::load(d, &ch[3][3 + x..]);
+            let p24 = D::F32Vec::load(d, &ch[4][2 + x..]);
             let d20_21 = (p20 - p21).abs();
             let d11_21 = (p11 - p21).abs();
             let d22_21 = (p22 - p21).abs();
@@ -131,20 +169,17 @@ fn epf1_process_row_chunk(
             w += *sad;
         }
         let inv_w = D::F32Vec::splat(d, 1.0) / w;
-        for (input_c, output_c) in input_rows.iter().zip(output_rows.iter_mut()) {
-            let mut out = D::F32Vec::load(d, &input_c[2][2 + x..]);
-            for (row_idx, col_idx, sad_idx) in [
-                (3, 2+x, 3),
-                (2, 3+x, 2),
-                (2, 1+x, 1),
-                (1, 2+x, 0),
-            ] {
-                out = D::F32Vec::load(d, &input_c[row_idx][col_idx..]).mul_add(sads[sad_idx], out);
-            }
+        for c in 0..3 {
+            let ch = channels[c];
+            let mut out = D::F32Vec::load(d, &ch[2][2 + x..]);
+            out = D::F32Vec::load(d, &ch[3][2 + x..]).mul_add(sads[3], out);
+            out = D::F32Vec::load(d, &ch[2][3 + x..]).mul_add(sads[2], out);
+            out = D::F32Vec::load(d, &ch[2][1 + x..]).mul_add(sads[1], out);
+            out = D::F32Vec::load(d, &ch[1][2 + x..]).mul_add(sads[0], out);
             out *= inv_w;
-            let p22 = D::F32Vec::load(d, &input_c[2][2 + x..]);
+            let p22 = D::F32Vec::load(d, &ch[2][2 + x..]);
             let out = sigma_mask.if_then_else_f32(p22, out);
-            out.store(&mut output_c[0][x..]);
+            out.store(&mut out_rows[c * out_rpc][x..]);
         }
     }
 });

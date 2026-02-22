@@ -124,7 +124,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         Self(unsafe { vld1q_f32(mem.as_ptr()) }, d)
@@ -132,7 +132,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn store(&self, mem: &mut [f32]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         unsafe { vst1q_f32(mem.as_mut_ptr(), self.0) }
@@ -140,7 +140,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<f32>]) {
-        assert!(dest.len() >= 2 * Self::LEN);
+        debug_assert!(dest.len() >= 2 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -151,7 +151,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<f32>]) {
-        assert!(dest.len() >= 3 * Self::LEN);
+        debug_assert!(dest.len() >= 3 * Self::LEN);
         // SAFETY: `dest` has enough space and writing to `MaybeUninit<f32>` through `*mut f32` is valid.
         unsafe {
             let dest_ptr = dest.as_mut_ptr() as *mut f32;
@@ -167,7 +167,7 @@ unsafe impl F32SimdVec for F32VecNeon {
         d: Self,
         dest: &mut [MaybeUninit<f32>],
     ) {
-        assert!(dest.len() >= 4 * Self::LEN);
+        debug_assert!(dest.len() >= 4 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -201,7 +201,7 @@ unsafe impl F32SimdVec for F32VecNeon {
             h: float32x4_t,
             dest: &mut [f32],
         ) {
-            assert!(dest.len() >= 8 * F32VecNeon::LEN);
+            debug_assert!(dest.len() >= 8 * F32VecNeon::LEN);
             // NEON doesn't have vst8, so we use manual interleaving
             // For 4-wide vectors, output is 32 elements: [a0,b0,c0,d0,e0,f0,g0,h0, a1,...]
 
@@ -279,7 +279,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
-        assert!(src.len() >= 2 * Self::LEN);
+        debug_assert!(src.len() >= 2 * Self::LEN);
         // SAFETY: we just checked that `src` has enough space, and neon is available
         // from the safety invariant on `d`.
         let float32x4x2_t(a, b) = unsafe { vld2q_f32(src.as_ptr()) };
@@ -288,7 +288,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
-        assert!(src.len() >= 3 * Self::LEN);
+        debug_assert!(src.len() >= 3 * Self::LEN);
         // SAFETY: we just checked that `src` has enough space, and neon is available
         // from the safety invariant on `d`.
         let float32x4x3_t(a, b, c) = unsafe { vld3q_f32(src.as_ptr()) };
@@ -297,7 +297,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
-        assert!(src.len() >= 4 * Self::LEN);
+        debug_assert!(src.len() >= 4 * Self::LEN);
         // SAFETY: we just checked that `src` has enough space, and neon is available
         // from the safety invariant on `d`.
         let float32x4x4_t(a, b, c, e) = unsafe { vld4q_f32(src.as_ptr()) };
@@ -418,7 +418,7 @@ unsafe impl F32SimdVec for F32VecNeon {
         }
 
         fn round_store_u8(this: F32VecNeon, dest: &mut [u8]) {
-            assert!(dest.len() >= F32VecNeon::LEN);
+            debug_assert!(dest.len() >= F32VecNeon::LEN);
             // Round to nearest integer
             let rounded = vrndnq_f32(this.0);
             // Convert to i32, then to u16, then to u8
@@ -433,7 +433,7 @@ unsafe impl F32SimdVec for F32VecNeon {
         }
 
         fn round_store_u16(this: F32VecNeon, dest: &mut [u16]) {
-            assert!(dest.len() >= F32VecNeon::LEN);
+            debug_assert!(dest.len() >= F32VecNeon::LEN);
             // Round to nearest integer
             let rounded = vrndnq_f32(this.0);
             // Convert to i32, then to u16
@@ -447,7 +447,7 @@ unsafe impl F32SimdVec for F32VecNeon {
         }
 
         fn store_f16_bits(this: F32VecNeon, dest: &mut [u16]) {
-            assert!(dest.len() >= F32VecNeon::LEN);
+            debug_assert!(dest.len() >= F32VecNeon::LEN);
             // Use inline asm because Rust stdarch incorrectly requires fp16 target feature
             // for vcvt_f16_f32 (fixed in https://github.com/rust-lang/stdarch/pull/1978)
             let f16_bits: uint16x4_t;
@@ -466,7 +466,7 @@ unsafe impl F32SimdVec for F32VecNeon {
 
     #[inline(always)]
     fn load_f16_bits(d: Self::Descriptor, mem: &[u16]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // Use inline asm because Rust stdarch incorrectly requires fp16 target feature
         // for vcvt_f32_f16 (fixed in https://github.com/rust-lang/stdarch/pull/1978)
         let result: float32x4_t;
@@ -627,7 +627,7 @@ impl I32SimdVec for I32VecNeon {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         Self(unsafe { vld1q_s32(mem.as_ptr()) }, d)
@@ -635,7 +635,7 @@ impl I32SimdVec for I32VecNeon {
 
     #[inline(always)]
     fn store(&self, mem: &mut [i32]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         unsafe { vst1q_s32(mem.as_mut_ptr(), self.0) }
@@ -707,7 +707,7 @@ impl I32SimdVec for I32VecNeon {
 
     #[inline(always)]
     fn store_u16(self, dest: &mut [u16]) {
-        assert!(dest.len() >= Self::LEN);
+        debug_assert!(dest.len() >= Self::LEN);
         // SAFETY: We know neon is available from the safety invariant on `self.1`,
         // and we just checked that `dest` has enough space.
         unsafe {
@@ -863,7 +863,7 @@ unsafe impl U8SimdVec for U8VecNeon {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         Self(unsafe { vld1q_u8(mem.as_ptr()) }, d)
@@ -877,7 +877,7 @@ unsafe impl U8SimdVec for U8VecNeon {
 
     #[inline(always)]
     fn store(&self, mem: &mut [u8]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         unsafe { vst1q_u8(mem.as_mut_ptr(), self.0) }
@@ -885,7 +885,7 @@ unsafe impl U8SimdVec for U8VecNeon {
 
     #[inline(always)]
     fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u8>]) {
-        assert!(dest.len() >= 2 * Self::LEN);
+        debug_assert!(dest.len() >= 2 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -896,7 +896,7 @@ unsafe impl U8SimdVec for U8VecNeon {
 
     #[inline(always)]
     fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u8>]) {
-        assert!(dest.len() >= 3 * Self::LEN);
+        debug_assert!(dest.len() >= 3 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -913,7 +913,7 @@ unsafe impl U8SimdVec for U8VecNeon {
         d: Self,
         dest: &mut [MaybeUninit<u8>],
     ) {
-        assert!(dest.len() >= 4 * Self::LEN);
+        debug_assert!(dest.len() >= 4 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -935,7 +935,7 @@ unsafe impl U16SimdVec for U16VecNeon {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         Self(unsafe { vld1q_u16(mem.as_ptr()) }, d)
@@ -949,7 +949,7 @@ unsafe impl U16SimdVec for U16VecNeon {
 
     #[inline(always)]
     fn store(&self, mem: &mut [u16]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know neon is available
         // from the safety invariant on `d`.
         unsafe { vst1q_u16(mem.as_mut_ptr(), self.0) }
@@ -957,7 +957,7 @@ unsafe impl U16SimdVec for U16VecNeon {
 
     #[inline(always)]
     fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u16>]) {
-        assert!(dest.len() >= 2 * Self::LEN);
+        debug_assert!(dest.len() >= 2 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -968,7 +968,7 @@ unsafe impl U16SimdVec for U16VecNeon {
 
     #[inline(always)]
     fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u16>]) {
-        assert!(dest.len() >= 3 * Self::LEN);
+        debug_assert!(dest.len() >= 3 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {
@@ -985,7 +985,7 @@ unsafe impl U16SimdVec for U16VecNeon {
         d: Self,
         dest: &mut [MaybeUninit<u16>],
     ) {
-        assert!(dest.len() >= 4 * Self::LEN);
+        debug_assert!(dest.len() >= 4 * Self::LEN);
         // SAFETY: we just checked that `dest` has enough space, and neon is available
         // from the safety invariant on the descriptor stored in `a`.
         unsafe {

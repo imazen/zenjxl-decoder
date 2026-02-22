@@ -107,7 +107,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `d`.
         Self(unsafe { _mm_loadu_ps(mem.as_ptr()) }, d)
@@ -115,7 +115,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [f32]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `self.1`.
         unsafe { _mm_storeu_ps(mem.as_mut_ptr(), self.0) }
@@ -126,7 +126,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn store_interleaved_2_impl(a: __m128, b: __m128, dest: &mut [MaybeUninit<f32>]) {
-            assert!(dest.len() >= 2 * F32VecSse42::LEN);
+            debug_assert!(dest.len() >= 2 * F32VecSse42::LEN);
             // a = [a0, a1, a2, a3], b = [b0, b1, b2, b3]
             // lo = [a0, b0, a1, b1], hi = [a2, b2, a3, b3]
             let lo = _mm_unpacklo_ps(a, b);
@@ -153,7 +153,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
             c: __m128,
             dest: &mut [MaybeUninit<f32>],
         ) {
-            assert!(dest.len() >= 3 * F32VecSse42::LEN);
+            debug_assert!(dest.len() >= 3 * F32VecSse42::LEN);
             // Input vectors:
             // a = [a0, a1, a2, a3]
             // b = [b0, b1, b2, b3]
@@ -214,7 +214,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
             d: __m128,
             dest: &mut [MaybeUninit<f32>],
         ) {
-            assert!(dest.len() >= 4 * F32VecSse42::LEN);
+            debug_assert!(dest.len() >= 4 * F32VecSse42::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm_unpacklo_ps(a, b); // [a0, b0, a1, b1]
             let ab_hi = _mm_unpackhi_ps(a, b); // [a2, b2, a3, b3]
@@ -266,7 +266,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
             h: __m128,
             dest: &mut [f32],
         ) {
-            assert!(dest.len() >= 8 * F32VecSse42::LEN);
+            debug_assert!(dest.len() >= 8 * F32VecSse42::LEN);
             // For 4-wide vectors storing 8 interleaved, we need 32 elements output
             // Output: [a0,b0,c0,d0,e0,f0,g0,h0, a1,b1,c1,d1,e1,f1,g1,h1, ...]
             let ab_lo = _mm_unpacklo_ps(a, b);
@@ -310,7 +310,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn load_deinterleaved_2_impl(src: &[f32]) -> (__m128, __m128) {
-            assert!(src.len() >= 2 * F32VecSse42::LEN);
+            debug_assert!(src.len() >= 2 * F32VecSse42::LEN);
             // Input: [a0, b0, a1, b1, a2, b2, a3, b3]
             // Output: a = [a0, a1, a2, a3], b = [b0, b1, b2, b3]
             // SAFETY: we just checked that src has enough space.
@@ -338,7 +338,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn load_deinterleaved_3_impl(src: &[f32]) -> (__m128, __m128, __m128) {
-            assert!(src.len() >= 3 * F32VecSse42::LEN);
+            debug_assert!(src.len() >= 3 * F32VecSse42::LEN);
             // Input: [a0, b0, c0, a1, b1, c1, a2, b2, c2, a3, b3, c3]
             // Output: a = [a0, a1, a2, a3], b = [b0, b1, b2, b3], c = [c0, c1, c2, c3]
 
@@ -388,7 +388,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn load_deinterleaved_4_impl(src: &[f32]) -> (__m128, __m128, __m128, __m128) {
-            assert!(src.len() >= 4 * F32VecSse42::LEN);
+            debug_assert!(src.len() >= 4 * F32VecSse42::LEN);
             // Input: [a0, b0, c0, d0, a1, b1, c1, d1, a2, b2, c2, d2, a3, b3, c3, d3]
             // Output: a = [a0, a1, a2, a3], b = [b0, b1, b2, b3], c = [c0, c1, c2, c3], d = [d0, d1, d2, d3]
             // SAFETY: we just checked that src has enough space.
@@ -568,7 +568,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn round_store_u8_impl(v: __m128, dest: &mut [u8]) {
-            assert!(dest.len() >= F32VecSse42::LEN);
+            debug_assert!(dest.len() >= F32VecSse42::LEN);
             // Round to nearest integer
             let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             // Convert to i32
@@ -592,7 +592,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn round_store_u16_impl(v: __m128, dest: &mut [u16]) {
-            assert!(dest.len() >= F32VecSse42::LEN);
+            debug_assert!(dest.len() >= F32VecSse42::LEN);
             // Round to nearest integer
             let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             // Convert to i32
@@ -613,7 +613,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
 
     #[inline(always)]
     fn load_f16_bits(d: Self::Descriptor, mem: &[u16]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SSE4.2 doesn't have F16C, use scalar conversion
         let mut result = [0.0f32; 4];
         for i in 0..4 {
@@ -624,7 +624,7 @@ unsafe impl F32SimdVec for F32VecSse42 {
 
     #[inline(always)]
     fn store_f16_bits(self, dest: &mut [u16]) {
-        assert!(dest.len() >= Self::LEN);
+        debug_assert!(dest.len() >= Self::LEN);
         // SSE4.2 doesn't have F16C, use scalar conversion
         let mut tmp = [0.0f32; 4];
         self.store(&mut tmp);
@@ -731,7 +731,7 @@ impl I32SimdVec for I32VecSse42 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `d`.
         Self(unsafe { _mm_loadu_si128(mem.as_ptr() as *const _) }, d)
@@ -739,7 +739,7 @@ impl I32SimdVec for I32VecSse42 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [i32]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `self.1`.
         unsafe { _mm_storeu_si128(mem.as_mut_ptr().cast(), self.0) }
@@ -821,7 +821,7 @@ impl I32SimdVec for I32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn store_u16_impl(v: __m128i, dest: &mut [u16]) {
-            assert!(dest.len() >= I32VecSse42::LEN);
+            debug_assert!(dest.len() >= I32VecSse42::LEN);
             // Use scalar loop since _mm_packs_epi32 would saturate incorrectly for unsigned values
             let mut tmp = [0i32; 4];
             // SAFETY: tmp has 4 elements, matching LEN
@@ -953,7 +953,7 @@ unsafe impl U8SimdVec for U8VecSse42 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `d`.
         unsafe { Self(_mm_loadu_si128(mem.as_ptr() as *const _), d) }
@@ -967,7 +967,7 @@ unsafe impl U8SimdVec for U8VecSse42 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [u8]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `self.1`.
         unsafe { _mm_storeu_si128(mem.as_mut_ptr() as *mut __m128i, self.0) }
@@ -978,7 +978,7 @@ unsafe impl U8SimdVec for U8VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn store_interleaved_2_impl(a: __m128i, b: __m128i, dest: &mut [MaybeUninit<u8>]) {
-            assert!(dest.len() >= 2 * U8VecSse42::LEN);
+            debug_assert!(dest.len() >= 2 * U8VecSse42::LEN);
             let lo = _mm_unpacklo_epi8(a, b);
             let hi = _mm_unpackhi_epi8(a, b);
             // SAFETY: `dest` has enough space and writing to `MaybeUninit<u8>` through `*mut __m128i` is valid.
@@ -1002,7 +1002,7 @@ unsafe impl U8SimdVec for U8VecSse42 {
             c: __m128i,
             dest: &mut [MaybeUninit<u8>],
         ) {
-            assert!(dest.len() >= 3 * U8VecSse42::LEN);
+            debug_assert!(dest.len() >= 3 * U8VecSse42::LEN);
 
             // Masks for out0
             let mask_a0 = _mm_setr_epi8(0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1, 5);
@@ -1067,7 +1067,7 @@ unsafe impl U8SimdVec for U8VecSse42 {
             d: __m128i,
             dest: &mut [MaybeUninit<u8>],
         ) {
-            assert!(dest.len() >= 4 * U8VecSse42::LEN);
+            debug_assert!(dest.len() >= 4 * U8VecSse42::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm_unpacklo_epi8(a, b);
             let ab_hi = _mm_unpackhi_epi8(a, b);
@@ -1106,7 +1106,7 @@ unsafe impl U16SimdVec for U16VecSse42 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `d`.
         unsafe { Self(_mm_loadu_si128(mem.as_ptr() as *const _), d) }
@@ -1120,7 +1120,7 @@ unsafe impl U16SimdVec for U16VecSse42 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [u16]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know sse4.2 is available
         // from the safety invariant on `self.1`.
         unsafe { _mm_storeu_si128(mem.as_mut_ptr() as *mut __m128i, self.0) }
@@ -1131,7 +1131,7 @@ unsafe impl U16SimdVec for U16VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn store_interleaved_2_impl(a: __m128i, b: __m128i, dest: &mut [MaybeUninit<u16>]) {
-            assert!(dest.len() >= 2 * U16VecSse42::LEN);
+            debug_assert!(dest.len() >= 2 * U16VecSse42::LEN);
             let lo = _mm_unpacklo_epi16(a, b);
             let hi = _mm_unpackhi_epi16(a, b);
             // SAFETY: `dest` has enough space and writing to `MaybeUninit<u16>` through `*mut __m128i` is valid.
@@ -1155,7 +1155,7 @@ unsafe impl U16SimdVec for U16VecSse42 {
             c: __m128i,
             dest: &mut [MaybeUninit<u16>],
         ) {
-            assert!(dest.len() >= 3 * U16VecSse42::LEN);
+            debug_assert!(dest.len() >= 3 * U16VecSse42::LEN);
 
             // Masks for out0
             let mask_a0 = _mm_setr_epi8(0, 1, -1, -1, -1, -1, 2, 3, -1, -1, -1, -1, 4, 5, -1, -1);
@@ -1220,7 +1220,7 @@ unsafe impl U16SimdVec for U16VecSse42 {
             d: __m128i,
             dest: &mut [MaybeUninit<u16>],
         ) {
-            assert!(dest.len() >= 4 * U16VecSse42::LEN);
+            debug_assert!(dest.len() >= 4 * U16VecSse42::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm_unpacklo_epi16(a, b);
             let ab_hi = _mm_unpackhi_epi16(a, b);

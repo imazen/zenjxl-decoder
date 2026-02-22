@@ -198,17 +198,15 @@ unsafe impl F32SimdVec for F32VecAvx {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx is available
-        // from the safety invariant on `d`.
+        debug_assert!(mem.len() >= Self::LEN);
+        // SAFETY: callers guarantee `mem` has enough space via slicing.
         Self(unsafe { _mm256_loadu_ps(mem.as_ptr()) }, d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [f32]) {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx is available
-        // from the safety invariant on `self.1`.
+        debug_assert!(mem.len() >= Self::LEN);
+        // SAFETY: callers guarantee `mem` has enough space via slicing.
         unsafe { _mm256_storeu_ps(mem.as_mut_ptr(), self.0) }
     }
 
@@ -217,7 +215,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn store_interleaved_2_impl(a: __m256, b: __m256, dest: &mut [MaybeUninit<f32>]) {
-            assert!(dest.len() >= 2 * F32VecAvx::LEN);
+            debug_assert!(dest.len() >= 2 * F32VecAvx::LEN);
             // a = [a0, a1, a2, a3, a4, a5, a6, a7], b = [b0, b1, b2, b3, b4, b5, b6, b7]
             // Output: [a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7]
             let lo = _mm256_unpacklo_ps(a, b); // [a0, b0, a1, b1, a4, b4, a5, b5]
@@ -247,7 +245,7 @@ unsafe impl F32SimdVec for F32VecAvx {
             c: __m256,
             dest: &mut [MaybeUninit<f32>],
         ) {
-            assert!(dest.len() >= 3 * F32VecAvx::LEN);
+            debug_assert!(dest.len() >= 3 * F32VecAvx::LEN);
 
             let idx_a0 = _mm256_setr_epi32(0, 0, 0, 1, 0, 0, 2, 0);
             let idx_b0 = _mm256_setr_epi32(0, 0, 0, 0, 1, 0, 0, 2);
@@ -306,7 +304,7 @@ unsafe impl F32SimdVec for F32VecAvx {
             d: __m256,
             dest: &mut [MaybeUninit<f32>],
         ) {
-            assert!(dest.len() >= 4 * F32VecAvx::LEN);
+            debug_assert!(dest.len() >= 4 * F32VecAvx::LEN);
             // First interleave pairs
             let ab_lo = _mm256_unpacklo_ps(a, b);
             let ab_hi = _mm256_unpackhi_ps(a, b);
@@ -376,7 +374,7 @@ unsafe impl F32SimdVec for F32VecAvx {
             r7: __m256,
             dest: &mut [f32],
         ) {
-            assert!(dest.len() >= 8 * F32VecAvx::LEN);
+            debug_assert!(dest.len() >= 8 * F32VecAvx::LEN);
             // This is essentially an 8x8 transpose, same algorithm as transpose_square
             let (c0, c1, c2, c3, c4, c5, c6, c7) =
                 transpose_8x8_core(r0, r1, r2, r3, r4, r5, r6, r7);
@@ -403,7 +401,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn load_deinterleaved_2_impl(src: &[f32]) -> (__m256, __m256) {
-            assert!(src.len() >= 2 * F32VecAvx::LEN);
+            debug_assert!(src.len() >= 2 * F32VecAvx::LEN);
             // Input: [a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7]
             // Output: a = [a0, a1, a2, a3, a4, a5, a6, a7], b = [b0, b1, b2, b3, b4, b5, b6, b7]
             // SAFETY: we just checked that src has enough space.
@@ -436,7 +434,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn load_deinterleaved_3_impl(src: &[f32]) -> (__m256, __m256, __m256) {
-            assert!(src.len() >= 3 * F32VecAvx::LEN);
+            debug_assert!(src.len() >= 3 * F32VecAvx::LEN);
             // Input layout (24 floats):
             // in0: [a0, b0, c0, a1, b1, c1, a2, b2]
             // in1: [c2, a3, b3, c3, a4, b4, c4, a5]
@@ -498,7 +496,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn load_deinterleaved_4_impl(src: &[f32]) -> (__m256, __m256, __m256, __m256) {
-            assert!(src.len() >= 4 * F32VecAvx::LEN);
+            debug_assert!(src.len() >= 4 * F32VecAvx::LEN);
             // Input: [a0,b0,c0,d0, a1,b1,c1,d1, a2,b2,c2,d2, a3,b3,c3,d3, ...]
             // Output: a = [a0..a7], b = [b0..b7], c = [c0..c7], d = [d0..d7]
             // SAFETY: we just checked that src has enough space.
@@ -625,7 +623,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn round_store_u8_impl(v: __m256, dest: &mut [u8]) {
-            assert!(dest.len() >= F32VecAvx::LEN);
+            debug_assert!(dest.len() >= F32VecAvx::LEN);
             // Round to nearest integer
             let rounded = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             // Convert to i32
@@ -652,7 +650,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn round_store_u16_impl(v: __m256, dest: &mut [u16]) {
-            assert!(dest.len() >= F32VecAvx::LEN);
+            debug_assert!(dest.len() >= F32VecAvx::LEN);
             // Round to nearest integer
             let rounded = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             // Convert to i32
@@ -693,7 +691,7 @@ unsafe impl F32SimdVec for F32VecAvx {
         #[target_feature(enable = "avx2,f16c")]
         #[inline]
         fn store_f16_bits_impl(v: __m256, dest: &mut [u16]) {
-            assert!(dest.len() >= F32VecAvx::LEN);
+            debug_assert!(dest.len() >= F32VecAvx::LEN);
             let bits = _mm256_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             // SAFETY: dest.len() >= 8 is checked above
             unsafe { _mm_storeu_si128(dest.as_mut_ptr() as *mut __m128i, bits) };
@@ -800,7 +798,7 @@ impl I32SimdVec for I32VecAvx {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx is available
         // from the safety invariant on `d`.
         Self(unsafe { _mm256_loadu_si256(mem.as_ptr() as *const _) }, d)
@@ -808,7 +806,7 @@ impl I32SimdVec for I32VecAvx {
 
     #[inline(always)]
     fn store(&self, mem: &mut [i32]) {
-        assert!(mem.len() >= Self::LEN);
+        debug_assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx is available
         // from the safety invariant on `self.1`.
         unsafe { _mm256_storeu_si256(mem.as_mut_ptr().cast(), self.0) }
@@ -886,7 +884,7 @@ impl I32SimdVec for I32VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn store_u16_impl(v: __m256i, dest: &mut [u16]) {
-            assert!(dest.len() >= I32VecAvx::LEN);
+            debug_assert!(dest.len() >= I32VecAvx::LEN);
             let tmp = _mm256_shuffle_epi8(
                 v,
                 _mm256_setr_epi8(
@@ -1074,7 +1072,7 @@ unsafe impl U8SimdVec for U8VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn store_interleaved_2_impl(a: __m256i, b: __m256i, dest: &mut [MaybeUninit<u8>]) {
-            assert!(dest.len() >= 2 * U8VecAvx::LEN);
+            debug_assert!(dest.len() >= 2 * U8VecAvx::LEN);
             // a = [A0..A15 | A16..A31]
             // b = [B0..B15 | B16..B31]
             let lo = _mm256_unpacklo_epi8(a, b); // [A0 B0..A7 B7 | A16 B16..A23 B23]
@@ -1106,7 +1104,7 @@ unsafe impl U8SimdVec for U8VecAvx {
             c: __m256i,
             dest: &mut [MaybeUninit<u8>],
         ) {
-            assert!(dest.len() >= 3 * U8VecAvx::LEN);
+            debug_assert!(dest.len() >= 3 * U8VecAvx::LEN);
 
             // U8 Masks
             let mask_a0 = _mm256_setr_epi8(
@@ -1208,7 +1206,7 @@ unsafe impl U8SimdVec for U8VecAvx {
             d: __m256i,
             dest: &mut [MaybeUninit<u8>],
         ) {
-            assert!(dest.len() >= 4 * U8VecAvx::LEN);
+            debug_assert!(dest.len() >= 4 * U8VecAvx::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm256_unpacklo_epi8(a, b);
             let ab_hi = _mm256_unpackhi_epi8(a, b);
@@ -1278,7 +1276,7 @@ unsafe impl U16SimdVec for U16VecAvx {
         #[target_feature(enable = "avx2")]
         #[inline]
         fn store_interleaved_2_impl(a: __m256i, b: __m256i, dest: &mut [MaybeUninit<u16>]) {
-            assert!(dest.len() >= 2 * U16VecAvx::LEN);
+            debug_assert!(dest.len() >= 2 * U16VecAvx::LEN);
             // a = [A0..A7 | A8..A15]
             // b = [B0..B7 | B8..B15]
             let lo = _mm256_unpacklo_epi16(a, b); // [A0 B0..A3 B3 | A8 B8..A11 B11]
@@ -1310,7 +1308,7 @@ unsafe impl U16SimdVec for U16VecAvx {
             c: __m256i,
             dest: &mut [MaybeUninit<u16>],
         ) {
-            assert!(dest.len() >= 3 * U16VecAvx::LEN);
+            debug_assert!(dest.len() >= 3 * U16VecAvx::LEN);
 
             // U16 Masks
             let mask_a0 = _mm256_setr_epi8(
@@ -1412,7 +1410,7 @@ unsafe impl U16SimdVec for U16VecAvx {
             d: __m256i,
             dest: &mut [MaybeUninit<u16>],
         ) {
-            assert!(dest.len() >= 4 * U16VecAvx::LEN);
+            debug_assert!(dest.len() >= 4 * U16VecAvx::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm256_unpacklo_epi16(a, b);
             let ab_hi = _mm256_unpackhi_epi16(a, b);
