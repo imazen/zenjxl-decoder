@@ -998,6 +998,15 @@ impl Frame {
         // This matches libjxl (53042ec5) dec_xyb.cc:184:
         //   color_encoding_is_original = orig_color_encoding.SameColorEncoding(c_desired);
         let color_encoding_is_original = input_profile.same_color_encoding(output_profile);
+
+        // Also check if the CMS would be a no-op: for XYB images, the CMS input is the
+        // linearized version of the embedded profile. If this matches the output profile,
+        // the CMS transform would be identity but may introduce clamping artifacts
+        // (e.g., moxcms clamps TRC LUT to [0,1], losing out-of-gamut values).
+        let cms_would_be_identity = cms_input_profile
+            .as_ref()
+            .is_some_and(|cms_in| cms_in.same_color_encoding(output_profile));
+
         let mut cms_used = false;
 
         // Skip CMS if channel counts differ (grayscale↔RGB) - like libjxl's not_mixing_color_and_grey.
@@ -1011,6 +1020,7 @@ impl Frame {
             src_channels == dst_channels || (src_channels == 4 && dst_channels == 3);
 
         if !color_encoding_is_original
+            && !cms_would_be_identity
             && channel_counts_compatible
             && let Some(cms) = cms
             && let Some(cms_input) = cms_input_profile

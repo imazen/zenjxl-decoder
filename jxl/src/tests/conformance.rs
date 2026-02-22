@@ -1176,4 +1176,5 @@ mod tests {
     conformance_test!(spot);
     conformance_test!(sunset_logo);
     conformance_test!(upsampling_5);
+
 }
