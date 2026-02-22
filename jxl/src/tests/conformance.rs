@@ -398,8 +398,8 @@ struct DecodeResult {
 }
 
 /// Decode a JXL file to f32 pixels for conformance testing.
-/// Currently only supports single-frame images. Animation support would require
-/// API changes to iterate frames.
+/// Supports both single-frame and animated (multi-frame) images.
+/// Pixels are returned as a flat buffer with shape [N, H, W, C].
 #[cfg(feature = "cms")]
 fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
     use crate::image::{Image, Rect};
@@ -415,7 +415,7 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
 
     // Advance to image info
-    let mut decoder = loop {
+    let mut decoder_with_image_info = loop {
         match decoder.process(&mut input) {
             Ok(ProcessingResult::Complete { result }) => break result,
             Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
@@ -428,16 +428,11 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
         }
     };
 
-    let basic_info = decoder.basic_info().clone();
+    let basic_info = decoder_with_image_info.basic_info().clone();
     let (width, height) = basic_info.size;
 
-    // Check for animation - we only support single-frame for now
-    if basic_info.animation.is_some() {
-        return Err("Animation not yet supported in conformance tests".to_string());
-    }
-
     // Determine format based on color space and alpha
-    let default_format = decoder.current_pixel_format();
+    let default_format = decoder_with_image_info.current_pixel_format();
     let is_grayscale = matches!(
         default_format.color_type,
         JxlColorType::Grayscale | JxlColorType::GrayscaleAlpha
@@ -467,68 +462,78 @@ fn decode_jxl_to_f32(path: &Path) -> Result<DecodeResult, String> {
         extra_channel_format,
     };
 
-    decoder.set_pixel_format(format);
+    decoder_with_image_info.set_pixel_format(format);
 
     // Capture output color profile before advancing to frame info
-    // We don't modify the output profile - let the decoder use its default.
-    // The conformance test comparison phase will handle transforms if needed.
-    let output_profile = decoder.output_color_profile().clone();
+    let output_profile = decoder_with_image_info.output_color_profile().clone();
 
-    // Advance to frame info
-    let mut decoder = loop {
-        match decoder.process(&mut input) {
-            Ok(ProcessingResult::Complete { result }) => break result,
-            Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
-                if input.is_empty() {
-                    return Err("Unexpected end of input before frame".to_string());
-                }
-                decoder = fallback;
-            }
-            Err(e) => return Err(format!("Frame info decode error: {:?}", e)),
-        }
-    };
+    let frame_pixels = width * height * channels;
+    let mut all_pixels = Vec::new();
+    let mut frame_count = 0usize;
 
-    // Create output buffer - use Image<f32> for proper alignment
-    let mut output_image = Image::<f32>::new((width * channels, height))
-        .map_err(|e| format!("Buffer error: {:?}", e))?;
-
-    let mut buffers = vec![JxlOutputBuffer::from_image_rect_mut(
-        output_image
-            .get_rect_mut(Rect {
-                origin: (0, 0),
-                size: (width * channels, height),
-            })
-            .into_raw(),
-    )];
-
-    // Decode frame pixels
+    // Multi-frame decode loop
     loop {
-        match decoder.process(&mut input, &mut buffers) {
-            Ok(ProcessingResult::Complete { .. }) => break,
-            Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
-                if input.is_empty() {
-                    return Err("Unexpected end of input during frame".to_string());
+        // Advance to frame info
+        let mut decoder_with_frame_info = loop {
+            match decoder_with_image_info.process(&mut input) {
+                Ok(ProcessingResult::Complete { result }) => break result,
+                Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                    if input.is_empty() {
+                        return Err("Unexpected end of input before frame".to_string());
+                    }
+                    decoder_with_image_info = fallback;
                 }
-                decoder = fallback;
+                Err(e) => return Err(format!("Frame info decode error: {:?}", e)),
             }
-            Err(e) => return Err(format!("Frame decode error: {:?}", e)),
+        };
+
+        // Create output buffer for this frame
+        let mut output_image = Image::<f32>::new((width * channels, height))
+            .map_err(|e| format!("Buffer error: {:?}", e))?;
+
+        let mut buffers = vec![JxlOutputBuffer::from_image_rect_mut(
+            output_image
+                .get_rect_mut(Rect {
+                    origin: (0, 0),
+                    size: (width * channels, height),
+                })
+                .into_raw(),
+        )];
+
+        // Decode frame pixels
+        decoder_with_image_info = loop {
+            match decoder_with_frame_info.process(&mut input, &mut buffers) {
+                Ok(ProcessingResult::Complete { result }) => break result,
+                Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                    if input.is_empty() {
+                        return Err("Unexpected end of input during frame".to_string());
+                    }
+                    decoder_with_frame_info = fallback;
+                }
+                Err(e) => return Err(format!("Frame decode error: {:?}", e)),
+            }
+        };
+
+        // Extract pixels from this frame
+        all_pixels.reserve(frame_pixels);
+        for y in 0..height {
+            let row = output_image.row(y);
+            all_pixels.extend_from_slice(row);
+        }
+        frame_count += 1;
+
+        // Check for more frames
+        if !decoder_with_image_info.has_more_frames() {
+            break;
         }
     }
 
-    // Extract pixels from Image<f32>
-    let mut pixels = Vec::with_capacity(width * height * channels);
-    for y in 0..height {
-        let row = output_image.row(y);
-        pixels.extend_from_slice(row);
-    }
-
-    // Return as single frame (1, height, width, channels)
     Ok(DecodeResult {
-        frames: 1,
+        frames: frame_count,
         height,
         width,
         channels,
-        pixels,
+        pixels: all_pixels,
         output_profile,
     })
 }
@@ -993,10 +998,13 @@ mod tests {
 
                     // Preserve alpha if reference has alpha
                     let preserve_alpha = ref_channels == 4 || ref_channels == 2;
+                    // For multi-frame, treat as a taller image (height * frames)
+                    // since transform_pixels_to_icc processes row-by-row
+                    let total_height = result.height * result.frames;
                     let (trans_channels, transformed) = transform_pixels_to_icc(
                         &result.pixels,
                         result.width,
-                        result.height,
+                        total_height,
                         result.channels,
                         &source_profile,
                         &ref_icc,

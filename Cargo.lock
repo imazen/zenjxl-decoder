@@ -723,25 +723,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jxl_cli"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "clap",
- "color-eyre",
- "criterion",
- "exr",
- "half",
- "lcms2",
- "png 0.18.0",
- "tracing-subscriber",
- "vergen-gitcl",
- "zenjxl-decoder",
- "zenjxl-decoder-macros",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1609,6 +1590,25 @@ dependencies = [
  "zenjxl-decoder-macros",
  "zenjxl-decoder-simd",
  "zenjxl-decoder-transforms",
+]
+
+[[package]]
+name = "zenjxl-decoder-cli"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "clap",
+ "color-eyre",
+ "criterion",
+ "exr",
+ "half",
+ "lcms2",
+ "png 0.18.0",
+ "tracing-subscriber",
+ "vergen-gitcl",
+ "zenjxl-decoder",
+ "zenjxl-decoder-macros",
 ]
 
 [[package]]
