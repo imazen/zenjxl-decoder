@@ -174,7 +174,10 @@ impl JxlCms for MoxCms {
 
         // Use Perceptual intent as default - this tends to work better for most images.
         // Note: skcms may use profile's embedded intent, which we don't currently extract.
-        let options = moxcms::TransformOptions::default();
+        let options = moxcms::TransformOptions {
+            allow_extended_range_rgb_xyz: true,
+            ..moxcms::TransformOptions::default()
+        };
 
         let mut transforms: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = Vec::with_capacity(n);
 
