@@ -30,16 +30,17 @@ pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 
     for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
         let x = D::F32Vec::load(d, vec);
-        // Per ICC parametric curve type 3 semantics: the linear segment applies
-        // for ALL values below the threshold, including negatives. This preserves
-        // sign naturally (12.92 * negative = negative) without needing copysign.
-        // The gamma branch is only used for x >= 0.0031308 (always positive).
+        // Sign-extended sRGB: apply full curve to abs(x), then restore sign.
+        // This matches libjxl's TF_SRGB::EncodedFromDisplay behavior for
+        // out-of-gamut negative values.
+        let a = x.abs();
         D::F32Vec::splat(d, 0.0031308)
-            .gt(x)
+            .gt(a)
             .if_then_else_f32(
-                x * D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, x.sqrt(), P, Q),
+                a * D::F32Vec::splat(d, 12.92),
+                eval_rational_poly_simd(d, a.sqrt(), P, Q),
             )
+            .copysign(x)
             .store(vec);
     }
 }
@@ -65,13 +66,14 @@ pub fn srgb_to_linear(samples: &mut [f32]) {
     ];
 
     for x in samples {
-        // Per ICC parametric curve type 3: linear segment for all values below
-        // threshold, including negatives. Gamma branch only for x >= 0.04045.
-        *x = if *x <= 0.04045 {
-            *x / 12.92
+        // Sign-extended sRGB inverse: apply to abs, then restore sign.
+        let a = x.abs();
+        let v = if a <= 0.04045 {
+            a / 12.92
         } else {
-            eval_rational_poly(*x, P, Q)
+            eval_rational_poly(a, P, Q)
         };
+        *x = v.copysign(*x);
     }
 }
 
@@ -97,14 +99,15 @@ pub fn srgb_to_linear_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 
     for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
         let x = D::F32Vec::load(d, vec);
-        // Per ICC parametric curve type 3: linear segment for all values below
-        // threshold, including negatives. Gamma branch only for x >= 0.04045.
+        // Sign-extended sRGB inverse: apply to abs, then restore sign.
+        let a = x.abs();
         D::F32Vec::splat(d, 0.04045)
-            .gt(x)
+            .gt(a)
             .if_then_else_f32(
-                x / D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, x, P, Q),
+                a / D::F32Vec::splat(d, 12.92),
+                eval_rational_poly_simd(d, a, P, Q),
             )
+            .copysign(x)
             .store(vec);
     }
 }
@@ -549,12 +552,14 @@ mod test {
     /// Naive linear to sRGB using actual pow for testing.
     fn linear_to_srgb_naive(samples: &mut [f32]) {
         for x in samples {
-            // ICC type 3: linear segment for all x < threshold (including negatives)
-            *x = if *x <= 0.0031308 {
-                *x * 12.92
+            // Sign-extended sRGB: apply curve to abs, restore sign.
+            let a = x.abs();
+            let v = if a <= 0.0031308 {
+                a * 12.92
             } else {
-                (*x).powf(1.0 / 2.4).mul_add(1.055, -0.055)
+                a.powf(1.0 / 2.4).mul_add(1.055, -0.055)
             };
+            *x = v.copysign(*x);
         }
     }
 

@@ -833,9 +833,54 @@ fn compare_conformance(
 
                     if error > max_error {
                         max_error = error;
+                        if error > frame_info.peak_error {
+                            eprintln!(
+                                "    New max error {:.6} at ({}, {}, ch={}) dec={:.6} ref={:.6}",
+                                error, x, y, c, dec_val, ref_val
+                            );
+                        }
                     }
                     sum_sq_errors[c] += (error as f64) * (error as f64);
                 }
+            }
+        }
+        // Dump pixels with large errors (all channels)
+        if max_error > frame_info.peak_error {
+            let mut error_pixels: Vec<(f32, usize, usize)> = Vec::new();
+            for y in 0..dec_height {
+                for x in 0..dec_width {
+                    let dec_idx = dec_frame_start + (y * dec_width + x) * dec_channels;
+                    let ref_idx = ref_frame_start + (y * ref_width + x) * ref_channels;
+                    let mut pixel_error: f32 = 0.0;
+                    for c in 0..compare_channels {
+                        let e = (decoded[dec_idx + c] - reference[ref_idx + c]).abs();
+                        pixel_error = pixel_error.max(e);
+                    }
+                    if pixel_error > frame_info.peak_error {
+                        error_pixels.push((pixel_error, x, y));
+                    }
+                }
+            }
+            error_pixels.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            eprintln!(
+                "    {} pixels exceed threshold. Top 10:",
+                error_pixels.len()
+            );
+            for &(err, x, y) in error_pixels.iter().take(10) {
+                let di = dec_frame_start + (y * dec_width + x) * dec_channels;
+                let ri = ref_frame_start + (y * ref_width + x) * ref_channels;
+                eprintln!(
+                    "    ({:3},{:3}) err={:.6} dec=[{:.8},{:.8},{:.8}] ref=[{:.8},{:.8},{:.8}]",
+                    x,
+                    y,
+                    err,
+                    decoded[di],
+                    decoded[di + 1],
+                    decoded[di + 2],
+                    reference[ri],
+                    reference[ri + 1],
+                    reference[ri + 2]
+                );
             }
         }
 
@@ -924,6 +969,7 @@ mod tests {
             "  Decoded shape: ({}, {}, {}, {})",
             result.frames, result.height, result.width, result.channels
         );
+
         eprintln!("  Output color profile: {}", result.output_profile);
 
         // Debug: show detailed profile info
@@ -1160,5 +1206,4 @@ mod tests {
     conformance_test!(spot);
     conformance_test!(sunset_logo);
     conformance_test!(upsampling_5);
-
 }
