@@ -371,9 +371,11 @@ fn bench_tf(c: &mut Criterion) {
                 srgb_f32.copy_from_slice(&input);
                 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
                 if let Some(d) = jxl_simd::AvxDescriptor::new() {
-                    linear_to_srgb_simd(d, &mut srgb_f32);
-                    f32_to_u8_simd(d, &srgb_f32, &mut output);
-                    return;
+                    // Must use d.call() to get #[target_feature] context for proper codegen
+                    return d.call(|d| {
+                        linear_to_srgb_simd(d, &mut srgb_f32);
+                        f32_to_u8_simd(d, &srgb_f32, &mut output);
+                    });
                 }
                 let d = jxl_simd::ScalarDescriptor::new().unwrap();
                 linear_to_srgb_simd(d, &mut srgb_f32);
@@ -392,8 +394,10 @@ fn bench_tf(c: &mut Criterion) {
                 srgb_f32.copy_from_slice(src);
                 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
                 if let Some(d) = jxl_simd::AvxDescriptor::new() {
-                    linear_to_srgb_simd(d, black_box(&mut srgb_f32));
-                    return;
+                    // Must use d.call() to get #[target_feature] context for proper codegen
+                    return d.call(|d| {
+                        linear_to_srgb_simd(d, black_box(&mut srgb_f32));
+                    });
                 }
                 linear_to_srgb_simd(
                     jxl_simd::ScalarDescriptor::new().unwrap(),
