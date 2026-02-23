@@ -96,7 +96,7 @@ impl RowBuffer {
         &mut self,
         y: Range<usize>,
         xoffset: usize,
-    ) -> SmallVec<&mut [T], 8> {
+    ) -> SmallVec<[&mut [T]; 8]> {
         assert!(y.clone().count() <= self.num_rows);
         let first_row_idx = y.start & (self.num_rows - 1);
         let stride = self.row_stride;

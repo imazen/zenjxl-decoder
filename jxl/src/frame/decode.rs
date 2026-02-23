@@ -748,7 +748,7 @@ impl Frame {
                 )?;
             }
         }
-        let sections: SmallVec<_, 4> = passes.iter().map(|x| x.0 + 2).collect();
+        let sections: SmallVec<[_; 4]> = passes.iter().map(|x| x.0 + 2).collect();
         let lf_global = self.lf_global.as_mut().unwrap();
         lf_global.modular_global.process_output(
             &sections,

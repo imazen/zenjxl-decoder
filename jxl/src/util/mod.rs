@@ -20,7 +20,7 @@ pub mod ndarray;
 pub mod profiling;
 mod rational_poly;
 mod shift_right_ceil;
-mod smallvec;
+// Re-export SmallVec from the smallvec crate (replaces custom implementation)
 pub mod tracing_wrappers;
 mod vec_helpers;
 mod xorshift128plus;
@@ -39,6 +39,6 @@ pub(crate) use ndarray::*;
 pub use profiling::*;
 pub use rational_poly::*;
 pub use shift_right_ceil::*;
-pub use smallvec::*;
+pub use smallvec::SmallVec;
 pub use vec_helpers::*;
 pub use xorshift128plus::*;

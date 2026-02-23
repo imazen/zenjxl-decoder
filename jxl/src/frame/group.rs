@@ -416,7 +416,7 @@ pub fn decode_vardct_group(
                 tracker,
             )
         })
-        .collect::<Result<SmallVec<_, 4>>>()?;
+        .collect::<Result<SmallVec<[_; 4]>>>()?;
 
     // Reset and use pooled buffers
     buffers.reset();

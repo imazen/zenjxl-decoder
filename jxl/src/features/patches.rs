@@ -705,7 +705,7 @@ impl PatchesDictionary {
         assert!(num_ec + 1 == self.blendings_stride);
         let num_channels = 3 + num_ec;
         let dummy_fg = [0f32];
-        let mut fg: SmallVec<&[f32], 8> = SmallVec::new();
+        let mut fg: SmallVec<[&[f32]; 8]> = SmallVec::new();
         for _ in 0..num_channels {
             fg.push(&dummy_fg[..]);
         }
@@ -748,7 +748,7 @@ impl PatchesDictionary {
             }
 
             let blending_idx = pos_idx * self.blendings_stride;
-            let mut bg: SmallVec<&mut [f32], 8> =
+            let mut bg: SmallVec<[&mut [f32]; 8]> =
                 row.iter_mut().map(|s| &mut s[out_x0..out_x1]).collect();
             perform_blending(
                 &mut bg,

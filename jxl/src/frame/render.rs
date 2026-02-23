@@ -585,11 +585,11 @@ impl Frame {
 
                 // Track all groups that receive data from process_output.
                 // Squeeze and other transforms can output to groups other than gw.group.
-                let mut groups_with_data: SmallVec<usize, 8> = SmallVec::new();
+                let mut groups_with_data: SmallVec<[usize; 8]> = SmallVec::new();
                 groups_with_data.push(gw.group);
                 {
                     let lf_global = self.lf_global.as_mut().unwrap();
-                    let sections: SmallVec<_, 4> = gw.passes.iter().map(|x| x.0 + 2).collect();
+                    let sections: SmallVec<[_; 4]> = gw.passes.iter().map(|x| x.0 + 2).collect();
                     lf_global.modular_global.process_output(
                         &sections,
                         gw.group,

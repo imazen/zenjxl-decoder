@@ -136,7 +136,7 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
                     (current_row << T::SHIFT.1)..((current_row + 1) << T::SHIFT.1),
                     RowBuffer::x0_offset::<T::OutputT>() - (xpre << T::SHIFT.0),
                 );
-                output_row_data.extend_sv(rows);
+                output_row_data.extend(rows);
             }
         }
         let mut output_rows = ChannelsMut::new(
