@@ -26,6 +26,10 @@ impl NeonDescriptor {
     pub unsafe fn new_unchecked() -> Self {
         Self(())
     }
+
+    pub fn from_token(_token: archmage::NeonToken) -> Self {
+        Self(())
+    }
 }
 
 /// Prepared 8-entry BF16 lookup table for NEON.

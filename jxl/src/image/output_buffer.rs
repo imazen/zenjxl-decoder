@@ -46,6 +46,7 @@ impl<'a> JxlOutputBuffer<'a> {
     ///   from `0` to `num_rows-1`.
     /// - The bytes in these ranges must not be accessed as long as the returned `Self` is in scope.
     /// - All the bytes in those ranges (and in between) must be part of the same allocated object.
+    #[cfg(feature = "allow-unsafe")]
     #[allow(unsafe_code)]
     pub unsafe fn new_from_ptr(
         buf: *mut std::mem::MaybeUninit<u8>,

@@ -13,6 +13,12 @@ use super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, U16Simd
 #[derive(Clone, Copy, Debug)]
 pub struct ScalarDescriptor;
 
+impl ScalarDescriptor {
+    pub fn from_token(_token: archmage::ScalarToken) -> Self {
+        Self
+    }
+}
+
 impl SimdDescriptor for ScalarDescriptor {
     type F32Vec = f32;
     type I32Vec = Wrapping<i32>;
@@ -466,6 +472,7 @@ macro_rules! simd_function {
         $(#[$($attr:meta)*])*
         $pub:vis fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )? $body: block
     ) => {
+        #[inline(always)]
         $(#[$($attr)*])*
         $pub fn $name<$descr_ty: $crate::SimdDescriptor>($descr: $descr_ty, $($arg: $ty),*) $(-> $ret)? $body
         $(#[$($attr)*])*

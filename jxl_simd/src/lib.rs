@@ -37,6 +37,26 @@ pub use aarch64::neon::NeonDescriptor;
 
 pub use scalar::ScalarDescriptor;
 
+// Re-exports for simd_function! macro internals.
+// Concrete token types must keep their original names (no aliases) because
+// the #[arcane] proc macro matches on the last path segment to determine
+// which #[target_feature] attributes to emit.
+#[doc(hidden)]
+pub use archmage::arcane as __arcane;
+#[doc(hidden)]
+pub use archmage::SimdToken as __SimdToken;
+#[doc(hidden)]
+pub use archmage::ScalarToken;
+#[cfg(target_arch = "x86_64")]
+#[doc(hidden)]
+pub use archmage::{X64V2Token, X64V3Token};
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[doc(hidden)]
+pub use archmage::X64V4Token;
+#[cfg(target_arch = "aarch64")]
+#[doc(hidden)]
+pub use archmage::NeonToken;
+
 pub trait SimdDescriptor: Sized + Copy + Debug + Send + Sync {
     type F32Vec: F32SimdVec<Descriptor = Self>;
 

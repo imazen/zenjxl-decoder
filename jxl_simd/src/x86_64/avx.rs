@@ -107,6 +107,10 @@ impl AvxDescriptor {
         Self(())
     }
 
+    pub fn from_token(_token: archmage::X64V3Token) -> Self {
+        Self(())
+    }
+
     pub fn as_sse42(&self) -> Sse42Descriptor {
         // SAFETY: the safety invariant on `self` guarantees avx is available, which implies
         // sse42.

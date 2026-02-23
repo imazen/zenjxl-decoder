@@ -3,7 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#![deny(unsafe_code)]
+#![cfg_attr(not(feature = "allow-unsafe"), forbid(unsafe_code))]
+#![cfg_attr(feature = "allow-unsafe", deny(unsafe_code))]
 // Internal modules expose items that are used across the crate but not
 // externally.  Some items are kept for future use (container, color TFs,
 // render stages) — suppress dead-code noise so clippy -D warnings passes.

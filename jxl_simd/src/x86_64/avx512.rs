@@ -27,6 +27,11 @@ impl Avx512Descriptor {
     pub unsafe fn new_unchecked() -> Self {
         Self(())
     }
+
+    pub fn from_token(_token: archmage::X64V4Token) -> Self {
+        Self(())
+    }
+
     pub fn as_avx(&self) -> AvxDescriptor {
         // SAFETY: the safety invariant on `self` guarantees avx512f is available, which implies
         // avx2 and fma.

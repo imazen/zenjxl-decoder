@@ -25,6 +25,10 @@ impl Sse42Descriptor {
     pub unsafe fn new_unchecked() -> Self {
         Self(())
     }
+
+    pub fn from_token(_token: archmage::X64V2Token) -> Self {
+        Self(())
+    }
 }
 
 impl SimdDescriptor for Sse42Descriptor {

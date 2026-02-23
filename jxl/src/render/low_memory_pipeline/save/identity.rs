@@ -3,11 +3,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#![allow(unsafe_code)]
+#![cfg_attr(feature = "allow-unsafe", allow(unsafe_code))]
 
-use std::mem::MaybeUninit;
 use std::ops::Range;
 
+#[cfg(feature = "allow-unsafe")]
+use std::mem::MaybeUninit;
+
+#[cfg(feature = "allow-unsafe")]
 use jxl_simd::{F32SimdVec, SimdDescriptor, U8SimdVec, U16SimdVec, simd_function};
 
 use crate::{
@@ -15,6 +18,7 @@ use crate::{
     render::low_memory_pipeline::row_buffers::RowBuffer,
 };
 
+#[cfg(feature = "allow-unsafe")]
 macro_rules! define_run_interleaved {
     ($fn_name:ident, $ty:ty, $vec_trait:ident, $store_fn:ident, $cnt:expr, $($arg:ident),+) => {
         #[inline(always)]
@@ -66,6 +70,7 @@ macro_rules! define_run_interleaved {
     };
 }
 
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_2_f32,
     f32,
@@ -75,6 +80,7 @@ define_run_interleaved!(
     a,
     b
 );
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_3_f32,
     f32,
@@ -85,6 +91,7 @@ define_run_interleaved!(
     b,
     c
 );
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_4_f32,
     f32,
@@ -97,6 +104,7 @@ define_run_interleaved!(
     e
 );
 
+#[cfg(feature = "allow-unsafe")]
 simd_function!(
     store_interleaved_f32,
     d: D,
@@ -113,6 +121,7 @@ simd_function!(
     }
 );
 
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_2_u8,
     u8,
@@ -122,6 +131,7 @@ define_run_interleaved!(
     a,
     b
 );
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_3_u8,
     u8,
@@ -132,6 +142,7 @@ define_run_interleaved!(
     b,
     c
 );
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_4_u8,
     u8,
@@ -144,6 +155,7 @@ define_run_interleaved!(
     e
 );
 
+#[cfg(feature = "allow-unsafe")]
 simd_function!(
     store_interleaved_u8,
     d: D,
@@ -160,6 +172,7 @@ simd_function!(
     }
 );
 
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_2_u16,
     u16,
@@ -169,6 +182,7 @@ define_run_interleaved!(
     a,
     b
 );
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_3_u16,
     u16,
@@ -179,6 +193,7 @@ define_run_interleaved!(
     b,
     c
 );
+#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_4_u16,
     u16,
@@ -191,6 +206,7 @@ define_run_interleaved!(
     e
 );
 
+#[cfg(feature = "allow-unsafe")]
 simd_function!(
     store_interleaved_u16,
     d: D,
@@ -207,11 +223,7 @@ simd_function!(
     }
 );
 
-/// Reinterprets `&mut [u8]` as `&mut [MaybeUninit<u8>]`.
-///
-/// # Safety
-/// This is sound because `MaybeUninit<u8>` has the same layout as `u8`,
-/// and converting initialized memory to `MaybeUninit` is always valid.
+#[cfg(feature = "allow-unsafe")]
 #[inline(always)]
 unsafe fn as_maybe_uninit_slice(buf: &mut [u8]) -> &mut [MaybeUninit<u8>] {
     // SAFETY: MaybeUninit<u8> has identical layout to u8. Converting initialized
@@ -250,6 +262,7 @@ pub(super) fn store(
             output_buf.copy_from_slice(input_buf);
             input_buf.len() / data_format.bytes_per_sample()
         }
+        #[cfg(feature = "allow-unsafe")]
         (channels, 1, true) if (2..=4).contains(&channels) => {
             let start_u8 = byte_start;
             let end_u8 = byte_end;
@@ -262,6 +275,7 @@ pub(super) fn store(
             let output_uninit = unsafe { as_maybe_uninit_slice(output_buf) };
             store_interleaved_u8(&slices[..channels], output_uninit)
         }
+        #[cfg(feature = "allow-unsafe")]
         (channels, 2, true) if (2..=4).contains(&channels) => {
             let ptr = output_buf.as_mut_ptr();
             if ptr.align_offset(std::mem::align_of::<u16>()) == 0 {
@@ -285,6 +299,7 @@ pub(super) fn store(
                 0
             }
         }
+        #[cfg(feature = "allow-unsafe")]
         (channels, 4, true) if (2..=4).contains(&channels) => {
             let ptr = output_buf.as_mut_ptr();
             if ptr.align_offset(std::mem::align_of::<f32>()) == 0 {
