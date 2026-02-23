@@ -12,7 +12,7 @@
 ///
 /// Format: 1 sign bit, 5 exponent bits (bias 15), 10 mantissa bits.
 #[allow(non_camel_case_types)]
-#[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
 pub struct f16(u16);
 

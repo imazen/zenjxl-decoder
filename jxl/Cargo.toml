@@ -25,6 +25,7 @@ jxl_simd = { package = "zenjxl-decoder-simd", path = "../jxl_simd", version = "=
 moxcms = { version = "0.7", optional = true }
 rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
+bytemuck = { version = "1", features = ["derive"] }
 atomic_refcell = "0.1"
 smallvec = "1"
 enough = { version = "0.4", features = ["std"] }

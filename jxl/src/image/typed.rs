@@ -171,31 +171,12 @@ impl<T: ImageDataType> Image<T> {
 
     #[inline(always)]
     pub fn row(&self, row: usize) -> &[T] {
-        let row = self.raw.row(row);
-        // SAFETY: Since self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) by the safety invariant
-        // on `self`, the returned slice is aligned to T::DATA_TYPE_ID.size(), and sizeof(T) ==
-        // T::DATA_TYPE_ID.size() by the requirements of ImageDataType; moreover, ImageDataType
-        // requires T to be a bag-of-bits type with no padding, so the implicit transmute is not
-        // an issue.
-        unsafe {
-            std::slice::from_raw_parts(row.as_ptr().cast::<T>(), row.len() / T::DATA_TYPE_ID.size())
-        }
+        bytemuck::cast_slice(self.raw.row(row))
     }
 
     #[inline(always)]
     pub fn row_mut(&mut self, row: usize) -> &mut [T] {
-        let row = self.raw.row_mut(row);
-        // SAFETY: Since self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) by the safety invariant
-        // on `self`, the returned slice is aligned to T::DATA_TYPE_ID.size(), and sizeof(T) ==
-        // T::DATA_TYPE_ID.size() by the requirements of ImageDataType; moreover, ImageDataType
-        // requires T to be a bag-of-bits type with no padding, so the implicit transmute is not
-        // an issue.
-        unsafe {
-            std::slice::from_raw_parts_mut(
-                row.as_mut_ptr().cast::<T>(),
-                row.len() / T::DATA_TYPE_ID.size(),
-            )
-        }
+        bytemuck::cast_slice_mut(self.raw.row_mut(row))
     }
 
     /// Note: this is quadratic in the number of rows. Indexing *ignores any padding rows*, i.e.
@@ -237,13 +218,11 @@ impl<'a, T: ImageDataType> ImageRect<'a, T> {
     #[inline(always)]
     pub fn row(&self, row: usize) -> &'a [T] {
         let row = self.raw.row(row);
-        // SAFETY: Since self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) by the safety invariant
-        // on `self`, the returned slice is aligned to T::DATA_TYPE_ID.size(), and sizeof(T) ==
-        // T::DATA_TYPE_ID.size() by the requirements of ImageDataType; moreover, ImageDataType
-        // requires T to be a bag-of-bits type with no padding, so the implicit transmute is not
-        // an issue.
+        // The raw row borrows from &self but the data is alive for 'a.
+        // We use from_raw_parts to extend the lifetime from &self to 'a,
+        // which is safe because the data lives as long as the ImageRect.
         unsafe {
-            std::slice::from_raw_parts(row.as_ptr().cast::<T>(), row.len() / T::DATA_TYPE_ID.size())
+            std::slice::from_raw_parts(row.as_ptr().cast::<T>(), row.len() / std::mem::size_of::<T>())
         }
     }
 
@@ -286,18 +265,7 @@ impl<'a, T: ImageDataType> ImageRectMut<'a, T> {
 
     #[inline(always)]
     pub fn row(&mut self, row: usize) -> &mut [T] {
-        let row = self.raw.row(row);
-        // SAFETY: Since self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) by the safety invariant
-        // on `self`, the returned slice is aligned to T::DATA_TYPE_ID.size(), and sizeof(T) ==
-        // T::DATA_TYPE_ID.size() by the requirements of ImageDataType; moreover, ImageDataType
-        // requires T to be a bag-of-bits type with no padding, so the implicit transmute is not
-        // an issue.
-        unsafe {
-            std::slice::from_raw_parts_mut(
-                row.as_mut_ptr().cast::<T>(),
-                row.len() / T::DATA_TYPE_ID.size(),
-            )
-        }
+        bytemuck::cast_slice_mut(self.raw.row(row))
     }
 
     pub fn as_rect(&'a self) -> ImageRect<'a, T> {

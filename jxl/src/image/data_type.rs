@@ -47,14 +47,12 @@ const _: () = {
     assert!(std::mem::size_of::<f64>() == DataTypeTag::F64.size());
 };
 
-/// # Safety
-/// Any type implementing this trait must be a "bag-of-bits" type with no padding.
-/// Moreover, Self::DATA_TYPE_ID.size() must match the size of `Self`.
-pub unsafe trait ImageDataType:
-    private::Sealed + Copy + Default + 'static + Debug + PartialEq + Send + Sync
+/// Image data type trait. Implementors must be "bag-of-bits" types with no padding,
+/// guaranteed by the `bytemuck::Pod` bound.
+pub trait ImageDataType:
+    private::Sealed + bytemuck::Pod + Copy + Default + 'static + Debug + PartialEq + Send + Sync
 {
-    /// ID of this data type. Different types *must* have different values (this is not a safety
-    /// requirement).
+    /// ID of this data type. Different types *must* have different values.
     const DATA_TYPE_ID: DataTypeTag;
 
     fn from_f64(f: f64) -> Self;
@@ -92,8 +90,7 @@ macro_rules! type_max {
 macro_rules! impl_image_data_type {
     ($ty: ident, $id: ident) => {
         impl private::Sealed for $ty {}
-        // SAFETY: primitive integer/float types are bag-of-bits types.
-        unsafe impl ImageDataType for $ty {
+        impl ImageDataType for $ty {
             const DATA_TYPE_ID: DataTypeTag = DataTypeTag::$id;
             fn from_f64(f: f64) -> $ty {
                 f as $ty
@@ -125,8 +122,7 @@ impl_image_data_type!(i32, I32);
 impl_image_data_type!(f64, F64);
 
 impl private::Sealed for crate::util::f16 {}
-// SAFETY: f16 is a bag-of-bits type (transparent wrapper around u16).
-unsafe impl ImageDataType for crate::util::f16 {
+impl ImageDataType for crate::util::f16 {
     const DATA_TYPE_ID: DataTypeTag = DataTypeTag::F16;
     fn from_f64(f: f64) -> crate::util::f16 {
         crate::util::f16::from_f64(f)
