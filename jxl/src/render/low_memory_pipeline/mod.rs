@@ -567,4 +567,54 @@ impl LowMemoryRenderPipeline {
     pub(crate) fn input_size(&self) -> (usize, usize) {
         self.shared.input_size
     }
+
+    /// Prepares all groups that have all channels ready, in parallel.
+    ///
+    /// Phase 1 (parallel): Extracts border data for each ready group.
+    ///   Border extraction is per-group with no cross-group reads, so it
+    ///   can safely run in parallel. Skips the scratch buffer pool (allocates
+    ///   fresh if needed) for thread safety. Does NOT set is_ready.
+    ///
+    /// Phase 2 (serial): Sets is_ready and emits work items, in group index order.
+    ///   The is_ready flag is set here so that the 3×3 readiness mask reflects
+    ///   serial ordering, preserving the non-overlapping work-item guarantee.
+    ///
+    /// Returns the collected work items and a list of `(group_id, has_items)` pairs
+    /// for the caller to build render-info.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn prepare_groups_parallel(
+        &mut self,
+    ) -> Result<(Vec<group_scheduler::RenderWorkItem>, Vec<(usize, bool)>)> {
+        use group_scheduler::extract_borders;
+        use rayon::prelude::*;
+
+        // Phase 1 (parallel): extract borders for all ready groups.
+        // Split borrow: immutable access to shared config, mutable access to input_buffers.
+        // par_iter_mut().map().collect() preserves index order.
+        let shared = &self.shared;
+        let border_size = self.border_size;
+
+        let extracted: Vec<bool> = self
+            .input_buffers
+            .par_iter_mut()
+            .map(|buf| extract_borders(buf, shared, border_size))
+            .collect::<Result<Vec<_>>>()?;
+
+        // Phase 2 (serial): emit work items in group index order.
+        // Sets is_ready for each extracted group BEFORE reading neighbors,
+        // so that the 3×3 readiness mask reflects serial ordering and
+        // work items from different groups never overlap.
+        let mut items = Vec::new();
+        let mut group_has_items = Vec::new();
+        for (g, did_extract) in extracted.iter().enumerate() {
+            if !did_extract {
+                continue;
+            }
+            let group_items = self.emit_work_items(g)?;
+            let has = !group_items.is_empty();
+            items.extend(group_items);
+            group_has_items.push((g, has));
+        }
+        Ok((items, group_has_items))
+    }
 }

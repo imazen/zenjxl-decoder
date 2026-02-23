@@ -470,9 +470,9 @@ impl Frame {
             self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
         }
 
-        // Phase 3a: Sequential — store buffers and compute renderable work items.
-        let mut all_items = Vec::new();
-        let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(work.len());
+        // Phase 3a-store: Sequential — store decoded buffers and run process_output.
+        // Tracks (group, do_render, is_main_work_group) for building render_infos later.
+        let mut groups_stored: Vec<(usize, bool, bool)> = Vec::with_capacity(work.len());
         for gw in work {
             self.decoder_state.check_cancelled()?;
 
@@ -600,27 +600,34 @@ impl Frame {
                 )?;
             }
 
-            // Prepare work items for ALL groups that received data.
-            for g in groups_with_data.iter().copied() {
-                let items = lmp_mut!().prepare_group(g)?;
-                let has_items = !items.is_empty();
-                all_items.extend(items);
-                if g == gw.group {
-                    render_infos.push(GroupRenderInfo {
-                        group: gw.group,
-                        do_render: gw.do_render,
-                        has_items,
-                    });
-                } else if has_items {
-                    // Other groups that received data from transforms also need
-                    // buffer recycling. Mark them as do_render since their data
-                    // was stored with complete=true.
-                    render_infos.push(GroupRenderInfo {
-                        group: g,
-                        do_render: true,
-                        has_items,
-                    });
-                }
+            // Record which groups received data for render_info tracking.
+            groups_stored.push((gw.group, gw.do_render, true));
+            for &g in groups_with_data.iter().skip(1) {
+                groups_stored.push((g, true, false));
+            }
+        }
+
+        // Phase 3a-prepare: Parallel — extract borders and emit work items.
+        // All groups have been stored above, so the neighbor readiness mask is
+        // trivially all-true. This is the main parallelism win: border extraction
+        // and work-item computation run concurrently across all groups.
+        let (all_items, group_has_items) = lmp_mut!().prepare_groups_parallel()?;
+        let has_items_set: std::collections::HashSet<usize> = group_has_items
+            .iter()
+            .filter(|(_, has)| *has)
+            .map(|(g, _)| *g)
+            .collect();
+
+        // Build render_infos from store tracking + prepare results.
+        let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(groups_stored.len());
+        for &(group, do_render, is_main) in &groups_stored {
+            let has_items = has_items_set.contains(&group);
+            if is_main || has_items {
+                render_infos.push(GroupRenderInfo {
+                    group,
+                    do_render,
+                    has_items,
+                });
             }
         }
 

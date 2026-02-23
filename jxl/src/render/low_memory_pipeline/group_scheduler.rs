@@ -9,10 +9,10 @@ use crate::error::Result;
 use crate::image::{OwnedRawImage, Rect};
 use crate::render::LowMemoryRenderPipeline;
 use crate::render::buffer_splitter::BufferSplitter;
-use crate::render::internal::{ChannelInfo, Stage};
+use crate::render::internal::{ChannelInfo, RenderPipelineShared, Stage};
 use crate::util::tracing_wrappers::*;
 
-use super::{PipelineReadView, render_group};
+use super::{PipelineReadView, render_group, row_buffers::RowBuffer};
 
 /// A renderable sub-rect of a group, produced by `prepare_group`.
 /// The parallel render path collects these across multiple groups
@@ -41,6 +41,11 @@ impl InputBuffer {
         assert!(self.data[chan].is_none());
         self.data[chan] = Some(buf);
         self.ready_channels += 1;
+    }
+
+    /// Returns true if all channels have been stored (ready for prepare).
+    pub(super) fn is_all_channels_ready(&self) -> bool {
+        self.ready_channels == self.data.len()
     }
 
     pub(super) fn new(num_channels: usize) -> Self {
@@ -319,6 +324,98 @@ impl LowMemoryRenderPipeline {
         }
     }
 
+    /// Sets is_ready and computes renderable work items for a group whose borders
+    /// have already been extracted (via `extract_borders`).
+    ///
+    /// MUST be called serially, in group index order. The is_ready flag is set
+    /// here (not in extract_borders) so that when computing the 3×3 readiness
+    /// mask, only groups that have already been emitted are marked ready. This
+    /// preserves the non-overlapping work-item guarantee: each border pixel is
+    /// rendered by exactly one group.
+    #[cfg(feature = "threads")]
+    pub(crate) fn emit_work_items(&mut self, g: usize) -> Result<Vec<RenderWorkItem>> {
+        // Set is_ready NOW (before computing the mask) so that subsequent groups
+        // see this group as ready. Earlier groups were already set in previous
+        // iterations of this serial loop.
+        self.input_buffers[g].is_ready = true;
+        let (gx, gy) = self.shared.group_position(g);
+
+        let gsz = 1 << self.shared.log_group_size;
+        let group_rect = Rect {
+            size: (gsz, gsz),
+            origin: (gsz * gx, gsz * gy),
+        }
+        .clip(self.shared.input_size);
+
+        // Compute readiness mask from 3x3 neighborhood.
+        let gxm1 = gx.saturating_sub(1);
+        let gym1 = gy.saturating_sub(1);
+        let gxp1 = (gx + 1).min(self.shared.group_count.0 - 1);
+        let gyp1 = (gy + 1).min(self.shared.group_count.1 - 1);
+        let gw = self.shared.group_count.0;
+        let mut ready_mask = [
+            self.input_buffers[gym1 * gw + gxm1].is_ready,
+            self.input_buffers[gym1 * gw + gx].is_ready,
+            self.input_buffers[gym1 * gw + gxp1].is_ready,
+            self.input_buffers[gy * gw + gxm1].is_ready,
+            self.input_buffers[gy * gw + gx].is_ready, // guaranteed true
+            self.input_buffers[gy * gw + gxp1].is_ready,
+            self.input_buffers[gyp1 * gw + gxm1].is_ready,
+            self.input_buffers[gyp1 * gw + gx].is_ready,
+            self.input_buffers[gyp1 * gw + gxp1].is_ready,
+        ];
+        // Corners require both adjacent sides to be ready.
+        ready_mask[0] &= ready_mask[1];
+        ready_mask[0] &= ready_mask[3];
+        ready_mask[2] &= ready_mask[1];
+        ready_mask[2] &= ready_mask[5];
+        ready_mask[6] &= ready_mask[3];
+        ready_mask[6] &= ready_mask[7];
+        ready_mask[8] &= ready_mask[5];
+        ready_mask[8] &= ready_mask[7];
+
+        let border_size = self.border_size;
+        let group_count = self.shared.group_count;
+        let mut items = Vec::new();
+        foreach_ready_rect(ready_mask, |xrange, yrange| {
+            let y0 = match (gy == 0, yrange.start) {
+                (true, 0) => group_rect.origin.1,
+                (false, 0) => group_rect.origin.1 - border_size.1,
+                (_, 1) => group_rect.origin.1 + border_size.1,
+                _ => group_rect.end().1 - border_size.1,
+            };
+            let x0 = match (gx == 0, xrange.start) {
+                (true, 0) => group_rect.origin.0,
+                (false, 0) => group_rect.origin.0 - border_size.0,
+                (_, 1) => group_rect.origin.0 + border_size.0,
+                _ => group_rect.end().0 - border_size.0,
+            };
+            let y1 = match (gy + 1 == group_count.1, yrange.end) {
+                (true, 3) => group_rect.end().1,
+                (false, 3) => group_rect.end().1 + border_size.1,
+                (_, 2) => group_rect.end().1 - border_size.1,
+                _ => group_rect.origin.1 + border_size.1,
+            };
+            let x1 = match (gx + 1 == group_count.0, xrange.end) {
+                (true, 3) => group_rect.end().0,
+                (false, 3) => group_rect.end().0 + border_size.0,
+                (_, 2) => group_rect.end().0 - border_size.0,
+                _ => group_rect.origin.0 + border_size.0,
+            };
+            items.push(RenderWorkItem {
+                gx,
+                gy,
+                image_area: Rect {
+                    origin: (x0, y0),
+                    size: (x1 - x0, y1 - y0),
+                },
+            });
+            Ok(())
+        })?;
+
+        Ok(items)
+    }
+
     /// Process a group: prepare borders, render all ready sub-rects, recycle buffers.
     pub(crate) fn render_with_new_group(
         &mut self,
@@ -377,6 +474,79 @@ impl LowMemoryRenderPipeline {
 
         Ok(())
     }
+}
+
+/// Extracts border data for a single group without computing work items.
+///
+/// This is the per-group workhorse for the parallel border extraction phase.
+/// It resets ready_channels, copies border data, and sets is_ready = true.
+/// Skips the scratch buffer pool (allocates fresh if needed) for thread safety.
+///
+/// After all groups have had borders extracted, call `emit_work_items` serially
+/// to compute the readiness mask and work items (which reads neighbor is_ready).
+#[cfg(feature = "threads")]
+pub(super) fn extract_borders(
+    buf: &mut InputBuffer,
+    shared: &RenderPipelineShared<RowBuffer>,
+    border_size: (usize, usize),
+) -> Result<bool> {
+    if !buf.is_all_channels_ready() {
+        return Ok(false);
+    }
+    buf.ready_channels = 0;
+
+    // Extract border data from the group's buffers.
+    for c in 0..shared.num_channels() {
+        let (bx, by) = border_size;
+        let (sx, sy) = buf.data[c].as_ref().unwrap().byte_size();
+        let ChannelInfo {
+            ty,
+            downsample: (dx, dy),
+        } = shared.channel_info[0][c];
+        let ty = ty.unwrap();
+        let bx = bx >> dx;
+        let by = by >> dy;
+        // Take existing border buffer or allocate fresh (skip scratch pool for
+        // thread safety — no shared mutable pool access).
+        let mut topbottom = if let Some(b) = buf.topbottom[c].take() {
+            b
+        } else {
+            let height = 4 * by;
+            let width = (1 << shared.log_group_size) * ty.size();
+            OwnedRawImage::new_zeroed_with_padding((width, height), (0, 0), (0, 0))?
+        };
+        let mut leftright = if let Some(b) = buf.leftright[c].take() {
+            b
+        } else {
+            let height = 1 << shared.log_group_size;
+            let width = 4 * bx * ty.size();
+            OwnedRawImage::new_zeroed_with_padding((width, height), (0, 0), (0, 0))?
+        };
+        let input = buf.data[c].as_ref().unwrap();
+        if by != 0 {
+            for y in 0..(2 * by).min(sy) {
+                topbottom.row_mut(y)[..sx].copy_from_slice(input.row(y));
+                topbottom.row_mut(4 * by - 1 - y)[..sx]
+                    .copy_from_slice(input.row(sy - y - 1));
+            }
+        }
+        if bx != 0 {
+            let cs = (bx * 2 * ty.size()).min(sx);
+            for y in 0..sy {
+                let row_out = leftright.row_mut(y);
+                let row_in = input.row(y);
+                row_out[..cs].copy_from_slice(&row_in[..cs]);
+                row_out[4 * bx * ty.size() - cs..].copy_from_slice(&row_in[sx - cs..]);
+            }
+        }
+        buf.leftright[c] = Some(leftright);
+        buf.topbottom[c] = Some(topbottom);
+    }
+    // NOTE: is_ready is NOT set here. It must be set serially during the
+    // emit_work_items phase to preserve the non-overlapping work item guarantee.
+    // See emit_work_items for details.
+
+    Ok(true)
 }
 
 #[cfg(test)]
