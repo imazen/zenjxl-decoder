@@ -140,13 +140,10 @@ simd_function!(
     int_to_float_32bit_simd_dispatch,
     d: D,
     fn int_to_float_32bit_simd(input: &[i32], output: &mut [f32], xsize: usize) {
-        let simd_width = D::I32Vec::LEN;
-
-        // Process complete SIMD vectors
-        for (in_chunk, out_chunk) in input
-            .chunks_exact(simd_width)
-            .zip(output.chunks_exact_mut(simd_width))
-            .take(xsize.div_ceil(simd_width))
+        let end = xsize.next_multiple_of(D::I32Vec::LEN);
+        for (in_chunk, out_chunk) in input[..end]
+            .chunks_exact(D::I32Vec::LEN)
+            .zip(output[..end].chunks_exact_mut(D::I32Vec::LEN))
         {
             let val = D::I32Vec::load(d, in_chunk);
             val.bitcast_to_f32().store(out_chunk);
@@ -168,11 +165,11 @@ simd_function!(
         const { assert!(D::F32Vec::LEN <= 16) }
         let mut u16_buf = [0u16; 16];
 
-        // Process complete SIMD vectors
-        for (in_chunk, out_chunk) in input
+        // Process complete SIMD vectors (pre-slice to avoid .take() adapter overhead)
+        let end = xsize.next_multiple_of(simd_width);
+        for (in_chunk, out_chunk) in input[..end]
             .chunks_exact(simd_width)
-            .zip(output.chunks_exact_mut(simd_width))
-            .take(xsize.div_ceil(simd_width))
+            .zip(output[..end].chunks_exact_mut(simd_width))
         {
             // Use SIMD to extract lower 16 bits from each i32 lane
             let i32_vec = D::I32Vec::load(d, in_chunk);
@@ -315,16 +312,15 @@ simd_function!(
     f32_to_u8_simd_dispatch,
     d: D,
     fn f32_to_u8_simd(input: &[f32], output: &mut [u8], max: f32, xsize: usize) {
-        let simd_width = D::F32Vec::LEN;
         let zero = D::F32Vec::splat(d, 0.0);
         let one = D::F32Vec::splat(d, 1.0);
         let scale = D::F32Vec::splat(d, max);
 
-        // Process SIMD vectors using div_ceil (buffers are padded)
-        for (input_chunk, output_chunk) in input
-            .chunks_exact(simd_width)
-            .zip(output.chunks_exact_mut(simd_width))
-            .take(xsize.div_ceil(simd_width))
+        // Pre-slice to avoid .take() iterator adapter overhead (buffers are padded).
+        let end = xsize.next_multiple_of(D::F32Vec::LEN);
+        for (input_chunk, output_chunk) in input[..end]
+            .chunks_exact(D::F32Vec::LEN)
+            .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
         {
             let val = D::F32Vec::load(d, input_chunk);
             // Clamp to [0, 1] and scale
@@ -387,16 +383,15 @@ simd_function!(
     f32_to_u16_simd_dispatch,
     d: D,
     fn f32_to_u16_simd(input: &[f32], output: &mut [u16], max: f32, xsize: usize) {
-        let simd_width = D::F32Vec::LEN;
         let zero = D::F32Vec::splat(d, 0.0);
         let one = D::F32Vec::splat(d, 1.0);
         let scale = D::F32Vec::splat(d, max);
 
-        // Process SIMD vectors using div_ceil (buffers are padded)
-        for (input_chunk, output_chunk) in input
-            .chunks_exact(simd_width)
-            .zip(output.chunks_exact_mut(simd_width))
-            .take(xsize.div_ceil(simd_width))
+        // Pre-slice to avoid .take() iterator adapter overhead (buffers are padded).
+        let end = xsize.next_multiple_of(D::F32Vec::LEN);
+        for (input_chunk, output_chunk) in input[..end]
+            .chunks_exact(D::F32Vec::LEN)
+            .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
         {
             let val = D::F32Vec::load(d, input_chunk);
             // Clamp to [0, 1] and scale
