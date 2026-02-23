@@ -259,7 +259,7 @@ impl SymbolReader {
                     min_symbol,
                     min_length,
                     dist_multiplier,
-                    window: Vec::new(),
+                    window: Vec::with_capacity(1 << Lz77State::LOG_WINDOW_SIZE),
                     num_to_copy: 0,
                     copy_pos: 0,
                     num_decoded: 0,

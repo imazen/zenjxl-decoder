@@ -111,15 +111,16 @@ fn dequant_lane<D: SimdDescriptor>(
     qblock: &[&[i32]; 3],
     block: &mut [Vec<f32>; 3],
 ) {
-    let x_mul = D::F32Vec::load(d, &dequant_matrices[k..]) * D::F32Vec::splat(d, scaled_dequant_x);
+    let x_mul =
+        D::F32Vec::load_from(d, dequant_matrices, k) * D::F32Vec::splat(d, scaled_dequant_x);
     let y_mul =
-        D::F32Vec::load(d, &dequant_matrices[size + k..]) * D::F32Vec::splat(d, scaled_dequant_y);
-    let b_mul = D::F32Vec::load(d, &dequant_matrices[2 * size + k..])
+        D::F32Vec::load_from(d, dequant_matrices, size + k) * D::F32Vec::splat(d, scaled_dequant_y);
+    let b_mul = D::F32Vec::load_from(d, dequant_matrices, 2 * size + k)
         * D::F32Vec::splat(d, scaled_dequant_b);
 
-    let quantized_x = D::I32Vec::load(d, &qblock[0][k..]);
-    let quantized_y = D::I32Vec::load(d, &qblock[1][k..]);
-    let quantized_b = D::I32Vec::load(d, &qblock[2][k..]);
+    let quantized_x = D::I32Vec::load_from(d, qblock[0], k);
+    let quantized_y = D::I32Vec::load_from(d, qblock[1], k);
+    let quantized_b = D::I32Vec::load_from(d, qblock[2], k);
 
     let dequant_x_cc = adjust_quant_bias(d, 0, quantized_x, biases) * x_mul;
     let dequant_y = adjust_quant_bias(d, 1, quantized_y, biases) * y_mul;
@@ -127,9 +128,9 @@ fn dequant_lane<D: SimdDescriptor>(
 
     let dequant_x = D::F32Vec::splat(d, x_cc_mul).mul_add(dequant_y, dequant_x_cc);
     let dequant_b = D::F32Vec::splat(d, b_cc_mul).mul_add(dequant_y, dequant_b_cc);
-    dequant_x.store(&mut block[0][k..]);
-    dequant_y.store(&mut block[1][k..]);
-    dequant_b.store(&mut block[2][k..]);
+    dequant_x.store_at(&mut block[0], k);
+    dequant_y.store_at(&mut block[1], k);
+    dequant_b.store_at(&mut block[2], k);
 }
 
 #[allow(clippy::too_many_arguments)]

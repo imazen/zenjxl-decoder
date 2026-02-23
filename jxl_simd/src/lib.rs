@@ -353,6 +353,20 @@ pub trait I32SimdVec:
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self;
 
+    /// Loads Self::LEN i32 values starting at `mem[offset..]`.
+    /// Equivalent to `Self::load(d, &mem[offset..])` but avoids the subslice bounds check.
+    #[inline(always)]
+    fn load_from(d: Self::Descriptor, mem: &[i32], offset: usize) -> Self {
+        debug_assert!(
+            offset + Self::LEN <= mem.len(),
+            "I32 load_from: offset {} + LEN {} > len {}",
+            offset,
+            Self::LEN,
+            mem.len()
+        );
+        Self::load(d, unsafe { mem.get_unchecked(offset..) })
+    }
+
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn store(&self, mem: &mut [i32]);
 
