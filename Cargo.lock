@@ -143,6 +143,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 
 [[package]]
+name = "atomic_refcell"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41e67cd8309bbd06cd603a9e693a784ac2e5d1e955f11286e355089fcab3047c"
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1634,6 +1640,7 @@ dependencies = [
  "almost-enough",
  "arbtest",
  "array-init",
+ "atomic_refcell",
  "brotli",
  "byteorder",
  "criterion 0.5.1",
@@ -1647,6 +1654,7 @@ dependencies = [
  "rand_xorshift",
  "rayon",
  "serde_json",
+ "smallvec",
  "test-log",
  "thiserror",
  "tracing",

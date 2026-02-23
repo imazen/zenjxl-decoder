@@ -6,7 +6,7 @@
 #[cfg(test)]
 pub mod test;
 
-mod atomic_refcell;
+// Re-export AtomicRefCell from the atomic_refcell crate (replaces custom implementation)
 mod bits;
 mod cacheline;
 mod concat_slice;
@@ -25,7 +25,7 @@ pub mod tracing_wrappers;
 mod vec_helpers;
 mod xorshift128plus;
 
-pub use atomic_refcell::*;
+pub use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 pub use bits::*;
 pub use cacheline::*;
 pub use concat_slice::*;
