@@ -274,11 +274,11 @@ impl Frame {
 
     /// Parallel decode + render path for both VarDCT and Modular frames.
     ///
-    /// Groups are processed in batches of `MAX_DECODE_THREADS` to limit peak memory:
-    /// pixel buffers allocated for one batch are recycled by the pipeline before the next
-    /// batch allocates new ones.
+    /// Processes ALL groups through a four-phase pipeline (no batching),
+    /// reducing rayon barriers from ~5×(num_groups/num_threads) to 5 total
+    /// and enabling better work-stealing across all groups.
     ///
-    /// Each batch runs four phases:
+    /// The four phases:
     /// 1. Sequential: compute render decisions and allocate pixel buffers
     /// 2. Parallel: entropy decode + dequant + IDCT (VarDCT) / read_stream (Modular)
     /// 3. Store, render, recycle:
@@ -342,7 +342,6 @@ impl Frame {
 
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
-        let batch_size = rayon::current_num_threads();
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
 
         struct GroupWork<'a> {
@@ -359,332 +358,328 @@ impl Frame {
             has_items: bool,
         }
 
-        let mut remaining = groups;
-        while !remaining.is_empty() {
-            let drain_count = remaining.len().min(batch_size);
-            let batch: Vec<_> = remaining.drain(..drain_count).collect();
+        // Phase 1: Sequential — compute render decisions and allocate pixel buffers.
+        // Process ALL groups at once (no batching) to minimize rayon barriers
+        // and maximize work-stealing opportunities.
+        let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
+        for (group, passes) in groups {
+            if let Some((p, _)) = passes.last() {
+                self.last_rendered_pass[group] = Some(*p);
+            }
+            let pass_to_render = self.last_rendered_pass[group];
+            let complete = pass_to_render.is_some_and(|p| p >= last_pass_in_file);
+            let do_render = if complete {
+                true
+            } else if do_flush {
+                self.allow_rendering_before_last_pass()
+            } else {
+                false
+            };
 
-            // Phase 1: Sequential — compute render decisions and allocate pixel buffers.
-            let mut work: Vec<GroupWork> = Vec::with_capacity(batch.len());
-            for (group, passes) in batch {
-                if let Some((p, _)) = passes.last() {
-                    self.last_rendered_pass[group] = Some(*p);
+            let pixels = if is_vardct && do_render {
+                Some([
+                    pipeline!(self, p, p.get_buffer(0))?,
+                    pipeline!(self, p, p.get_buffer(1))?,
+                    pipeline!(self, p, p.get_buffer(2))?,
+                ])
+            } else {
+                None
+            };
+
+            work.push(GroupWork {
+                group,
+                passes,
+                complete,
+                do_render,
+                pixels,
+            });
+        }
+
+        // Phase 2: Parallel decode.
+        // Seed the buffer pool from self.vardct_buffers so buffers persist across
+        // calls. The streaming API calls this function once per group (batch_size=1),
+        // so without persistence we'd allocate+zero a fresh 1.5MB buffer per group.
+        {
+            let lf_global = self.lf_global.as_ref().unwrap();
+            let header = &self.header;
+            let hf_global = self.hf_global.as_ref();
+            let hf_meta = self.hf_meta.as_ref();
+            let lf_image = &self.lf_image;
+            let quant_lf = &self.quant_lf;
+            let quant_biases = &self
+                .decoder_state
+                .file_header
+                .transform_data
+                .opsin_inverse_matrix
+                .quant_biases;
+            let tracker = &self.decoder_state.memory_tracker;
+            let mut pool: Vec<VarDctBuffers> = Vec::new();
+            if let Some(buf) = self.vardct_buffers.take() {
+                pool.push(buf);
+            }
+            let buffer_pool = std::sync::Mutex::new(pool);
+            work.par_iter_mut().try_for_each(|gw| -> Result<()> {
+                stop.check()?;
+                if is_vardct && !gw.passes.is_empty() {
+                    let hf_global = hf_global.unwrap();
+                    let hf_meta = hf_meta.unwrap();
+                    let mut buffers = match buffer_pool.lock().unwrap().pop() {
+                        Some(mut b) => {
+                            b.reset();
+                            b
+                        }
+                        None => VarDctBuffers::new()?,
+                    };
+
+                    if !(gw.pixels.is_none() && gw.do_render) {
+                        decode_vardct_group(
+                            gw.group,
+                            &mut gw.passes,
+                            header,
+                            lf_global,
+                            hf_global,
+                            hf_meta,
+                            lf_image,
+                            quant_lf,
+                            quant_biases,
+                            None,
+                            &mut gw.pixels,
+                            &mut buffers,
+                            tracker,
+                            #[cfg(feature = "jpeg")]
+                            None,
+                        )?;
+                    }
+                    buffer_pool.lock().unwrap().push(buffers);
                 }
-                let pass_to_render = self.last_rendered_pass[group];
-                let complete = pass_to_render.is_some_and(|p| p >= last_pass_in_file);
-                let do_render = if complete {
-                    true
-                } else if do_flush {
-                    self.allow_rendering_before_last_pass()
-                } else {
-                    false
-                };
 
-                let pixels = if is_vardct && do_render {
-                    Some([
+                for (pass, br) in gw.passes.iter_mut() {
+                    lf_global.modular_global.read_stream(
+                        ModularStreamId::ModularHF {
+                            group: gw.group,
+                            pass: *pass,
+                        },
+                        header,
+                        &lf_global.tree,
+                        br,
+                    )?;
+                }
+                Ok(())
+            })?;
+            // Save one buffer for reuse in next call
+            self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
+        }
+
+        // Phase 3a: Sequential — store buffers and compute renderable work items.
+        let mut all_items = Vec::new();
+        let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(work.len());
+        for gw in work {
+            self.decoder_state.check_cancelled()?;
+
+            if is_vardct {
+                if gw.pixels.is_none() && gw.do_render && gw.passes.is_empty() {
+                    let mut pixels = [
                         pipeline!(self, p, p.get_buffer(0))?,
                         pipeline!(self, p, p.get_buffer(1))?,
                         pipeline!(self, p, p.get_buffer(2))?,
-                    ])
-                } else {
-                    None
-                };
-
-                work.push(GroupWork {
-                    group,
-                    passes,
-                    complete,
-                    do_render,
-                    pixels,
-                });
-            }
-
-            // Phase 2: Parallel decode.
-            // Seed the buffer pool from self.vardct_buffers so buffers persist across
-            // calls. The streaming API calls this function once per group (batch_size=1),
-            // so without persistence we'd allocate+zero a fresh 1.5MB buffer per group.
-            {
-                let lf_global = self.lf_global.as_ref().unwrap();
-                let header = &self.header;
-                let hf_global = self.hf_global.as_ref();
-                let hf_meta = self.hf_meta.as_ref();
-                let lf_image = &self.lf_image;
-                let quant_lf = &self.quant_lf;
-                let quant_biases = &self
-                    .decoder_state
-                    .file_header
-                    .transform_data
-                    .opsin_inverse_matrix
-                    .quant_biases;
-                let tracker = &self.decoder_state.memory_tracker;
-                let mut pool: Vec<VarDctBuffers> = Vec::new();
-                if let Some(buf) = self.vardct_buffers.take() {
-                    pool.push(buf);
-                }
-                let buffer_pool = std::sync::Mutex::new(pool);
-                work.par_iter_mut().try_for_each(|gw| -> Result<()> {
-                    stop.check()?;
-                    if is_vardct && !gw.passes.is_empty() {
-                        let hf_global = hf_global.unwrap();
-                        let hf_meta = hf_meta.unwrap();
-                        let mut buffers = match buffer_pool.lock().unwrap().pop() {
-                            Some(mut b) => {
-                                b.reset();
-                                b
-                            }
-                            None => VarDctBuffers::new()?,
-                        };
-
-                        if !(gw.pixels.is_none() && gw.do_render) {
-                            decode_vardct_group(
-                                gw.group,
-                                &mut gw.passes,
-                                header,
-                                lf_global,
-                                hf_global,
-                                hf_meta,
-                                lf_image,
-                                quant_lf,
-                                quant_biases,
-                                None,
-                                &mut gw.pixels,
-                                &mut buffers,
-                                tracker,
-                                #[cfg(feature = "jpeg")]
-                                None,
-                            )?;
-                        }
-                        buffer_pool.lock().unwrap().push(buffers);
-                    }
-
-                    for (pass, br) in gw.passes.iter_mut() {
-                        lf_global.modular_global.read_stream(
-                            ModularStreamId::ModularHF {
-                                group: gw.group,
-                                pass: *pass,
-                            },
-                            header,
-                            &lf_global.tree,
-                            br,
-                        )?;
-                    }
-                    Ok(())
-                })?;
-                // Save one buffer for reuse in next call
-                self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
-            }
-
-            // Phase 3a: Sequential — store buffers and compute renderable work items.
-            let mut all_items = Vec::new();
-            let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(work.len());
-            for gw in work {
-                self.decoder_state.check_cancelled()?;
-
-                if is_vardct {
-                    if gw.pixels.is_none() && gw.do_render && gw.passes.is_empty() {
-                        let mut pixels = [
-                            pipeline!(self, p, p.get_buffer(0))?,
-                            pipeline!(self, p, p.get_buffer(1))?,
-                            pipeline!(self, p, p.get_buffer(2))?,
-                        ];
-                        upsample_lf_group(
-                            gw.group,
-                            &mut pixels,
-                            self.lf_image.as_ref().unwrap(),
-                            &self.header,
-                            &self.decoder_state.file_header.transform_data,
-                        )?;
-                        for (c, img) in pixels.into_iter().enumerate() {
-                            lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
-                        }
-                    } else if let Some(pixels) = gw.pixels {
-                        for (c, img) in pixels.into_iter().enumerate() {
-                            lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
-                        }
-                    }
-                }
-
-                // Generate noise buffers for this group if needed.
-                if self.header.has_noise() && gw.do_render {
-                    let num_channels = self.header.num_extra_channels as usize + 3;
-                    let group_dim = self.header.group_dim() as u32;
-                    let xsize_groups = self.header.size_groups().0;
-                    let gx = (gw.group % xsize_groups) as u32;
-                    let gy = (gw.group / xsize_groups) as u32;
-                    let upsampling = self.header.upsampling;
-                    let upsampled_size = self.header.size_upsampled();
-
-                    let buf_x1 = ((gx + 1) * upsampling * group_dim) as usize;
-                    let buf_y1 = ((gy + 1) * upsampling * group_dim) as usize;
-                    let buf_xsize =
-                        buf_x1.min(upsampled_size.0) - (gx * upsampling * group_dim) as usize;
-                    let buf_ysize =
-                        buf_y1.min(upsampled_size.1) - (gy * upsampling * group_dim) as usize;
-
-                    let bits_to_float = |bits: u32| f32::from_bits((bits >> 9) | 0x3F800000);
-
-                    let mut bufs = [
-                        pipeline!(self, p, p.get_buffer(num_channels)?),
-                        pipeline!(self, p, p.get_buffer(num_channels + 1)?),
-                        pipeline!(self, p, p.get_buffer(num_channels + 2)?),
                     ];
+                    upsample_lf_group(
+                        gw.group,
+                        &mut pixels,
+                        self.lf_image.as_ref().unwrap(),
+                        &self.header,
+                        &self.decoder_state.file_header.transform_data,
+                    )?;
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
+                    }
+                } else if let Some(pixels) = gw.pixels {
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
+                    }
+                }
+            }
 
-                    const FLOATS_PER_BATCH: usize = Xorshift128Plus::N * std::mem::size_of::<u64>()
-                        / std::mem::size_of::<f32>();
-                    let mut batch = [0u64; Xorshift128Plus::N];
+            // Generate noise buffers for this group if needed.
+            if self.header.has_noise() && gw.do_render {
+                let num_channels = self.header.num_extra_channels as usize + 3;
+                let group_dim = self.header.group_dim() as u32;
+                let xsize_groups = self.header.size_groups().0;
+                let gx = (gw.group % xsize_groups) as u32;
+                let gy = (gw.group / xsize_groups) as u32;
+                let upsampling = self.header.upsampling;
+                let upsampled_size = self.header.size_upsampled();
 
-                    for iy in 0..upsampling {
-                        for ix in 0..upsampling {
-                            let x0 = (gx * upsampling + ix) * group_dim;
-                            let y0 = (gy * upsampling + iy) * group_dim;
-                            let mut rng = Xorshift128Plus::new_with_seeds(
-                                self.decoder_state.visible_frame_index as u32,
-                                self.decoder_state.nonvisible_frame_index as u32,
-                                x0,
-                                y0,
-                            );
-                            let sub_x0 = (ix * group_dim) as usize;
-                            let sub_y0 = (iy * group_dim) as usize;
-                            let sub_x1 = ((ix + 1) * group_dim) as usize;
-                            let sub_y1 = ((iy + 1) * group_dim) as usize;
-                            let sub_xsize = sub_x1.min(buf_xsize).saturating_sub(sub_x0);
-                            let sub_ysize = sub_y1.min(buf_ysize).saturating_sub(sub_y0);
-                            if sub_xsize == 0 || sub_ysize == 0 {
-                                continue;
-                            }
-                            for buf in &mut bufs {
-                                for y in 0..sub_ysize {
-                                    let row = buf.row_mut(sub_y0 + y);
-                                    for batch_index in 0..sub_xsize.div_ceil(FLOATS_PER_BATCH) {
-                                        rng.fill(&mut batch);
-                                        let batch_size = (sub_xsize
-                                            - batch_index * FLOATS_PER_BATCH)
-                                            .min(FLOATS_PER_BATCH);
-                                        for i in 0..batch_size {
-                                            let x = sub_x0 + FLOATS_PER_BATCH * batch_index + i;
-                                            let k = i / 2;
-                                            let high_bytes = i % 2 != 0;
-                                            let bits = if high_bytes {
-                                                ((batch[k] & 0xFFFFFFFF00000000) >> 32) as u32
-                                            } else {
-                                                (batch[k] & 0xFFFFFFFF) as u32
-                                            };
-                                            row[x] = bits_to_float(bits);
-                                        }
+                let buf_x1 = ((gx + 1) * upsampling * group_dim) as usize;
+                let buf_y1 = ((gy + 1) * upsampling * group_dim) as usize;
+                let buf_xsize =
+                    buf_x1.min(upsampled_size.0) - (gx * upsampling * group_dim) as usize;
+                let buf_ysize =
+                    buf_y1.min(upsampled_size.1) - (gy * upsampling * group_dim) as usize;
+
+                let bits_to_float = |bits: u32| f32::from_bits((bits >> 9) | 0x3F800000);
+
+                let mut bufs = [
+                    pipeline!(self, p, p.get_buffer(num_channels)?),
+                    pipeline!(self, p, p.get_buffer(num_channels + 1)?),
+                    pipeline!(self, p, p.get_buffer(num_channels + 2)?),
+                ];
+
+                const FLOATS_PER_BATCH: usize = Xorshift128Plus::N * std::mem::size_of::<u64>()
+                    / std::mem::size_of::<f32>();
+                let mut batch = [0u64; Xorshift128Plus::N];
+
+                for iy in 0..upsampling {
+                    for ix in 0..upsampling {
+                        let x0 = (gx * upsampling + ix) * group_dim;
+                        let y0 = (gy * upsampling + iy) * group_dim;
+                        let mut rng = Xorshift128Plus::new_with_seeds(
+                            self.decoder_state.visible_frame_index as u32,
+                            self.decoder_state.nonvisible_frame_index as u32,
+                            x0,
+                            y0,
+                        );
+                        let sub_x0 = (ix * group_dim) as usize;
+                        let sub_y0 = (iy * group_dim) as usize;
+                        let sub_x1 = ((ix + 1) * group_dim) as usize;
+                        let sub_y1 = ((iy + 1) * group_dim) as usize;
+                        let sub_xsize = sub_x1.min(buf_xsize).saturating_sub(sub_x0);
+                        let sub_ysize = sub_y1.min(buf_ysize).saturating_sub(sub_y0);
+                        if sub_xsize == 0 || sub_ysize == 0 {
+                            continue;
+                        }
+                        for buf in &mut bufs {
+                            for y in 0..sub_ysize {
+                                let row = buf.row_mut(sub_y0 + y);
+                                for batch_index in 0..sub_xsize.div_ceil(FLOATS_PER_BATCH) {
+                                    rng.fill(&mut batch);
+                                    let batch_size = (sub_xsize
+                                        - batch_index * FLOATS_PER_BATCH)
+                                        .min(FLOATS_PER_BATCH);
+                                    for i in 0..batch_size {
+                                        let x = sub_x0 + FLOATS_PER_BATCH * batch_index + i;
+                                        let k = i / 2;
+                                        let high_bytes = i % 2 != 0;
+                                        let bits = if high_bytes {
+                                            ((batch[k] & 0xFFFFFFFF00000000) >> 32) as u32
+                                        } else {
+                                            (batch[k] & 0xFFFFFFFF) as u32
+                                        };
+                                        row[x] = bits_to_float(bits);
                                     }
                                 }
                             }
                         }
                     }
-
-                    let [buf0, buf1, buf2] = bufs;
-                    lmp_mut!().store_buffer_only(num_channels, gw.group, gw.complete, buf0);
-                    lmp_mut!().store_buffer_only(num_channels + 1, gw.group, gw.complete, buf1);
-                    lmp_mut!().store_buffer_only(num_channels + 2, gw.group, gw.complete, buf2);
                 }
 
-                // Track all groups that receive data from process_output.
-                // Squeeze and other transforms can output to groups other than gw.group.
-                let mut groups_with_data: SmallVec<[usize; 8]> = SmallVec::new();
-                groups_with_data.push(gw.group);
-                {
-                    let lf_global = self.lf_global.as_mut().unwrap();
-                    let sections: SmallVec<[_; 4]> = gw.passes.iter().map(|x| x.0 + 2).collect();
-                    lf_global.modular_global.process_output(
-                        &sections,
-                        gw.group,
-                        &self.header,
-                        &mut |chan, group, image| {
-                            lmp_mut!().store_buffer_only(chan, group, true, image);
-                            if !groups_with_data.contains(&group) {
-                                groups_with_data.push(group);
-                            }
-                            Ok(())
-                        },
-                    )?;
-                }
-
-                // Prepare work items for ALL groups that received data.
-                for g in groups_with_data.iter().copied() {
-                    let items = lmp_mut!().prepare_group(g)?;
-                    let has_items = !items.is_empty();
-                    all_items.extend(items);
-                    if g == gw.group {
-                        render_infos.push(GroupRenderInfo {
-                            group: gw.group,
-                            do_render: gw.do_render,
-                            has_items,
-                        });
-                    } else if has_items {
-                        // Other groups that received data from transforms also need
-                        // buffer recycling. Mark them as do_render since their data
-                        // was stored with complete=true.
-                        render_infos.push(GroupRenderInfo {
-                            group: g,
-                            do_render: true,
-                            has_items,
-                        });
-                    }
-                }
+                let [buf0, buf1, buf2] = bufs;
+                lmp_mut!().store_buffer_only(num_channels, gw.group, gw.complete, buf0);
+                lmp_mut!().store_buffer_only(num_channels + 1, gw.group, gw.complete, buf1);
+                lmp_mut!().store_buffer_only(num_channels + 2, gw.group, gw.complete, buf2);
             }
 
-            // Phase 3b: Parallel render — render all work items across threads.
-            if !all_items.is_empty() {
-                // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
-                // output buffers. We don't use buffer_splitter while shared_bufs is alive,
-                // and all sub-views access non-overlapping regions (guaranteed by the
-                // non-overlapping work items from prepare_group).
-                let shared_bufs =
-                    unsafe { SharedOutputBuffers::from_buffer_splitter(buffer_splitter) };
+            // Track all groups that receive data from process_output.
+            // Squeeze and other transforms can output to groups other than gw.group.
+            let mut groups_with_data: SmallVec<[usize; 8]> = SmallVec::new();
+            groups_with_data.push(gw.group);
+            {
+                let lf_global = self.lf_global.as_mut().unwrap();
+                let sections: SmallVec<[_; 4]> = gw.passes.iter().map(|x| x.0 + 2).collect();
+                lf_global.modular_global.process_output(
+                    &sections,
+                    gw.group,
+                    &self.header,
+                    &mut |chan, group, image| {
+                        lmp_mut!().store_buffer_only(chan, group, true, image);
+                        if !groups_with_data.contains(&group) {
+                            groups_with_data.push(group);
+                        }
+                        Ok(())
+                    },
+                )?;
+            }
 
-                {
-                    let p = lmp_ref!();
-                    let view = p.read_view();
-                    let (frame_origin, full_image_size) = p.extend_origin_size();
-                    let sbi = p.save_buffer_info();
-                    let input_size = p.input_size();
-                    let factory = p.context_factory();
+            // Prepare work items for ALL groups that received data.
+            for g in groups_with_data.iter().copied() {
+                let items = lmp_mut!().prepare_group(g)?;
+                let has_items = !items.is_empty();
+                all_items.extend(items);
+                if g == gw.group {
+                    render_infos.push(GroupRenderInfo {
+                        group: gw.group,
+                        do_render: gw.do_render,
+                        has_items,
+                    });
+                } else if has_items {
+                    // Other groups that received data from transforms also need
+                    // buffer recycling. Mark them as do_render since their data
+                    // was stored with complete=true.
+                    render_infos.push(GroupRenderInfo {
+                        group: g,
+                        do_render: true,
+                        has_items,
+                    });
+                }
+            }
+        }
 
-                    // Rayon's try_for_each_init may call init more than once
-                    // per thread (work-splitting), so we create contexts on
-                    // demand via the factory (which is Sync).
-                    all_items.par_iter().try_for_each_init(
-                        || factory.create(1).ok(),
-                        |ctx_opt, item| -> Result<()> {
-                            stop.check()?;
-                            let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
-                            // SAFETY: Each work item covers a non-overlapping region.
-                            let mut local_buffers = unsafe {
-                                shared_bufs.get_local_buffers(
-                                    sbi,
-                                    item.image_area,
-                                    input_size,
-                                    full_image_size,
-                                    frame_origin,
-                                )
-                            };
-                            render_group::render(
-                                ctx,
-                                &view,
-                                (item.gx, item.gy),
+        // Phase 3b: Parallel render — render all work items across threads.
+        if !all_items.is_empty() {
+            // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
+            // output buffers. We don't use buffer_splitter while shared_bufs is alive,
+            // and all sub-views access non-overlapping regions (guaranteed by the
+            // non-overlapping work items from prepare_group).
+            let shared_bufs =
+                unsafe { SharedOutputBuffers::from_buffer_splitter(buffer_splitter) };
+
+            {
+                let p = lmp_ref!();
+                let view = p.read_view();
+                let (frame_origin, full_image_size) = p.extend_origin_size();
+                let sbi = p.save_buffer_info();
+                let input_size = p.input_size();
+                let factory = p.context_factory();
+
+                // Rayon's try_for_each_init may call init more than once
+                // per thread (work-splitting), so we create contexts on
+                // demand via the factory (which is Sync).
+                all_items.par_iter().try_for_each_init(
+                    || factory.create(1).ok(),
+                    |ctx_opt, item| -> Result<()> {
+                        stop.check()?;
+                        let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                        // SAFETY: Each work item covers a non-overlapping region.
+                        let mut local_buffers = unsafe {
+                            shared_bufs.get_local_buffers(
+                                sbi,
                                 item.image_area,
-                                &mut local_buffers,
+                                input_size,
+                                full_image_size,
+                                frame_origin,
                             )
-                        },
-                    )?;
-                }
+                        };
+                        render_group::render(
+                            ctx,
+                            &view,
+                            (item.gx, item.gy),
+                            item.image_area,
+                            &mut local_buffers,
+                        )
+                    },
+                )?;
             }
+        }
 
-            // Phase 3c: Sequential — recycle buffers and update flush state.
-            for ri in &render_infos {
-                if ri.has_items {
-                    lmp_mut!().recycle_group_buffers(ri.group);
-                }
-                if ri.do_render {
-                    self.groups_to_flush.remove(&ri.group);
-                } else {
-                    self.groups_to_flush.insert(ri.group);
-                }
+        // Phase 3c: Sequential — recycle buffers and update flush state.
+        for ri in &render_infos {
+            if ri.has_items {
+                lmp_mut!().recycle_group_buffers(ri.group);
+            }
+            if ri.do_render {
+                self.groups_to_flush.remove(&ri.group);
+            } else {
+                self.groups_to_flush.insert(ri.group);
             }
         }
         Ok(())
