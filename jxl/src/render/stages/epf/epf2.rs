@@ -75,21 +75,21 @@ fn epf2_process_row_chunk(
 
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
         let sigma = get_sigma(d, x + xpos, row_sigma);
-        let sad_mul = D::F32Vec::load(d, &sad_mul_storage[x % 8..]);
+        let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
-            D::F32Vec::load(d, &input_x[1][1 + x..]).store(&mut output_x[0][x..]);
-            D::F32Vec::load(d, &input_y[1][1 + x..]).store(&mut output_y[0][x..]);
-            D::F32Vec::load(d, &input_b[1][1 + x..]).store(&mut output_b[0][x..]);
+            D::F32Vec::load_from(d, input_x[1], 1 + x).store_at(&mut output_x[0], x);
+            D::F32Vec::load_from(d, input_y[1], 1 + x).store_at(&mut output_y[0], x);
+            D::F32Vec::load_from(d, input_b[1], 1 + x).store_at(&mut output_b[0], x);
             continue;
         }
 
         let inv_sigma = sigma * sad_mul;
 
-        let x_cc = D::F32Vec::load(d, &input_x[1][1 + x..]);
-        let y_cc = D::F32Vec::load(d, &input_y[1][1 + x..]);
-        let b_cc = D::F32Vec::load(d, &input_b[1][1 + x..]);
+        let x_cc = D::F32Vec::load_from(d, input_x[1], 1 + x);
+        let y_cc = D::F32Vec::load_from(d, input_y[1], 1 + x);
+        let b_cc = D::F32Vec::load_from(d, input_b[1], 1 + x);
 
         let mut w_acc = D::F32Vec::splat(d, 1.0);
         let mut x_acc = x_cc;
@@ -98,9 +98,9 @@ fn epf2_process_row_chunk(
 
         for (y_off, x_off) in [(0, 1), (1, 0), (1, 2), (2, 1)] {
             let (cx, cy, cb) = (
-                D::F32Vec::load(d, &input_x[y_off as usize][x_off + x..]),
-                D::F32Vec::load(d, &input_y[y_off as usize][x_off + x..]),
-                D::F32Vec::load(d, &input_b[y_off as usize][x_off + x..]),
+                D::F32Vec::load_from(d, input_x[y_off as usize], x_off + x),
+                D::F32Vec::load_from(d, input_y[y_off as usize], x_off + x),
+                D::F32Vec::load_from(d, input_b[y_off as usize], x_off + x),
             );
             let sad = (cx - x_cc).abs().mul_add(
                 D::F32Vec::splat(d, stage.channel_scale[0]),
@@ -123,12 +123,12 @@ fn epf2_process_row_chunk(
         x_acc *= inv_w;
         y_acc *= inv_w;
         b_acc *= inv_w;
-        x_acc = sigma_mask.if_then_else_f32(D::F32Vec::load(d, &input_x[1][1+x..]), x_acc);
-        y_acc = sigma_mask.if_then_else_f32(D::F32Vec::load(d, &input_y[1][1+x..]), y_acc);
-        b_acc = sigma_mask.if_then_else_f32(D::F32Vec::load(d, &input_b[1][1+x..]), b_acc);
-        x_acc.store(&mut output_x[0][x..]);
-        y_acc.store(&mut output_y[0][x..]);
-        b_acc.store(&mut output_b[0][x..]);
+        x_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_x[1], 1 + x), x_acc);
+        y_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_y[1], 1 + x), y_acc);
+        b_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_b[1], 1 + x), b_acc);
+        x_acc.store_at(&mut output_x[0], x);
+        y_acc.store_at(&mut output_y[0], x);
+        b_acc.store_at(&mut output_b[0], x);
     }
 });
 

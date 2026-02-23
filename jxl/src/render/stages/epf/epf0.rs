@@ -74,12 +74,12 @@ simd_function!(
 
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
         let sigma = get_sigma(d, x + xpos, row_sigma);
-        let sad_mul = D::F32Vec::load(d, &sad_mul_storage[x % 8..]);
+        let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
             for (input_c, output_c) in input_rows.iter().zip(output_rows.iter_mut()) {
-                D::F32Vec::load(d, &input_c[3][3 + x..]).store(&mut output_c[0][x..]);
+                D::F32Vec::load_from(d, input_c[3], 3 + x).store_at(&mut output_c[0], x);
             }
             continue;
         }
@@ -89,31 +89,31 @@ simd_function!(
         for (input_c, scale) in input_rows.iter().zip(stage.channel_scale) {
             let scale = D::F32Vec::splat(d, scale);
 
-            let p30 = D::F32Vec::load(d, &input_c[0][3 + x..]);
-            let p21 = D::F32Vec::load(d, &input_c[1][2 + x..]);
-            let p31 = D::F32Vec::load(d, &input_c[1][3 + x..]);
-            let p41 = D::F32Vec::load(d, &input_c[1][4 + x..]);
-            let p12 = D::F32Vec::load(d, &input_c[2][1 + x..]);
-            let p22 = D::F32Vec::load(d, &input_c[2][2 + x..]);
-            let p32 = D::F32Vec::load(d, &input_c[2][3 + x..]);
-            let p42 = D::F32Vec::load(d, &input_c[2][4 + x..]);
-            let p52 = D::F32Vec::load(d, &input_c[2][5 + x..]);
-            let p03 = D::F32Vec::load(d, &input_c[3][x..]);
-            let p13 = D::F32Vec::load(d, &input_c[3][1 + x..]);
-            let p23 = D::F32Vec::load(d, &input_c[3][2 + x..]);
-            let p33 = D::F32Vec::load(d, &input_c[3][3 + x..]);
-            let p43 = D::F32Vec::load(d, &input_c[3][4 + x..]);
-            let p53 = D::F32Vec::load(d, &input_c[3][5 + x..]);
-            let p63 = D::F32Vec::load(d, &input_c[3][6 + x..]);
-            let p14 = D::F32Vec::load(d, &input_c[4][1 + x..]);
-            let p24 = D::F32Vec::load(d, &input_c[4][2 + x..]);
-            let p34 = D::F32Vec::load(d, &input_c[4][3 + x..]);
-            let p44 = D::F32Vec::load(d, &input_c[4][4 + x..]);
-            let p54 = D::F32Vec::load(d, &input_c[4][5 + x..]);
-            let p25 = D::F32Vec::load(d, &input_c[5][2 + x..]);
-            let p35 = D::F32Vec::load(d, &input_c[5][3 + x..]);
-            let p45 = D::F32Vec::load(d, &input_c[5][4 + x..]);
-            let p36 = D::F32Vec::load(d, &input_c[6][3 + x..]);
+            let p30 = D::F32Vec::load_from(d, input_c[0], 3 + x);
+            let p21 = D::F32Vec::load_from(d, input_c[1], 2 + x);
+            let p31 = D::F32Vec::load_from(d, input_c[1], 3 + x);
+            let p41 = D::F32Vec::load_from(d, input_c[1], 4 + x);
+            let p12 = D::F32Vec::load_from(d, input_c[2], 1 + x);
+            let p22 = D::F32Vec::load_from(d, input_c[2], 2 + x);
+            let p32 = D::F32Vec::load_from(d, input_c[2], 3 + x);
+            let p42 = D::F32Vec::load_from(d, input_c[2], 4 + x);
+            let p52 = D::F32Vec::load_from(d, input_c[2], 5 + x);
+            let p03 = D::F32Vec::load_from(d, input_c[3], x);
+            let p13 = D::F32Vec::load_from(d, input_c[3], 1 + x);
+            let p23 = D::F32Vec::load_from(d, input_c[3], 2 + x);
+            let p33 = D::F32Vec::load_from(d, input_c[3], 3 + x);
+            let p43 = D::F32Vec::load_from(d, input_c[3], 4 + x);
+            let p53 = D::F32Vec::load_from(d, input_c[3], 5 + x);
+            let p63 = D::F32Vec::load_from(d, input_c[3], 6 + x);
+            let p14 = D::F32Vec::load_from(d, input_c[4], 1 + x);
+            let p24 = D::F32Vec::load_from(d, input_c[4], 2 + x);
+            let p34 = D::F32Vec::load_from(d, input_c[4], 3 + x);
+            let p44 = D::F32Vec::load_from(d, input_c[4], 4 + x);
+            let p54 = D::F32Vec::load_from(d, input_c[4], 5 + x);
+            let p25 = D::F32Vec::load_from(d, input_c[5], 2 + x);
+            let p35 = D::F32Vec::load_from(d, input_c[5], 3 + x);
+            let p45 = D::F32Vec::load_from(d, input_c[5], 4 + x);
+            let p36 = D::F32Vec::load_from(d, input_c[6], 3 + x);
             let d32_30 = (p32 - p30).abs();
             let d32_21 = (p32 - p21).abs();
             let d32_31 = (p32 - p31).abs();
@@ -188,7 +188,7 @@ simd_function!(
         }
         let inv_w = D::F32Vec::splat(d, 1.0) / w;
         for (input_c, output_c) in input_rows.iter().zip(output_rows.iter_mut()) {
-            let mut out = D::F32Vec::load(d, &input_c[3][3 + x..]);
+            let mut out = D::F32Vec::load_from(d, input_c[3], 3 + x);
             for (row_idx, col_idx, sad_idx) in [
                 (5, 3+x, 11),
                 (4, 4+x, 10),
@@ -203,12 +203,12 @@ simd_function!(
                 (2, 2+x, 1),
                 (1, 3+x, 0),
             ] {
-                out = D::F32Vec::load(d, &input_c[row_idx][col_idx..]).mul_add(sads[sad_idx], out);
+                out = D::F32Vec::load_from(d, input_c[row_idx], col_idx).mul_add(sads[sad_idx], out);
             }
             out *= inv_w;
-            let p33 = D::F32Vec::load(d, &input_c[3][3 + x..]);
+            let p33 = D::F32Vec::load_from(d, input_c[3], 3 + x);
             let out = sigma_mask.if_then_else_f32(p33, out);
-            out.store(&mut output_c[0][x..]);
+            out.store_at(&mut output_c[0], x);
         }
     }
 });

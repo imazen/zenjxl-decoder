@@ -114,10 +114,43 @@ pub unsafe trait F32SimdVec:
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self;
 
+    /// Loads Self::LEN f32 values starting at `mem[offset..]`.
+    /// Equivalent to `Self::load(d, &mem[offset..])` but avoids the subslice bounds check.
+    /// Callers must ensure `offset + Self::LEN <= mem.len()` (checked in debug mode).
+    #[inline(always)]
+    fn load_from(d: Self::Descriptor, mem: &[f32], offset: usize) -> Self {
+        debug_assert!(
+            offset + Self::LEN <= mem.len(),
+            "load_from: offset {} + LEN {} > len {}",
+            offset,
+            Self::LEN,
+            mem.len()
+        );
+        // SAFETY: debug_assert above verifies bounds. Callers in EPF/render stages
+        // assert row lengths before the hot loop, making this provably in-bounds.
+        Self::load(d, unsafe { mem.get_unchecked(offset..) })
+    }
+
     fn load_array(d: Self::Descriptor, mem: &Self::UnderlyingArray) -> Self;
 
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn store(&self, mem: &mut [f32]);
+
+    /// Stores Self::LEN f32 values starting at `mem[offset..]`.
+    /// Equivalent to `self.store(&mut mem[offset..])` but avoids the subslice bounds check.
+    /// Callers must ensure `offset + Self::LEN <= mem.len()` (checked in debug mode).
+    #[inline(always)]
+    fn store_at(&self, mem: &mut [f32], offset: usize) {
+        debug_assert!(
+            offset + Self::LEN <= mem.len(),
+            "store_at: offset {} + LEN {} > len {}",
+            offset,
+            Self::LEN,
+            mem.len()
+        );
+        // SAFETY: debug_assert above verifies bounds.
+        self.store(unsafe { mem.get_unchecked_mut(offset..) });
+    }
 
     fn store_array(&self, mem: &mut Self::UnderlyingArray);
 

@@ -108,13 +108,13 @@ fn epf1_process_row_chunk(
 
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
         let sigma = get_sigma(d, x + xpos, row_sigma);
-        let sad_mul = D::F32Vec::load(d, &sad_mul_storage[x % 8..]);
+        let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
             for c in 0..3 {
-                D::F32Vec::load(d, &channels[c][2][2 + x..])
-                    .store(&mut out_rows[c * out_rpc][x..]);
+                D::F32Vec::load_from(d, channels[c][2], 2 + x)
+                    .store_at(&mut out_rows[c * out_rpc], x);
             }
             continue;
         }
@@ -124,19 +124,19 @@ fn epf1_process_row_chunk(
         for c in 0..3 {
             let ch = channels[c];
             let scale = scale_vec[c];
-            let p20 = D::F32Vec::load(d, &ch[0][2 + x..]);
-            let p11 = D::F32Vec::load(d, &ch[1][1 + x..]);
-            let p21 = D::F32Vec::load(d, &ch[1][2 + x..]);
-            let p31 = D::F32Vec::load(d, &ch[1][3 + x..]);
-            let p02 = D::F32Vec::load(d, &ch[2][x..]);
-            let p12 = D::F32Vec::load(d, &ch[2][1 + x..]);
-            let p22 = D::F32Vec::load(d, &ch[2][2 + x..]);
-            let p32 = D::F32Vec::load(d, &ch[2][3 + x..]);
-            let p42 = D::F32Vec::load(d, &ch[2][4 + x..]);
-            let p13 = D::F32Vec::load(d, &ch[3][1 + x..]);
-            let p23 = D::F32Vec::load(d, &ch[3][2 + x..]);
-            let p33 = D::F32Vec::load(d, &ch[3][3 + x..]);
-            let p24 = D::F32Vec::load(d, &ch[4][2 + x..]);
+            let p20 = D::F32Vec::load_from(d, ch[0], 2 + x);
+            let p11 = D::F32Vec::load_from(d, ch[1], 1 + x);
+            let p21 = D::F32Vec::load_from(d, ch[1], 2 + x);
+            let p31 = D::F32Vec::load_from(d, ch[1], 3 + x);
+            let p02 = D::F32Vec::load_from(d, ch[2], x);
+            let p12 = D::F32Vec::load_from(d, ch[2], 1 + x);
+            let p22 = D::F32Vec::load_from(d, ch[2], 2 + x);
+            let p32 = D::F32Vec::load_from(d, ch[2], 3 + x);
+            let p42 = D::F32Vec::load_from(d, ch[2], 4 + x);
+            let p13 = D::F32Vec::load_from(d, ch[3], 1 + x);
+            let p23 = D::F32Vec::load_from(d, ch[3], 2 + x);
+            let p33 = D::F32Vec::load_from(d, ch[3], 3 + x);
+            let p24 = D::F32Vec::load_from(d, ch[4], 2 + x);
             let d20_21 = (p20 - p21).abs();
             let d11_21 = (p11 - p21).abs();
             let d22_21 = (p22 - p21).abs();
@@ -171,15 +171,15 @@ fn epf1_process_row_chunk(
         let inv_w = D::F32Vec::splat(d, 1.0) / w;
         for c in 0..3 {
             let ch = channels[c];
-            let mut out = D::F32Vec::load(d, &ch[2][2 + x..]);
-            out = D::F32Vec::load(d, &ch[3][2 + x..]).mul_add(sads[3], out);
-            out = D::F32Vec::load(d, &ch[2][3 + x..]).mul_add(sads[2], out);
-            out = D::F32Vec::load(d, &ch[2][1 + x..]).mul_add(sads[1], out);
-            out = D::F32Vec::load(d, &ch[1][2 + x..]).mul_add(sads[0], out);
+            let mut out = D::F32Vec::load_from(d, ch[2], 2 + x);
+            out = D::F32Vec::load_from(d, ch[3], 2 + x).mul_add(sads[3], out);
+            out = D::F32Vec::load_from(d, ch[2], 3 + x).mul_add(sads[2], out);
+            out = D::F32Vec::load_from(d, ch[2], 1 + x).mul_add(sads[1], out);
+            out = D::F32Vec::load_from(d, ch[1], 2 + x).mul_add(sads[0], out);
             out *= inv_w;
-            let p22 = D::F32Vec::load(d, &ch[2][2 + x..]);
+            let p22 = D::F32Vec::load_from(d, ch[2], 2 + x);
             let out = sigma_mask.if_then_else_f32(p22, out);
-            out.store(&mut out_rows[c * out_rpc][x..]);
+            out.store_at(&mut out_rows[c * out_rpc], x);
         }
     }
 });
