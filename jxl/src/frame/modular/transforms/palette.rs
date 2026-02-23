@@ -174,7 +174,7 @@ pub fn do_palette_step_general(
     num_deltas: usize,
     predictor: Predictor,
     wp_header: &WeightedHeader,
-) {
+) -> Result<()> {
     let (w, h) = buf_in.data.size();
     let palette = &buf_pal.data;
     let bit_depth = buf_in.bit_depth.bits_per_sample().min(24) as usize;
@@ -203,7 +203,7 @@ pub fn do_palette_step_general(
     } else if predictor == Predictor::Weighted {
         let w = buf_in.data.size().0;
         for (chan_index, out) in buf_out.iter_mut().enumerate() {
-            let mut wp_state = WeightedPredictorState::new(wp_header, w);
+            let mut wp_state = WeightedPredictorState::new(wp_header, w)?;
             for y in 0..h {
                 let idx = buf_in.data.row(y);
                 for (x, &index) in idx.iter().enumerate() {
@@ -252,6 +252,7 @@ pub fn do_palette_step_general(
             }
         }
     }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -373,7 +374,7 @@ pub fn do_palette_step_group_row(
 
     if predictor == Predictor::Weighted {
         for c in 0..num_c {
-            let mut wp_state = WeightedPredictorState::new(wp_header, total_w);
+            let mut wp_state = WeightedPredictorState::new(wp_header, total_w)?;
             let out_row_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize;
             if grid_y > 0 {
                 let prev_row_idx = out_row_idx - grid_y * grid_xsize;

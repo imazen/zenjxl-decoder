@@ -8,7 +8,7 @@ use std::fmt::Display;
 
 use crate::error::Result;
 use crate::image::{DataTypeTag, ImageDataType};
-use crate::util::ShiftRightCeil;
+use crate::util::{MemoryTracker, ShiftRightCeil};
 
 use super::save::SaveStage;
 use super::stages::ExtendToImageDimensionsStage;
@@ -105,6 +105,7 @@ pub struct RenderPipelineShared<Buffer> {
     pub chunk_size: usize,
     pub stages: Vec<Stage<Buffer>>,
     pub extend_stage_index: Option<usize>,
+    pub memory_tracker: MemoryTracker,
 }
 
 impl<Buffer> RenderPipelineShared<Buffer> {

@@ -18,7 +18,7 @@ use crate::{
         toc::Toc,
     },
     image::Image,
-    util::{MemoryTracker, tracing_wrappers::*},
+    util::{MemoryTracker, TryVecExt, tracing_wrappers::*},
 };
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;
@@ -478,7 +478,7 @@ impl Frame {
             let wb = comp.width_in_blocks as usize;
             let hb = comp.height_in_blocks as usize;
             let num_blocks = wb * hb;
-            comp.coeffs = vec![0i16; num_blocks * 64];
+            comp.coeffs = Vec::try_from_elem(0i16, num_blocks * 64)?;
 
             // HShift/VShift for mapping component blocks to frame-level block grid
             let hshift_c = maxhs - self.header.raw_hshift(jxl_c);

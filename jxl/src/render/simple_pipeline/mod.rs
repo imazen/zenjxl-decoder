@@ -8,7 +8,7 @@ use crate::{
     error::Result,
     image::{Image, ImageDataType},
     render::{buffer_splitter::BufferSplitter, internal::ChannelInfo},
-    util::{ShiftRightCeil, tracing_wrappers::*},
+    util::{MemoryTracker, ShiftRightCeil, tracing_wrappers::*},
 };
 
 use super::{
@@ -26,6 +26,7 @@ mod save;
 pub struct SimpleRenderPipeline {
     shared: RenderPipelineShared<Image<f64>>,
     input_buffers: Vec<Image<f64>>,
+    memory_tracker: MemoryTracker,
 }
 
 impl SimpleRenderPipeline {
@@ -58,7 +59,8 @@ impl SimpleRenderPipeline {
                         let xsize = current_size.0.shrc(info.downsample.0);
                         let ysize = current_size.1.shrc(info.downsample.1);
                         debug!("reallocating channel {c} to new size {xsize}x{ysize}");
-                        output_buffers[c] = Image::new((xsize, ysize))?;
+                        output_buffers[c] =
+                            Image::new_tracked((xsize, ysize), &self.memory_tracker)?;
                     }
                 }
             }
@@ -132,25 +134,28 @@ impl RenderPipeline for SimpleRenderPipeline {
     type Buffer = Image<f64>;
 
     fn new_from_shared(shared: RenderPipelineShared<Self::Buffer>) -> Result<Self> {
+        let tracker = &shared.memory_tracker;
         let input_buffers = shared.channel_info[0]
             .iter()
             .map(|x| {
                 let xsize = shared.input_size.0.shrc(x.downsample.0);
                 let ysize = shared.input_size.1.shrc(x.downsample.1);
-                Image::new((xsize, ysize))
+                Image::new_tracked((xsize, ysize), tracker)
             })
             .collect::<Result<Vec<_>>>()?;
+        let memory_tracker = shared.memory_tracker.clone();
 
         Ok(Self {
             shared,
             input_buffers,
+            memory_tracker,
         })
     }
 
     #[instrument(skip_all, err)]
     fn get_buffer<T: ImageDataType>(&mut self, channel: usize) -> Result<Image<T>> {
         let sz = self.shared.group_size_for_channel(channel, T::DATA_TYPE_ID);
-        Image::<T>::new(sz)
+        Image::<T>::new_tracked(sz, &self.memory_tracker)
     }
 
     fn set_buffer_for_group<T: ImageDataType>(

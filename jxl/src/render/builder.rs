@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::headers::Orientation;
 use crate::render::internal::ChannelInfo;
 use crate::render::save::SaveStage;
-use crate::util::{ShiftRightCeil, tracing_wrappers::*};
+use crate::util::{MemoryTracker, ShiftRightCeil, tracing_wrappers::*};
 
 use super::internal::{RenderPipelineShared, Stage};
 use super::stages::ExtendToImageDimensionsStage;
@@ -59,8 +59,14 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                 ],
                 chunk_size,
                 extend_stage_index: None,
+                memory_tracker: MemoryTracker::default(),
             },
         }
+    }
+
+    pub fn with_memory_tracker(mut self, tracker: MemoryTracker) -> Self {
+        self.shared.memory_tracker = tracker;
+        self
     }
 
     pub(super) fn add_stage_internal(mut self, stage: Stage<Pipeline::Buffer>) -> Result<Self> {

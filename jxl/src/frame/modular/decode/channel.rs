@@ -36,7 +36,7 @@ fn decode_modular_channel_small(
     br: &mut BitReader,
 ) -> Result<()> {
     let size = buffers[chan].data.size();
-    let mut wp_state = WeightedPredictorState::new(&header.wp_header, size.0);
+    let mut wp_state = WeightedPredictorState::new(&header.wp_header, size.0)?;
     let mut num_ref_props = tree
         .max_property_count()
         .saturating_sub(NUM_NONREF_PROPERTIES);

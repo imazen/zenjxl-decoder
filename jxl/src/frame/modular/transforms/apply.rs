@@ -926,7 +926,7 @@ impl TransformStep {
                         *num_deltas,
                         *predictor,
                         wp_header,
-                    );
+                    )?;
                 }
                 for (pos, buf) in buf_out.iter().zip(out_bufs.into_iter()) {
                     buffers[*pos] = buf;

@@ -5,6 +5,7 @@
 
 use crate::bit_reader::BitReader;
 use crate::error::Error;
+use crate::util::TryVecExt;
 use std::collections::HashSet;
 
 use crate::entropy_coding::decode::*;
@@ -49,7 +50,7 @@ pub fn decode_context_map(num_contexts: usize, br: &mut BitReader) -> Result<Vec
                 .map(|_| Ok(br.read(bits_per_entry)? as u8))
                 .collect()
         } else {
-            Ok(vec![0u8; num_contexts])
+            Ok(Vec::try_from_elem(0u8, num_contexts)?)
         }
     } else {
         let use_mtf = br.read(1)? != 0;

@@ -769,7 +769,8 @@ impl Frame {
             frame_header.size_upsampled(),
             frame_header.upsampling.ilog2() as usize,
             frame_header.log_group_dim(),
-        );
+        )
+        .with_memory_tracker(decoder_state.memory_tracker.clone());
 
         if frame_header.encoding == Encoding::Modular {
             if decoder_state.file_header.image_metadata.xyb_encoded {

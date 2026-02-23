@@ -105,7 +105,7 @@ impl GeneralTree {
         stream: usize,
         xsize: usize,
     ) -> Result<Self> {
-        let wp_state = WeightedPredictorState::new(&header.wp_header, xsize);
+        let wp_state = WeightedPredictorState::new(&header.wp_header, xsize)?;
         Ok(Self {
             no_wp_tree: NoWpTree::new(nodes, max_property_count, channel, stream, xsize)?,
             wp_state,
@@ -219,7 +219,7 @@ impl WpOnlyLookupConfig420 {
         if !histograms.can_use_config_420_fast_path() {
             return None;
         }
-        let wp_state = WeightedPredictorState::new(&header.wp_header, xsize);
+        let wp_state = WeightedPredictorState::new(&header.wp_header, xsize).ok()?;
         let lut = make_lut(tree, histograms)?;
         Some(Self { lut, wp_state })
     }
