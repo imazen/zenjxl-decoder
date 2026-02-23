@@ -81,6 +81,11 @@ struct Opt {
     /// Force a partial render every `render_interval` bytes.
     #[clap(long)]
     render_interval: Option<usize>,
+
+    /// Number of threads (0 = single-threaded, default = use all cores).
+    /// Only effective when compiled with the `threads` feature.
+    #[clap(long)]
+    num_threads: Option<usize>,
 }
 
 fn save_icc(icc_bytes: &[u8], icc_filename: Option<&PathBuf>) -> Result<()> {
@@ -111,12 +116,16 @@ fn main() -> Result<()> {
         .transpose()?;
 
     let high_precision = opt.high_precision;
+    let num_threads = opt.num_threads;
     let options = |skip_preview: bool| {
         let mut options = JxlDecoderOptions::default();
         options.render_spot_colors = !matches!(output_format, Some(OutputFormat::Npy));
         options.skip_preview = skip_preview;
         options.high_precision = high_precision;
         options.cms = Some(Box::new(Lcms2Cms));
+        if let Some(0) = num_threads {
+            options.parallel = false;
+        }
         options
     };
 

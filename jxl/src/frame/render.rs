@@ -1043,7 +1043,11 @@ impl Frame {
             let in_channels = cms_input.channels();
             // Create enough transformers for parallel rendering threads.
             #[cfg(feature = "threads")]
-            let num_transforms = rayon::current_num_threads() + 2;
+            let num_transforms = if decoder_state.parallel {
+                rayon::current_num_threads() + 2
+            } else {
+                1
+            };
             #[cfg(not(feature = "threads"))]
             let num_transforms = 1;
             let (out_channels, transformers) = cms.initialize_transforms(
