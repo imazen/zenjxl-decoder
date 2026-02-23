@@ -233,13 +233,10 @@ impl Frame {
         }
 
         #[cfg(all(feature = "threads", not(test)))]
-        let use_parallel =
-            self.decoder_state.parallel && groups.len() > 1 && self.hf_coefficients.is_none();
+        let use_parallel = self.decoder_state.parallel && groups.len() > 1;
         #[cfg(all(feature = "threads", test))]
-        let use_parallel = self.decoder_state.parallel
-            && groups.len() > 1
-            && self.hf_coefficients.is_none()
-            && !self.use_simple_pipeline;
+        let use_parallel =
+            self.decoder_state.parallel && groups.len() > 1 && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
@@ -287,7 +284,6 @@ impl Frame {
     ///    - 3c. Sequential: recycle buffers + update flush state
     ///
     /// Requirements:
-    /// - `hf_coefficients.is_none()` (single-pass, so HfGlobalState is read-only)
     /// - More than 1 group
     #[cfg(feature = "threads")]
     #[allow(unsafe_code)]
@@ -302,6 +298,48 @@ impl Frame {
         use crate::image::Image;
         use crate::render::buffer_splitter::SharedOutputBuffers;
         use crate::render::low_memory_pipeline::render_group;
+
+        /// Provides parallel access to disjoint rows of an `Image<i32>`.
+        ///
+        /// Each row corresponds to one group's HF coefficient storage.
+        /// Safety: the caller must ensure no two concurrent calls use the same `row`.
+        struct SplitRowAccess {
+            ptr: *mut i32,
+            row_stride: usize, // in i32 elements
+            row_len: usize,    // in i32 elements
+            num_rows: usize,
+        }
+
+        impl SplitRowAccess {
+            fn from_image(img: &mut Image<i32>) -> Self {
+                let (ptr, row_stride, row_len, num_rows) = img.row_info_mut();
+                SplitRowAccess {
+                    ptr,
+                    row_stride,
+                    row_len,
+                    num_rows,
+                }
+            }
+
+            /// # Safety
+            /// Caller must ensure no two concurrent calls use the same `row`.
+            #[allow(clippy::mut_from_ref)]
+            unsafe fn row_mut(&self, row: usize) -> &mut [i32] {
+                assert!(row < self.num_rows);
+                let offset = row * self.row_stride;
+                // SAFETY: `ptr` points to contiguous image storage. Each row at
+                // `offset = row * row_stride` is non-overlapping. The caller
+                // ensures no two concurrent calls use the same `row`.
+                unsafe { std::slice::from_raw_parts_mut(self.ptr.add(offset), self.row_len) }
+            }
+        }
+
+        // SAFETY: Each parallel worker accesses a distinct row (group_id).
+        // No two workers access the same row concurrently.
+        unsafe impl Send for SplitRowAccess {}
+        // SAFETY: Concurrent reads/writes are safe because each parallel worker
+        // accesses a distinct row (group_id) — no two workers share a row.
+        unsafe impl Sync for SplitRowAccess {}
         use crate::util::{SmallVec, Xorshift128Plus};
         use rayon::prelude::*;
 
@@ -400,6 +438,17 @@ impl Frame {
         // calls. The streaming API calls this function once per group (batch_size=1),
         // so without persistence we'd allocate+zero a fresh 1.5MB buffer per group.
         {
+            // Create SplitRowAccess for multi-pass HF coefficient accumulation.
+            // Each group writes to its own row — no cross-group writes.
+            // The SplitRowAccess holds raw pointers, so doesn't borrow self.
+            let hf_split = self.hf_coefficients.as_mut().map(|(a, b, c)| {
+                [
+                    SplitRowAccess::from_image(a),
+                    SplitRowAccess::from_image(b),
+                    SplitRowAccess::from_image(c),
+                ]
+            });
+
             let lf_global = self.lf_global.as_ref().unwrap();
             let header = &self.header;
             let hf_global = self.hf_global.as_ref();
@@ -432,6 +481,15 @@ impl Frame {
                     };
 
                     if !(gw.pixels.is_none() && gw.do_render) {
+                        // SAFETY: Each parallel task uses a distinct gw.group, so
+                        // row_mut(gw.group) accesses non-overlapping memory.
+                        let hf_coeffs = hf_split.as_ref().map(|splits| unsafe {
+                            [
+                                splits[0].row_mut(gw.group),
+                                splits[1].row_mut(gw.group),
+                                splits[2].row_mut(gw.group),
+                            ]
+                        });
                         decode_vardct_group(
                             gw.group,
                             &mut gw.passes,
@@ -442,7 +500,7 @@ impl Frame {
                             lf_image,
                             quant_lf,
                             quant_biases,
-                            None,
+                            hf_coeffs,
                             &mut gw.pixels,
                             &mut buffers,
                             tracker,

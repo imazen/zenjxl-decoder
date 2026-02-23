@@ -186,6 +186,22 @@ impl<T: ImageDataType> Image<T> {
         let rows = self.raw.data.distinct_rows_mut(rows);
         I::cast_rows(rows)
     }
+
+    /// Returns the raw pointer, stride (in elements), row length (in elements),
+    /// and number of rows for this image's data.
+    ///
+    /// This is intended for building split-access wrappers that provide
+    /// `&mut [T]` for individual rows without borrowing the entire image.
+    /// The caller must ensure aliasing rules are upheld.
+    #[cfg(feature = "threads")]
+    #[allow(unsafe_code)]
+    pub fn row_info_mut(&mut self) -> (*mut T, usize, usize, usize) {
+        let (bytes_per_row, num_rows, bytes_between_rows) = self.raw.data.dimensions();
+        let row_len = bytes_per_row / std::mem::size_of::<T>();
+        let row_stride = bytes_between_rows / std::mem::size_of::<T>();
+        let ptr = self.raw.data.data_slice_mut().as_mut_ptr() as *mut T;
+        (ptr, row_stride, row_len, num_rows)
+    }
 }
 
 #[derive(Clone, Copy)]
