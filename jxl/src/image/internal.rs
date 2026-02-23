@@ -171,18 +171,13 @@ impl RawImageBuffer {
 
     /// Extracts a sub-rectangle from this buffer. Rectangle coordinates are in bytes.
     /// Safety note: the returned RawImageBuffer retains the same kind of access (read or write) as `self`.
+    #[inline]
     pub(super) fn rect(&self, rect: Rect) -> Self {
         if rect.size.0 == 0 || rect.size.1 == 0 {
             return Self::empty();
         }
-        // More helpful message in debug builds (not needed for safety).
-        if cfg!(debug_assertions) {
-            rect.check_within(self.byte_size());
-        }
-        assert!(rect.origin.1 < self.num_rows);
-        assert!(rect.origin.1.checked_add(rect.size.1).unwrap() <= self.num_rows);
-        assert!(rect.origin.0 < self.bytes_per_row);
-        assert!(rect.origin.0.checked_add(rect.size.0).unwrap() <= self.bytes_per_row);
+        assert!(rect.origin.1 + rect.size.1 <= self.num_rows);
+        assert!(rect.origin.0 + rect.size.0 <= self.bytes_per_row);
         // SAFETY: the safety invariant of `self`, together with the above check, guarantees that
         // the calculation does not overflow and that the new pointer stays within the bounds of
         // the allocation.
