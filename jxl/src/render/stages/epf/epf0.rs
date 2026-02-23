@@ -79,7 +79,7 @@ simd_function!(
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
             for (input_c, output_c) in input_rows.iter().zip(output_rows.iter_mut()) {
-                D::F32Vec::load_from(d, input_c[3], 3 + x).store_at(&mut output_c[0], x);
+                D::F32Vec::load_from(d, input_c[3], 3 + x).store_at(output_c[0], x);
             }
             continue;
         }
@@ -208,7 +208,7 @@ simd_function!(
             out *= inv_w;
             let p33 = D::F32Vec::load_from(d, input_c[3], 3 + x);
             let out = sigma_mask.if_then_else_f32(p33, out);
-            out.store_at(&mut output_c[0], x);
+            out.store_at(output_c[0], x);
         }
     }
 });

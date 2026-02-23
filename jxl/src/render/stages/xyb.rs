@@ -194,9 +194,9 @@ simd_function!(
         let intensity_scale = D::F32Vec::splat(d, intensity_scale);
 
         for idx in (0..xsize).step_by(D::F32Vec::LEN) {
-            let x = D::F32Vec::load(d, &row_x[idx..]);
-            let y = D::F32Vec::load(d, &row_y[idx..]);
-            let b = D::F32Vec::load(d, &row_b[idx..]);
+            let x = D::F32Vec::load_from(d, row_x, idx);
+            let y = D::F32Vec::load_from(d, row_y, idx);
+            let b = D::F32Vec::load_from(d, row_b, idx);
 
             // Mix and apply bias
             let l = y + x - bias_cbrt[0];
@@ -218,9 +218,9 @@ simd_function!(
             let r = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
             let g = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
             let b = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
-            r.store(&mut row_x[idx..]);
-            g.store(&mut row_y[idx..]);
-            b.store(&mut row_b[idx..]);
+            r.store_at(row_x, idx);
+            g.store_at(row_y, idx);
+            b.store_at(row_b, idx);
         }
     }
 );

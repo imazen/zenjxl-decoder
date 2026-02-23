@@ -364,6 +364,7 @@ pub trait I32SimdVec:
             Self::LEN,
             mem.len()
         );
+        // SAFETY: debug_assert above verifies offset + Self::LEN <= mem.len()
         Self::load(d, unsafe { mem.get_unchecked(offset..) })
     }
 

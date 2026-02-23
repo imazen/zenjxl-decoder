@@ -479,7 +479,17 @@ impl HuffmanCodes {
 
     #[inline]
     pub fn read(&self, br: &mut BitReader, ctx: usize) -> u32 {
-        self.tables[ctx].read(br)
+        debug_assert!(
+            ctx < self.tables.len(),
+            "HuffmanCodes::read: ctx {} out of bounds (len = {})",
+            ctx,
+            self.tables.len()
+        );
+        // SAFETY: ctx is a cluster index from the context map, which is validated during
+        // Histograms::decode() to be < num_histograms = self.tables.len().
+        #[allow(unsafe_code)]
+        let table = unsafe { self.tables.get_unchecked(ctx) };
+        table.read(br)
     }
 
     pub fn single_symbol(&self, ctx: usize) -> Option<u32> {

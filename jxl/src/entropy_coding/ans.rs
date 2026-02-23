@@ -435,7 +435,17 @@ impl AnsReader {
 
     #[inline]
     pub fn read(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
-        codes.histograms[ctx].read(br, &mut self.0)
+        debug_assert!(
+            ctx < codes.histograms.len(),
+            "AnsReader::read: ctx {} out of bounds (len = {})",
+            ctx,
+            codes.histograms.len()
+        );
+        // SAFETY: ctx is a cluster index from the context map, which is validated during
+        // Histograms::decode() to be < num_histograms = codes.histograms.len().
+        #[allow(unsafe_code)]
+        let histogram = unsafe { codes.histograms.get_unchecked(ctx) };
+        histogram.read(br, &mut self.0)
     }
 
     pub fn check_final_state(self) -> Result<()> {

@@ -166,7 +166,7 @@ impl RleState {
             // on the LZ77 path), but we don't report an error.
             self.repeat_count = count.wrapping_add(self.min_length);
         } else {
-            let sym = histograms.uint_configs[cluster].read(token, br);
+            let sym = histograms.uint_config(cluster).read(token, br);
             self.last_sym = Some(sym);
             self.repeat_count = 1;
         }
@@ -243,7 +243,7 @@ impl SymbolReader {
             let dist_multiplier = image_width.unwrap_or(0) as u32;
 
             let lz_dist_cluster = *histograms.context_map.last().unwrap() as usize;
-            let lz_conf = &histograms.uint_configs[lz_dist_cluster];
+            let lz_conf = histograms.uint_config(lz_dist_cluster);
             let is_rle = histograms.codes.single_symbol(lz_dist_cluster) == Some(1)
                 && lz_conf.is_split_exponent_zero();
 
@@ -313,7 +313,7 @@ impl SymbolReader {
                     Codes::Huffman(hc) => hc.read(br, cluster),
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
                 };
-                histograms.uint_configs[cluster].read(token, br)
+                histograms.uint_config(cluster).read(token, br)
             }
 
             SymbolReaderState::Lz77(lz77_state) => {
@@ -326,7 +326,7 @@ impl SymbolReader {
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
                 };
                 let Some(lz77_token) = token.checked_sub(lz77_state.min_symbol) else {
-                    let sym = histograms.uint_configs[cluster].read(token, br);
+                    let sym = histograms.uint_config(cluster).read(token, br);
                     lz77_state.push_decoded_symbol(sym);
                     return sym;
                 };
@@ -354,7 +354,7 @@ impl SymbolReader {
                     Codes::Huffman(hc) => hc.read(br, lz_dist_cluster),
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, lz_dist_cluster),
                 };
-                let distance_sym = histograms.uint_configs[lz_dist_cluster].read(distance_sym, br);
+                let distance_sym = histograms.uint_config(lz_dist_cluster).read(distance_sym, br);
                 lz77_state.apply_copy(distance_sym, num_to_copy);
 
                 let sym = lz77_state.pull_symbol().unwrap();
@@ -581,8 +581,38 @@ impl Histograms {
         })
     }
 
+    #[inline(always)]
     pub fn map_context_to_cluster(&self, context: usize) -> usize {
-        self.context_map[context] as usize
+        debug_assert!(
+            context < self.context_map.len(),
+            "map_context_to_cluster: context {} out of bounds (len = {})",
+            context,
+            self.context_map.len()
+        );
+        // SAFETY: context is bounded by num_contexts, which equals context_map.len()
+        // (asserted during Histograms::decode). Callers use context values computed from
+        // block_context_map which are within the configured num_contexts range.
+        #[allow(unsafe_code)]
+        unsafe {
+            *self.context_map.get_unchecked(context) as usize
+        }
+    }
+
+    /// Returns the uint config for the given cluster index without bounds checking.
+    #[inline(always)]
+    fn uint_config(&self, cluster: usize) -> &HybridUint {
+        debug_assert!(
+            cluster < self.uint_configs.len(),
+            "uint_config: cluster {} out of bounds (len = {})",
+            cluster,
+            self.uint_configs.len()
+        );
+        // SAFETY: cluster comes from context_map values, which are validated during
+        // decode() to be < num_histograms = uint_configs.len().
+        #[allow(unsafe_code)]
+        unsafe {
+            self.uint_configs.get_unchecked(cluster)
+        }
     }
 
     pub fn num_histograms(&self) -> usize {

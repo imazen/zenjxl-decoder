@@ -114,7 +114,7 @@ fn epf1_process_row_chunk(
         if sigma_mask.all() {
             for c in 0..3 {
                 D::F32Vec::load_from(d, channels[c][2], 2 + x)
-                    .store_at(&mut out_rows[c * out_rpc], x);
+                    .store_at(out_rows[c * out_rpc], x);
             }
             continue;
         }
@@ -179,7 +179,7 @@ fn epf1_process_row_chunk(
             out *= inv_w;
             let p22 = D::F32Vec::load_from(d, ch[2], 2 + x);
             let out = sigma_mask.if_then_else_f32(p22, out);
-            out.store_at(&mut out_rows[c * out_rpc], x);
+            out.store_at(out_rows[c * out_rpc], x);
         }
     }
 });

@@ -79,9 +79,9 @@ fn epf2_process_row_chunk(
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
-            D::F32Vec::load_from(d, input_x[1], 1 + x).store_at(&mut output_x[0], x);
-            D::F32Vec::load_from(d, input_y[1], 1 + x).store_at(&mut output_y[0], x);
-            D::F32Vec::load_from(d, input_b[1], 1 + x).store_at(&mut output_b[0], x);
+            D::F32Vec::load_from(d, input_x[1], 1 + x).store_at(output_x[0], x);
+            D::F32Vec::load_from(d, input_y[1], 1 + x).store_at(output_y[0], x);
+            D::F32Vec::load_from(d, input_b[1], 1 + x).store_at(output_b[0], x);
             continue;
         }
 
@@ -126,9 +126,9 @@ fn epf2_process_row_chunk(
         x_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_x[1], 1 + x), x_acc);
         y_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_y[1], 1 + x), y_acc);
         b_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_b[1], 1 + x), b_acc);
-        x_acc.store_at(&mut output_x[0], x);
-        y_acc.store_at(&mut output_y[0], x);
-        b_acc.store_at(&mut output_b[0], x);
+        x_acc.store_at(output_x[0], x);
+        y_acc.store_at(output_y[0], x);
+        b_acc.store_at(output_b[0], x);
     }
 });
 
