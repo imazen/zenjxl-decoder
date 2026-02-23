@@ -3,7 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use std::{fmt::Debug, marker::PhantomData};
+use std::fmt::Debug;
 
 use crate::{
     error::Result,
@@ -13,9 +13,7 @@ use crate::{
 use super::{Rect, internal::RawImageBuffer};
 
 pub struct OwnedRawImage {
-    // Safety invariant: all the accessible bytes of `self.data` are initialized, and
-    // belongs to a single allocation that lives until `self` is dropped.
-    // The data referenced by self.data was allocated by RawImageBuffer::try_allocate.
+    // All the accessible bytes of `self.data` are initialized (Vec<u8> guarantees this).
     // `data.is_aligned(CACHE_LINE_BYTE_SIZE)` is true.
     pub(super) data: RawImageBuffer,
     offset: (usize, usize),
@@ -42,8 +40,6 @@ impl OwnedRawImage {
             padding.0 += CACHE_LINE_BYTE_SIZE - (padding.0 + byte_size.0) % CACHE_LINE_BYTE_SIZE;
         }
         Ok(Self {
-            // Safety note: the returned memory is initialized and part of a single allocation of
-            // the correct length.
             data: RawImageBuffer::try_allocate(
                 (byte_size.0 + padding.0, byte_size.1 + padding.1),
                 false,
@@ -56,19 +52,15 @@ impl OwnedRawImage {
     }
 
     pub fn get_rect_including_padding_mut(&mut self, rect: Rect) -> RawImageRectMut<'_> {
-        RawImageRectMut {
-            // Safety note: we are lending exclusive ownership to RawImageRectMut.
-            data: self.data.rect(rect),
-            _ph: PhantomData,
-        }
+        let (bpr, nr, bbr) = self.data.dimensions();
+        let storage = self.data.data_slice_mut();
+        sub_rect_mut(storage, bpr, nr, bbr, rect)
     }
 
-    pub fn get_rect_including_padding(&'_ self, rect: Rect) -> RawImageRect<'_> {
-        RawImageRect {
-            // Safety note: correctness ensured by the return value borrowing from `self`.
-            data: self.data.rect(rect),
-            _ph: PhantomData,
-        }
+    pub fn get_rect_including_padding(&self, rect: Rect) -> RawImageRect<'_> {
+        let (bpr, nr, bbr) = self.data.dimensions();
+        let storage = self.data.data_slice();
+        sub_rect(storage, bpr, nr, bbr, rect)
     }
 
     fn shift_rect(&self, rect: Rect) -> Rect {
@@ -86,7 +78,7 @@ impl OwnedRawImage {
         self.get_rect_including_padding_mut(self.shift_rect(rect))
     }
 
-    pub fn get_rect(&'_ self, rect: Rect) -> RawImageRect<'_> {
+    pub fn get_rect(&self, rect: Rect) -> RawImageRect<'_> {
         self.get_rect_including_padding(self.shift_rect(rect))
     }
 
@@ -94,23 +86,16 @@ impl OwnedRawImage {
     pub fn row_mut(&mut self, row: usize) -> &mut [u8] {
         let offset = self.offset;
         let end = offset.0 + self.byte_size().0;
-        // SAFETY: we don't write uninit data to `row`, and we have ownership of the accessible
-        // bytes of `self.data`.
-        let row = &mut unsafe { self.data.row_mut(row + offset.1) }[offset.0..end];
-        // SAFETY: MaybeUninit<u8> and u8 have the same size and layout, and our safety invariant
-        // guarantees the data is initialized.
-        unsafe { std::slice::from_raw_parts_mut(row.as_mut_ptr().cast::<u8>(), row.len()) }
+        let row = self.data.row_mut(row + offset.1);
+        &mut row[offset.0..end]
     }
 
     #[inline(always)]
     pub fn row(&self, row: usize) -> &[u8] {
         let offset = self.offset;
         let end = offset.0 + self.byte_size().0;
-        // SAFETY: we have shared access to the accessible bytes of `self.data`.
-        let row = &unsafe { self.data.row(row + offset.1) }[offset.0..end];
-        // SAFETY: MaybeUninit<u8> and u8 have the same size and layout, and our safety invariant
-        // guarantees the data is initialized.
-        unsafe { std::slice::from_raw_parts(row.as_ptr().cast::<u8>(), row.len()) }
+        let row = self.data.row(row + offset.1);
+        &row[offset.0..end]
     }
 
     pub fn byte_size(&self) -> (usize, usize) {
@@ -145,10 +130,7 @@ impl OwnedRawImage {
             .map(|t| MemoryGuard::new(t.clone(), self.tracked_bytes));
 
         let clone = Self {
-            // SAFETY: we own the data that self.data references, so it is all accessible.
-            // Moreover, it is initialized and try_clone creates a copy, so the resulting data is
-            // owned and initialized.
-            data: unsafe { self.data.try_clone()? },
+            data: self.data.try_clone()?,
             offset: self.offset,
             padding: self.padding,
             tracker: self.tracker.clone(),
@@ -169,82 +151,153 @@ impl Drop for OwnedRawImage {
         if let Some(tracker) = &self.tracker {
             tracker.release(self.tracked_bytes);
         }
-        // SAFETY: we own the data referenced by self.data, and it was allocated by
-        // RawImageBuffer::try_allocate.
-        unsafe {
-            self.data.deallocate();
-        }
+        // Vec<u8> drops automatically — no manual dealloc needed.
+        self.data.deallocate();
     }
 }
 
+/// Helper: create an immutable sub-view from a storage slice and its dimensions.
+fn sub_rect<'a>(
+    storage: &'a [u8],
+    bpr: usize,
+    nr: usize,
+    bbr: usize,
+    rect: Rect,
+) -> RawImageRect<'a> {
+    if rect.size.0 == 0 || rect.size.1 == 0 {
+        return RawImageRect { storage: &[], bytes_per_row: 0, num_rows: 0, bytes_between_rows: 0 };
+    }
+    assert!(rect.origin.1 + rect.size.1 <= nr, "rect y out of bounds: {} + {} > {}", rect.origin.1, rect.size.1, nr);
+    assert!(rect.origin.0 + rect.size.0 <= bpr, "rect x out of bounds: {} + {} > {}", rect.origin.0, rect.size.0, bpr);
+    let new_start = rect.origin.1 * bbr + rect.origin.0;
+    let data_span = (rect.size.1 - 1) * bbr + rect.size.0;
+    assert!(new_start + data_span <= storage.len());
+    RawImageRect {
+        storage: &storage[new_start..new_start + data_span],
+        bytes_per_row: rect.size.0,
+        num_rows: rect.size.1,
+        bytes_between_rows: bbr,
+    }
+}
+
+/// Helper: create a mutable sub-view from a storage slice and its dimensions.
+fn sub_rect_mut<'a>(
+    storage: &'a mut [u8],
+    bpr: usize,
+    nr: usize,
+    bbr: usize,
+    rect: Rect,
+) -> RawImageRectMut<'a> {
+    if rect.size.0 == 0 || rect.size.1 == 0 {
+        return RawImageRectMut { storage: &mut [], bytes_per_row: 0, num_rows: 0, bytes_between_rows: 0 };
+    }
+    assert!(rect.origin.1 + rect.size.1 <= nr, "rect y out of bounds: {} + {} > {}", rect.origin.1, rect.size.1, nr);
+    assert!(rect.origin.0 + rect.size.0 <= bpr, "rect x out of bounds: {} + {} > {}", rect.origin.0, rect.size.0, bpr);
+    let new_start = rect.origin.1 * bbr + rect.origin.0;
+    let data_span = (rect.size.1 - 1) * bbr + rect.size.0;
+    assert!(new_start + data_span <= storage.len());
+    RawImageRectMut {
+        storage: &mut storage[new_start..new_start + data_span],
+        bytes_per_row: rect.size.0,
+        num_rows: rect.size.1,
+        bytes_between_rows: bbr,
+    }
+}
+
+/// Immutable view into image data. Holds a borrowed slice + row layout info.
+/// `Copy` because it's just a `&[u8]` + dimensions.
 #[derive(Clone, Copy)]
 pub struct RawImageRect<'a> {
-    // Safety invariant: all the accessible bytes of `self.data` are initialized.
-    pub(super) data: RawImageBuffer,
-    _ph: PhantomData<&'a u8>,
+    pub(super) storage: &'a [u8],
+    pub(super) bytes_per_row: usize,
+    pub(super) num_rows: usize,
+    pub(super) bytes_between_rows: usize,
 }
 
 impl<'a> RawImageRect<'a> {
     #[inline(always)]
-    pub fn row(&self, row: usize) -> &[u8] {
-        // SAFETY: we have shared access to the accessible bytes of `self.data`.
-        let row = unsafe { self.data.row(row) };
-        // SAFETY: MaybeUninit<u8> and u8 have the same size and layout, and our safety invariant
-        // guarantees the data is initialized.
-        unsafe { std::slice::from_raw_parts(row.as_ptr().cast::<u8>(), row.len()) }
+    pub fn row(&self, row: usize) -> &'a [u8] {
+        assert!(row < self.num_rows);
+        let start = row * self.bytes_between_rows;
+        &self.storage[start..start + self.bytes_per_row]
     }
 
     pub fn rect(&self, rect: Rect) -> RawImageRect<'a> {
-        Self {
-            // Safety note: correctness ensured by the fact that the return value still borrows
-            // from the original data source.
-            data: self.data.rect(rect),
-            _ph: PhantomData,
-        }
+        sub_rect(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
     }
 
     pub fn byte_size(&self) -> (usize, usize) {
-        self.data.byte_size()
+        (self.bytes_per_row, self.num_rows)
+    }
+
+    pub(super) fn is_aligned(&self, align: usize) -> bool {
+        if self.num_rows == 0 {
+            return true;
+        }
+        self.bytes_per_row.is_multiple_of(align)
+            && self.bytes_between_rows.is_multiple_of(align)
+            && (self.storage.as_ptr() as usize).is_multiple_of(align)
     }
 }
 
+/// Mutable view into image data. Holds a borrowed mutable slice + row layout info.
 pub struct RawImageRectMut<'a> {
-    // Safety invariant: all the accessible bytes of `self.data` are initialized and we have
-    // exclusive access to them.
-    pub(super) data: RawImageBuffer,
-    _ph: PhantomData<&'a mut u8>,
+    pub(super) storage: &'a mut [u8],
+    pub(super) bytes_per_row: usize,
+    pub(super) num_rows: usize,
+    pub(super) bytes_between_rows: usize,
 }
 
 impl<'a> RawImageRectMut<'a> {
     #[inline(always)]
     pub fn row(&mut self, row: usize) -> &mut [u8] {
-        // SAFETY: we don't write uninit data to `row`, and we have exclusive access to the accessible
-        // bytes of `self.data`.
-        let row = unsafe { self.data.row_mut(row) };
-        // SAFETY: MaybeUninit<u8> and u8 have the same size and layout, and our safety invariant
-        // guarantees the data is initialized.
-        unsafe { std::slice::from_raw_parts_mut(row.as_mut_ptr().cast::<u8>(), row.len()) }
+        assert!(row < self.num_rows);
+        let start = row * self.bytes_between_rows;
+        &mut self.storage[start..start + self.bytes_per_row]
     }
 
-    pub fn rect_mut(&'_ mut self, rect: Rect) -> RawImageRectMut<'_> {
-        Self {
-            // Safety note: we are lending ownership to the returned RawImageRectMut, and Rust's
-            // type system ensures correctness.
-            data: self.data.rect(rect),
-            _ph: PhantomData,
-        }
+    pub fn rect_mut(&mut self, rect: Rect) -> RawImageRectMut<'_> {
+        sub_rect_mut(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
     }
 
-    pub fn as_rect(&'_ self) -> RawImageRect<'_> {
+    pub fn as_rect(&self) -> RawImageRect<'_> {
         RawImageRect {
-            // Safety note: correctness ensured by the return value borrowing from self.
-            data: self.data,
-            _ph: PhantomData,
+            storage: self.storage,
+            bytes_per_row: self.bytes_per_row,
+            num_rows: self.num_rows,
+            bytes_between_rows: self.bytes_between_rows,
         }
     }
 
     pub fn byte_size(&self) -> (usize, usize) {
-        self.data.byte_size()
+        (self.bytes_per_row, self.num_rows)
+    }
+
+    pub(super) fn is_aligned(&self, align: usize) -> bool {
+        if self.num_rows == 0 {
+            return true;
+        }
+        self.bytes_per_row.is_multiple_of(align)
+            && self.bytes_between_rows.is_multiple_of(align)
+            && (self.storage.as_ptr() as usize).is_multiple_of(align)
+    }
+
+    /// Creates a mutable view from an external slice and dimensions.
+    pub(super) fn from_slice(
+        buf: &'a mut [u8],
+        num_rows: usize,
+        bytes_per_row: usize,
+        bytes_between_rows: usize,
+    ) -> Self {
+        RawImageBuffer::check_vals(num_rows, bytes_per_row, bytes_between_rows);
+        let expected_len = if num_rows == 0 { 0 } else { (num_rows - 1) * bytes_between_rows + bytes_per_row };
+        assert!(buf.len() >= expected_len, "buffer too small: {} < {}", buf.len(), expected_len);
+        RawImageRectMut {
+            storage: if expected_len == 0 { &mut [] } else { &mut buf[..expected_len] },
+            bytes_per_row,
+            num_rows,
+            bytes_between_rows,
+        }
     }
 }
 

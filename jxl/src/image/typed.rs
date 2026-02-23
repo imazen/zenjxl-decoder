@@ -163,7 +163,6 @@ impl<T: ImageDataType> Image<T> {
         const { assert!(CACHE_LINE_BYTE_SIZE.is_multiple_of(T::DATA_TYPE_ID.size())) };
         assert!(raw.data.is_aligned(T::DATA_TYPE_ID.size()));
         Image {
-            // Safety note: we just checked alignment.
             raw,
             _ph: PhantomData,
         }
@@ -183,22 +182,15 @@ impl<T: ImageDataType> Image<T> {
     /// the row at index 0 will be the first row of the *padding*, unlike with all the other row
     /// accessors.
     #[inline(always)]
-    pub fn distinct_full_rows_mut<I: DistinctRowsIndexes>(&mut self, rows: I) -> I::Output<'_, T> {
-        // SAFETY: we don't write uninit data to the returned `rows`, and `self.raw` has ownership
-        // of the accessible bytes of `self.raw.data`.
-        let rows = unsafe { self.raw.data.distinct_rows_mut(rows) };
-        // SAFETY: Since self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) by the safety invariant
-        // on `self`, the returned slices are aligned to T::DATA_TYPE_ID.size(), and sizeof(T)
-        // == T::DATA_TYPE_ID.size() by the requirements of ImageDataType; moreover, ImageDataType
-        // requires T to be a bag-of-bits type with no padding and `self.raw` guarantees its
-        // accessible bytes are initialized, so the transmute is not an issue.
-        unsafe { I::transmute_rows(rows) }
+    pub fn distinct_full_rows_mut<I: DistinctRowsIndexes>(&mut self, rows: I) -> I::CastOutput<'_, T> {
+        let rows = self.raw.data.distinct_rows_mut(rows);
+        I::cast_rows(rows)
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct ImageRect<'a, T: ImageDataType> {
-    // Safety invariant: self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) is true.
+    // Invariant: self.raw.is_aligned(T::DATA_TYPE_ID.size()) is true.
     raw: RawImageRect<'a>,
     _ph: PhantomData<T>,
 }
@@ -217,13 +209,9 @@ impl<'a, T: ImageDataType> ImageRect<'a, T> {
 
     #[inline(always)]
     pub fn row(&self, row: usize) -> &'a [T] {
-        let row = self.raw.row(row);
-        // The raw row borrows from &self but the data is alive for 'a.
-        // We use from_raw_parts to extend the lifetime from &self to 'a,
-        // which is safe because the data lives as long as the ImageRect.
-        unsafe {
-            std::slice::from_raw_parts(row.as_ptr().cast::<T>(), row.len() / std::mem::size_of::<T>())
-        }
+        // RawImageRect::row() returns &'a [u8] (the lifetime of the underlying storage),
+        // and bytemuck::cast_slice preserves that lifetime.
+        bytemuck::cast_slice(self.raw.row(row))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
@@ -236,9 +224,8 @@ impl<'a, T: ImageDataType> ImageRect<'a, T> {
 
     pub fn from_raw(raw: RawImageRect<'a>) -> Self {
         const { assert!(CACHE_LINE_BYTE_SIZE.is_multiple_of(T::DATA_TYPE_ID.size())) };
-        assert!(raw.data.is_aligned(T::DATA_TYPE_ID.size()));
+        assert!(raw.is_aligned(T::DATA_TYPE_ID.size()));
         ImageRect {
-            // Safety note: we just checked alignment.
             raw,
             _ph: PhantomData,
         }
@@ -246,7 +233,7 @@ impl<'a, T: ImageDataType> ImageRect<'a, T> {
 }
 
 pub struct ImageRectMut<'a, T: ImageDataType> {
-    // Safety invariant: self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) is true.
+    // Invariant: self.raw.is_aligned(T::DATA_TYPE_ID.size()) is true.
     raw: RawImageRectMut<'a>,
     _ph: PhantomData<T>,
 }
@@ -278,9 +265,8 @@ impl<'a, T: ImageDataType> ImageRectMut<'a, T> {
 
     pub fn from_raw(raw: RawImageRectMut<'a>) -> Self {
         const { assert!(CACHE_LINE_BYTE_SIZE.is_multiple_of(T::DATA_TYPE_ID.size())) };
-        assert!(raw.data.is_aligned(T::DATA_TYPE_ID.size()));
+        assert!(raw.is_aligned(T::DATA_TYPE_ID.size()));
         ImageRectMut {
-            // Safety note: we just checked alignment.
             raw,
             _ph: PhantomData,
         }

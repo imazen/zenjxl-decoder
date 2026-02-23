@@ -207,6 +207,19 @@ simd_function!(
     }
 );
 
+/// Reinterprets `&mut [u8]` as `&mut [MaybeUninit<u8>]`.
+///
+/// # Safety
+/// This is sound because `MaybeUninit<u8>` has the same layout as `u8`,
+/// and converting initialized memory to `MaybeUninit` is always valid.
+#[inline(always)]
+unsafe fn as_maybe_uninit_slice(buf: &mut [u8]) -> &mut [MaybeUninit<u8>] {
+    // SAFETY: MaybeUninit<u8> has identical layout to u8. Converting initialized
+    // memory to MaybeUninit is always valid. The SIMD functions guarantee they
+    // only write initialized data.
+    unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<MaybeUninit<u8>>(), buf.len()) }
+}
+
 pub(super) fn store(
     input_buf: &[&RowBuffer],
     input_y: usize,
@@ -223,8 +236,7 @@ pub(super) fn store(
         | JxlDataFormat::U16 { endianness, .. }
         | JxlDataFormat::F32 { endianness, .. } => endianness == Endianness::native(),
     };
-    // SAFETY: we never write uninit memory to the `output_row`.
-    let output_buf = unsafe { output_buf.row_mut(output_y) };
+    let output_buf = output_buf.row_mut(output_y);
     let output_buf = &mut output_buf[0..(byte_end - byte_start) * input_buf.len()];
     match (
         input_buf.len(),
@@ -235,17 +247,7 @@ pub(super) fn store(
             // We can just do a memcpy.
             let input_buf = &input_buf[0].get_row::<u8>(input_y)[byte_start..byte_end];
             assert_eq!(input_buf.len(), output_buf.len());
-            // SAFETY: we are copying `u8`s, which have an alignment of 1, from a slice of [u8] to
-            // a slice of [MaybeUninit<u8>] of the same length (as we checked just above). u8 and
-            // MaybeUninit<u8> have the same layout, and aliasing rules guarantee that the two
-            // slices are non-overlapping.
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    input_buf.as_ptr(),
-                    output_buf.as_mut_ptr() as *mut u8,
-                    output_buf.len(),
-                );
-            }
+            output_buf.copy_from_slice(input_buf);
             input_buf.len() / data_format.bytes_per_sample()
         }
         (channels, 1, true) if (2..=4).contains(&channels) => {
@@ -255,17 +257,17 @@ pub(super) fn store(
             for (i, buf) in input_buf.iter().enumerate() {
                 slices[i] = &buf.get_row::<u8>(input_y)[start_u8..end_u8];
             }
-            // Note that, by the conditions on the *_uninit methods on U8Vec, this function
-            // never writes uninitialized memory.
-            store_interleaved_u8(&slices[..channels], output_buf)
+            // SAFETY: output_buf is initialized &mut [u8]; MaybeUninit<u8> has identical layout.
+            // The SIMD interleave functions never write uninitialized memory.
+            let output_uninit = unsafe { as_maybe_uninit_slice(output_buf) };
+            store_interleaved_u8(&slices[..channels], output_uninit)
         }
         (channels, 2, true) if (2..=4).contains(&channels) => {
             let ptr = output_buf.as_mut_ptr();
             if ptr.align_offset(std::mem::align_of::<u16>()) == 0 {
                 let len_u16 = output_buf.len() / 2;
-                // SAFETY: we checked alignment above, and the size is correct by definition
-                // (note that it is guaranteed that MaybeUninit<T> has the same size and align
-                // of T for any T).
+                // SAFETY: we checked alignment above, and the size is correct.
+                // MaybeUninit<u16> has the same size and alignment as u16.
                 let output_u16 = unsafe {
                     std::slice::from_raw_parts_mut(
                         output_buf.as_mut_ptr().cast::<MaybeUninit<u16>>(),
@@ -278,8 +280,6 @@ pub(super) fn store(
                 for (i, buf) in input_buf.iter().enumerate() {
                     slices[i] = &buf.get_row::<u16>(input_y)[start_u16..end_u16];
                 }
-                // Note that, by the conditions on the *_uninit methods on U16Vec, this function
-                // never writes uninitialized memory.
                 store_interleaved_u16(&slices[..channels], output_u16)
             } else {
                 0
@@ -289,9 +289,8 @@ pub(super) fn store(
             let ptr = output_buf.as_mut_ptr();
             if ptr.align_offset(std::mem::align_of::<f32>()) == 0 {
                 let len_f32 = output_buf.len() / std::mem::size_of::<f32>();
-                // SAFETY: we checked alignment above, and the size is correct by definition
-                // (note that it is guaranteed that MaybeUninit<T> has the same size and align
-                // of T for any T).
+                // SAFETY: we checked alignment above, and the size is correct.
+                // MaybeUninit<f32> has the same size and alignment as f32.
                 let output_f32 = unsafe {
                     std::slice::from_raw_parts_mut(
                         output_buf.as_mut_ptr().cast::<MaybeUninit<f32>>(),
@@ -307,8 +306,6 @@ pub(super) fn store(
                     slices[i] = &buf.get_row::<f32>(input_y)[start_f32..end_f32];
                 }
 
-                // Note that, by the conditions on the *_uninit methods on F32Vec, this function
-                // never writes uninitialized memory.
                 store_interleaved_f32(&slices[..channels], output_f32)
             } else {
                 0
