@@ -7,7 +7,7 @@
 #![allow(clippy::approx_constant)]
 
 use crate::{transform_map::HfTransformType, *};
-use jxl_simd::{simd_function, SimdDescriptor};
+use jxl_simd::{SimdDescriptor, simd_function};
 
 fn idct2_top_block(s: usize, block_in: &[f32], block_out: &mut [f32]) {
     let num_2x2 = s / 2;

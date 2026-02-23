@@ -1098,8 +1098,35 @@ impl Frame {
         // XYB output is linear, so apply transfer function:
         // - Only if output is non-linear AND
         // - CMS was not used (CMS already handles the full conversion including TF)
+        //
+        // Optimization: when the TF is sRGB and the output is U8, we can fuse the TF
+        // and u8 conversion into a single SIMD pass, avoiding an intermediate f32
+        // buffer write/read. This is only safe when no intermediate stages modify
+        // the color channels between TF application and u8 conversion.
+        let mut fuse_srgb_to_u8_bit_depth: Option<u8> = None;
         if xyb_encoded && !output_tf.is_linear() && !cms_used {
-            pipeline = pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()))?;
+            if let TransferFunction::Srgb = &output_tf
+                && let Some(JxlDataFormat::U8 { bit_depth }) = pixel_format.color_data_format
+            {
+                let has_spot_colors = decoder_state.render_spotcolors
+                    && decoder_state
+                        .file_header
+                        .image_metadata
+                        .extra_channel_info
+                        .iter()
+                        .any(|info| info.ec_type == ExtraChannel::SpotColor);
+                if !has_black_channel
+                    && !frame_header.needs_blending()
+                    && !has_spot_colors
+                    && !decoder_state.premultiply_output
+                {
+                    fuse_srgb_to_u8_bit_depth = Some(bit_depth);
+                }
+            }
+            if fuse_srgb_to_u8_bit_depth.is_none() {
+                pipeline =
+                    pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()))?;
+            }
         }
 
         // For CMYK images that don't need deferred CMS, apply Black channel conversion here
@@ -1285,8 +1312,21 @@ impl Frame {
                         alpha_channel,
                     ))?;
                 }
-                // Add conversion stages for non-float output formats
-                pipeline = Self::add_conversion_stages(pipeline, color_source_channels, *df)?;
+                // Add conversion stages for non-float output formats.
+                // When fused sRGB+U8 is active, use the fused stage for RGB channels
+                // and only add separate conversion for the alpha channel (if any).
+                if let Some(bit_depth) = fuse_srgb_to_u8_bit_depth {
+                    use crate::render::stages::{ConvertF32ToU8Stage, FromLinearSrgbToU8Stage};
+                    pipeline =
+                        pipeline.add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth))?;
+                    // Alpha channel still needs plain f32→u8 conversion (no TF)
+                    for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
+                        pipeline = pipeline
+                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth))?;
+                    }
+                } else {
+                    pipeline = Self::add_conversion_stages(pipeline, color_source_channels, *df)?;
+                }
                 pipeline = pipeline.add_save_stage(
                     color_source_channels,
                     metadata.orientation,

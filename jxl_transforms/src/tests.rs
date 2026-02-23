@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use super::*;
-use jxl_simd::{test_all_instruction_sets, ScalarDescriptor, SimdDescriptor};
+use jxl_simd::{ScalarDescriptor, SimdDescriptor, test_all_instruction_sets};
 use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
@@ -16,11 +16,7 @@ use std::f64::consts::SQRT_2;
 
 #[inline(always)]
 fn alpha(u: usize) -> f64 {
-    if u == 0 {
-        FRAC_1_SQRT_2
-    } else {
-        1.0
-    }
+    if u == 0 { FRAC_1_SQRT_2 } else { 1.0 }
 }
 
 pub fn dct1d(input_matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {

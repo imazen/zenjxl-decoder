@@ -5,8 +5,9 @@
 
 use crate::color::tf;
 use crate::headers::color_encoding::CustomTransferFunction;
-use crate::render::RenderPipelineInPlaceStage;
-use jxl_simd::{F32SimdVec, simd_function};
+use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
+use crate::util::eval_rational_poly_simd;
+use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 
 /// Apply transfer function to display-referred linear color samples.
 #[derive(Debug)]
@@ -195,6 +196,125 @@ impl TryFrom<CustomTransferFunction> for TransferFunction {
         }
     }
 }
+
+// ============================================================================
+// Fused sRGB TF + u8 conversion stage
+// ============================================================================
+
+/// Fused stage that applies sRGB transfer function and converts to u8 in a single SIMD pass.
+/// This avoids the intermediate f32 buffer write/read between separate FromLinear and ConvertF32ToU8 stages.
+pub struct FromLinearSrgbToU8Stage {
+    first_channel: usize,
+    bit_depth: u8,
+}
+
+impl FromLinearSrgbToU8Stage {
+    pub fn new(first_channel: usize, bit_depth: u8) -> Self {
+        Self {
+            first_channel,
+            bit_depth,
+        }
+    }
+}
+
+impl std::fmt::Display for FromLinearSrgbToU8Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let c = self.first_channel;
+        write!(
+            f,
+            "Fused sRGB TF + U{} conversion for channels [{},{},{}]",
+            self.bit_depth,
+            c,
+            c + 1,
+            c + 2,
+        )
+    }
+}
+
+impl RenderPipelineInOutStage for FromLinearSrgbToU8Stage {
+    type InputT = f32;
+    type OutputT = u8;
+    const SHIFT: (u8, u8) = (0, 0);
+    const BORDER: (u8, u8) = (0, 0);
+
+    fn uses_channel(&self, c: usize) -> bool {
+        (self.first_channel..self.first_channel + 3).contains(&c)
+    }
+
+    fn process_row_chunk(
+        &self,
+        _position: (usize, usize),
+        xsize: usize,
+        input_rows: &Channels<f32>,
+        output_rows: &mut ChannelsMut<u8>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
+    ) {
+        let max_val = ((1u32 << self.bit_depth) - 1) as f32;
+        fused_srgb_to_u8_channel_dispatch(max_val, xsize, input_rows, output_rows);
+    }
+}
+
+simd_function!(
+    fused_srgb_to_u8_channel_dispatch,
+    d: D,
+    fn fused_srgb_to_u8_channel(
+        max_val: f32,
+        xsize: usize,
+        input_rows: &Channels<f32>,
+        output_rows: &mut ChannelsMut<u8>,
+    ) {
+        #[allow(clippy::excessive_precision)]
+        const P: [f32; 5] = [
+            -5.135152395e-4,
+            5.287254571e-3,
+            3.903842876e-1,
+            1.474205315,
+            7.352629620e-1,
+        ];
+        #[allow(clippy::excessive_precision)]
+        const Q: [f32; 5] = [
+            1.004519624e-2,
+            3.036675394e-1,
+            1.340816930,
+            9.258482155e-1,
+            2.424867759e-2,
+        ];
+
+        assert_eq!(input_rows.len(), 3);
+        assert_eq!(output_rows.len(), 3);
+
+        let zero = D::F32Vec::splat(d, 0.0);
+        let one = D::F32Vec::splat(d, 1.0);
+        let scale = D::F32Vec::splat(d, max_val);
+        let threshold = D::F32Vec::splat(d, 0.0031308);
+        let linear_scale = D::F32Vec::splat(d, 12.92);
+
+        let end = xsize.next_multiple_of(D::F32Vec::LEN);
+
+        for c in 0..3 {
+            let input = input_rows[c][0];
+            let output = &mut output_rows[c][0];
+
+            for (in_chunk, out_chunk) in input[..end]
+                .chunks_exact(D::F32Vec::LEN)
+                .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
+            {
+                let v = D::F32Vec::load(d, in_chunk);
+                // Clamp to [0, 1]
+                let a = v.max(zero).min(one);
+                // Apply sRGB transfer function
+                let srgb = threshold
+                    .gt(a)
+                    .if_then_else_f32(
+                        a * linear_scale,
+                        eval_rational_poly_simd(d, a.sqrt(), P, Q),
+                    );
+                // Scale and convert to u8
+                (srgb * scale).round_store_u8(out_chunk);
+            }
+        }
+    }
+);
 
 #[cfg(test)]
 mod test {

@@ -6,8 +6,8 @@
 #![allow(clippy::identity_op)]
 
 use criterion::measurement::Measurement;
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, BenchmarkId, Criterion};
-use jxl_simd::{bench_all_instruction_sets, SimdDescriptor};
+use criterion::{BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criterion_main};
+use jxl_simd::{SimdDescriptor, bench_all_instruction_sets};
 use jxl_transforms::transform_map::MAX_COEFF_AREA;
 use jxl_transforms::*;
 

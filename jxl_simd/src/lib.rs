@@ -249,6 +249,22 @@ pub unsafe trait F32SimdVec:
     /// Requires `dest.len() >= Self::LEN` or it will panic.
     fn round_store_u8(self, dest: &mut [u8]);
 
+    /// Rounds to nearest integer and stores as u8 at the given offset.
+    /// Equivalent to `self.round_store_u8(&mut dest[offset..])` but avoids the subslice bounds check.
+    /// Callers must ensure `offset + Self::LEN <= dest.len()` (checked in debug mode).
+    #[inline(always)]
+    fn round_store_u8_at(self, dest: &mut [u8], offset: usize) {
+        debug_assert!(
+            offset + Self::LEN <= dest.len(),
+            "round_store_u8_at: offset {} + LEN {} > len {}",
+            offset,
+            Self::LEN,
+            dest.len()
+        );
+        // SAFETY: debug_assert above verifies bounds.
+        self.round_store_u8(unsafe { dest.get_unchecked_mut(offset..) });
+    }
+
     /// Rounds to nearest integer and stores as u16.
     /// Behavior is unspecified if values would overflow u16.
     /// Requires `dest.len() >= Self::LEN` or it will panic.

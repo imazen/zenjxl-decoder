@@ -15,11 +15,11 @@ mod idct4;
 mod idct8;
 mod idct_large;
 
-use idct16::*;
 use idct2::*;
-use idct32::*;
 use idct4::*;
 use idct8::*;
+use idct16::*;
+use idct32::*;
 
 mod reinterpreting_dct16;
 mod reinterpreting_dct2;
@@ -27,14 +27,14 @@ mod reinterpreting_dct32;
 mod reinterpreting_dct4;
 mod reinterpreting_dct8;
 
-use reinterpreting_dct16::*;
 use reinterpreting_dct2::*;
-use reinterpreting_dct32::*;
 use reinterpreting_dct4::*;
 use reinterpreting_dct8::*;
+use reinterpreting_dct16::*;
+use reinterpreting_dct32::*;
 
-pub use idct2d::*;
 pub use idct_large::*;
+pub use idct2d::*;
 pub use reinterpreting_dct2d::*;
 
 #[cfg(test)]

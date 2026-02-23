@@ -354,7 +354,9 @@ impl SymbolReader {
                     Codes::Huffman(hc) => hc.read(br, lz_dist_cluster),
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, lz_dist_cluster),
                 };
-                let distance_sym = histograms.uint_config(lz_dist_cluster).read(distance_sym, br);
+                let distance_sym = histograms
+                    .uint_config(lz_dist_cluster)
+                    .read(distance_sym, br);
                 lz77_state.apply_copy(distance_sym, num_to_copy);
 
                 let sym = lz77_state.pull_symbol().unwrap();
