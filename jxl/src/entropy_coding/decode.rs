@@ -585,36 +585,12 @@ impl Histograms {
 
     #[inline(always)]
     pub fn map_context_to_cluster(&self, context: usize) -> usize {
-        debug_assert!(
-            context < self.context_map.len(),
-            "map_context_to_cluster: context {} out of bounds (len = {})",
-            context,
-            self.context_map.len()
-        );
-        // SAFETY: context is bounded by num_contexts, which equals context_map.len()
-        // (asserted during Histograms::decode). Callers use context values computed from
-        // block_context_map which are within the configured num_contexts range.
-        #[allow(unsafe_code)]
-        unsafe {
-            *self.context_map.get_unchecked(context) as usize
-        }
+        self.context_map[context] as usize
     }
 
-    /// Returns the uint config for the given cluster index without bounds checking.
     #[inline(always)]
     fn uint_config(&self, cluster: usize) -> &HybridUint {
-        debug_assert!(
-            cluster < self.uint_configs.len(),
-            "uint_config: cluster {} out of bounds (len = {})",
-            cluster,
-            self.uint_configs.len()
-        );
-        // SAFETY: cluster comes from context_map values, which are validated during
-        // decode() to be < num_histograms = uint_configs.len().
-        #[allow(unsafe_code)]
-        unsafe {
-            self.uint_configs.get_unchecked(cluster)
-        }
+        &self.uint_configs[cluster]
     }
 
     pub fn num_histograms(&self) -> usize {

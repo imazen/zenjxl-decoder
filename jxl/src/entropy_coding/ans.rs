@@ -358,20 +358,7 @@ impl AnsHistogram {
         let i = (idx >> self.log_bucket_size) as usize;
         let pos = idx & self.bucket_mask;
 
-        debug_assert!(self.buckets.len().is_power_of_two());
-        debug_assert!(
-            i < self.buckets.len(),
-            "bucket index {} out of bounds (len = {})",
-            i,
-            self.buckets.len()
-        );
-        // SAFETY: The struct-level safety invariant (see AnsHistogram::buckets) ensures that
-        // buckets.len() = 2^(LOG_SUM_PROBS - log_bucket_size). Since idx = state & 0xfff
-        // (12 bits) and i = idx >> log_bucket_size, we have i < buckets.len() always.
-        #[allow(unsafe_code)]
-        let bucket = unsafe { *self.buckets.get_unchecked(i) };
-        // Safe version: (~3% slower for e2 lossless decoding)
-        // let bucket = self.buckets[i & (self.buckets.len() - 1)];
+        let bucket = self.buckets[i];
         let alias_symbol = bucket.alias_symbol as u32;
         let alias_cutoff = bucket.alias_cutoff as u32;
         let dist = bucket.dist as u32;
@@ -435,16 +422,7 @@ impl AnsReader {
 
     #[inline]
     pub fn read(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
-        debug_assert!(
-            ctx < codes.histograms.len(),
-            "AnsReader::read: ctx {} out of bounds (len = {})",
-            ctx,
-            codes.histograms.len()
-        );
-        // SAFETY: ctx is a cluster index from the context map, which is validated during
-        // Histograms::decode() to be < num_histograms = codes.histograms.len().
-        #[allow(unsafe_code)]
-        let histogram = unsafe { codes.histograms.get_unchecked(ctx) };
+        let histogram = &codes.histograms[ctx];
         histogram.read(br, &mut self.0)
     }
 
