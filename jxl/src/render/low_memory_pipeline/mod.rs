@@ -509,6 +509,12 @@ impl RenderPipeline for LowMemoryRenderPipeline {
 /// Methods for the parallel rendering path.
 #[cfg(feature = "threads")]
 impl LowMemoryRenderPipeline {
+    /// Returns the pixel buffer size for a channel (used for parallel allocation).
+    pub(crate) fn pixel_buffer_size(&self, channel: usize) -> (usize, usize) {
+        self.shared
+            .group_size_for_channel(channel, crate::image::DataTypeTag::F32)
+    }
+
     /// Stores a buffer for a group/channel without triggering rendering.
     pub(crate) fn store_buffer_only<T: ImageDataType>(
         &mut self,

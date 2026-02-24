@@ -358,11 +358,12 @@ impl Frame {
             has_items: bool,
         }
 
-        // Phase 1: Sequential — compute render decisions and allocate pixel buffers.
-        // Process ALL groups at once (no batching) to minimize rayon barriers
-        // and maximize work-stealing opportunities.
+        // Phase 1: Sequential — compute render decisions (NO pixel allocation).
+        // Pixel buffers are allocated on-demand in Phase 2 (parallel) to avoid
+        // the sequential allocation bottleneck that caused the 0.59x regression.
         let phase1_start = std::time::Instant::now();
         let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
+        let mut num_needs_pixels = 0usize;
         for (group, passes) in groups {
             if let Some((p, _)) = passes.last() {
                 self.last_rendered_pass[group] = Some(*p);
@@ -377,27 +378,48 @@ impl Frame {
                 false
             };
 
-            let pixels = if is_vardct && do_render {
-                Some([
-                    pipeline!(self, p, p.get_buffer(0))?,
-                    pipeline!(self, p, p.get_buffer(1))?,
-                    pipeline!(self, p, p.get_buffer(2))?,
-                ])
-            } else {
-                None
-            };
+            if is_vardct && do_render {
+                num_needs_pixels += 1;
+            }
 
             work.push(GroupWork {
                 group,
                 passes,
                 complete,
                 do_render,
-                pixels,
+                pixels: None, // Deferred to Phase 2
             });
         }
 
         let num_groups = work.len();
         let phase1_dur = phase1_start.elapsed();
+
+        // Pre-seed a shared pixel buffer pool from the scratch pool.
+        // Allocate min(num_threads, groups_needing_pixels) triples — recycled
+        // buffers from previous calls are free (no page faults). Remaining
+        // groups allocate fresh in Phase 2, but in PARALLEL across threads
+        // instead of sequentially here.
+        let num_threads = rayon::current_num_threads();
+        let pool_size = num_threads.min(num_needs_pixels);
+        let mut pixel_pool_vec: Vec<[Image<f32>; 3]> = Vec::with_capacity(pool_size);
+        for _ in 0..pool_size {
+            pixel_pool_vec.push([
+                pipeline!(self, p, p.get_buffer(0))?,
+                pipeline!(self, p, p.get_buffer(1))?,
+                pipeline!(self, p, p.get_buffer(2))?,
+            ]);
+        }
+        let pixel_pool = std::sync::Mutex::new(pixel_pool_vec);
+        // Buffer sizes for fresh allocation in Phase 2.
+        let pixel_sizes: [(usize, usize); 3] = if is_vardct && num_needs_pixels > pool_size {
+            [
+                lmp_ref!().pixel_buffer_size(0),
+                lmp_ref!().pixel_buffer_size(1),
+                lmp_ref!().pixel_buffer_size(2),
+            ]
+        } else {
+            [(0, 0); 3] // unused — all groups served from pool
+        };
 
         // Phase 2: Parallel decode.
         // Seed the buffer pool from self.vardct_buffers so buffers persist across
@@ -436,6 +458,19 @@ impl Frame {
             let buffer_pool = std::sync::Mutex::new(pool);
             work.par_iter_mut().try_for_each(|gw| -> Result<()> {
                 stop.check()?;
+                // Allocate pixel buffers on-demand from the shared pool.
+                // This runs in PARALLEL instead of the old sequential Phase 1
+                // allocation, distributing page fault cost across threads.
+                if is_vardct && gw.do_render {
+                    gw.pixels = Some(match pixel_pool.lock().unwrap().pop() {
+                        Some(bufs) => bufs,
+                        None => [
+                            Image::<f32>::new(pixel_sizes[0])?,
+                            Image::<f32>::new(pixel_sizes[1])?,
+                            Image::<f32>::new(pixel_sizes[2])?,
+                        ],
+                    });
+                }
                 if is_vardct && !gw.passes.is_empty() {
                     let hf_global = hf_global.unwrap();
                     let hf_meta = hf_meta.unwrap();
