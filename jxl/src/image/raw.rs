@@ -73,18 +73,21 @@ impl OwnedRawImage {
         })
     }
 
+    #[inline]
     pub fn get_rect_including_padding_mut(&mut self, rect: Rect) -> RawImageRectMut<'_> {
         let (bpr, nr, bbr) = self.data.dimensions();
         let storage = self.data.data_slice_mut();
         sub_rect_mut(storage, bpr, nr, bbr, rect)
     }
 
+    #[inline]
     pub fn get_rect_including_padding(&self, rect: Rect) -> RawImageRect<'_> {
         let (bpr, nr, bbr) = self.data.dimensions();
         let storage = self.data.data_slice();
         sub_rect(storage, bpr, nr, bbr, rect)
     }
 
+    #[inline]
     fn shift_rect(&self, rect: Rect) -> Rect {
         if cfg!(debug_assertions) {
             // Check the original rect is within the content size (without padding)
@@ -96,10 +99,12 @@ impl OwnedRawImage {
         }
     }
 
+    #[inline]
     pub fn get_rect_mut(&mut self, rect: Rect) -> RawImageRectMut<'_> {
         self.get_rect_including_padding_mut(self.shift_rect(rect))
     }
 
+    #[inline]
     pub fn get_rect(&self, rect: Rect) -> RawImageRect<'_> {
         self.get_rect_including_padding(self.shift_rect(rect))
     }
@@ -179,6 +184,7 @@ impl Drop for OwnedRawImage {
 }
 
 /// Helper: create an immutable sub-view from a storage slice and its dimensions.
+#[inline]
 fn sub_rect<'a>(
     storage: &'a [u8],
     bpr: usize,
@@ -203,6 +209,7 @@ fn sub_rect<'a>(
 }
 
 /// Helper: create a mutable sub-view from a storage slice and its dimensions.
+#[inline]
 fn sub_rect_mut<'a>(
     storage: &'a mut [u8],
     bpr: usize,
@@ -252,6 +259,7 @@ impl<'a> RawImageRect<'a> {
         (self.bytes_per_row, self.num_rows)
     }
 
+    #[inline]
     pub(super) fn is_aligned(&self, align: usize) -> bool {
         if self.num_rows == 0 {
             return true;
@@ -295,6 +303,7 @@ impl<'a> RawImageRectMut<'a> {
         (self.bytes_per_row, self.num_rows)
     }
 
+    #[inline]
     pub(super) fn is_aligned(&self, align: usize) -> bool {
         if self.num_rows == 0 {
             return true;

@@ -24,10 +24,12 @@ impl Rect {
         }
     }
 
+    #[inline]
     pub fn to_byte_rect(&self, data_type: DataTypeTag) -> Rect {
         self.to_byte_rect_sz(data_type.size())
     }
 
+    #[inline]
     pub fn to_byte_rect_sz(&self, sz: usize) -> Rect {
         Rect {
             origin: (self.origin.0 * sz, self.origin.1),

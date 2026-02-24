@@ -129,6 +129,7 @@ impl<T: ImageDataType> Image<T> {
         }
     }
 
+    #[inline]
     pub fn get_rect_including_padding_mut(&mut self, rect: Rect) -> ImageRectMut<'_, T> {
         ImageRectMut::from_raw(
             self.raw
@@ -136,6 +137,7 @@ impl<T: ImageDataType> Image<T> {
         )
     }
 
+    #[inline]
     pub fn get_rect_including_padding(&mut self, rect: Rect) -> ImageRect<'_, T> {
         ImageRect::from_raw(
             self.raw
@@ -143,10 +145,12 @@ impl<T: ImageDataType> Image<T> {
         )
     }
 
+    #[inline]
     pub fn get_rect_mut(&mut self, rect: Rect) -> ImageRectMut<'_, T> {
         ImageRectMut::from_raw(self.raw.get_rect_mut(rect.to_byte_rect(T::DATA_TYPE_ID)))
     }
 
+    #[inline]
     pub fn get_rect(&self, rect: Rect) -> ImageRect<'_, T> {
         ImageRect::from_raw(self.raw.get_rect(rect.to_byte_rect(T::DATA_TYPE_ID)))
     }
@@ -238,6 +242,7 @@ impl<'a, T: ImageDataType> ImageRect<'a, T> {
         self.raw
     }
 
+    #[inline]
     pub fn from_raw(raw: RawImageRect<'a>) -> Self {
         const { assert!(CACHE_LINE_BYTE_SIZE.is_multiple_of(T::DATA_TYPE_ID.size())) };
         assert!(raw.is_aligned(T::DATA_TYPE_ID.size()));
@@ -279,6 +284,7 @@ impl<'a, T: ImageDataType> ImageRectMut<'a, T> {
         self.raw
     }
 
+    #[inline]
     pub fn from_raw(raw: RawImageRectMut<'a>) -> Self {
         const { assert!(CACHE_LINE_BYTE_SIZE.is_multiple_of(T::DATA_TYPE_ID.size())) };
         assert!(raw.is_aligned(T::DATA_TYPE_ID.size()));
