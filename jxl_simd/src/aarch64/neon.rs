@@ -74,7 +74,7 @@ impl SimdDescriptor for NeonDescriptor {
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
         #[target_feature(enable = "neon")]
-        #[inline(never)]
+        #[inline]
         unsafe fn inner<R>(d: NeonDescriptor, f: impl FnOnce(NeonDescriptor) -> R) -> R {
             f(d)
         }
