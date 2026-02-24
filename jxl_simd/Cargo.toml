@@ -18,11 +18,12 @@ paste = "1"
 arbtest = "0.3.2"
 
 [features]
-all-simd = ["sse42", "avx", "avx512", "neon"]
+all-simd = ["sse42", "avx", "avx512", "neon", "wasm128"]
 sse42 = []
 avx = ["sse42"]
 avx512 = ["avx"]
 neon = []
+wasm128 = []
 
 [lints]
 workspace = true

@@ -20,6 +20,9 @@ mod x86_64;
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
 
+#[cfg(target_arch = "wasm32")]
+mod wasm32;
+
 pub mod float16;
 pub mod scalar;
 
@@ -34,6 +37,9 @@ pub use x86_64::sse42::Sse42Descriptor;
 
 #[cfg(all(target_arch = "aarch64", feature = "neon"))]
 pub use aarch64::neon::NeonDescriptor;
+
+#[cfg(all(target_arch = "wasm32", feature = "wasm128"))]
+pub use wasm32::simd128::Wasm128Descriptor;
 
 pub use scalar::ScalarDescriptor;
 
@@ -56,6 +62,9 @@ pub use archmage::X64V4Token;
 #[cfg(target_arch = "aarch64")]
 #[doc(hidden)]
 pub use archmage::NeonToken;
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub use archmage::Wasm128Token;
 
 pub trait SimdDescriptor: Sized + Copy + Debug + Send + Sync {
     type F32Vec: F32SimdVec<Descriptor = Self>;
