@@ -217,7 +217,7 @@ pub struct ImageRect<'a, T: ImageDataType> {
 }
 
 impl<'a, T: ImageDataType> ImageRect<'a, T> {
-    #[inline]
+    #[inline(always)]
     pub fn rect(&self, rect: Rect) -> ImageRect<'a, T> {
         Self::from_raw(self.raw.rect(rect.to_byte_rect(T::DATA_TYPE_ID)))
     }

@@ -9,37 +9,39 @@ use crate::render::low_memory_pipeline::render_group::ChannelVec;
 /// Panics if any of the indices are out of bounds or
 /// (idx[i].0, idx[i].1) == (idx[j].0, idx[j].1) for i != j or indices are not
 /// sorted lexicographically.
+#[inline]
+#[allow(unsafe_code)]
 pub(super) fn get_distinct_indices<'a, T>(
     vals: &'a mut [impl AsMut<[T]>],
     idx: &[(usize, usize, usize)],
 ) -> ChannelVec<&'a mut T> {
-    let mut answer_buffer = ChannelVec::new();
+    let mut answer_buffer: ChannelVec<Option<&'a mut T>> = ChannelVec::new();
     for _ in 0..idx.len() {
         answer_buffer.push(None);
     }
 
-    // TODO(veluca): in theory, we don't really need to first create a vector of
-    // `Option`s that then get `unwrap`-ed separately. Currently, this function
-    // uses somewhere between 0.5 and 1.5% of the total runtime; if that number
-    // increases, it might be worth investigating how to speed this up.
-    let mut targets = idx.iter();
-    let mut target = targets.next().unwrap();
-    'outer: for (aa, bufs) in vals.iter_mut().enumerate() {
-        for (bb, buf) in bufs.as_mut().iter_mut().enumerate() {
-            let (a, b, pos) = target;
-            if aa == *a && bb == *b {
-                answer_buffer[*pos] = Some(buf);
-                if let Some(t) = targets.next() {
-                    target = t;
-                } else {
-                    break 'outer;
-                }
-            }
-        }
+    let mut prev_outer = usize::MAX;
+    let mut prev_inner = usize::MAX;
+    for &(outer, inner, pos) in idx {
+        // Verify sorted and distinct (same check as before, just explicit)
+        debug_assert!(
+            prev_outer == usize::MAX || outer > prev_outer || (outer == prev_outer && inner > prev_inner),
+            "indices must be sorted and distinct"
+        );
+        prev_outer = outer;
+        prev_inner = inner;
+
+        let buf = vals[outer].as_mut();
+        assert!(inner < buf.len(), "inner index out of bounds");
+        // SAFETY: indices are guaranteed distinct (no two (outer, inner) pairs are equal),
+        // so each &mut T points to a different element. We use raw pointers to avoid
+        // the borrow checker's inability to prove non-aliasing across loop iterations.
+        let ptr = unsafe { buf.as_mut_ptr().add(inner) };
+        answer_buffer[pos] = Some(unsafe { &mut *ptr });
     }
 
     answer_buffer
-        .iter_mut()
-        .map(|x| std::mem::take(x).expect("Not all elements were found"))
+        .into_iter()
+        .map(|x| x.expect("Not all elements were found"))
         .collect()
 }

@@ -198,8 +198,8 @@ fn sub_rect<'a>(
     if rect.size.0 == 0 || rect.size.1 == 0 {
         return RawImageRect { storage: &[], bytes_per_row: 0, num_rows: 0, bytes_between_rows: 0 };
     }
-    assert!(rect.origin.1 + rect.size.1 <= nr, "rect y out of bounds: {} + {} > {}", rect.origin.1, rect.size.1, nr);
-    assert!(rect.origin.0 + rect.size.0 <= bpr, "rect x out of bounds: {} + {} > {}", rect.origin.0, rect.size.0, bpr);
+    assert!(rect.origin.1 + rect.size.1 <= nr);
+    assert!(rect.origin.0 + rect.size.0 <= bpr);
     let new_start = rect.origin.1 * bbr + rect.origin.0;
     let data_span = (rect.size.1 - 1) * bbr + rect.size.0;
     assert!(new_start + data_span <= storage.len());
@@ -223,8 +223,8 @@ fn sub_rect_mut<'a>(
     if rect.size.0 == 0 || rect.size.1 == 0 {
         return RawImageRectMut { storage: &mut [], bytes_per_row: 0, num_rows: 0, bytes_between_rows: 0 };
     }
-    assert!(rect.origin.1 + rect.size.1 <= nr, "rect y out of bounds: {} + {} > {}", rect.origin.1, rect.size.1, nr);
-    assert!(rect.origin.0 + rect.size.0 <= bpr, "rect x out of bounds: {} + {} > {}", rect.origin.0, rect.size.0, bpr);
+    assert!(rect.origin.1 + rect.size.1 <= nr);
+    assert!(rect.origin.0 + rect.size.0 <= bpr);
     let new_start = rect.origin.1 * bbr + rect.origin.0;
     let data_span = (rect.size.1 - 1) * bbr + rect.size.0;
     assert!(new_start + data_span <= storage.len());
