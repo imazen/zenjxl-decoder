@@ -171,9 +171,17 @@ impl RawImageBuffer {
             // Caller guarantees all bytes will be written before being read.
             // This avoids touching every page upfront (saves page fault overhead
             // for large output buffers).
-            #[allow(unsafe_code)]
-            unsafe {
-                storage.set_len(total_len);
+            #[cfg(feature = "allow-unsafe")]
+            {
+                #[allow(unsafe_code)]
+                // SAFETY: capacity >= total_len from try_reserve above.
+                unsafe {
+                    storage.set_len(total_len);
+                }
+            }
+            #[cfg(not(feature = "allow-unsafe"))]
+            {
+                storage.resize(total_len, 0);
             }
         } else {
             storage.resize(total_len, 0);

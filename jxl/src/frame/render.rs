@@ -770,10 +770,14 @@ impl Frame {
             // For VarDCT images, store_and_prepare_groups_parallel combines
             // pending pixel storage with border extraction in a single parallel
             // pass, eliminating the sequential pixel store bottleneck.
+            // In unbatched mode, skip border extraction — the rendering phase reads
+            // border pixels directly from neighbors' center data (which stays alive
+            // through Phase 3b). This eliminates the topbottom/leftright double-copy.
+            let skip_border_copy = !is_batched;
             let (all_items, group_has_items) = if is_vardct && !pending_stores.is_empty() {
-                lmp_mut!().store_and_prepare_groups_parallel(&mut pending_stores)?
+                lmp_mut!().store_and_prepare_groups_parallel(&mut pending_stores, skip_border_copy)?
             } else {
-                lmp_mut!().prepare_groups_parallel()?
+                lmp_mut!().prepare_groups_parallel(skip_border_copy)?
             };
             let has_items_set: std::collections::HashSet<usize> = group_has_items
                 .iter()

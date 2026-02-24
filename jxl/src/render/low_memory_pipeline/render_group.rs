@@ -88,9 +88,25 @@ fn fill_initial_buffers(
     let group_x0 = gx << (view.shared.log_group_size - dx as usize);
     let group_x1 = group_x0 + group_xsize;
 
+    // Determine which group row this y falls in and the row index within that group.
+    // When direct borders are active (topbottom is None), we compute center_y —
+    // the row index in the neighbor's center data. When borders are extracted
+    // (topbottom is Some), we compute the topbottom buffer index instead.
+    let direct_borders = view.input_buffers[gy * view.shared.group_count.0 + gx]
+        .topbottom[c]
+        .is_none();
+
     let (input_y, igy, is_topbottom) = if y < group_y0 {
-        (y + (by >> dy) * 4 - group_y0, gy - 1, true)
+        let igy = gy - 1;
+        if direct_borders {
+            // center_y = y - igy * group_ysize (row in neighbor's center data)
+            (y + group_ysize - group_y0, igy, true)
+        } else {
+            (y + (by >> dy) * 4 - group_y0, igy, true)
+        }
     } else if y >= group_y0 + group_ysize {
+        // For both direct and extracted borders, input_y = y - group_y0 - group_ysize
+        // (this is the center data row for the group below, or topbottom top-half index)
         (y - group_y0 - group_ysize, gy + 1, true)
     } else {
         (y - group_y0, gy, false)
@@ -110,7 +126,12 @@ fn fill_initial_buffers(
 
     // Previous group horizontally, if needed.
     if copy_x0 < group_x0 {
-        let (input_buf, xs) = if is_topbottom {
+        let (input_buf, xs) = if direct_borders {
+            // Read directly from the neighbor's center data.
+            let buf = view.input_buffers[base_gid - 1].data[c].as_ref().unwrap();
+            let xs_bytes = buf.byte_size().0;
+            (buf, xs_bytes / ty.size())
+        } else if is_topbottom {
             (
                 view.input_buffers[base_gid - 1].topbottom[c]
                     .as_ref()
@@ -134,7 +155,7 @@ fn fill_initial_buffers(
             .copy_from_slice(&input_row[src_byte_offset..src_byte_offset + to_copy]);
         copy_byte_offset += to_copy;
     }
-    let input_buf = if is_topbottom {
+    let input_buf = if is_topbottom && !direct_borders {
         view.input_buffers[base_gid].topbottom[c].as_ref().unwrap()
     } else {
         view.input_buffers[base_gid].data[c].as_ref().unwrap()
@@ -148,7 +169,9 @@ fn fill_initial_buffers(
     copy_byte_offset += to_copy;
     // Next group horizontally, if any.
     if copy_x1 > group_x1 {
-        let input_buf = if is_topbottom {
+        let input_buf = if direct_borders {
+            view.input_buffers[base_gid + 1].data[c].as_ref().unwrap()
+        } else if is_topbottom {
             view.input_buffers[base_gid + 1].topbottom[c]
                 .as_ref()
                 .unwrap()

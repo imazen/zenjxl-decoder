@@ -590,6 +590,7 @@ impl LowMemoryRenderPipeline {
     #[allow(clippy::type_complexity)]
     pub(crate) fn prepare_groups_parallel(
         &mut self,
+        skip_border_copy: bool,
     ) -> Result<(Vec<group_scheduler::RenderWorkItem>, Vec<(usize, bool)>)> {
         use group_scheduler::extract_borders;
         use rayon::prelude::*;
@@ -603,7 +604,7 @@ impl LowMemoryRenderPipeline {
         let extracted: Vec<bool> = self
             .input_buffers
             .par_iter_mut()
-            .map(|buf| extract_borders(buf, shared, border_size))
+            .map(|buf| extract_borders(buf, shared, border_size, skip_border_copy))
             .collect::<Result<Vec<_>>>()?;
 
         // Phase 2 (serial): emit work items in group index order.
@@ -642,6 +643,7 @@ impl LowMemoryRenderPipeline {
     pub(crate) fn store_and_prepare_groups_parallel(
         &mut self,
         pending_stores: &mut [Option<([OwnedRawImage; 3], bool)>],
+        skip_border_copy: bool,
     ) -> Result<(Vec<group_scheduler::RenderWorkItem>, Vec<(usize, bool)>)> {
         use group_scheduler::extract_borders;
         use rayon::prelude::*;
@@ -671,7 +673,7 @@ impl LowMemoryRenderPipeline {
                         buf.set_buffer(c, img);
                     }
                 }
-                extract_borders(buf, shared, border_size)
+                extract_borders(buf, shared, border_size, skip_border_copy)
             })
             .collect::<Result<Vec<_>>>()?;
 

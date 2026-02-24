@@ -9,6 +9,7 @@ use crate::render::low_memory_pipeline::render_group::ChannelVec;
 /// Panics if any of the indices are out of bounds or
 /// (idx[i].0, idx[i].1) == (idx[j].0, idx[j].1) for i != j or indices are not
 /// sorted lexicographically.
+#[cfg(feature = "allow-unsafe")]
 #[inline]
 #[allow(unsafe_code)]
 pub(super) fn get_distinct_indices<'a, T>(
@@ -23,9 +24,10 @@ pub(super) fn get_distinct_indices<'a, T>(
     let mut prev_outer = usize::MAX;
     let mut prev_inner = usize::MAX;
     for &(outer, inner, pos) in idx {
-        // Verify sorted and distinct (same check as before, just explicit)
         debug_assert!(
-            prev_outer == usize::MAX || outer > prev_outer || (outer == prev_outer && inner > prev_inner),
+            prev_outer == usize::MAX
+                || outer > prev_outer
+                || (outer == prev_outer && inner > prev_inner),
             "indices must be sorted and distinct"
         );
         prev_outer = outer;
@@ -41,6 +43,41 @@ pub(super) fn get_distinct_indices<'a, T>(
     }
 
     answer_buffer
+        .into_iter()
+        .map(|x| x.expect("Not all elements were found"))
+        .collect()
+}
+
+/// Safe fallback using split_at_mut to avoid aliasing mutable references.
+#[cfg(not(feature = "allow-unsafe"))]
+#[inline]
+pub(super) fn get_distinct_indices<'a, T>(
+    vals: &'a mut [impl AsMut<[T]>],
+    idx: &[(usize, usize, usize)],
+) -> ChannelVec<&'a mut T> {
+    let mut answer: ChannelVec<Option<&'a mut T>> = ChannelVec::new();
+    for _ in 0..idx.len() {
+        answer.push(None);
+    }
+
+    // Process each outer slice using split_at_mut to safely extract elements.
+    for (outer_idx, outer_val) in vals.iter_mut().enumerate() {
+        let mut remaining = outer_val.as_mut();
+        let mut base = 0usize;
+        for &(outer, inner, pos) in idx {
+            if outer != outer_idx {
+                continue;
+            }
+            debug_assert!(inner >= base, "indices must be sorted within each outer");
+            let (_, rest) = remaining.split_at_mut(inner - base);
+            let (element, after) = rest.split_first_mut().unwrap();
+            answer[pos] = Some(element);
+            remaining = after;
+            base = inner + 1;
+        }
+    }
+
+    answer
         .into_iter()
         .map(|x| x.expect("Not all elements were found"))
         .collect()

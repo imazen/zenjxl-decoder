@@ -506,6 +506,11 @@ impl LowMemoryRenderPipeline {
 /// It resets ready_channels, copies border data, and sets is_ready = true.
 /// Skips the scratch buffer pool (allocates fresh if needed) for thread safety.
 ///
+/// When `skip_copy` is true, border data is not copied — the rendering phase
+/// will read border pixels directly from neighbors' center data buffers.
+/// This is only safe when ALL groups' center data remains alive through rendering
+/// (i.e., unbatched parallel mode where Phase 3b completes before Phase 3c recycles).
+///
 /// After all groups have had borders extracted, call `emit_work_items` serially
 /// to compute the readiness mask and work items (which reads neighbor is_ready).
 #[cfg(feature = "threads")]
@@ -513,11 +518,18 @@ pub(super) fn extract_borders(
     buf: &mut InputBuffer,
     shared: &RenderPipelineShared<RowBuffer>,
     border_size: (usize, usize),
+    skip_copy: bool,
 ) -> Result<bool> {
     if !buf.is_all_channels_ready() {
         return Ok(false);
     }
     buf.ready_channels = 0;
+
+    if skip_copy {
+        // Direct borders mode: rendering reads from center data directly.
+        // No topbottom/leftright buffers needed.
+        return Ok(true);
+    }
 
     // Extract border data from the group's buffers.
     for c in 0..shared.num_channels() {
