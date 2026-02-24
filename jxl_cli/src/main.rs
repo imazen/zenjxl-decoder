@@ -106,6 +106,19 @@ fn main() -> Result<()> {
     }
 
     let opt = Opt::parse();
+
+    // Configure rayon thread pool based on --num-threads.
+    // Must happen before any rayon parallel work.
+    #[cfg(feature = "threads")]
+    if let Some(n) = opt.num_threads {
+        if n > 0 {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(n)
+                .build_global()
+                .wrap_err("Failed to configure thread pool")?;
+        }
+    }
+
     let mut file = fs::File::open(opt.input.clone())
         .wrap_err_with(|| format!("Failed to read source image from {:?}", opt.input))?;
 
