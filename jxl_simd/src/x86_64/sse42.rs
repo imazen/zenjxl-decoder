@@ -22,10 +22,12 @@ pub struct Sse42Descriptor(());
 impl Sse42Descriptor {
     /// # Safety
     /// The caller must guarantee that the sse4.2 target feature is available.
+    #[inline]
     pub unsafe fn new_unchecked() -> Self {
         Self(())
     }
 
+    #[inline]
     pub fn from_token(_token: archmage::X64V2Token) -> Self {
         Self(())
     }
@@ -43,10 +45,12 @@ impl SimdDescriptor for Sse42Descriptor {
     type Descriptor256 = Self;
     type Descriptor128 = Self;
 
+    #[inline]
     fn maybe_downgrade_256bit(self) -> Self::Descriptor256 {
         self
     }
 
+    #[inline]
     fn maybe_downgrade_128bit(self) -> Self::Descriptor128 {
         self
     }

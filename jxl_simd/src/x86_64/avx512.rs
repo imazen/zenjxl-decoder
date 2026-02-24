@@ -24,14 +24,17 @@ pub struct Avx512Descriptor(());
 impl Avx512Descriptor {
     /// # Safety
     /// The caller must guarantee that "avx512f" and "avx512bw" target features are available.
+    #[inline]
     pub unsafe fn new_unchecked() -> Self {
         Self(())
     }
 
+    #[inline]
     pub fn from_token(_token: archmage::X64V4Token) -> Self {
         Self(())
     }
 
+    #[inline]
     pub fn as_avx(&self) -> AvxDescriptor {
         // SAFETY: the safety invariant on `self` guarantees avx512f is available, which implies
         // avx2 and fma.
@@ -58,10 +61,12 @@ impl SimdDescriptor for Avx512Descriptor {
     type Descriptor256 = AvxDescriptor;
     type Descriptor128 = Sse42Descriptor;
 
+    #[inline]
     fn maybe_downgrade_256bit(self) -> Self::Descriptor256 {
         self.as_avx()
     }
 
+    #[inline]
     fn maybe_downgrade_128bit(self) -> Self::Descriptor128 {
         self.as_avx().as_sse42()
     }

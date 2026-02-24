@@ -251,6 +251,7 @@ impl<'a> RawImageRect<'a> {
         &self.storage[start..start + self.bytes_per_row]
     }
 
+    #[inline]
     pub fn rect(&self, rect: Rect) -> RawImageRect<'a> {
         sub_rect(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
     }
@@ -286,6 +287,7 @@ impl<'a> RawImageRectMut<'a> {
         &mut self.storage[start..start + self.bytes_per_row]
     }
 
+    #[inline]
     pub fn rect_mut(&mut self, rect: Rect) -> RawImageRectMut<'_> {
         sub_rect_mut(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
     }

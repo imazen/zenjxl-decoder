@@ -23,10 +23,12 @@ pub struct NeonDescriptor(());
 impl NeonDescriptor {
     /// # Safety
     /// The caller must guarantee that the "neon" target feature is available.
+    #[inline]
     pub unsafe fn new_unchecked() -> Self {
         Self(())
     }
 
+    #[inline]
     pub fn from_token(_token: archmage::NeonToken) -> Self {
         Self(())
     }
@@ -64,10 +66,12 @@ impl SimdDescriptor for NeonDescriptor {
         }
     }
 
+    #[inline]
     fn maybe_downgrade_256bit(self) -> Self {
         self
     }
 
+    #[inline]
     fn maybe_downgrade_128bit(self) -> Self {
         self
     }

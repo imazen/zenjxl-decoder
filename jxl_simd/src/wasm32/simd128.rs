@@ -20,6 +20,7 @@ use super::super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, 
 pub struct Wasm128Descriptor(());
 
 impl Wasm128Descriptor {
+    #[inline]
     pub fn from_token(_token: archmage::Wasm128Token) -> Self {
         Self(())
     }
@@ -49,10 +50,12 @@ impl SimdDescriptor for Wasm128Descriptor {
         Some(Self(()))
     }
 
+    #[inline]
     fn maybe_downgrade_256bit(self) -> Self {
         self
     }
 
+    #[inline]
     fn maybe_downgrade_128bit(self) -> Self {
         self
     }

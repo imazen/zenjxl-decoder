@@ -14,6 +14,7 @@ use super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, U16Simd
 pub struct ScalarDescriptor;
 
 impl ScalarDescriptor {
+    #[inline]
     pub fn from_token(_token: archmage::ScalarToken) -> Self {
         Self
     }
@@ -31,14 +32,17 @@ impl SimdDescriptor for ScalarDescriptor {
     type Descriptor256 = Self;
     type Descriptor128 = Self;
 
+    #[inline]
     fn maybe_downgrade_256bit(self) -> Self::Descriptor256 {
         self
     }
 
+    #[inline]
     fn maybe_downgrade_128bit(self) -> Self::Descriptor128 {
         self
     }
 
+    #[inline]
     fn new() -> Option<Self> {
         Some(Self)
     }
