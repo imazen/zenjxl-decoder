@@ -4,6 +4,8 @@
 // license that can be found in the LICENSE file.
 
 mod data_type;
+#[cfg(feature = "threads")]
+pub(crate) mod disjoint;
 mod internal;
 mod output_buffer;
 mod raw;

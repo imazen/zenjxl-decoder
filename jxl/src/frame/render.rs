@@ -299,47 +299,7 @@ impl Frame {
         use crate::render::buffer_splitter::SharedOutputBuffers;
         use crate::render::low_memory_pipeline::render_group;
 
-        /// Provides parallel access to disjoint rows of an `Image<i32>`.
-        ///
-        /// Each row corresponds to one group's HF coefficient storage.
-        /// Safety: the caller must ensure no two concurrent calls use the same `row`.
-        struct SplitRowAccess {
-            ptr: *mut i32,
-            row_stride: usize, // in i32 elements
-            row_len: usize,    // in i32 elements
-            num_rows: usize,
-        }
-
-        impl SplitRowAccess {
-            fn from_image(img: &mut Image<i32>) -> Self {
-                let (ptr, row_stride, row_len, num_rows) = img.row_info_mut();
-                SplitRowAccess {
-                    ptr,
-                    row_stride,
-                    row_len,
-                    num_rows,
-                }
-            }
-
-            /// # Safety
-            /// Caller must ensure no two concurrent calls use the same `row`.
-            #[allow(clippy::mut_from_ref)]
-            unsafe fn row_mut(&self, row: usize) -> &mut [i32] {
-                assert!(row < self.num_rows);
-                let offset = row * self.row_stride;
-                // SAFETY: `ptr` points to contiguous image storage. Each row at
-                // `offset = row * row_stride` is non-overlapping. The caller
-                // ensures no two concurrent calls use the same `row`.
-                unsafe { std::slice::from_raw_parts_mut(self.ptr.add(offset), self.row_len) }
-            }
-        }
-
-        // SAFETY: Each parallel worker accesses a distinct row (group_id).
-        // No two workers access the same row concurrently.
-        unsafe impl Send for SplitRowAccess {}
-        // SAFETY: Concurrent reads/writes are safe because each parallel worker
-        // accesses a distinct row (group_id) — no two workers share a row.
-        unsafe impl Sync for SplitRowAccess {}
+        use crate::image::disjoint::DisjointRowAccess;
         use crate::util::{SmallVec, Xorshift128Plus};
         use rayon::prelude::*;
 
@@ -378,6 +338,8 @@ impl Frame {
             }};
         }
 
+        let phase_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
@@ -399,6 +361,7 @@ impl Frame {
         // Phase 1: Sequential — compute render decisions and allocate pixel buffers.
         // Process ALL groups at once (no batching) to minimize rayon barriers
         // and maximize work-stealing opportunities.
+        let phase1_start = std::time::Instant::now();
         let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
         for (group, passes) in groups {
             if let Some((p, _)) = passes.last() {
@@ -433,19 +396,23 @@ impl Frame {
             });
         }
 
+        let num_groups = work.len();
+        let phase1_dur = phase1_start.elapsed();
+
         // Phase 2: Parallel decode.
         // Seed the buffer pool from self.vardct_buffers so buffers persist across
         // calls. The streaming API calls this function once per group (batch_size=1),
         // so without persistence we'd allocate+zero a fresh 1.5MB buffer per group.
+        let phase2_start = std::time::Instant::now();
         {
-            // Create SplitRowAccess for multi-pass HF coefficient accumulation.
+            // Take ownership of HF coefficient images for multi-pass accumulation.
             // Each group writes to its own row — no cross-group writes.
-            // The SplitRowAccess holds raw pointers, so doesn't borrow self.
-            let hf_split = self.hf_coefficients.as_mut().map(|(a, b, c)| {
+            // DisjointRowAccess wraps the images with safe, debug-checked row access.
+            let hf_disjoint = self.hf_coefficients.take().map(|(a, b, c)| {
                 [
-                    SplitRowAccess::from_image(a),
-                    SplitRowAccess::from_image(b),
-                    SplitRowAccess::from_image(c),
+                    DisjointRowAccess::from_image(a),
+                    DisjointRowAccess::from_image(b),
+                    DisjointRowAccess::from_image(c),
                 ]
             });
 
@@ -481,14 +448,15 @@ impl Frame {
                     };
 
                     if !(gw.pixels.is_none() && gw.do_render) {
-                        // SAFETY: Each parallel task uses a distinct gw.group, so
-                        // row_mut(gw.group) accesses non-overlapping memory.
-                        let hf_coeffs = hf_split.as_ref().map(|splits| unsafe {
-                            [
-                                splits[0].row_mut(gw.group),
-                                splits[1].row_mut(gw.group),
-                                splits[2].row_mut(gw.group),
-                            ]
+                        // Each parallel task uses a distinct gw.group —
+                        // DisjointRowAccess verifies this in debug builds.
+                        let mut guards = hf_disjoint.as_ref().map(|splits| [
+                            splits[0].row_guard(gw.group),
+                            splits[1].row_guard(gw.group),
+                            splits[2].row_guard(gw.group),
+                        ]);
+                        let hf_coeffs = guards.as_mut().map(|[g0, g1, g2]| {
+                            [g0.as_mut_slice(), g1.as_mut_slice(), g2.as_mut_slice()]
                         });
                         decode_vardct_group(
                             gw.group,
@@ -526,10 +494,19 @@ impl Frame {
             })?;
             // Save one buffer for reuse in next call
             self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
+
+            // Restore HF coefficient images after parallel access is complete.
+            if let Some([a, b, c]) = hf_disjoint {
+                self.hf_coefficients =
+                    Some((a.into_image(), b.into_image(), c.into_image()));
+            }
         }
+
+        let phase2_dur = phase2_start.elapsed();
 
         // Phase 3a-store: Sequential — store decoded buffers and run process_output.
         // Tracks (group, do_render, is_main_work_group) for building render_infos later.
+        let phase3a_start = std::time::Instant::now();
         let mut groups_stored: Vec<(usize, bool, bool)> = Vec::with_capacity(work.len());
         for gw in work {
             self.decoder_state.check_cancelled()?;
@@ -665,6 +642,9 @@ impl Frame {
             }
         }
 
+        let phase3a_store_dur = phase3a_start.elapsed();
+        let phase3a_prep_start = std::time::Instant::now();
+
         // Phase 3a-prepare: Parallel — extract borders and emit work items.
         // All groups have been stored above, so the neighbor readiness mask is
         // trivially all-true. This is the main parallelism win: border extraction
@@ -689,7 +669,10 @@ impl Frame {
             }
         }
 
+        let phase3a_prepare_dur = phase3a_prep_start.elapsed();
+
         // Phase 3b: Parallel render — render all work items across threads.
+        let phase3b_start = std::time::Instant::now();
         if !all_items.is_empty() {
             // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
             // output buffers. We don't use buffer_splitter while shared_bufs is alive,
@@ -736,7 +719,10 @@ impl Frame {
             }
         }
 
+        let phase3b_dur = phase3b_start.elapsed();
+
         // Phase 3c: Sequential — recycle buffers and update flush state.
+        let phase3c_start = std::time::Instant::now();
         for ri in &render_infos {
             if ri.has_items {
                 lmp_mut!().recycle_group_buffers(ri.group);
@@ -747,6 +733,23 @@ impl Frame {
                 self.groups_to_flush.insert(ri.group);
             }
         }
+        let phase3c_dur = phase3c_start.elapsed();
+
+        if phase_timing {
+            eprintln!(
+                "[JXL_PHASE_TIMING] {num_groups} groups | \
+                 P1(alloc): {:.2}ms | P2(decode): {:.2}ms | \
+                 P3a-store: {:.2}ms | P3a-prepare: {:.2}ms | \
+                 P3b(render): {:.2}ms | P3c(recycle): {:.2}ms",
+                phase1_dur.as_secs_f64() * 1000.0,
+                phase2_dur.as_secs_f64() * 1000.0,
+                phase3a_store_dur.as_secs_f64() * 1000.0,
+                phase3a_prepare_dur.as_secs_f64() * 1000.0,
+                phase3b_dur.as_secs_f64() * 1000.0,
+                phase3c_dur.as_secs_f64() * 1000.0,
+            );
+        }
+
         Ok(())
     }
 
