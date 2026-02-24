@@ -418,8 +418,11 @@ pub fn decode_vardct_group(
         })
         .collect::<Result<SmallVec<[_; 4]>>>()?;
 
-    // Reset and use pooled buffers
-    buffers.reset();
+    // Reset coefficients for reuse. Only needed when using local coeffs_storage
+    // (hf_coefficients is None). When hf_coefficients is Some, coeffs_storage is unused.
+    if hf_coefficients.is_none() {
+        buffers.reset();
+    }
     let scratch = &mut buffers.scratch;
     let color_correlation_params = lf_global.color_correlation_params.as_ref().unwrap();
     let cmap_rect = Rect {

@@ -9,10 +9,10 @@ use crate::api::{
 };
 use crate::error::Result;
 use crate::headers::{FileHeader, OpsinInverseMatrix};
-use crate::render::RenderPipelineInPlaceStage;
+use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
 use crate::render::stages::from_linear;
-use crate::util::{Matrix3x3, inv_3x3_matrix, mul_3x3_matrix};
-use jxl_simd::{F32SimdVec, simd_function};
+use crate::util::{Matrix3x3, eval_rational_poly_simd, inv_3x3_matrix, mul_3x3_matrix};
+use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 
 const SRGB_LUMINANCES: [f32; 3] = [0.2126, 0.7152, 0.0722];
 
@@ -257,6 +257,171 @@ impl RenderPipelineInPlaceStage for XybStage {
     }
 }
 
+/// Fused XYB inverse + sRGB transfer function + u8 conversion in a single SIMD pass.
+/// Eliminates intermediate f32 buffer writes between the three separate stages.
+pub struct XybToSrgbU8Stage {
+    first_channel: usize,
+    output_color_info: OutputColorInfo,
+    bit_depth: u8,
+}
+
+impl XybToSrgbU8Stage {
+    pub fn new(first_channel: usize, output_color_info: OutputColorInfo, bit_depth: u8) -> Self {
+        Self {
+            first_channel,
+            output_color_info,
+            bit_depth,
+        }
+    }
+}
+
+impl std::fmt::Display for XybToSrgbU8Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let c = self.first_channel;
+        write!(
+            f,
+            "Fused XYB→sRGB→U{} for channels [{},{},{}]",
+            self.bit_depth,
+            c,
+            c + 1,
+            c + 2,
+        )
+    }
+}
+
+simd_function!(
+    xyb_to_srgb_u8_dispatch,
+    d: D,
+    fn xyb_to_srgb_u8_process(
+        opsin: &OpsinInverseMatrix,
+        intensity_target: f32,
+        max_val: f32,
+        xsize: usize,
+        input_rows: &Channels<f32>,
+        output_rows: &mut ChannelsMut<u8>,
+    ) {
+        let OpsinInverseMatrix {
+            inverse_matrix: mat,
+            opsin_biases: bias,
+            ..
+        } = opsin;
+
+        // XYB inverse constants
+        let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
+        let intensity_scale = 255.0 / intensity_target;
+        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale));
+        let mat = mat.map(|x| D::F32Vec::splat(d, x));
+        let intensity_scale = D::F32Vec::splat(d, intensity_scale);
+
+        // sRGB TF constants
+        #[allow(clippy::excessive_precision)]
+        const P: [f32; 5] = [
+            -5.135152395e-4,
+            5.287254571e-3,
+            3.903842876e-1,
+            1.474205315,
+            7.352629620e-1,
+        ];
+        #[allow(clippy::excessive_precision)]
+        const Q: [f32; 5] = [
+            1.004519624e-2,
+            3.036675394e-1,
+            1.340816930,
+            9.258482155e-1,
+            2.424867759e-2,
+        ];
+        let zero = D::F32Vec::splat(d, 0.0);
+        let one = D::F32Vec::splat(d, 1.0);
+        let scale = D::F32Vec::splat(d, max_val);
+        let threshold = D::F32Vec::splat(d, 0.0031308);
+        let linear_scale = D::F32Vec::splat(d, 12.92);
+
+        let in_x = input_rows[0][0];
+        let in_y = input_rows[1][0];
+        let in_b = input_rows[2][0];
+        let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
+
+        let end = xsize.next_multiple_of(D::F32Vec::LEN);
+        for idx in (0..end).step_by(D::F32Vec::LEN) {
+            // --- XYB inverse ---
+            let x = D::F32Vec::load_from(d, in_x, idx);
+            let y = D::F32Vec::load_from(d, in_y, idx);
+            let b = D::F32Vec::load_from(d, in_b, idx);
+
+            let l = y + x - bias_cbrt[0];
+            let m = y - x - bias_cbrt[1];
+            let s = b - bias_cbrt[2];
+
+            let l2 = l * l;
+            let m2 = m * m;
+            let s2 = s * s;
+            let scaled_l = l * intensity_scale;
+            let scaled_m = m * intensity_scale;
+            let scaled_s = s * intensity_scale;
+            let l = l2.mul_add(scaled_l, scaled_bias[0]);
+            let m = m2.mul_add(scaled_m, scaled_bias[1]);
+            let s = s2.mul_add(scaled_s, scaled_bias[2]);
+
+            let r_lin = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
+            let g_lin = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
+            let b_lin = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
+
+            // --- sRGB TF + u8 quantize (inline for all 3 channels) ---
+            // Process each channel: clamp, apply sRGB curve, scale, round to u8
+            let r_c = r_lin.max(zero).min(one);
+            let r_srgb = threshold.gt(r_c).if_then_else_f32(
+                r_c * linear_scale,
+                eval_rational_poly_simd(d, r_c.sqrt(), P, Q),
+            );
+            (r_srgb * scale).round_store_u8(&mut out_r[0][idx..]);
+
+            let g_c = g_lin.max(zero).min(one);
+            let g_srgb = threshold.gt(g_c).if_then_else_f32(
+                g_c * linear_scale,
+                eval_rational_poly_simd(d, g_c.sqrt(), P, Q),
+            );
+            (g_srgb * scale).round_store_u8(&mut out_g[0][idx..]);
+
+            let b_c = b_lin.max(zero).min(one);
+            let b_srgb = threshold.gt(b_c).if_then_else_f32(
+                b_c * linear_scale,
+                eval_rational_poly_simd(d, b_c.sqrt(), P, Q),
+            );
+            (b_srgb * scale).round_store_u8(&mut out_b[0][idx..]);
+        }
+    }
+);
+
+impl RenderPipelineInOutStage for XybToSrgbU8Stage {
+    type InputT = f32;
+    type OutputT = u8;
+    const SHIFT: (u8, u8) = (0, 0);
+    const BORDER: (u8, u8) = (0, 0);
+
+    fn uses_channel(&self, c: usize) -> bool {
+        (self.first_channel..self.first_channel + 3).contains(&c)
+    }
+
+    fn process_row_chunk(
+        &self,
+        _position: (usize, usize),
+        xsize: usize,
+        input_rows: &Channels<f32>,
+        output_rows: &mut ChannelsMut<u8>,
+        _state: Option<&mut (dyn std::any::Any + Send)>,
+    ) {
+        let max_val = ((1u32 << self.bit_depth) - 1) as f32;
+        xyb_to_srgb_u8_dispatch(
+            &self.output_color_info.opsin,
+            self.output_color_info.intensity_target,
+            max_val,
+            xsize,
+            input_rows,
+            output_rows,
+        );
+    }
+}
+
 #[cfg(test)]
 mod test {
     use test_log::test;
@@ -365,4 +530,13 @@ mod test {
     }
 
     test_all_instruction_sets!(xyb_process_scalar_equivalent);
+
+    #[test]
+    fn fused_xyb_srgb_u8_consistency() -> Result<()> {
+        crate::render::test::test_stage_consistency(
+            || XybToSrgbU8Stage::new(0, OutputColorInfo::default(), 8),
+            (500, 500),
+            3,
+        )
+    }
 }
