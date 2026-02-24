@@ -367,6 +367,20 @@ impl<T: ImageDataType> SharedImageView<T> {
     /// # Safety
     /// The rect must not overlap with any other concurrently-accessed sub-view
     /// from the same `SharedImageView`. Coordinates are in elements (not bytes).
+    /// Returns a mutable slice for a single row.
+    ///
+    /// # Safety
+    /// The row must not overlap with any other concurrently-accessed row
+    /// from the same `SharedImageView`.
+    pub(crate) unsafe fn row_mut(&self, y: usize) -> &mut [T] {
+        let row_start = (y + self.offset.1) * self.bytes_between_rows + self.offset.0;
+        let row_bytes = self.byte_size.0;
+        assert!(row_start + row_bytes <= self.len, "row out of bounds");
+        let ptr = unsafe { self.ptr.add(row_start) };
+        let count = row_bytes / std::mem::size_of::<T>();
+        unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, count) }
+    }
+
     pub(crate) unsafe fn get_rect_mut(&self, rect: Rect) -> ImageRectMut<'_, T> {
         let byte_rect = rect.to_byte_rect(T::DATA_TYPE_ID);
         // Shift by offset (same as OwnedRawImage::shift_rect)

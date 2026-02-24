@@ -272,6 +272,8 @@ impl Frame {
                     inv_quant_lf * lf_quant.quant_factors[2],
                 ],
                 self.lf_image.as_mut().unwrap(),
+                #[cfg(feature = "threads")]
+                self.decoder_state.parallel,
             )
         } else {
             Ok(())
