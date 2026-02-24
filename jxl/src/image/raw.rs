@@ -125,15 +125,18 @@ impl OwnedRawImage {
         &row[offset.0..end]
     }
 
+    #[inline]
     pub fn byte_size(&self) -> (usize, usize) {
         let size = self.data.byte_size();
         (size.0 - self.padding.0, size.1 - self.padding.1)
     }
 
+    #[inline]
     pub fn byte_offset(&self) -> (usize, usize) {
         self.offset
     }
 
+    #[inline]
     pub fn byte_padding(&self) -> (usize, usize) {
         self.padding
     }
@@ -256,6 +259,7 @@ impl<'a> RawImageRect<'a> {
         sub_rect(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
     }
 
+    #[inline]
     pub fn byte_size(&self) -> (usize, usize) {
         (self.bytes_per_row, self.num_rows)
     }
@@ -301,6 +305,7 @@ impl<'a> RawImageRectMut<'a> {
         }
     }
 
+    #[inline]
     pub fn byte_size(&self) -> (usize, usize) {
         (self.bytes_per_row, self.num_rows)
     }

@@ -99,6 +99,7 @@ impl<T: ImageDataType> Image<T> {
         Ok(img)
     }
 
+    #[inline]
     pub fn size(&self) -> (usize, usize) {
         (
             self.raw.byte_size().0 / T::DATA_TYPE_ID.size(),
@@ -216,10 +217,12 @@ pub struct ImageRect<'a, T: ImageDataType> {
 }
 
 impl<'a, T: ImageDataType> ImageRect<'a, T> {
+    #[inline]
     pub fn rect(&self, rect: Rect) -> ImageRect<'a, T> {
         Self::from_raw(self.raw.rect(rect.to_byte_rect(T::DATA_TYPE_ID)))
     }
 
+    #[inline]
     pub fn size(&self) -> (usize, usize) {
         (
             self.raw.byte_size().0 / T::DATA_TYPE_ID.size(),
@@ -260,10 +263,12 @@ pub struct ImageRectMut<'a, T: ImageDataType> {
 }
 
 impl<'a, T: ImageDataType> ImageRectMut<'a, T> {
+    #[inline]
     pub fn rect(&'a mut self, rect: Rect) -> ImageRectMut<'a, T> {
         Self::from_raw(self.raw.rect_mut(rect.to_byte_rect(T::DATA_TYPE_ID)))
     }
 
+    #[inline]
     pub fn size(&self) -> (usize, usize) {
         (
             self.raw.byte_size().0 / T::DATA_TYPE_ID.size(),
