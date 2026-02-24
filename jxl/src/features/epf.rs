@@ -12,7 +12,7 @@ use crate::{
     image::Image,
 };
 
-use jxl_transforms::transform_map::*;
+use crate::transforms::transform_map::*;
 
 /// Source of sigma values for EPF (Edge Preserving Filter).
 /// For VarDCT encoding, sigma varies per-block based on quantization.

@@ -13,7 +13,7 @@ use std::f32::consts::SQRT_2;
 use jxl_simd::F32SimdVec;
 use jxl_simd::SimdDescriptor;
 
-use crate::idct_32;
+use super::idct_32;
 
 const WC_WEIGHTS_64: [f32; 32] = [
     0.500150636020651,

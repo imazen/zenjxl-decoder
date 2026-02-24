@@ -13,7 +13,6 @@ license = "BSD-3-Clause"
 exclude = ["resources/"]
 
 [dependencies]
-jxl_transforms = { package = "zenjxl-decoder-transforms", path = "../jxl_transforms", version = "0.3.0" }
 thiserror = "2.0"
 byteorder = "1.4.3"
 num-derive = "0.4"
@@ -36,6 +35,7 @@ paste = "1"
 arbtest = "0.3.2"
 png = "0.17"
 rand = "0.9.2"
+rand_chacha = "0.9.0"
 rand_xorshift = "0.4.0"
 almost-enough = { version = "0.4", features = ["std"] }
 serde_json = "1.0"

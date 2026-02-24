@@ -1693,6 +1693,7 @@ dependencies = [
  "paste",
  "png 0.17.16",
  "rand",
+ "rand_chacha",
  "rand_xorshift",
  "rayon",
  "serde_json",
@@ -1702,7 +1703,6 @@ dependencies = [
  "tracing",
  "zenjxl-decoder-macros",
  "zenjxl-decoder-simd",
- "zenjxl-decoder-transforms",
 ]
 
 [[package]]
@@ -1741,18 +1741,6 @@ dependencies = [
  "arbtest",
  "archmage",
  "paste",
-]
-
-[[package]]
-name = "zenjxl-decoder-transforms"
-version = "0.3.0"
-dependencies = [
- "criterion 0.7.0",
- "paste",
- "rand",
- "rand_chacha",
- "test-log",
- "zenjxl-decoder-simd",
 ]
 
 [[package]]

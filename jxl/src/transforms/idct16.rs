@@ -7,7 +7,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::erasing_op)]
 #![allow(clippy::identity_op)]
-use crate::*;
+use super::*;
 use jxl_simd::{F32SimdVec, SimdDescriptor};
 
 #[allow(clippy::too_many_arguments)]

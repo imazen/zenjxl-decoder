@@ -24,7 +24,7 @@ use crate::{
     headers::{bit_depth::BitDepth, frame_header::FrameHeader},
     image::Rect,
 };
-use jxl_transforms::transform_map::*;
+use crate::transforms::transform_map::*;
 
 pub const INV_LF_QUANT: [f32; 3] = [4096.0, 512.0, 256.0];
 

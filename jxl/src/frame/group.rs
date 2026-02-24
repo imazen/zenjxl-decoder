@@ -5,7 +5,7 @@
 
 use num_traits::Float;
 
-use jxl_transforms::{transform::*, transform_map::*};
+use crate::transforms::{transform::*, transform_map::*};
 
 use crate::{
     BLOCK_DIM, BLOCK_SIZE, GROUP_DIM,

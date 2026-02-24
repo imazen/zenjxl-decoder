@@ -41,7 +41,7 @@ use crate::{
     render::RenderPipeline,
     util::{CeilLog2, Xorshift128Plus, tracing_wrappers::*},
 };
-use jxl_transforms::transform_map::*;
+use crate::transforms::transform_map::*;
 
 use crate::headers::CustomTransformData;
 use crate::render::RenderPipelineInOutStage;

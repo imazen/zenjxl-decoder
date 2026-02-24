@@ -20,7 +20,7 @@ use crate::{
     image::{Image, Rect},
     util::{AtomicRefCell, CeilLog2, tracing_wrappers::*},
 };
-use jxl_transforms::transform_map::*;
+use crate::transforms::transform_map::*;
 
 mod borrowed_buffers;
 pub(crate) mod decode;

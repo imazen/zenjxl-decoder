@@ -22,6 +22,7 @@ pub(crate) mod headers;
 pub(crate) mod icc;
 pub(crate) mod image;
 pub(crate) mod render;
+pub(crate) mod transforms;
 pub(crate) mod util;
 
 #[cfg(feature = "jpeg")]

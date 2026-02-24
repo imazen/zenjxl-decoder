@@ -13,7 +13,7 @@ use crate::{
     util::{CeilLog2, tracing_wrappers::*},
 };
 
-use jxl_transforms::transform_map::*;
+use crate::transforms::transform_map::*;
 
 use std::borrow::Cow;
 use std::mem;
