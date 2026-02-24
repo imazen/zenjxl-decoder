@@ -7,7 +7,7 @@
 #![allow(clippy::approx_constant)]
 
 use super::{transform_map::HfTransformType, *};
-use jxl_simd::{SimdDescriptor, simd_function};
+use jxl_simd::SimdDescriptor;
 
 fn idct2_top_block(s: usize, block_in: &[f32], block_out: &mut [f32]) {
     let num_2x2 = s / 2;
@@ -371,7 +371,7 @@ fn afv_transform_to_pixels<D: SimdDescriptor>(
     }
 }
 
-#[inline(always)]
+#[inline]
 pub fn transform_to_pixels_impl<D: SimdDescriptor>(
     d: D,
     transform_type: HfTransformType,
@@ -661,15 +661,3 @@ pub fn transform_to_pixels_impl<D: SimdDescriptor>(
     };
 }
 
-simd_function!(
-    transform_to_pixels,
-    d: D,
-    /// This includes a call to what libjxl calls lowest_frequencies_from_lf.
-    pub fn transform_to_pixels_trampoline(
-        transform_type: HfTransformType,
-        lf: &mut [f32],
-        transform_buffer: &mut [f32],
-    ) {
-        transform_to_pixels_impl(d, transform_type, lf, transform_buffer);
-    }
-);
