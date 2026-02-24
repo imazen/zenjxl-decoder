@@ -623,4 +623,70 @@ impl LowMemoryRenderPipeline {
         }
         Ok((items, group_has_items))
     }
+
+    /// Returns the total number of groups in the pipeline.
+    pub(crate) fn num_groups(&self) -> usize {
+        self.input_buffers.len()
+    }
+
+    /// Stores pending pixel data and prepares groups in a single parallel pass.
+    ///
+    /// `pending_stores` is indexed by group_id. Each entry is `Some((pixels, complete))`
+    /// for groups that have VarDCT pixel data to store from Phase 2, or `None` for groups
+    /// that were stored in the sequential Phase 3a-store (LF upsample, noise, modular).
+    ///
+    /// Phase 1 (serial): Sets `group_chan_complete` for groups with pending stores.
+    /// Phase 2 (parallel): Stores pending pixels + extracts borders.
+    /// Phase 3 (serial): Emits work items in group index order.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn store_and_prepare_groups_parallel(
+        &mut self,
+        pending_stores: &mut [Option<([OwnedRawImage; 3], bool)>],
+    ) -> Result<(Vec<group_scheduler::RenderWorkItem>, Vec<(usize, bool)>)> {
+        use group_scheduler::extract_borders;
+        use rayon::prelude::*;
+
+        // Phase 1 (serial): set group_chan_complete for pending stores.
+        // This must happen before extract_borders, which checks is_all_channels_ready().
+        // group_chan_complete is only read later in recycle_group_buffers (Phase 3c).
+        for (g, store) in pending_stores.iter().enumerate() {
+            if let Some((_, complete)) = store {
+                for c in 0..self.shared.group_chan_complete[g].len() {
+                    self.shared.group_chan_complete[g][c] = *complete;
+                }
+            }
+        }
+
+        let shared = &self.shared;
+        let border_size = self.border_size;
+
+        // Phase 2 (parallel): store pending pixels + extract borders.
+        let extracted: Vec<bool> = self
+            .input_buffers
+            .par_iter_mut()
+            .zip(pending_stores.par_iter_mut())
+            .map(|(buf, store)| {
+                if let Some((pixels, _complete)) = store.take() {
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        buf.set_buffer(c, img);
+                    }
+                }
+                extract_borders(buf, shared, border_size)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Phase 3 (serial): emit work items in group index order.
+        let mut items = Vec::new();
+        let mut group_has_items = Vec::new();
+        for (g, did_extract) in extracted.iter().enumerate() {
+            if !did_extract {
+                continue;
+            }
+            let group_items = self.emit_work_items(g)?;
+            let has = !group_items.is_empty();
+            items.extend(group_items);
+            group_has_items.push((g, has));
+        }
+        Ok((items, group_has_items))
+    }
 }

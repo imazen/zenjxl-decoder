@@ -295,7 +295,7 @@ impl Frame {
     ) -> Result<()> {
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
-        use crate::image::Image;
+        use crate::image::{Image, OwnedRawImage};
         use crate::render::buffer_splitter::SharedOutputBuffers;
         use crate::render::low_memory_pipeline::render_group;
 
@@ -574,7 +574,27 @@ impl Frame {
             }
             phase2_dur += phase2_start.elapsed();
 
+            // Collect VarDCT pixels for parallel storage.
+            // Moving pixel storage from sequential Phase 3a-store to parallel
+            // store_and_prepare_groups_parallel eliminates the P2→P3a barrier
+            // for the dominant VarDCT pixel data.
+            let mut pending_stores: Vec<Option<([OwnedRawImage; 3], bool)>> = if is_vardct {
+                let num_groups = lmp_ref!().num_groups();
+                let mut stores: Vec<Option<([OwnedRawImage; 3], bool)>> =
+                    (0..num_groups).map(|_| None).collect();
+                for gw in &mut work[batch_start..batch_end] {
+                    if let Some(pixels) = gw.pixels.take() {
+                        stores[gw.group] = Some((pixels.map(|p| p.into_raw()), gw.complete));
+                    }
+                }
+                stores
+            } else {
+                Vec::new()
+            };
+
             // Phase 3a-store: Sequential — store decoded buffers and run process_output.
+            // VarDCT pixels from Phase 2 were already collected above; they'll be
+            // stored in parallel during store_and_prepare_groups_parallel.
             let phase3a_start = std::time::Instant::now();
             let mut groups_stored: Vec<(usize, bool, bool)> = Vec::with_capacity(batch_end - batch_start);
             for gw in &mut work[batch_start..batch_end] {
@@ -719,7 +739,15 @@ impl Frame {
             // so the readiness mask correctly reflects partial-batch boundaries.
             // Border regions at batch edges are covered by neighboring batches'
             // emit_work_items (the pipeline was designed for incremental arrival).
-            let (all_items, group_has_items) = lmp_mut!().prepare_groups_parallel()?;
+            //
+            // For VarDCT images, store_and_prepare_groups_parallel combines
+            // pending pixel storage with border extraction in a single parallel
+            // pass, eliminating the sequential pixel store bottleneck.
+            let (all_items, group_has_items) = if is_vardct && !pending_stores.is_empty() {
+                lmp_mut!().store_and_prepare_groups_parallel(&mut pending_stores)?
+            } else {
+                lmp_mut!().prepare_groups_parallel()?
+            };
             let has_items_set: std::collections::HashSet<usize> = group_has_items
                 .iter()
                 .filter(|(_, has)| *has)
