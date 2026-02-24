@@ -411,12 +411,6 @@ impl Frame {
     #[instrument(level = "debug", skip(self, br))]
     pub fn decode_lf_group(&mut self, group: usize, br: &mut BitReader) -> Result<()> {
         debug!(section_size = br.total_bits_available());
-        let lf_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
-        let t0 = std::time::Instant::now();
-        let mut vardct_lf_dur = std::time::Duration::ZERO;
-        let mut modular_dur;
-        let mut hf_meta_dur = std::time::Duration::ZERO;
-
         let lf_global = self.lf_global.as_mut().unwrap();
         if self.header.encoding == Encoding::VarDCT && !self.header.has_lf_frame() {
             info!("decoding VarDCT LF with group id {}", group);
@@ -433,19 +427,15 @@ impl Frame {
                 &mut self.quant_lf,
                 br,
             )?;
-            vardct_lf_dur = t0.elapsed();
         }
-        let t1 = std::time::Instant::now();
         lf_global.modular_global.read_stream(
             ModularStreamId::ModularLF(group),
             &self.header,
             &lf_global.tree,
             br,
         )?;
-        modular_dur = t1.elapsed();
         if self.header.encoding == Encoding::VarDCT {
             info!("decoding HF metadata with group id {}", group);
-            let t2 = std::time::Instant::now();
             let hf_meta = self.hf_meta.as_mut().unwrap();
             decode_hf_metadata(
                 group,
@@ -455,16 +445,6 @@ impl Frame {
                 hf_meta,
                 br,
             )?;
-            hf_meta_dur = t2.elapsed();
-        }
-        if lf_timing {
-            eprintln!(
-                "[JXL_LF_GROUP_TIMING] group {group}: vardct_lf: {:.2}ms | modular: {:.2}ms | hf_meta: {:.2}ms | total: {:.2}ms",
-                vardct_lf_dur.as_secs_f64() * 1000.0,
-                modular_dur.as_secs_f64() * 1000.0,
-                hf_meta_dur.as_secs_f64() * 1000.0,
-                t0.elapsed().as_secs_f64() * 1000.0,
-            );
         }
         Ok(())
     }

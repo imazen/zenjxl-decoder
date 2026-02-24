@@ -166,7 +166,6 @@ impl CodestreamParser {
 
                 let lf_groups_dur = t0.elapsed() - lf_global_dur;
 
-                let hf_global_start = std::time::Instant::now();
                 let mut decode_hf_dur = std::time::Duration::ZERO;
                 let mut pipeline_dur = std::time::Duration::ZERO;
                 let mut finalize_lf_dur = std::time::Duration::ZERO;
@@ -195,8 +194,6 @@ impl CodestreamParser {
                     self.section_state.hf_global_done = true;
                     processed_section = true;
                 }
-                let hf_global_dur = hf_global_start.elapsed();
-
                 if !self.section_state.hf_global_done {
                     break 'process;
                 }
