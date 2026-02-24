@@ -22,3 +22,5 @@ pub(crate) use output_buffer::SharedOutputView;
 pub use raw::{OwnedRawImage, RawImageRect, RawImageRectMut};
 pub use rect::Rect;
 pub use typed::{Image, ImageRect, ImageRectMut};
+#[cfg(feature = "threads")]
+pub(crate) use typed::SharedImageView;

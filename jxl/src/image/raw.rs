@@ -16,7 +16,7 @@ pub struct OwnedRawImage {
     // All the accessible bytes of `self.data` are initialized (Vec<u8> guarantees this).
     // `data.is_aligned(CACHE_LINE_BYTE_SIZE)` is true.
     pub(super) data: RawImageBuffer,
-    offset: (usize, usize),
+    pub(super) offset: (usize, usize),
     padding: (usize, usize),
     /// If set, this image's allocation is tracked against a memory budget.
     /// On drop, `tracked_bytes` will be released back to the tracker.

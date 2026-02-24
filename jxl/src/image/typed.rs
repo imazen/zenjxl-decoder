@@ -324,3 +324,113 @@ impl<T: ImageDataType> Debug for ImageRectMut<'_, T> {
         )
     }
 }
+
+/// Raw-pointer view into an `Image<T>` that can be shared across threads.
+///
+/// Created via [`Image::shared_view`], which exclusively borrows the image.
+/// Provides `unsafe fn get_rect_mut()` to create non-overlapping `ImageRectMut`
+/// sub-views for parallel access. The safety contract matches [`SharedOutputView`]
+/// and [`ParallelOutputAccess`]: the caller must ensure concurrent rects do not overlap.
+///
+/// [`SharedOutputView`]: crate::image::output_buffer::SharedOutputView
+/// [`ParallelOutputAccess`]: crate::render::buffer_splitter::ParallelOutputAccess
+#[cfg(feature = "threads")]
+pub(crate) struct SharedImageView<T: ImageDataType> {
+    ptr: *mut u8,
+    len: usize,
+    /// Bytes per row of actual content (bytes_per_row after offset).
+    bytes_per_row: usize,
+    num_rows: usize,
+    bytes_between_rows: usize,
+    /// Byte offset from ptr to the first content byte.
+    offset: (usize, usize),
+    /// Content size in bytes (without padding).
+    byte_size: (usize, usize),
+    _marker: PhantomData<T>,
+}
+
+// SAFETY: SharedImageView's raw pointer is derived from an exclusively-borrowed
+// Image. The safety contract requires non-overlapping rect access, same as
+// SharedOutputView and DisjointRowAccess.
+#[cfg(feature = "threads")]
+#[allow(unsafe_code)]
+unsafe impl<T: ImageDataType> Send for SharedImageView<T> {}
+#[cfg(feature = "threads")]
+#[allow(unsafe_code)]
+unsafe impl<T: ImageDataType> Sync for SharedImageView<T> {}
+
+#[cfg(feature = "threads")]
+#[allow(unsafe_code)]
+impl<T: ImageDataType> SharedImageView<T> {
+    /// Creates a mutable rect sub-view for parallel access.
+    ///
+    /// # Safety
+    /// The rect must not overlap with any other concurrently-accessed sub-view
+    /// from the same `SharedImageView`. Coordinates are in elements (not bytes).
+    pub(crate) unsafe fn get_rect_mut(&self, rect: Rect) -> ImageRectMut<'_, T> {
+        let byte_rect = rect.to_byte_rect(T::DATA_TYPE_ID);
+        // Shift by offset (same as OwnedRawImage::shift_rect)
+        let shifted = Rect {
+            origin: (
+                byte_rect.origin.0 + self.offset.0,
+                byte_rect.origin.1 + self.offset.1,
+            ),
+            size: byte_rect.size,
+        };
+        if shifted.size.0 == 0 || shifted.size.1 == 0 {
+            return ImageRectMut::from_raw(super::RawImageRectMut {
+                storage: &mut [],
+                bytes_per_row: 0,
+                num_rows: 0,
+                bytes_between_rows: 0,
+            });
+        }
+        assert!(
+            shifted.origin.1 + shifted.size.1 <= self.num_rows,
+            "rect y out of bounds"
+        );
+        assert!(
+            shifted.origin.0 + shifted.size.0 <= self.bytes_per_row + self.offset.0,
+            "rect x out of bounds"
+        );
+        let new_start = shifted.origin.1 * self.bytes_between_rows + shifted.origin.0;
+        let data_span = (shifted.size.1 - 1) * self.bytes_between_rows + shifted.size.0;
+        assert!(new_start + data_span <= self.len);
+        // SAFETY: Caller guarantees non-overlapping sub-views. The pointer arithmetic
+        // stays within the original allocation (verified by the assert above).
+        let sub_ptr = unsafe { self.ptr.add(new_start) };
+        ImageRectMut::from_raw(super::RawImageRectMut {
+            // SAFETY: The sub-region is within the original buffer, and the caller
+            // guarantees exclusive access to this region.
+            storage: unsafe { std::slice::from_raw_parts_mut(sub_ptr, data_span) },
+            bytes_per_row: shifted.size.0,
+            num_rows: shifted.size.1,
+            bytes_between_rows: self.bytes_between_rows,
+        })
+    }
+}
+
+#[cfg(feature = "threads")]
+#[allow(unsafe_code)]
+impl<T: ImageDataType> Image<T> {
+    /// Creates a shared view for parallel access to non-overlapping rects.
+    ///
+    /// The returned view holds raw pointers into this image's backing store.
+    /// The caller must ensure the image outlives all uses of the view.
+    pub(crate) fn shared_view(&mut self) -> SharedImageView<T> {
+        let (bpr, nr, bbr) = self.raw.data.dimensions();
+        let offset = (self.raw.offset.0 * T::DATA_TYPE_ID.size(), self.raw.offset.1);
+        let byte_size = self.raw.byte_size();
+        let storage = self.raw.data.data_slice_mut();
+        SharedImageView {
+            ptr: storage.as_mut_ptr(),
+            len: storage.len(),
+            bytes_per_row: bpr,
+            num_rows: nr,
+            bytes_between_rows: bbr,
+            offset,
+            byte_size,
+            _marker: PhantomData,
+        }
+    }
+}

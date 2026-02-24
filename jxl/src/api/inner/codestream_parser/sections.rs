@@ -121,7 +121,6 @@ impl CodestreamParser {
 
                 #[cfg(feature = "threads")]
                 let use_parallel_lf = frame.decoder_state.parallel
-                    && frame.header().encoding == crate::headers::frame_header::Encoding::Modular
                     && self.lf_sections.len() > 1;
                 #[cfg(not(feature = "threads"))]
                 let use_parallel_lf = false;
@@ -140,7 +139,13 @@ impl CodestreamParser {
                                 (group, s.data)
                             })
                             .collect();
-                        frame.decode_lf_groups_modular_parallel(sections)?;
+                        if frame.header().encoding
+                            == crate::headers::frame_header::Encoding::Modular
+                        {
+                            frame.decode_lf_groups_modular_parallel(sections)?;
+                        } else {
+                            frame.decode_lf_groups_vardct_parallel(sections)?;
+                        }
                         self.section_state.remaining_lf -= count;
                         processed_section = true;
                     }

@@ -12,7 +12,10 @@ use super::{
     coeff_order::decode_coeff_orders,
     color_correlation_map::ColorCorrelationParams,
     group::{VarDctBuffers, decode_vardct_group},
-    modular::{FullModularImage, ModularStreamId, Tree, decode_hf_metadata, decode_vardct_lf},
+    modular::{
+        FullModularImage, ModularStreamId, Tree, decode_hf_metadata, decode_hf_metadata_into_rects,
+        decode_vardct_lf, dequant_lf,
+    },
     quant_weights::DequantMatrices,
     quantizer::{LfQuantFactors, QuantizerParams},
 };
@@ -37,7 +40,7 @@ use crate::{
         frame_header::{Encoding, FrameHeader},
         toc::Toc,
     },
-    image::Image,
+    image::{Image, Rect},
     render::RenderPipeline,
     util::{CeilLog2, Xorshift128Plus, tracing_wrappers::*},
 };
@@ -408,6 +411,12 @@ impl Frame {
     #[instrument(level = "debug", skip(self, br))]
     pub fn decode_lf_group(&mut self, group: usize, br: &mut BitReader) -> Result<()> {
         debug!(section_size = br.total_bits_available());
+        let lf_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+        let t0 = std::time::Instant::now();
+        let mut vardct_lf_dur = std::time::Duration::ZERO;
+        let mut modular_dur;
+        let mut hf_meta_dur = std::time::Duration::ZERO;
+
         let lf_global = self.lf_global.as_mut().unwrap();
         if self.header.encoding == Encoding::VarDCT && !self.header.has_lf_frame() {
             info!("decoding VarDCT LF with group id {}", group);
@@ -424,15 +433,19 @@ impl Frame {
                 &mut self.quant_lf,
                 br,
             )?;
+            vardct_lf_dur = t0.elapsed();
         }
+        let t1 = std::time::Instant::now();
         lf_global.modular_global.read_stream(
             ModularStreamId::ModularLF(group),
             &self.header,
             &lf_global.tree,
             br,
         )?;
+        modular_dur = t1.elapsed();
         if self.header.encoding == Encoding::VarDCT {
             info!("decoding HF metadata with group id {}", group);
+            let t2 = std::time::Instant::now();
             let hf_meta = self.hf_meta.as_mut().unwrap();
             decode_hf_metadata(
                 group,
@@ -442,6 +455,16 @@ impl Frame {
                 hf_meta,
                 br,
             )?;
+            hf_meta_dur = t2.elapsed();
+        }
+        if lf_timing {
+            eprintln!(
+                "[JXL_LF_GROUP_TIMING] group {group}: vardct_lf: {:.2}ms | modular: {:.2}ms | hf_meta: {:.2}ms | total: {:.2}ms",
+                vardct_lf_dur.as_secs_f64() * 1000.0,
+                modular_dur.as_secs_f64() * 1000.0,
+                hf_meta_dur.as_secs_f64() * 1000.0,
+                t0.elapsed().as_secs_f64() * 1000.0,
+            );
         }
         Ok(())
     }
@@ -465,6 +488,192 @@ impl Frame {
             let mut br = BitReader::new(&data);
             modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
         })
+    }
+
+    /// Parallel LF group decode for VarDCT frames.
+    ///
+    /// Each LF group writes to disjoint rects of `lf_image`, `quant_lf`, and
+    /// `hf_meta` (determined by `lf_group_rect(group)`). Uses `SharedImageView`
+    /// to provide parallel mutable access to non-overlapping regions, following
+    /// the same safety pattern as `ParallelOutputAccess`.
+    #[cfg(feature = "threads")]
+    #[allow(unsafe_code)]
+    pub fn decode_lf_groups_vardct_parallel(
+        &mut self,
+        sections: Vec<(usize, Vec<u8>)>,
+    ) -> Result<()> {
+        use crate::image::SharedImageView;
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        assert_eq!(self.header.encoding, Encoding::VarDCT);
+
+        let lf_global = self.lf_global.as_ref().unwrap();
+        // Shared (read-only) state for all groups.
+        let header = &self.header;
+        let image_metadata = &self.decoder_state.file_header.image_metadata;
+        let tree = &lf_global.tree;
+        let color_correlation = lf_global.color_correlation_params.as_ref().unwrap();
+        let quant_params = lf_global.quant_params.as_ref().unwrap();
+        let lf_quant = &lf_global.lf_quant;
+        let bctx = lf_global.block_context_map.as_ref().unwrap();
+        let modular = &lf_global.modular_global;
+        let stop: &dyn enough::Stop = &*self.decoder_state.stop;
+        let has_lf_frame = header.has_lf_frame();
+
+        // Create SharedImageViews for parallel mutable access to disjoint rects.
+        let lf_image = self.lf_image.as_mut().unwrap();
+        let lf_views: [SharedImageView<f32>; 3] = [
+            lf_image[0].shared_view(),
+            lf_image[1].shared_view(),
+            lf_image[2].shared_view(),
+        ];
+        let quant_lf_view = self.quant_lf.shared_view();
+
+        let hf_meta = self.hf_meta.as_mut().unwrap();
+        let ytox_view = hf_meta.ytox_map.shared_view();
+        let ytob_view = hf_meta.ytob_map.shared_view();
+        let transform_view = hf_meta.transform_map.shared_view();
+        let raw_quant_view = hf_meta.raw_quant_map.shared_view();
+        let epf_view = hf_meta.epf_map.shared_view();
+        let used_hf_types = AtomicU32::new(0);
+
+        sections.into_par_iter().try_for_each(|(group, data)| {
+            stop.check()?;
+            let mut br = BitReader::new(&data);
+            let r = header.lf_group_rect(group);
+
+            // Phase 1: Decode VarDCT LF coefficients (writes to lf_image + quant_lf).
+            if !has_lf_frame {
+                let extra_precision = br.read(2)?;
+                let mul = 1.0 / (1 << extra_precision) as f32;
+                let stream_id = ModularStreamId::VarDCTLF(group).get_id(header);
+                let shrink_rect = |size: (usize, usize), c| {
+                    (
+                        size.0 >> header.hshift(c),
+                        size.1 >> header.vshift(c),
+                    )
+                };
+                let mut buffers = [
+                    super::modular::ModularChannel::new(
+                        shrink_rect(r.size, 1),
+                        image_metadata.bit_depth,
+                    )?,
+                    super::modular::ModularChannel::new(
+                        shrink_rect(r.size, 0),
+                        image_metadata.bit_depth,
+                    )?,
+                    super::modular::ModularChannel::new(
+                        shrink_rect(r.size, 2),
+                        image_metadata.bit_depth,
+                    )?,
+                ];
+                super::modular::decode::decode_modular_subbitstream(
+                    buffers.iter_mut().collect(),
+                    stream_id,
+                    None,
+                    tree,
+                    &mut br,
+                )?;
+
+                // SAFETY: Each group writes to lf_group_rect(group) which is
+                // non-overlapping across groups (structurally guaranteed by the
+                // LF group grid partitioning).
+                let lf_rects = if header.is444() {
+                    unsafe {
+                        [
+                            lf_views[0].get_rect_mut(r),
+                            lf_views[1].get_rect_mut(r),
+                            lf_views[2].get_rect_mut(r),
+                        ]
+                    }
+                } else {
+                    unsafe {
+                        [
+                            lf_views[0].get_rect_mut(Rect {
+                                origin: (
+                                    r.origin.0 >> header.hshift(0),
+                                    r.origin.1 >> header.vshift(0),
+                                ),
+                                size: (
+                                    r.size.0 >> header.hshift(0),
+                                    r.size.1 >> header.vshift(0),
+                                ),
+                            }),
+                            lf_views[1].get_rect_mut(Rect {
+                                origin: (
+                                    r.origin.0 >> header.hshift(1),
+                                    r.origin.1 >> header.vshift(1),
+                                ),
+                                size: (
+                                    r.size.0 >> header.hshift(1),
+                                    r.size.1 >> header.vshift(1),
+                                ),
+                            }),
+                            lf_views[2].get_rect_mut(Rect {
+                                origin: (
+                                    r.origin.0 >> header.hshift(2),
+                                    r.origin.1 >> header.vshift(2),
+                                ),
+                                size: (
+                                    r.size.0 >> header.hshift(2),
+                                    r.size.1 >> header.vshift(2),
+                                ),
+                            }),
+                        ]
+                    }
+                };
+                // SAFETY: quant_lf rect is non-overlapping per group.
+                let quant_lf_rect = unsafe { quant_lf_view.get_rect_mut(r) };
+                super::modular::dequant_lf(
+                    r,
+                    lf_rects,
+                    quant_lf_rect,
+                    [&buffers[0].data, &buffers[1].data, &buffers[2].data],
+                    color_correlation,
+                    quant_params,
+                    lf_quant,
+                    mul,
+                    header,
+                    bctx,
+                )?;
+            }
+
+            // Phase 2: Modular LF stream (uses RefCell internally, already thread-safe).
+            modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)?;
+
+            // Phase 3: Decode HF metadata (writes to hf_meta maps).
+            let cr = Rect {
+                origin: (r.origin.0 >> 3, r.origin.1 >> 3),
+                size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
+            };
+            // SAFETY: Each group's cr/r rects are non-overlapping.
+            let ytox_rect = unsafe { ytox_view.get_rect_mut(cr) };
+            let ytob_rect = unsafe { ytob_view.get_rect_mut(cr) };
+            let transform_rect = unsafe { transform_view.get_rect_mut(r) };
+            let raw_quant_rect = unsafe { raw_quant_view.get_rect_mut(r) };
+            let epf_rect = unsafe { epf_view.get_rect_mut(r) };
+            let used = decode_hf_metadata_into_rects(
+                group,
+                header,
+                image_metadata,
+                tree,
+                r,
+                cr,
+                ytox_rect,
+                ytob_rect,
+                transform_rect,
+                raw_quant_rect,
+                epf_rect,
+                &mut br,
+            )?;
+            used_hf_types.fetch_or(used, Ordering::Relaxed);
+            Ok::<(), crate::error::Error>(())
+        })?;
+
+        // Merge the atomic used_hf_types back.
+        self.hf_meta.as_mut().unwrap().used_hf_types |= used_hf_types.load(Ordering::Relaxed);
+        Ok(())
     }
 
     #[instrument(level = "debug", skip_all)]

@@ -17,7 +17,7 @@ use crate::{
         ImageMetadata, JxlHeader, bit_depth::BitDepth, frame_header::FrameHeader,
         modular::GroupHeader,
     },
-    image::{Image, Rect},
+    image::{Image, ImageRectMut, Rect},
     util::{AtomicRefCell, CeilLog2, tracing_wrappers::*},
 };
 use crate::transforms::transform_map::*;
@@ -591,10 +591,10 @@ impl FullModularImage {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn dequant_lf(
+pub(crate) fn dequant_lf(
     r: Rect,
-    lf: &mut [Image<f32>; 3],
-    quant_lf: &mut Image<u8>,
+    mut lf_rects: [ImageRectMut<'_, f32>; 3],
+    mut quant_lf_rect: ImageRectMut<'_, u8>,
     input: [&Image<i32>; 3],
     color_correlation_params: &ColorCorrelationParams,
     quant_params: &QuantizerParams,
@@ -608,12 +608,7 @@ fn dequant_lf(
     let lf_factors = lf_quant.quant_factors.map(|factor| factor * inv_quant_lf);
 
     if frame_header.is444() {
-        let [lf0, lf1, lf2] = lf;
-        let mut lf_rects = (
-            lf0.get_rect_mut(r),
-            lf1.get_rect_mut(r),
-            lf2.get_rect_mut(r),
-        );
+        let [ref mut lf_rect_0, ref mut lf_rect_1, ref mut lf_rect_2] = lf_rects;
 
         let fac_x = lf_factors[0] * mul;
         let fac_y = lf_factors[1] * mul;
@@ -624,9 +619,9 @@ fn dequant_lf(
             let quant_row_x = input[1].row(y);
             let quant_row_y = input[0].row(y);
             let quant_row_b = input[2].row(y);
-            let dec_row_x = lf_rects.0.row(y);
-            let dec_row_y = lf_rects.1.row(y);
-            let dec_row_b = lf_rects.2.row(y);
+            let dec_row_x = lf_rect_0.row(y);
+            let dec_row_y = lf_rect_1.row(y);
+            let dec_row_b = lf_rect_2.row(y);
             for x in 0..r.size.0 {
                 let in_x = quant_row_x[x] as f32 * fac_x;
                 let in_y = quant_row_y[x] as f32 * fac_y;
@@ -637,30 +632,19 @@ fn dequant_lf(
             }
         }
     } else {
-        for (c, lf_rect) in lf.iter_mut().enumerate() {
-            let rect = Rect {
-                origin: (
-                    r.origin.0 >> frame_header.hshift(c),
-                    r.origin.1 >> frame_header.vshift(c),
-                ),
-                size: (
-                    r.size.0 >> frame_header.hshift(c),
-                    r.size.1 >> frame_header.vshift(c),
-                ),
-            };
-            let mut lf_rect = lf_rect.get_rect_mut(rect);
+        for (c, lf_rect) in lf_rects.iter_mut().enumerate() {
             let fac = lf_factors[c] * mul;
             let ch = input[if c < 2 { c ^ 1 } else { c }];
-            for y in 0..rect.size.1 {
+            let rect_size = lf_rect.size();
+            for y in 0..rect_size.1 {
                 let quant_row = ch.row(y);
                 let row = lf_rect.row(y);
-                for x in 0..rect.size.0 {
+                for x in 0..rect_size.0 {
                     row[x] = quant_row[x] as f32 * fac;
                 }
             }
         }
     }
-    let mut quant_lf_rect = quant_lf.get_rect_mut(r);
     if bctx.num_lf_contexts <= 1 {
         for y in 0..r.size.1 {
             quant_lf_rect.row(y).fill(0);
@@ -735,10 +719,53 @@ pub fn decode_vardct_lf(
         global_tree,
         br,
     )?;
+    let lf_rects = if frame_header.is444() {
+        let [lf0, lf1, lf2] = lf_image;
+        [
+            lf0.get_rect_mut(r),
+            lf1.get_rect_mut(r),
+            lf2.get_rect_mut(r),
+        ]
+    } else {
+        let [lf0, lf1, lf2] = lf_image;
+        [
+            lf0.get_rect_mut(Rect {
+                origin: (
+                    r.origin.0 >> frame_header.hshift(0),
+                    r.origin.1 >> frame_header.vshift(0),
+                ),
+                size: (
+                    r.size.0 >> frame_header.hshift(0),
+                    r.size.1 >> frame_header.vshift(0),
+                ),
+            }),
+            lf1.get_rect_mut(Rect {
+                origin: (
+                    r.origin.0 >> frame_header.hshift(1),
+                    r.origin.1 >> frame_header.vshift(1),
+                ),
+                size: (
+                    r.size.0 >> frame_header.hshift(1),
+                    r.size.1 >> frame_header.vshift(1),
+                ),
+            }),
+            lf2.get_rect_mut(Rect {
+                origin: (
+                    r.origin.0 >> frame_header.hshift(2),
+                    r.origin.1 >> frame_header.vshift(2),
+                ),
+                size: (
+                    r.size.0 >> frame_header.hshift(2),
+                    r.size.1 >> frame_header.vshift(2),
+                ),
+            }),
+        ]
+    };
+    let quant_lf_rect = quant_lf.get_rect_mut(r);
     dequant_lf(
         r,
-        lf_image,
-        quant_lf,
+        lf_rects,
+        quant_lf_rect,
         [&buffers[0].data, &buffers[1].data, &buffers[2].data],
         color_correlation_params,
         quant_params,
@@ -757,18 +784,58 @@ pub fn decode_hf_metadata(
     hf_meta: &mut HfMetadata,
     br: &mut BitReader,
 ) -> Result<()> {
+    let r = frame_header.lf_group_rect(group);
+    let cr = Rect {
+        origin: (r.origin.0 >> 3, r.origin.1 >> 3),
+        size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
+    };
+    let ytox_rect = hf_meta.ytox_map.get_rect_mut(cr);
+    let ytob_rect = hf_meta.ytob_map.get_rect_mut(cr);
+    let transform_rect = hf_meta.transform_map.get_rect_mut(r);
+    let raw_quant_rect = hf_meta.raw_quant_map.get_rect_mut(r);
+    let epf_rect = hf_meta.epf_map.get_rect_mut(r);
+    let used = decode_hf_metadata_into_rects(
+        group,
+        frame_header,
+        image_metadata,
+        global_tree,
+        r,
+        cr,
+        ytox_rect,
+        ytob_rect,
+        transform_rect,
+        raw_quant_rect,
+        epf_rect,
+        br,
+    )?;
+    hf_meta.used_hf_types |= used;
+    Ok(())
+}
+
+/// Inner implementation that writes to pre-computed rects.
+/// Returns the `used_hf_types` bitmask for the caller to merge.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_hf_metadata_into_rects(
+    group: usize,
+    frame_header: &FrameHeader,
+    image_metadata: &ImageMetadata,
+    global_tree: &Option<Tree>,
+    r: Rect,
+    cr: Rect,
+    mut ytox_map_rect: ImageRectMut<'_, i8>,
+    mut ytob_map_rect: ImageRectMut<'_, i8>,
+    mut transform_map_rect: ImageRectMut<'_, u8>,
+    mut raw_quant_map_rect: ImageRectMut<'_, i32>,
+    mut epf_map_rect: ImageRectMut<'_, u8>,
+    br: &mut BitReader,
+) -> Result<u32> {
     let stream_id = ModularStreamId::LFMeta(group).get_id(frame_header);
     debug!(?stream_id);
-    let r = frame_header.lf_group_rect(group);
     debug!(?r);
     let upper_bound = r.size.0 * r.size.1;
     let count_num_bits = upper_bound.ceil_log2();
     let count: usize = br.read(count_num_bits)? as usize + 1;
     debug!(?count);
-    let cr = Rect {
-        origin: (r.origin.0 >> 3, r.origin.1 >> 3),
-        size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
-    };
     let mut buffers = [
         ModularChannel::new_with_shift(cr.size, Some((3, 3)), image_metadata.bit_depth)?,
         ModularChannel::new_with_shift(cr.size, Some((3, 3)), image_metadata.bit_depth)?,
@@ -784,8 +851,6 @@ pub fn decode_hf_metadata(
     )?;
     let ytox_image = &buffers[0].data;
     let ytob_image = &buffers[1].data;
-    let mut ytox_map_rect = hf_meta.ytox_map.get_rect_mut(cr);
-    let mut ytob_map_rect = hf_meta.ytob_map.get_rect_mut(cr);
     let i8min: i32 = i8::MIN.into();
     let i8max: i32 = i8::MAX.into();
     for y in 0..cr.size.1 {
@@ -800,9 +865,6 @@ pub fn decode_hf_metadata(
     }
     let transform_image = &buffers[2].data;
     let epf_image = &buffers[3].data;
-    let mut transform_map_rect = hf_meta.transform_map.get_rect_mut(r);
-    let mut raw_quant_map_rect = hf_meta.raw_quant_map.get_rect_mut(r);
-    let mut epf_map_rect = hf_meta.epf_map.get_rect_mut(r);
     let mut num: usize = 0;
     let mut used_hf_types: u32 = 0;
     for y in 0..r.size.1 {
@@ -848,6 +910,5 @@ pub fn decode_hf_metadata(
             num += 1;
         }
     }
-    hf_meta.used_hf_types |= used_hf_types;
-    Ok(())
+    Ok(used_hf_types)
 }
