@@ -245,15 +245,15 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
 
         total_section_dur += section_start.elapsed();
 
-        // Create typed output buffers
+        // Create typed output buffers (uninit: decoder writes every pixel before read)
         let buf_alloc_start = Instant::now();
-        let mut outputs = vec![OwnedRawImage::new((
+        let mut outputs = vec![OwnedRawImage::new_uninit((
             frame_size.0 * samples_per_pixel,
             frame_size.1,
         ))?];
 
         for _ in 0..extra_channels {
-            outputs.push(OwnedRawImage::new(frame_size)?);
+            outputs.push(OwnedRawImage::new_uninit(frame_size)?);
         }
 
         total_buf_alloc_dur += buf_alloc_start.elapsed();

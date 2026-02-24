@@ -29,6 +29,28 @@ impl OwnedRawImage {
         Self::new_zeroed_with_padding(byte_size, (0, 0), (0, 0))
     }
 
+    /// Allocate an output buffer without zeroing.
+    ///
+    /// # Safety contract
+    /// The caller must ensure every byte is written before being read.
+    /// This is appropriate for output buffers that the decoder will fully populate.
+    pub fn new_uninit(byte_size: (usize, usize)) -> Result<Self> {
+        let mut padding = (0usize, 0usize);
+        if !(padding.0 + byte_size.0).is_multiple_of(CACHE_LINE_BYTE_SIZE) {
+            padding.0 += CACHE_LINE_BYTE_SIZE - (padding.0 + byte_size.0) % CACHE_LINE_BYTE_SIZE;
+        }
+        Ok(Self {
+            data: RawImageBuffer::try_allocate(
+                (byte_size.0 + padding.0, byte_size.1 + padding.1),
+                true,
+            )?,
+            offset: (0, 0),
+            padding,
+            tracker: None,
+            tracked_bytes: 0,
+        })
+    }
+
     pub fn new_zeroed_with_padding(
         byte_size: (usize, usize),
         offset: (usize, usize),

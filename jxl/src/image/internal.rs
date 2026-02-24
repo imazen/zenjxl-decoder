@@ -136,7 +136,7 @@ impl RawImageBuffer {
 
     /// Returns zeroed memory. The returned buffer is aligned to
     /// CACHE_LINE_BYTE_SIZE bytes via offset.
-    pub(super) fn try_allocate(byte_size: (usize, usize), _uninit: bool) -> Result<RawImageBuffer> {
+    pub(super) fn try_allocate(byte_size: (usize, usize), uninit: bool) -> Result<RawImageBuffer> {
         let (bytes_per_row, num_rows) = byte_size;
         if bytes_per_row == 0 || num_rows == 0 {
             return Ok(RawImageBuffer {
@@ -166,7 +166,18 @@ impl RawImageBuffer {
         storage.try_reserve(total_len).map_err(|_| {
             Error::ImageOutOfMemory(bytes_per_row, num_rows)
         })?;
-        storage.resize(total_len, 0);
+        if uninit {
+            // SAFETY: try_reserve succeeded so capacity >= total_len.
+            // Caller guarantees all bytes will be written before being read.
+            // This avoids touching every page upfront (saves page fault overhead
+            // for large output buffers).
+            #[allow(unsafe_code)]
+            unsafe {
+                storage.set_len(total_len);
+            }
+        } else {
+            storage.resize(total_len, 0);
+        }
 
         // Compute offset to first cache-line-aligned byte
         let base_ptr = storage.as_ptr() as usize;
