@@ -1718,6 +1718,7 @@ dependencies = [
  "half",
  "lcms2",
  "png 0.18.0",
+ "rayon",
  "tracing-subscriber",
  "vergen-gitcl",
  "zenjxl-decoder",
