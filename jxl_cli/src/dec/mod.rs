@@ -136,9 +136,12 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
     render_interval: Option<usize>,
     allow_partial_files: bool,
 ) -> Result<(DecodeOutput, Duration)> {
+    let cli_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
     let start = Instant::now();
 
     let mut decoder_with_image_info = decode_header(input, decoder_options)?;
+
+    let header_dur = start.elapsed();
 
     // Get info and clone what we need before mutating the decoder
     let info = decoder_with_image_info.basic_info().clone();
@@ -216,7 +219,13 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
     let color_type = pixel_format.color_type;
     let samples_per_pixel = pixel_format.color_type.samples_per_pixel();
 
+    let setup_dur = start.elapsed() - header_dur;
+
+    let mut total_section_dur = Duration::ZERO;
+    let mut total_buf_alloc_dur = Duration::ZERO;
+
     'frame: loop {
+        let section_start = Instant::now();
         let mut decoder_with_frame_info = match decoder_with_image_info.process(input)? {
             ProcessingResult::Complete { result } => result,
             ProcessingResult::NeedsMoreInput { .. } => {
@@ -234,7 +243,10 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
             frame_size.1,
         );
 
+        total_section_dur += section_start.elapsed();
+
         // Create typed output buffers
+        let buf_alloc_start = Instant::now();
         let mut outputs = vec![OwnedRawImage::new((
             frame_size.0 * samples_per_pixel,
             frame_size.1,
@@ -243,6 +255,8 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
         for _ in 0..extra_channels {
             outputs.push(OwnedRawImage::new(frame_size)?);
         }
+
+        total_buf_alloc_dur += buf_alloc_start.elapsed();
 
         let mut partial_renders = vec![];
 
@@ -302,6 +316,22 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
         if !decoder_with_image_info.has_more_frames() {
             break;
         }
+    }
+
+    if cli_timing {
+        let total = start.elapsed();
+        let decode_render = total - header_dur - setup_dur - total_section_dur - total_buf_alloc_dur;
+        eprintln!(
+            "[JXL_CLI_TIMING] header: {:.2}ms | setup: {:.2}ms | \
+             sections: {:.2}ms | buf_alloc: {:.2}ms | \
+             decode+render: {:.2}ms | total: {:.2}ms",
+            header_dur.as_secs_f64() * 1000.0,
+            setup_dur.as_secs_f64() * 1000.0,
+            total_section_dur.as_secs_f64() * 1000.0,
+            total_buf_alloc_dur.as_secs_f64() * 1000.0,
+            decode_render.as_secs_f64() * 1000.0,
+            total.as_secs_f64() * 1000.0,
+        );
     }
 
     Ok((image_data, start.elapsed()))

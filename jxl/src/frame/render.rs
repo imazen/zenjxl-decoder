@@ -191,11 +191,16 @@ impl Frame {
             }));
         };
 
+        let frame_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+        let frame_start = std::time::Instant::now();
+
         pipeline!(self, p, p.check_buffer_sizes(&mut buffers[..])?);
 
         let mut buffer_splitter = BufferSplitter::new(&mut buffers[..]);
 
         pipeline!(self, p, p.render_outside_frame(&mut buffer_splitter)?);
+
+        let frame_setup_dur = frame_start.elapsed();
 
         // Render data from the lf global section, if we didn't do so already, before rendering HF.
         if !self.lf_global_was_rendered {
@@ -228,6 +233,8 @@ impl Frame {
 
         // TODO(veluca): keep track of groups that should be flushed, and groups that have had nothing rendered yet.
 
+        let lf_global_dur = frame_start.elapsed() - frame_setup_dur;
+
         for (g, _) in groups.iter() {
             pipeline!(self, p, p.mark_group_to_rerender(*g));
         }
@@ -240,6 +247,7 @@ impl Frame {
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
+        let hf_start = std::time::Instant::now();
         if use_parallel {
             #[cfg(feature = "threads")]
             {
@@ -256,15 +264,34 @@ impl Frame {
                 }
             }
         }
+        let hf_dur = hf_start.elapsed();
 
+        let flush_start = std::time::Instant::now();
         if do_flush {
             for g in std::mem::take(&mut self.groups_to_flush) {
                 self.decode_hf_group(g, &mut [], &mut buffer_splitter, true)?;
             }
         }
+        let flush_dur = flush_start.elapsed();
 
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
+
+        if frame_timing {
+            let total = frame_start.elapsed();
+            let teardown = total - frame_setup_dur - lf_global_dur - hf_dur - flush_dur;
+            eprintln!(
+                "[JXL_FRAME_TIMING] setup: {:.2}ms | lf_global: {:.2}ms | \
+                 hf_groups: {:.2}ms | flush: {:.2}ms | teardown: {:.2}ms | \
+                 total: {:.2}ms",
+                frame_setup_dur.as_secs_f64() * 1000.0,
+                lf_global_dur.as_secs_f64() * 1000.0,
+                hf_dur.as_secs_f64() * 1000.0,
+                flush_dur.as_secs_f64() * 1000.0,
+                teardown.as_secs_f64() * 1000.0,
+                total.as_secs_f64() * 1000.0,
+            );
+        }
 
         Ok(())
     }
@@ -452,7 +479,9 @@ impl Frame {
         }
         let buffer_pool = std::sync::Mutex::new(vb_pool);
 
+        let mut setup_dur = std::time::Duration::ZERO;
         let mut phase2_dur = std::time::Duration::ZERO;
+        let mut collect_dur = std::time::Duration::ZERO;
         let mut phase3a_store_dur = std::time::Duration::ZERO;
         let mut phase3a_prepare_dur = std::time::Duration::ZERO;
         let mut phase3b_dur = std::time::Duration::ZERO;
@@ -462,9 +491,7 @@ impl Frame {
             let batch_end = (batch_start + decode_batch_size).min(num_groups);
 
             // Re-seed pixel pool from scratch between batches.
-            // Phase 3c recycled center data buffers back to the scratch pool,
-            // so get_buffer() pops them (free — no page faults) instead of
-            // allocating fresh.
+            let setup_start = std::time::Instant::now();
             if batch_start > 0 {
                 let batch_needs = work[batch_start..batch_end]
                     .iter()
@@ -485,6 +512,8 @@ impl Frame {
                     }
                 }
             }
+
+            setup_dur += setup_start.elapsed();
 
             // Phase 2: Parallel decode this batch.
             let phase2_start = std::time::Instant::now();
@@ -575,9 +604,7 @@ impl Frame {
             phase2_dur += phase2_start.elapsed();
 
             // Collect VarDCT pixels for parallel storage.
-            // Moving pixel storage from sequential Phase 3a-store to parallel
-            // store_and_prepare_groups_parallel eliminates the P2→P3a barrier
-            // for the dominant VarDCT pixel data.
+            let collect_start = std::time::Instant::now();
             let mut pending_stores: Vec<Option<([OwnedRawImage; 3], bool)>> = if is_vardct {
                 let num_groups = lmp_ref!().num_groups();
                 let mut stores: Vec<Option<([OwnedRawImage; 3], bool)>> =
@@ -592,9 +619,9 @@ impl Frame {
                 Vec::new()
             };
 
+            collect_dur += collect_start.elapsed();
+
             // Phase 3a-store: Sequential — store decoded buffers and run process_output.
-            // VarDCT pixels from Phase 2 were already collected above; they'll be
-            // stored in parallel during store_and_prepare_groups_parallel.
             let phase3a_start = std::time::Instant::now();
             let mut groups_stored: Vec<(usize, bool, bool)> = Vec::with_capacity(batch_end - batch_start);
             for gw in &mut work[batch_start..batch_end] {
@@ -846,17 +873,22 @@ impl Frame {
 
         if phase_timing {
             let batches = num_groups.div_ceil(decode_batch_size);
+            let total = phase1_dur + setup_dur + phase2_dur + collect_dur
+                + phase3a_store_dur + phase3a_prepare_dur + phase3b_dur + phase3c_dur;
             eprintln!(
                 "[JXL_PHASE_TIMING] {num_groups} groups ({batches} batches of {decode_batch_size}) | \
-                 P1(decisions): {:.2}ms | P2(decode): {:.2}ms | \
-                 P3a-store: {:.2}ms | P3a-prepare: {:.2}ms | \
-                 P3b(render): {:.2}ms | P3c(recycle): {:.2}ms",
+                 P1: {:.2}ms | setup: {:.2}ms | P2: {:.2}ms | collect: {:.2}ms | \
+                 P3a-store: {:.2}ms | P3a-prep: {:.2}ms | \
+                 P3b: {:.2}ms | P3c: {:.2}ms | sum: {:.2}ms",
                 phase1_dur.as_secs_f64() * 1000.0,
+                setup_dur.as_secs_f64() * 1000.0,
                 phase2_dur.as_secs_f64() * 1000.0,
+                collect_dur.as_secs_f64() * 1000.0,
                 phase3a_store_dur.as_secs_f64() * 1000.0,
                 phase3a_prepare_dur.as_secs_f64() * 1000.0,
                 phase3b_dur.as_secs_f64() * 1000.0,
                 phase3c_dur.as_secs_f64() * 1000.0,
+                total.as_secs_f64() * 1000.0,
             );
         }
 

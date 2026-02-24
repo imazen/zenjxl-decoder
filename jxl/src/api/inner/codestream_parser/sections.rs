@@ -104,6 +104,9 @@ impl CodestreamParser {
                 )?;
                 processed_section = true;
             } else {
+                let section_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+                let t0 = std::time::Instant::now();
+
                 if let Some(lf_global) = self.lf_global_section.take() {
                     frame.decode_lf_global(&mut BitReader::new(&lf_global.data))?;
                     self.section_state.lf_global_done = true;
@@ -113,6 +116,8 @@ impl CodestreamParser {
                 if !self.section_state.lf_global_done {
                     break 'process;
                 }
+
+                let lf_global_dur = t0.elapsed();
 
                 #[cfg(feature = "threads")]
                 let use_parallel_lf = frame.decoder_state.parallel
@@ -154,8 +159,18 @@ impl CodestreamParser {
                     break 'process;
                 }
 
+                let lf_groups_dur = t0.elapsed() - lf_global_dur;
+
+                let hf_global_start = std::time::Instant::now();
+                let mut decode_hf_dur = std::time::Duration::ZERO;
+                let mut pipeline_dur = std::time::Duration::ZERO;
+                let mut finalize_lf_dur = std::time::Duration::ZERO;
                 if let Some(hf_global) = self.hf_global_section.take() {
+                    let t = std::time::Instant::now();
                     frame.decode_hf_global(&mut BitReader::new(&hf_global.data))?;
+                    decode_hf_dur = t.elapsed();
+
+                    let t = std::time::Instant::now();
                     frame.prepare_render_pipeline(
                         self.pixel_format.as_ref().unwrap(),
                         decode_options.cms.as_deref(),
@@ -166,15 +181,22 @@ impl CodestreamParser {
                             "output_color_profile should be set before pipeline preparation",
                         ),
                     )?;
+                    pipeline_dur = t.elapsed();
+
+                    let t = std::time::Instant::now();
                     frame.finalize_lf()?;
+                    finalize_lf_dur = t.elapsed();
+
                     self.section_state.hf_global_done = true;
                     processed_section = true;
                 }
+                let hf_global_dur = hf_global_start.elapsed();
 
                 if !self.section_state.hf_global_done {
                     break 'process;
                 }
 
+                let prep_start = std::time::Instant::now();
                 let mut group_readers = vec![];
                 let mut processed_groups = vec![];
 
@@ -211,6 +233,22 @@ impl CodestreamParser {
                         }
                     }
                     self.candidate_hf_sections.clear();
+                }
+                let prep_dur = prep_start.elapsed();
+
+                if section_timing {
+                    eprintln!(
+                        "[JXL_SECTION_TIMING] lf_global: {:.2}ms | lf_groups: {:.2}ms | \
+                         decode_hf: {:.2}ms | pipeline: {:.2}ms | finalize_lf: {:.2}ms | \
+                         hf_prep: {:.2}ms | total: {:.2}ms",
+                        lf_global_dur.as_secs_f64() * 1000.0,
+                        lf_groups_dur.as_secs_f64() * 1000.0,
+                        decode_hf_dur.as_secs_f64() * 1000.0,
+                        pipeline_dur.as_secs_f64() * 1000.0,
+                        finalize_lf_dur.as_secs_f64() * 1000.0,
+                        prep_dur.as_secs_f64() * 1000.0,
+                        t0.elapsed().as_secs_f64() * 1000.0,
+                    );
                 }
 
                 frame.decode_and_render_hf_groups(
