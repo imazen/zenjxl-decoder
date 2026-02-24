@@ -105,7 +105,7 @@ impl<'a, 'b> BufferSplitter<'a, 'b> {
 }
 
 /// Computes the channel rect for a given save buffer info and image rect.
-/// Shared between BufferSplitter::get_local_buffers and SharedOutputBuffers::get_local_buffers.
+/// Shared between BufferSplitter::get_local_buffers and ParallelOutputAccess::get_local_buffers.
 #[cfg(feature = "threads")]
 fn compute_channel_rect(
     bi: &SaveStageBufferInfo,
@@ -149,43 +149,43 @@ fn compute_channel_rect(
     Some(channel_rect.to_byte_rect_sz(bi.byte_size))
 }
 
-/// Thread-safe access to output buffers for parallel rendering.
-/// Wraps shared views of the output buffers so multiple threads can
-/// create non-overlapping sub-views concurrently.
+/// Safe parallel access to output buffers for multi-threaded rendering.
 ///
-/// # Safety
-/// The backing memory of the output buffers must remain valid while this struct exists.
-/// Callers must ensure all sub-views access non-overlapping regions.
+/// Created via [`BufferSplitter::parallel_access`], which exclusively borrows
+/// the buffer splitter — the compiler prevents any other access while this
+/// guard exists. Internally uses raw pointers (like [`DisjointRowAccess`]) but
+/// exposes a safe API. Debug builds track outstanding rects and assert no overlap.
+///
+/// [`DisjointRowAccess`]: crate::image::disjoint::DisjointRowAccess
 #[cfg(feature = "threads")]
-pub(crate) struct SharedOutputBuffers {
+pub(crate) struct ParallelOutputAccess<'a> {
     views: Vec<Option<SharedOutputView>>,
+    #[cfg(debug_assertions)]
+    outstanding: std::sync::Mutex<Vec<(usize, Rect)>>,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
+
+// SAFETY: All fields are Sync (SharedOutputView has manual Sync impl,
+// Mutex is Sync, PhantomData is Sync). The raw pointers inside
+// SharedOutputView are derived from the exclusively-borrowed BufferSplitter
+// and only used to create non-overlapping sub-views.
+#[cfg(feature = "threads")]
+#[allow(unsafe_code)]
+unsafe impl Sync for ParallelOutputAccess<'_> {}
 
 #[cfg(feature = "threads")]
 #[allow(unsafe_code)]
-impl SharedOutputBuffers {
-    /// Creates shared output buffers from the buffer splitter's full buffers.
+impl ParallelOutputAccess<'_> {
+    /// Creates local buffer sub-views for a given image rect.
     ///
-    /// # Safety
-    /// - The buffer splitter's backing data must outlive the returned SharedOutputBuffers
-    /// - The buffer splitter's buffers must not be accessed while SharedOutputBuffers exists
-    pub(crate) unsafe fn from_buffer_splitter(splitter: &mut BufferSplitter) -> Self {
-        let buffers = splitter.get_full_buffers();
-        Self {
-            views: buffers
-                .iter()
-                // SAFETY: Guaranteed by the safety contract of from_buffer_splitter.
-                .map(|buf| buf.as_ref().map(|b| unsafe { b.shared_view() }))
-                .collect(),
-        }
-    }
-
-    /// Creates local buffer sub-views for a given rect.
-    /// Same logic as BufferSplitter::get_local_buffers but for parallel use.
+    /// Each work item's rect must be non-overlapping with all other concurrent
+    /// rects. This invariant is structurally guaranteed by `emit_work_items`,
+    /// which partitions the image into non-overlapping regions via the serial
+    /// `is_ready` assignment protocol.
     ///
-    /// # Safety
-    /// The rect must not overlap with any other rect being concurrently processed.
-    pub(crate) unsafe fn get_local_buffers(
+    /// Debug builds verify non-overlap at runtime; release builds compile the
+    /// check out (same pattern as `DisjointRowAccess`).
+    pub(crate) fn get_local_buffers(
         &self,
         save_buffer_info: &[Option<SaveStageBufferInfo>],
         rect: Rect,
@@ -211,9 +211,70 @@ impl SharedOutputBuffers {
             else {
                 continue;
             };
-            // SAFETY: Caller ensures non-overlapping access across threads.
+            #[cfg(debug_assertions)]
+            {
+                let mut outstanding = self.outstanding.lock().unwrap();
+                for &(ch, ref existing) in outstanding.iter() {
+                    if ch == i {
+                        assert!(
+                            !rects_overlap(existing, &channel_rect),
+                            "ParallelOutputAccess: overlapping rects on channel {i}: \
+                             existing {existing:?} vs new {channel_rect:?}"
+                        );
+                    }
+                }
+                outstanding.push((i, channel_rect));
+            }
+            // SAFETY: The work items are structurally non-overlapping (guaranteed
+            // by emit_work_items' serial is_ready protocol). Debug builds verify
+            // this above. The raw pointer is valid for the buffer splitter's
+            // lifetime (enforced by the PhantomData lifetime on this struct).
             local_buffers[i] = Some(unsafe { view.sub_view(channel_rect) });
         }
         local_buffers
+    }
+
+    /// Clears the debug overlap tracker. Call after all parallel work items
+    /// for a batch have completed (i.e., after `par_iter().try_for_each()`
+    /// returns).
+    #[cfg(debug_assertions)]
+    pub(crate) fn clear_tracking(&self) {
+        self.outstanding.lock().unwrap().clear();
+    }
+
+    /// No-op in release builds.
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn clear_tracking(&self) {}
+}
+
+#[cfg(all(feature = "threads", debug_assertions))]
+fn rects_overlap(a: &Rect, b: &Rect) -> bool {
+    let a_x1 = a.origin.0 + a.size.0;
+    let a_y1 = a.origin.1 + a.size.1;
+    let b_x1 = b.origin.0 + b.size.0;
+    let b_y1 = b.origin.1 + b.size.1;
+    a.origin.0 < b_x1 && b.origin.0 < a_x1 && a.origin.1 < b_y1 && b.origin.1 < a_y1
+}
+
+#[cfg(feature = "threads")]
+#[allow(unsafe_code)]
+impl<'a, 'b> BufferSplitter<'a, 'b> {
+    /// Creates a parallel output access guard that exclusively borrows this
+    /// buffer splitter. The compiler prevents any other use of the splitter
+    /// while the guard exists.
+    pub(crate) fn parallel_access(&mut self) -> ParallelOutputAccess<'_> {
+        let buffers = self.get_full_buffers();
+        ParallelOutputAccess {
+            views: buffers
+                .iter()
+                // SAFETY: The returned ParallelOutputAccess borrows `self` for
+                // its entire lifetime, so the backing data remains valid and
+                // no other code can access these buffers concurrently.
+                .map(|buf| buf.as_ref().map(|b| unsafe { b.shared_view() }))
+                .collect(),
+            #[cfg(debug_assertions)]
+            outstanding: std::sync::Mutex::new(Vec::new()),
+            _marker: std::marker::PhantomData,
+        }
     }
 }

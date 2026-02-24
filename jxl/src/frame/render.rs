@@ -296,7 +296,7 @@ impl Frame {
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
         use crate::image::{Image, OwnedRawImage};
-        use crate::render::buffer_splitter::SharedOutputBuffers;
+        use crate::render::buffer_splitter::ParallelOutputAccess;
         use crate::render::low_memory_pipeline::render_group;
 
         use crate::image::disjoint::DisjointRowAccess;
@@ -772,12 +772,9 @@ impl Frame {
             // Phase 3b: Parallel render — render all work items across threads.
             let phase3b_start = std::time::Instant::now();
             if !all_items.is_empty() {
-                // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
-                // output buffers. We don't use buffer_splitter while shared_bufs is alive,
-                // and all sub-views access non-overlapping regions (guaranteed by the
-                // non-overlapping work items from prepare_group).
-                let shared_bufs =
-                    unsafe { SharedOutputBuffers::from_buffer_splitter(buffer_splitter) };
+                // Exclusively borrows buffer_splitter — compiler prevents any other
+                // access while shared_bufs exists. Debug builds verify non-overlap.
+                let shared_bufs = buffer_splitter.parallel_access();
 
                 {
                     let p = lmp_ref!();
@@ -793,16 +790,13 @@ impl Frame {
                             stop.check()?;
                             let ctx =
                                 ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
-                            // SAFETY: Each work item covers a non-overlapping region.
-                            let mut local_buffers = unsafe {
-                                shared_bufs.get_local_buffers(
-                                    sbi,
-                                    item.image_area,
-                                    input_size,
-                                    full_image_size,
-                                    frame_origin,
-                                )
-                            };
+                            let mut local_buffers = shared_bufs.get_local_buffers(
+                                sbi,
+                                item.image_area,
+                                input_size,
+                                full_image_size,
+                                frame_origin,
+                            );
                             render_group::render(
                                 ctx,
                                 &view,
@@ -813,6 +807,7 @@ impl Frame {
                         },
                     )?;
                 }
+                shared_bufs.clear_tracking();
             }
             phase3b_dur += phase3b_start.elapsed();
 
