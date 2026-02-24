@@ -278,7 +278,12 @@ impl LowMemoryRenderPipeline {
     }
 
     /// Recycles data and border buffers after rendering a group.
-    pub(crate) fn recycle_group_buffers(&mut self, g: usize) {
+    ///
+    /// When `recycle_borders` is false, only center data buffers are recycled
+    /// (border buffers are kept alive). This is used during adaptive batching
+    /// where cross-batch `process_output` stores can re-ready groups whose
+    /// neighbors' borders must remain valid.
+    pub(crate) fn recycle_group_buffers(&mut self, g: usize, recycle_borders: bool) {
         let (gx, gy) = self.shared.group_position(g);
 
         // Recycle center data buffers.
@@ -286,6 +291,10 @@ impl LowMemoryRenderPipeline {
             if let Some(b) = std::mem::take(&mut self.input_buffers[g].data[c]) {
                 self.store_scratch_buffer(c, 0, b);
             }
+        }
+
+        if !recycle_borders {
+            return;
         }
 
         // Clear border buffers that will not be used again.
@@ -319,6 +328,21 @@ impl LowMemoryRenderPipeline {
                     if let Some(b) = std::mem::take(&mut self.input_buffers[g].leftright[c]) {
                         self.store_scratch_buffer(c, 2, b);
                     }
+                }
+            }
+        }
+    }
+
+    /// Recycles all remaining border buffers (topbottom + leftright) across all
+    /// groups. Used after adaptive batching completes to free deferred borders.
+    pub(crate) fn recycle_all_borders(&mut self) {
+        for buf in &mut self.input_buffers {
+            for c in 0..buf.data.len() {
+                if let Some(b) = std::mem::take(&mut buf.topbottom[c]) {
+                    self.scratch_channel_buffers[c * 3 + 1].push(b);
+                }
+                if let Some(b) = std::mem::take(&mut buf.leftright[c]) {
+                    self.scratch_channel_buffers[c * 3 + 2].push(b);
                 }
             }
         }
@@ -470,7 +494,7 @@ impl LowMemoryRenderPipeline {
             }
         }
 
-        self.recycle_group_buffers(g);
+        self.recycle_group_buffers(g, true);
 
         Ok(())
     }

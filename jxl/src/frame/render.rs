@@ -342,6 +342,7 @@ impl Frame {
 
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
+
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
 
         struct GroupWork<'a> {
@@ -421,42 +422,88 @@ impl Frame {
             [(0, 0); 3] // unused — all groups served from pool
         };
 
-        // Phase 2: Parallel decode.
-        // Seed the buffer pool from self.vardct_buffers so buffers persist across
-        // calls. The streaming API calls this function once per group (batch_size=1),
-        // so without persistence we'd allocate+zero a fresh 1.5MB buffer per group.
-        let phase2_start = std::time::Instant::now();
-        {
-            // Take ownership of HF coefficient images for multi-pass accumulation.
-            // Each group writes to its own row — no cross-group writes.
-            // DisjointRowAccess wraps the images with safe, debug-checked row access.
-            let hf_disjoint = self.hf_coefficients.take().map(|(a, b, c)| {
-                [
-                    DisjointRowAccess::from_image(a),
-                    DisjointRowAccess::from_image(b),
-                    DisjointRowAccess::from_image(c),
-                ]
-            });
+        // Adaptive batching: for large group counts, process in mini-batches
+        // running the full Phase 2→3a→3b→3c pipeline per batch. This allows
+        // pixel buffer recycling between batches, reducing page faults from
+        // ~919K to ~15K for portrait_4k (384 groups).
+        // Small group counts use the unbatched path (no overhead).
+        let decode_batch_size = if num_needs_pixels > num_threads * 8 {
+            num_threads * 4
+        } else {
+            num_groups // fully unbatched
+        };
+        let is_batched = decode_batch_size < num_groups;
 
-            let lf_global = self.lf_global.as_ref().unwrap();
-            let header = &self.header;
-            let hf_global = self.hf_global.as_ref();
-            let hf_meta = self.hf_meta.as_ref();
-            let lf_image = &self.lf_image;
-            let quant_lf = &self.quant_lf;
-            let quant_biases = &self
-                .decoder_state
-                .file_header
-                .transform_data
-                .opsin_inverse_matrix
-                .quant_biases;
-            let tracker = &self.decoder_state.memory_tracker;
-            let mut pool: Vec<VarDctBuffers> = Vec::new();
-            if let Some(buf) = self.vardct_buffers.take() {
-                pool.push(buf);
+        // Take ownership of HF coefficient images — persists across all batches.
+        // Each group writes to its own row — no cross-group writes.
+        // DisjointRowAccess wraps the images with safe, debug-checked row access.
+        let hf_disjoint = self.hf_coefficients.take().map(|(a, b, c)| {
+            [
+                DisjointRowAccess::from_image(a),
+                DisjointRowAccess::from_image(b),
+                DisjointRowAccess::from_image(c),
+            ]
+        });
+
+        // VarDCT scratch buffer pool — persists across all batches.
+        let mut vb_pool: Vec<VarDctBuffers> = Vec::new();
+        if let Some(buf) = self.vardct_buffers.take() {
+            vb_pool.push(buf);
+        }
+        let buffer_pool = std::sync::Mutex::new(vb_pool);
+
+        let mut phase2_dur = std::time::Duration::ZERO;
+        let mut phase3a_store_dur = std::time::Duration::ZERO;
+        let mut phase3a_prepare_dur = std::time::Duration::ZERO;
+        let mut phase3b_dur = std::time::Duration::ZERO;
+        let mut phase3c_dur = std::time::Duration::ZERO;
+
+        for batch_start in (0..num_groups).step_by(decode_batch_size) {
+            let batch_end = (batch_start + decode_batch_size).min(num_groups);
+
+            // Re-seed pixel pool from scratch between batches.
+            // Phase 3c recycled center data buffers back to the scratch pool,
+            // so get_buffer() pops them (free — no page faults) instead of
+            // allocating fresh.
+            if batch_start > 0 {
+                let batch_needs = work[batch_start..batch_end]
+                    .iter()
+                    .filter(|gw| is_vardct && gw.do_render)
+                    .count();
+                let reseed = num_threads.min(batch_needs);
+                let mut pool = pixel_pool.lock().unwrap();
+                for _ in 0..reseed {
+                    match (|| -> Result<[Image<f32>; 3]> {
+                        Ok([
+                            pipeline!(self, p, p.get_buffer(0))?,
+                            pipeline!(self, p, p.get_buffer(1))?,
+                            pipeline!(self, p, p.get_buffer(2))?,
+                        ])
+                    })() {
+                        Ok(triple) => pool.push(triple),
+                        Err(_) => break,
+                    }
+                }
             }
-            let buffer_pool = std::sync::Mutex::new(pool);
-            work.par_iter_mut().try_for_each(|gw| -> Result<()> {
+
+            // Phase 2: Parallel decode this batch.
+            let phase2_start = std::time::Instant::now();
+            {
+                let lf_global = self.lf_global.as_ref().unwrap();
+                let header = &self.header;
+                let hf_global = self.hf_global.as_ref();
+                let hf_meta = self.hf_meta.as_ref();
+                let lf_image = &self.lf_image;
+                let quant_lf = &self.quant_lf;
+                let quant_biases = &self
+                    .decoder_state
+                    .file_header
+                    .transform_data
+                    .opsin_inverse_matrix
+                    .quant_biases;
+                let tracker = &self.decoder_state.memory_tracker;
+
+                work[batch_start..batch_end].par_iter_mut().try_for_each(|gw| -> Result<()> {
                 stop.check()?;
                 // Allocate pixel buffers on-demand from the shared pool.
                 // This runs in PARALLEL instead of the old sequential Phase 1
@@ -527,23 +574,13 @@ impl Frame {
                 }
                 Ok(())
             })?;
-            // Save one buffer for reuse in next call
-            self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
-
-            // Restore HF coefficient images after parallel access is complete.
-            if let Some([a, b, c]) = hf_disjoint {
-                self.hf_coefficients =
-                    Some((a.into_image(), b.into_image(), c.into_image()));
             }
-        }
+            phase2_dur += phase2_start.elapsed();
 
-        let phase2_dur = phase2_start.elapsed();
-
-        // Phase 3a-store: Sequential — store decoded buffers and run process_output.
-        // Tracks (group, do_render, is_main_work_group) for building render_infos later.
-        let phase3a_start = std::time::Instant::now();
-        let mut groups_stored: Vec<(usize, bool, bool)> = Vec::with_capacity(work.len());
-        for gw in work {
+            // Phase 3a-store: Sequential — store decoded buffers and run process_output.
+            let phase3a_start = std::time::Instant::now();
+            let mut groups_stored: Vec<(usize, bool, bool)> = Vec::with_capacity(batch_end - batch_start);
+            for gw in &mut work[batch_start..batch_end] {
             self.decoder_state.check_cancelled()?;
 
             if is_vardct {
@@ -563,7 +600,7 @@ impl Frame {
                     for (c, img) in pixels.into_iter().enumerate() {
                         lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
                     }
-                } else if let Some(pixels) = gw.pixels {
+                } else if let Some(pixels) = gw.pixels.take() {
                     for (c, img) in pixels.into_iter().enumerate() {
                         lmp_mut!().store_buffer_only(c, gw.group, gw.complete, img);
                     }
@@ -677,103 +714,121 @@ impl Frame {
             }
         }
 
-        let phase3a_store_dur = phase3a_start.elapsed();
-        let phase3a_prep_start = std::time::Instant::now();
+            phase3a_store_dur += phase3a_start.elapsed();
+            let phase3a_prep_start = std::time::Instant::now();
 
-        // Phase 3a-prepare: Parallel — extract borders and emit work items.
-        // All groups have been stored above, so the neighbor readiness mask is
-        // trivially all-true. This is the main parallelism win: border extraction
-        // and work-item computation run concurrently across all groups.
-        let (all_items, group_has_items) = lmp_mut!().prepare_groups_parallel()?;
-        let has_items_set: std::collections::HashSet<usize> = group_has_items
-            .iter()
-            .filter(|(_, has)| *has)
-            .map(|(g, _)| *g)
-            .collect();
+            // Phase 3a-prepare: Parallel — extract borders and emit work items.
+            // When batching, groups from previous batches have is_ready=true,
+            // so the readiness mask correctly reflects partial-batch boundaries.
+            // Border regions at batch edges are covered by neighboring batches'
+            // emit_work_items (the pipeline was designed for incremental arrival).
+            let (all_items, group_has_items) = lmp_mut!().prepare_groups_parallel()?;
+            let has_items_set: std::collections::HashSet<usize> = group_has_items
+                .iter()
+                .filter(|(_, has)| *has)
+                .map(|(g, _)| *g)
+                .collect();
 
-        // Build render_infos from store tracking + prepare results.
-        let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(groups_stored.len());
-        for &(group, do_render, is_main) in &groups_stored {
-            let has_items = has_items_set.contains(&group);
-            if is_main || has_items {
-                render_infos.push(GroupRenderInfo {
-                    group,
-                    do_render,
-                    has_items,
-                });
+            // Build render_infos from store tracking + prepare results.
+            let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(groups_stored.len());
+            for &(group, do_render, is_main) in &groups_stored {
+                let has_items = has_items_set.contains(&group);
+                if is_main || has_items {
+                    render_infos.push(GroupRenderInfo {
+                        group,
+                        do_render,
+                        has_items,
+                    });
+                }
             }
-        }
 
-        let phase3a_prepare_dur = phase3a_prep_start.elapsed();
+            phase3a_prepare_dur += phase3a_prep_start.elapsed();
 
-        // Phase 3b: Parallel render — render all work items across threads.
-        let phase3b_start = std::time::Instant::now();
-        if !all_items.is_empty() {
-            // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
-            // output buffers. We don't use buffer_splitter while shared_bufs is alive,
-            // and all sub-views access non-overlapping regions (guaranteed by the
-            // non-overlapping work items from prepare_group).
-            let shared_bufs =
-                unsafe { SharedOutputBuffers::from_buffer_splitter(buffer_splitter) };
+            // Phase 3b: Parallel render — render all work items across threads.
+            let phase3b_start = std::time::Instant::now();
+            if !all_items.is_empty() {
+                // SAFETY: SharedOutputBuffers copies raw pointers from the buffer splitter's
+                // output buffers. We don't use buffer_splitter while shared_bufs is alive,
+                // and all sub-views access non-overlapping regions (guaranteed by the
+                // non-overlapping work items from prepare_group).
+                let shared_bufs =
+                    unsafe { SharedOutputBuffers::from_buffer_splitter(buffer_splitter) };
 
-            {
-                let p = lmp_ref!();
-                let view = p.read_view();
-                let (frame_origin, full_image_size) = p.extend_origin_size();
-                let sbi = p.save_buffer_info();
-                let input_size = p.input_size();
-                let factory = p.context_factory();
+                {
+                    let p = lmp_ref!();
+                    let view = p.read_view();
+                    let (frame_origin, full_image_size) = p.extend_origin_size();
+                    let sbi = p.save_buffer_info();
+                    let input_size = p.input_size();
+                    let factory = p.context_factory();
 
-                // Rayon's try_for_each_init may call init more than once
-                // per thread (work-splitting), so we create contexts on
-                // demand via the factory (which is Sync).
-                all_items.par_iter().try_for_each_init(
-                    || factory.create(1).ok(),
-                    |ctx_opt, item| -> Result<()> {
-                        stop.check()?;
-                        let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
-                        // SAFETY: Each work item covers a non-overlapping region.
-                        let mut local_buffers = unsafe {
-                            shared_bufs.get_local_buffers(
-                                sbi,
+                    all_items.par_iter().try_for_each_init(
+                        || factory.create(1).ok(),
+                        |ctx_opt, item| -> Result<()> {
+                            stop.check()?;
+                            let ctx =
+                                ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                            // SAFETY: Each work item covers a non-overlapping region.
+                            let mut local_buffers = unsafe {
+                                shared_bufs.get_local_buffers(
+                                    sbi,
+                                    item.image_area,
+                                    input_size,
+                                    full_image_size,
+                                    frame_origin,
+                                )
+                            };
+                            render_group::render(
+                                ctx,
+                                &view,
+                                (item.gx, item.gy),
                                 item.image_area,
-                                input_size,
-                                full_image_size,
-                                frame_origin,
+                                &mut local_buffers,
                             )
-                        };
-                        render_group::render(
-                            ctx,
-                            &view,
-                            (item.gx, item.gy),
-                            item.image_area,
-                            &mut local_buffers,
-                        )
-                    },
-                )?;
+                        },
+                    )?;
+                }
             }
+            phase3b_dur += phase3b_start.elapsed();
+
+            // Phase 3c: Sequential — recycle buffers and update flush state.
+            // When batching, skip border recycling: cross-batch process_output
+            // can store data to groups from previous batches, re-readying them
+            // for rendering. Their neighbors' border buffers must stay alive.
+            // Center data IS recycled to refill the pixel pool for next batch.
+            let phase3c_start = std::time::Instant::now();
+            for ri in &render_infos {
+                if ri.has_items {
+                    lmp_mut!().recycle_group_buffers(ri.group, !is_batched);
+                }
+                if ri.do_render {
+                    self.groups_to_flush.remove(&ri.group);
+                } else {
+                    self.groups_to_flush.insert(ri.group);
+                }
+            }
+            phase3c_dur += phase3c_start.elapsed();
+        } // end batch loop
+
+        // After all batches complete, run the deferred border recycling pass.
+        // This is a no-op when unbatched (borders were already recycled above).
+        if is_batched {
+            lmp_mut!().recycle_all_borders();
         }
 
-        let phase3b_dur = phase3b_start.elapsed();
+        // Save one VarDCT buffer for reuse in next call.
+        self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
 
-        // Phase 3c: Sequential — recycle buffers and update flush state.
-        let phase3c_start = std::time::Instant::now();
-        for ri in &render_infos {
-            if ri.has_items {
-                lmp_mut!().recycle_group_buffers(ri.group);
-            }
-            if ri.do_render {
-                self.groups_to_flush.remove(&ri.group);
-            } else {
-                self.groups_to_flush.insert(ri.group);
-            }
+        // Restore HF coefficient images after all batches complete.
+        if let Some([a, b, c]) = hf_disjoint {
+            self.hf_coefficients = Some((a.into_image(), b.into_image(), c.into_image()));
         }
-        let phase3c_dur = phase3c_start.elapsed();
 
         if phase_timing {
+            let batches = num_groups.div_ceil(decode_batch_size);
             eprintln!(
-                "[JXL_PHASE_TIMING] {num_groups} groups | \
-                 P1(alloc): {:.2}ms | P2(decode): {:.2}ms | \
+                "[JXL_PHASE_TIMING] {num_groups} groups ({batches} batches of {decode_batch_size}) | \
+                 P1(decisions): {:.2}ms | P2(decode): {:.2}ms | \
                  P3a-store: {:.2}ms | P3a-prepare: {:.2}ms | \
                  P3b(render): {:.2}ms | P3c(recycle): {:.2}ms",
                 phase1_dur.as_secs_f64() * 1000.0,
