@@ -177,6 +177,44 @@ fn dequant_block<D: SimdDescriptor>(
     }
 }
 
+/// Copy rows from contiguous source to strided image rect.
+/// Dispatches to const-generic width for common sizes, enabling
+/// the compiler to inline the copy as SIMD stores instead of memcpy calls.
+#[inline(always)]
+fn scatter_rows_to_image(
+    output_rect: &mut crate::image::ImageRectMut<'_, f32>,
+    src: &[f32],
+    width: usize,
+    height: usize,
+) {
+    #[inline(always)]
+    fn inner<const W: usize>(
+        output_rect: &mut crate::image::ImageRectMut<'_, f32>,
+        src: &[f32],
+        height: usize,
+    ) {
+        let src: &[f32] = &src[..W * height];
+        for i in 0..height {
+            let row = output_rect.row(i);
+            row[..W].copy_from_slice(&src[i * W..(i + 1) * W]);
+        }
+    }
+    match width {
+        8 => inner::<8>(output_rect, src, height),
+        16 => inner::<16>(output_rect, src, height),
+        32 => inner::<32>(output_rect, src, height),
+        4 => inner::<4>(output_rect, src, height),
+        _ => {
+            for i in 0..height {
+                let offset = i * width;
+                output_rect
+                    .row(i)
+                    .copy_from_slice(&src[offset..offset + width]);
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
@@ -244,12 +282,12 @@ fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
             size: block_rect.size,
         };
         let mut output_rect = pixels[c].get_rect_mut(downsampled_rect);
-        for i in 0..downsampled_rect.size.1 {
-            let offset = i * downsampled_rect.size.0;
-            output_rect
-                .row(i)
-                .copy_from_slice(&transform_buffer[c][offset..offset + downsampled_rect.size.0]);
-        }
+        scatter_rows_to_image(
+            &mut output_rect,
+            &transform_buffer[c],
+            downsampled_rect.size.0,
+            downsampled_rect.size.1,
+        );
     }
     Ok(())
 }
