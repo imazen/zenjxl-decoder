@@ -12,7 +12,7 @@ use crate::headers::{FileHeader, OpsinInverseMatrix};
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
 use crate::render::stages::from_linear;
 use crate::util::{Matrix3x3, eval_rational_poly_simd, inv_3x3_matrix, mul_3x3_matrix};
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
+use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask, simd_function};
 
 const SRGB_LUMINANCES: [f32; 3] = [0.2126, 0.7152, 0.0722];
 
@@ -257,36 +257,79 @@ impl RenderPipelineInPlaceStage for XybStage {
     }
 }
 
-/// Fused XYB inverse + sRGB transfer function + u8 conversion in a single SIMD pass.
-/// Eliminates intermediate f32 buffer writes between the three separate stages.
-pub struct XybToSrgbU8Stage {
+/// Fused XYB inverse + transfer function + u8 conversion in a single SIMD pass.
+/// Supports sRGB and gamma transfer functions. Eliminates intermediate f32 buffer
+/// writes between the three separate stages (XYB, TF, u8 conversion).
+pub struct XybToU8Stage {
     first_channel: usize,
     output_color_info: OutputColorInfo,
     bit_depth: u8,
+    tf: super::from_linear::TransferFunction,
 }
 
-impl XybToSrgbU8Stage {
-    pub fn new(first_channel: usize, output_color_info: OutputColorInfo, bit_depth: u8) -> Self {
+impl XybToU8Stage {
+    pub fn new(
+        first_channel: usize,
+        output_color_info: OutputColorInfo,
+        bit_depth: u8,
+        tf: super::from_linear::TransferFunction,
+    ) -> Self {
         Self {
             first_channel,
             output_color_info,
             bit_depth,
+            tf,
         }
     }
 }
 
-impl std::fmt::Display for XybToSrgbU8Stage {
+impl std::fmt::Display for XybToU8Stage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let c = self.first_channel;
         write!(
             f,
-            "Fused XYB→sRGB→U{} for channels [{},{},{}]",
+            "Fused XYB→{:?}→U{} for channels [{},{},{}]",
+            self.tf,
             self.bit_depth,
             c,
             c + 1,
             c + 2,
         )
     }
+}
+
+/// Common XYB inverse that produces linear RGB values for three channels.
+/// Returns (r_lin, g_lin, b_lin) SIMD vectors.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn xyb_inverse<D: jxl_simd::SimdDescriptor>(
+    _d: D,
+    x: D::F32Vec,
+    y: D::F32Vec,
+    b: D::F32Vec,
+    bias_cbrt: &[D::F32Vec; 3],
+    intensity_scale: D::F32Vec,
+    scaled_bias: &[D::F32Vec; 3],
+    mat: &[D::F32Vec; 9],
+) -> (D::F32Vec, D::F32Vec, D::F32Vec) {
+    let l = y + x - bias_cbrt[0];
+    let m = y - x - bias_cbrt[1];
+    let s = b - bias_cbrt[2];
+
+    let l2 = l * l;
+    let m2 = m * m;
+    let s2 = s * s;
+    let scaled_l = l * intensity_scale;
+    let scaled_m = m * intensity_scale;
+    let scaled_s = s * intensity_scale;
+    let l = l2.mul_add(scaled_l, scaled_bias[0]);
+    let m = m2.mul_add(scaled_m, scaled_bias[1]);
+    let s = s2.mul_add(scaled_s, scaled_bias[2]);
+
+    let r_lin = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
+    let g_lin = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
+    let b_lin = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
+    (r_lin, g_lin, b_lin)
 }
 
 simd_function!(
@@ -306,14 +349,12 @@ simd_function!(
             ..
         } = opsin;
 
-        // XYB inverse constants
         let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
-        let intensity_scale = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale));
+        let intensity_scale_f = 255.0 / intensity_target;
+        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale_f));
         let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale);
+        let intensity_scale = D::F32Vec::splat(d, intensity_scale_f);
 
-        // sRGB TF constants
         #[allow(clippy::excessive_precision)]
         const P: [f32; 5] = [
             -5.135152395e-4,
@@ -343,31 +384,15 @@ simd_function!(
 
         let end = xsize.next_multiple_of(D::F32Vec::LEN);
         for idx in (0..end).step_by(D::F32Vec::LEN) {
-            // --- XYB inverse ---
             let x = D::F32Vec::load_from(d, in_x, idx);
             let y = D::F32Vec::load_from(d, in_y, idx);
             let b = D::F32Vec::load_from(d, in_b, idx);
 
-            let l = y + x - bias_cbrt[0];
-            let m = y - x - bias_cbrt[1];
-            let s = b - bias_cbrt[2];
+            let (r_lin, g_lin, b_lin) = xyb_inverse(
+                d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
+            );
 
-            let l2 = l * l;
-            let m2 = m * m;
-            let s2 = s * s;
-            let scaled_l = l * intensity_scale;
-            let scaled_m = m * intensity_scale;
-            let scaled_s = s * intensity_scale;
-            let l = l2.mul_add(scaled_l, scaled_bias[0]);
-            let m = m2.mul_add(scaled_m, scaled_bias[1]);
-            let s = s2.mul_add(scaled_s, scaled_bias[2]);
-
-            let r_lin = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
-            let g_lin = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
-            let b_lin = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
-
-            // --- sRGB TF + u8 quantize (inline for all 3 channels) ---
-            // Process each channel: clamp, apply sRGB curve, scale, round to u8
+            // sRGB TF + u8 quantize
             let r_c = r_lin.max(zero).min(one);
             let r_srgb = threshold.gt(r_c).if_then_else_f32(
                 r_c * linear_scale,
@@ -392,7 +417,65 @@ simd_function!(
     }
 );
 
-impl RenderPipelineInOutStage for XybToSrgbU8Stage {
+simd_function!(
+    xyb_to_gamma_u8_dispatch,
+    d: D,
+    fn xyb_to_gamma_u8_process(
+        opsin: &OpsinInverseMatrix,
+        gamma_params: &[f32; 3],
+        xsize: usize,
+        input_rows: &Channels<f32>,
+        output_rows: &mut ChannelsMut<u8>,
+    ) {
+        let [intensity_target, gamma, max_val] = *gamma_params;
+        let OpsinInverseMatrix {
+            inverse_matrix: mat,
+            opsin_biases: bias,
+            ..
+        } = opsin;
+
+        let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
+        let intensity_scale_f = 255.0 / intensity_target;
+        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale_f));
+        let mat = mat.map(|x| D::F32Vec::splat(d, x));
+        let intensity_scale = D::F32Vec::splat(d, intensity_scale_f);
+
+        let zero = D::F32Vec::splat(d, 0.0);
+        let scale = D::F32Vec::splat(d, max_val);
+        let gamma_vec = D::F32Vec::splat(d, gamma);
+
+        let in_x = input_rows[0][0];
+        let in_y = input_rows[1][0];
+        let in_b = input_rows[2][0];
+        let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
+
+        let end = xsize.next_multiple_of(D::F32Vec::LEN);
+        for idx in (0..end).step_by(D::F32Vec::LEN) {
+            let x = D::F32Vec::load_from(d, in_x, idx);
+            let y = D::F32Vec::load_from(d, in_y, idx);
+            let b = D::F32Vec::load_from(d, in_b, idx);
+
+            let (r_lin, g_lin, b_lin) = xyb_inverse(
+                d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
+            );
+
+            // Gamma TF + u8 quantize: powf(abs(x), gamma) * copysign(1, x)
+            let r_abs = r_lin.abs().max(zero);
+            let r_tf = crate::util::fast_powf_simd(d, r_abs, gamma_vec).copysign(r_lin);
+            (r_tf * scale).round_store_u8(&mut out_r[0][idx..]);
+
+            let g_abs = g_lin.abs().max(zero);
+            let g_tf = crate::util::fast_powf_simd(d, g_abs, gamma_vec).copysign(g_lin);
+            (g_tf * scale).round_store_u8(&mut out_g[0][idx..]);
+
+            let b_abs = b_lin.abs().max(zero);
+            let b_tf = crate::util::fast_powf_simd(d, b_abs, gamma_vec).copysign(b_lin);
+            (b_tf * scale).round_store_u8(&mut out_b[0][idx..]);
+        }
+    }
+);
+
+impl RenderPipelineInOutStage for XybToU8Stage {
     type InputT = f32;
     type OutputT = u8;
     const SHIFT: (u8, u8) = (0, 0);
@@ -411,14 +494,28 @@ impl RenderPipelineInOutStage for XybToSrgbU8Stage {
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let max_val = ((1u32 << self.bit_depth) - 1) as f32;
-        xyb_to_srgb_u8_dispatch(
-            &self.output_color_info.opsin,
-            self.output_color_info.intensity_target,
-            max_val,
-            xsize,
-            input_rows,
-            output_rows,
-        );
+        match self.tf {
+            super::from_linear::TransferFunction::Srgb => {
+                xyb_to_srgb_u8_dispatch(
+                    &self.output_color_info.opsin,
+                    self.output_color_info.intensity_target,
+                    max_val,
+                    xsize,
+                    input_rows,
+                    output_rows,
+                );
+            }
+            super::from_linear::TransferFunction::Gamma(gamma) => {
+                xyb_to_gamma_u8_dispatch(
+                    &self.output_color_info.opsin,
+                    &[self.output_color_info.intensity_target, gamma, max_val],
+                    xsize,
+                    input_rows,
+                    output_rows,
+                );
+            }
+            _ => unreachable!("XybToU8Stage only supports Srgb and Gamma TFs"),
+        }
     }
 }
 
@@ -534,7 +631,30 @@ mod test {
     #[test]
     fn fused_xyb_srgb_u8_consistency() -> Result<()> {
         crate::render::test::test_stage_consistency(
-            || XybToSrgbU8Stage::new(0, OutputColorInfo::default(), 8),
+            || {
+                XybToU8Stage::new(
+                    0,
+                    OutputColorInfo::default(),
+                    8,
+                    super::super::from_linear::TransferFunction::Srgb,
+                )
+            },
+            (500, 500),
+            3,
+        )
+    }
+
+    #[test]
+    fn fused_xyb_gamma_u8_consistency() -> Result<()> {
+        crate::render::test::test_stage_consistency(
+            || {
+                XybToU8Stage::new(
+                    0,
+                    OutputColorInfo::default(),
+                    8,
+                    super::super::from_linear::TransferFunction::Gamma(0.454545),
+                )
+            },
             (500, 500),
             3,
         )
