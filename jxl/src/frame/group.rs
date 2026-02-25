@@ -448,7 +448,7 @@ pub fn decode_vardct_group(
     let quant_lf_rect = quant_lf.get_rect(block_group_rect);
     let block_context_map = lf_global.block_context_map.as_ref().unwrap();
     // TODO(veluca): improve coefficient storage (smaller allocations, use 16 bits if possible).
-    let coeffs = match hf_coefficients {
+    let mut coeffs = match hf_coefficients {
         Some(rows) => rows,
         None => {
             // Use pooled buffer (zeroed by buffers.reset() for multi-pass, or per-block below)
@@ -550,8 +550,8 @@ pub fn decode_vardct_group(
             // the bulk fill(0). This is more cache-friendly: the zeroed memory stays
             // in L1/L2 and is immediately reused by the decode loop.
             if single_pass && uses_local_coeffs {
-                for c in 0..3 {
-                    coeffs[c][coeffs_offset..coeffs_offset + num_coeffs].fill(0);
+                for coeff in coeffs.iter_mut() {
+                    coeff[coeffs_offset..coeffs_offset + num_coeffs].fill(0);
                 }
             }
             for PassInfo {
