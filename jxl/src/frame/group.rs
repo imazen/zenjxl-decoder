@@ -420,7 +420,11 @@ pub fn decode_vardct_group(
 
     // Reset coefficients for reuse. Only needed when using local coeffs_storage
     // (hf_coefficients is None). When hf_coefficients is Some, coeffs_storage is unused.
-    if hf_coefficients.is_none() {
+    // For single-pass images, skip the bulk zero — we zero per-block instead,
+    // which is more cache-friendly (the zeroed memory is immediately reused).
+    let uses_local_coeffs = hf_coefficients.is_none();
+    let single_pass = pass_info.len() == 1;
+    if uses_local_coeffs && !single_pass {
         buffers.reset();
     }
     let scratch = &mut buffers.scratch;
@@ -447,7 +451,7 @@ pub fn decode_vardct_group(
     let coeffs = match hf_coefficients {
         Some(rows) => rows,
         None => {
-            // Use pooled buffer (already reset to zero in buffers.reset() above)
+            // Use pooled buffer (zeroed by buffers.reset() for multi-pass, or per-block below)
             let (coeffs_x, coeffs_y_b) = buffers.coeffs_storage.split_at_mut(GROUP_DIM * GROUP_DIM);
             let (coeffs_y, coeffs_b) = coeffs_y_b.split_at_mut(GROUP_DIM * GROUP_DIM);
             [coeffs_x, coeffs_y, coeffs_b]
@@ -542,6 +546,14 @@ pub fn decode_vardct_group(
             let num_blocks = cx * cy;
             let num_coeffs = num_blocks * BLOCK_SIZE;
             let log_num_blocks = num_blocks.ilog2() as usize;
+            // For single-pass images, zero per-block coefficient ranges instead of
+            // the bulk fill(0). This is more cache-friendly: the zeroed memory stays
+            // in L1/L2 and is immediately reused by the decode loop.
+            if single_pass && uses_local_coeffs {
+                for c in 0..3 {
+                    coeffs[c][coeffs_offset..coeffs_offset + num_coeffs].fill(0);
+                }
+            }
             for PassInfo {
                 histogram_index,
                 reader,
