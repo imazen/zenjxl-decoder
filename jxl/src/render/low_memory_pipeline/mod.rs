@@ -350,7 +350,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
             return Ok(Image::from_raw(b));
         }
         let sz = self.shared.group_size_for_channel(channel, T::DATA_TYPE_ID);
-        Image::<T>::new(sz)
+        Image::<T>::new_uninit(sz)
     }
 
     fn set_buffer_for_group<T: ImageDataType>(

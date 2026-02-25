@@ -41,6 +41,19 @@ impl<T: ImageDataType> Image<T> {
         Self::new_with_padding(size, (0, 0), (0, 0))
     }
 
+    /// Allocates an uninitialized image buffer.
+    ///
+    /// With the `allow-unsafe` feature, the memory is left truly uninitialized
+    /// (saving page-fault and zeroing costs). Without it, the buffer is zeroed.
+    ///
+    /// # Safety contract
+    /// The caller MUST write every pixel before reading it.
+    pub fn new_uninit(size: (usize, usize)) -> Result<Image<T>> {
+        let s = T::DATA_TYPE_ID.size();
+        let img = OwnedRawImage::new_uninit((size.0 * s, size.1))?;
+        Ok(Self::from_raw(img))
+    }
+
     pub fn new_with_value(size: (usize, usize), value: T) -> Result<Image<T>> {
         // TODO(veluca): skip zero-initializing the allocation if this becomes
         // performance-sensitive.

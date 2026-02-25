@@ -543,9 +543,9 @@ impl Frame {
                     gw.pixels = Some(match pixel_pool.lock().unwrap().pop() {
                         Some(bufs) => bufs,
                         None => [
-                            Image::<f32>::new(pixel_sizes[0])?,
-                            Image::<f32>::new(pixel_sizes[1])?,
-                            Image::<f32>::new(pixel_sizes[2])?,
+                            Image::<f32>::new_uninit(pixel_sizes[0])?,
+                            Image::<f32>::new_uninit(pixel_sizes[1])?,
+                            Image::<f32>::new_uninit(pixel_sizes[2])?,
                         ],
                     });
                 }
