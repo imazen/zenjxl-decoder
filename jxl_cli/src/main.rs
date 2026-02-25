@@ -111,7 +111,7 @@ fn main() -> Result<()> {
     // Must happen before any rayon parallel work.
     #[cfg(feature = "threads")]
     if let Some(n) = opt.num_threads {
-        if n > 0 {
+        if n > 1 {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(n)
                 .build_global()
@@ -136,7 +136,7 @@ fn main() -> Result<()> {
         options.skip_preview = skip_preview;
         options.high_precision = high_precision;
         options.cms = Some(Box::new(Lcms2Cms));
-        if let Some(0) = num_threads {
+        if let Some(0 | 1) = num_threads {
             options.parallel = false;
         }
         options
