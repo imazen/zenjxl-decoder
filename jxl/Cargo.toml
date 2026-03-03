@@ -54,7 +54,7 @@ wasm128 = ["jxl_simd/wasm128"]
 cms = ["moxcms"]
 jpeg = ["dep:brotli"]
 allow-unsafe = []
-threads = ["rayon", "allow-unsafe"]
+threads = ["rayon"]
 
 [[bench]]
 name = "tf_bench"
