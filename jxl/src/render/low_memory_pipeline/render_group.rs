@@ -92,9 +92,8 @@ fn fill_initial_buffers(
     // When direct borders are active (topbottom is None), we compute center_y —
     // the row index in the neighbor's center data. When borders are extracted
     // (topbottom is Some), we compute the topbottom buffer index instead.
-    let direct_borders = view.input_buffers[gy * view.shared.group_count.0 + gx]
-        .topbottom[c]
-        .is_none();
+    let direct_borders =
+        view.input_buffers[gy * view.shared.group_count.0 + gx].topbottom[c].is_none();
 
     let (input_y, igy, is_topbottom) = if y < group_y0 {
         let igy = gy - 1;

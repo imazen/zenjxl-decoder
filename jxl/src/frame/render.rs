@@ -313,7 +313,6 @@ impl Frame {
     /// Requirements:
     /// - More than 1 group
     #[cfg(feature = "threads")]
-    #[allow(unsafe_code)]
     fn decode_groups_parallel(
         &mut self,
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
@@ -323,10 +322,9 @@ impl Frame {
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
         use crate::image::{Image, OwnedRawImage};
-        use crate::render::buffer_splitter::ParallelOutputAccess;
+        use crate::render::buffer_splitter;
         use crate::render::low_memory_pipeline::render_group;
 
-        use crate::image::disjoint::DisjointRowAccess;
         use crate::util::{SmallVec, Xorshift128Plus};
         use rayon::prelude::*;
 
@@ -378,6 +376,8 @@ impl Frame {
             complete: bool,
             do_render: bool,
             pixels: Option<[Image<f32>; 3]>,
+            /// Owned per-group HF coefficient buffers (multi-pass only).
+            hf_coeffs: Option<[Vec<i32>; 3]>,
         }
 
         struct GroupRenderInfo {
@@ -385,6 +385,10 @@ impl Frame {
             do_render: bool,
             has_items: bool,
         }
+
+        // Take ownership of per-group HF coefficient buffers before Phase 1.
+        // Each group owns its own Vec<i32> — no shared mutable state.
+        let mut hf_coefficients = self.hf_coefficients.take();
 
         // Phase 1: Sequential — compute render decisions (NO pixel allocation).
         // Pixel buffers are allocated on-demand in Phase 2 (parallel) to avoid
@@ -410,12 +414,22 @@ impl Frame {
                 num_needs_pixels += 1;
             }
 
+            // Take this group's owned coefficient buffers (multi-pass only).
+            let hf_coeffs = hf_coefficients.as_mut().map(|[a, b, c]| {
+                [
+                    std::mem::take(&mut a[group]),
+                    std::mem::take(&mut b[group]),
+                    std::mem::take(&mut c[group]),
+                ]
+            });
+
             work.push(GroupWork {
                 group,
                 passes,
                 complete,
                 do_render,
                 pixels: None, // Deferred to Phase 2
+                hf_coeffs,
             });
         }
 
@@ -462,17 +476,6 @@ impl Frame {
             num_groups // fully unbatched
         };
         let is_batched = decode_batch_size < num_groups;
-
-        // Take ownership of HF coefficient images — persists across all batches.
-        // Each group writes to its own row — no cross-group writes.
-        // DisjointRowAccess wraps the images with safe, debug-checked row access.
-        let hf_disjoint = self.hf_coefficients.take().map(|(a, b, c)| {
-            [
-                DisjointRowAccess::from_image(a),
-                DisjointRowAccess::from_image(b),
-                DisjointRowAccess::from_image(c),
-            ]
-        });
 
         // VarDCT scratch buffer pool — persists across all batches.
         let mut vb_pool: Vec<VarDctBuffers> = Vec::new();
@@ -561,16 +564,9 @@ impl Frame {
 
                             if !(gw.pixels.is_none() && gw.do_render) {
                                 // Each parallel task uses a distinct gw.group —
-                                // DisjointRowAccess verifies this in debug builds.
-                                let mut guards = hf_disjoint.as_ref().map(|splits| {
-                                    [
-                                        splits[0].row_guard(gw.group),
-                                        splits[1].row_guard(gw.group),
-                                        splits[2].row_guard(gw.group),
-                                    ]
-                                });
-                                let hf_coeffs = guards.as_mut().map(|[g0, g1, g2]| {
-                                    [g0.as_mut_slice(), g1.as_mut_slice(), g2.as_mut_slice()]
+                                // each group owns its own Vec<i32>, no shared state.
+                                let hf_coeffs = gw.hf_coeffs.as_mut().map(|[a, b, c]| {
+                                    [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()]
                                 });
                                 decode_vardct_group(
                                     gw.group,
@@ -808,44 +804,340 @@ impl Frame {
 
             phase3a_prepare_dur += phase3a_prep_start.elapsed();
 
-            // Phase 3b: Parallel render — render all work items across threads.
+            // Phase 3b: Fragment-based parallel render.
+            //
+            // Split output buffers into per-tile disjoint fragments (row bands ×
+            // column ranges), then process ALL tiles in parallel with direct
+            // writes. No copy-back needed since each tile writes exclusively to
+            // its own fragment.
+            //
+            // Falls back to two-phase (owned buffers + copy-back) when band
+            // splitting isn't possible (single gy band with overlapping rows).
             let phase3b_start = std::time::Instant::now();
             if !all_items.is_empty() {
-                // Exclusively borrows buffer_splitter — compiler prevents any other
-                // access while shared_bufs exists. Debug builds verify non-overlap.
-                let shared_bufs = buffer_splitter.parallel_access();
+                let p = lmp_ref!();
+                let view = p.read_view();
+                let (frame_origin, full_image_size) = p.extend_origin_size();
+                let sbi = p.save_buffer_info();
+                let input_size = p.input_size();
+                let factory = p.context_factory();
+                let num_buffer_slots = buffer_splitter.get_full_buffers().len();
 
-                {
-                    let p = lmp_ref!();
-                    let view = p.read_view();
-                    let (frame_origin, full_image_size) = p.extend_origin_size();
-                    let sbi = p.save_buffer_info();
-                    let input_size = p.input_size();
-                    let factory = p.context_factory();
+                // Pre-compute channel_rects for all items.
+                let all_layouts: Vec<Vec<(usize, usize, usize, Rect)>> = all_items
+                    .iter()
+                    .map(|item| {
+                        buffer_splitter::compute_local_buffer_layouts(
+                            sbi,
+                            num_buffer_slots,
+                            item.image_area,
+                            input_size,
+                            full_image_size,
+                            frame_origin,
+                        )
+                    })
+                    .collect();
 
-                    all_items.par_iter().try_for_each_init(
-                        || factory.create(1).ok(),
-                        |ctx_opt, item| -> Result<()> {
-                            stop.check()?;
-                            let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
-                            let mut local_buffers = shared_bufs.get_local_buffers(
-                                sbi,
-                                item.image_area,
-                                input_size,
-                                full_image_size,
-                                frame_origin,
-                            );
-                            render_group::render(
-                                ctx,
-                                &view,
-                                (item.gx, item.gy),
-                                item.image_area,
-                                &mut local_buffers,
-                            )
-                        },
-                    )?;
+                // Group items by gy (sorted ascending).
+                let mut gy_map: std::collections::BTreeMap<usize, Vec<usize>> =
+                    std::collections::BTreeMap::new();
+                for (i, item) in all_items.iter().enumerate() {
+                    gy_map.entry(item.gy).or_default().push(i);
                 }
-                shared_bufs.clear_tracking();
+                let gy_items: Vec<Vec<usize>> = gy_map.into_values().collect();
+                let num_bands = gy_items.len();
+
+                // Sort items within each band by gx for consistent column ordering.
+                let gy_items: Vec<Vec<usize>> = gy_items
+                    .into_iter()
+                    .map(|mut indices| {
+                        indices.sort_by_key(|&idx| all_items[idx].gx);
+                        indices
+                    })
+                    .collect();
+
+                // Compute per-slot, per-band row ranges from channel_rects.
+                let mut slot_band_ranges: Vec<Vec<(usize, usize)>> =
+                    vec![vec![(usize::MAX, 0); num_bands]; num_buffer_slots];
+                for (band_idx, item_indices) in gy_items.iter().enumerate() {
+                    for &item_idx in item_indices {
+                        for &(slot, _, _, channel_rect) in &all_layouts[item_idx] {
+                            let start_row = channel_rect.origin.1;
+                            let end_row = start_row + channel_rect.size.1;
+                            let range = &mut slot_band_ranges[slot][band_idx];
+                            range.0 = range.0.min(start_row);
+                            range.1 = range.1.max(end_row);
+                        }
+                    }
+                }
+
+                // Verify non-overlapping bands for each active slot.
+                let can_band_split = num_bands > 1
+                    && slot_band_ranges.iter().all(|ranges| {
+                        ranges.windows(2).all(|w| {
+                            let (_, end_a) = w[0];
+                            let (start_b, _) = w[1];
+                            // Empty bands (usize::MAX, 0) never overlap.
+                            end_a == 0 || start_b == usize::MAX || end_a <= start_b
+                        })
+                    });
+
+                // Fragment path: split each slot's buffer into a tile grid,
+                // then process all tiles in parallel with direct writes.
+                if can_band_split {
+                    // Compute per-slot row split points.
+                    let slot_split_rows: Vec<Vec<usize>> = (0..num_buffer_slots)
+                        .map(|slot| {
+                            let ranges = &slot_band_ranges[slot];
+                            (0..num_bands - 1)
+                                .map(|band_idx| {
+                                    let end_row = ranges[band_idx].1;
+                                    if end_row == 0 { 0 } else { end_row }
+                                })
+                                .collect()
+                        })
+                        .collect();
+
+                    // Compute per-slot, per-band column split points.
+                    // Within each band, items are sorted by gx. For each slot,
+                    // use the column start of each item (except the first) as
+                    // the split point.
+                    let slot_split_cols_per_band: Vec<Vec<Vec<usize>>> = (0..num_buffer_slots)
+                        .map(|slot| {
+                            gy_items
+                                .iter()
+                                .map(|item_indices| {
+                                    // Collect column starts for items in this band+slot.
+                                    let col_starts: Vec<usize> = item_indices
+                                        .iter()
+                                        .filter_map(|&item_idx| {
+                                            all_layouts[item_idx]
+                                                .iter()
+                                                .find(|&&(s, _, _, _)| s == slot)
+                                                .map(|&(_, _, _, cr)| cr.origin.0)
+                                        })
+                                        .collect();
+                                    // Split points = starts of 2nd, 3rd, ... items.
+                                    col_starts.into_iter().skip(1).collect()
+                                })
+                                .collect()
+                        })
+                        .collect();
+
+                    // Split each slot's buffer into a tile grid.
+                    let output = buffer_splitter.get_full_buffers();
+                    let mut slot_grids: Vec<Option<Vec<Vec<Option<JxlOutputBuffer<'_>>>>>> = output
+                        .iter_mut()
+                        .enumerate()
+                        .map(|(slot_idx, buf_opt)| {
+                            buf_opt.as_mut().map(|buf| {
+                                let split_cols_refs: Vec<&[usize]> =
+                                    slot_split_cols_per_band[slot_idx]
+                                        .iter()
+                                        .map(|v| v.as_slice())
+                                        .collect();
+                                buf.split_into_tile_grid(
+                                    &slot_split_rows[slot_idx],
+                                    &split_cols_refs,
+                                )
+                                .into_iter()
+                                .map(|band| band.into_iter().map(Some).collect())
+                                .collect()
+                            })
+                        })
+                        .collect();
+
+                    // Build per-item fragment sets by taking from the grid.
+                    // Each item gets one fragment per slot, plus the fragment's
+                    // absolute column offset so rect() can adjust correctly.
+                    let mut item_fragments: Vec<Vec<Option<JxlOutputBuffer<'_>>>> = (0
+                        ..all_items.len())
+                        .map(|_| (0..num_buffer_slots).map(|_| None).collect())
+                        .collect();
+                    let mut item_col_offsets: Vec<Vec<usize>> =
+                        vec![vec![0; num_buffer_slots]; all_items.len()];
+
+                    for (band_idx, item_indices) in gy_items.iter().enumerate() {
+                        // Track fragment index per slot (items without a rect for
+                        // a given slot don't consume a fragment in that slot).
+                        let mut slot_frag_idx: Vec<usize> = vec![0; num_buffer_slots];
+                        for &item_idx in item_indices {
+                            for slot_idx in 0..num_buffer_slots {
+                                let has_rect = all_layouts[item_idx]
+                                    .iter()
+                                    .any(|&(s, _, _, _)| s == slot_idx);
+                                if !has_rect {
+                                    continue;
+                                }
+                                let frag_idx = slot_frag_idx[slot_idx];
+                                slot_frag_idx[slot_idx] += 1;
+                                if let Some(grid) = slot_grids[slot_idx].as_mut()
+                                    && let Some(frag) = grid[band_idx]
+                                        .get_mut(frag_idx)
+                                        .and_then(|o| o.take())
+                                {
+                                    item_fragments[item_idx][slot_idx] = Some(frag);
+                                    // Fragment col offset: 0 for first fragment,
+                                    // split_cols[frag_idx-1] for subsequent ones.
+                                    let col_offset = if frag_idx == 0 {
+                                        0
+                                    } else {
+                                        slot_split_cols_per_band[slot_idx][band_idx]
+                                            .get(frag_idx - 1)
+                                            .copied()
+                                            .unwrap_or(0)
+                                    };
+                                    item_col_offsets[item_idx][slot_idx] = col_offset;
+                                }
+                            }
+                        }
+                    }
+                    drop(slot_grids);
+
+                    // Process all tiles in parallel with direct fragment writes.
+                    let first_error: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+                    item_fragments
+                        .par_iter_mut()
+                        .enumerate()
+                        .for_each_init(
+                            || factory.create(1).ok(),
+                            |ctx_opt, (item_idx, slot_bufs)| {
+                                if first_error.lock().unwrap().is_some() {
+                                    return;
+                                }
+                                let result = (|| -> Result<()> {
+                                    stop.check()?;
+                                    let ctx =
+                                        ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                    let item = &all_items[item_idx];
+                                    // Create rect sub-views from fragments.
+                                    // Fragments cover the full band; rect() narrows
+                                    // to the tile's exact row range and resets to 0-based.
+                                    let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> =
+                                        slot_bufs
+                                            .iter_mut()
+                                            .enumerate()
+                                            .map(|(slot_idx, frag_opt)| {
+                                                let frag = frag_opt.as_mut()?;
+                                                let cr = all_layouts[item_idx]
+                                                    .iter()
+                                                    .find(|&&(s, _, _, _)| s == slot_idx)
+                                                    .map(|&(_, _, _, cr)| cr)?;
+                                                // Adjust column origin: fragment starts at
+                                                // col_offset, tile starts at cr.origin.0.
+                                                let col_offset =
+                                                    item_col_offsets[item_idx][slot_idx];
+                                                Some(frag.rect(Rect {
+                                                    origin: (
+                                                        cr.origin.0 - col_offset,
+                                                        cr.origin.1,
+                                                    ),
+                                                    size: cr.size,
+                                                }))
+                                            })
+                                            .collect();
+                                    render_group::render(
+                                        ctx,
+                                        &view,
+                                        (item.gx, item.gy),
+                                        item.image_area,
+                                        &mut local_bufs,
+                                    )?;
+                                    Ok(())
+                                })();
+                                if let Err(e) = result {
+                                    let mut err = first_error.lock().unwrap();
+                                    if err.is_none() {
+                                        *err = Some(e);
+                                    }
+                                }
+                            },
+                        );
+
+                    drop(item_fragments);
+
+                    if let Some(e) = first_error.into_inner().unwrap() {
+                        return Err(e);
+                    }
+                } else {
+                    // Fallback: two-phase render (owned buffers + copy-back).
+                    // Used when band splitting isn't possible (single gy band
+                    // or overlapping row ranges).
+                    let first_error: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+                    let render_outputs: Vec<Option<Vec<buffer_splitter::OwnedLocalBuffer>>> =
+                        all_items
+                            .par_iter()
+                            .enumerate()
+                            .map_init(
+                                || factory.create(1).ok(),
+                                |ctx_opt, (idx, item)| {
+                                    if first_error.lock().unwrap().is_some() {
+                                        return None;
+                                    }
+                                    let result =
+                                        (|| -> Result<Vec<buffer_splitter::OwnedLocalBuffer>> {
+                                            stop.check()?;
+                                            let ctx = ctx_opt
+                                                .as_mut()
+                                                .ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                            let layouts = &all_layouts[idx];
+                                            let mut owned: Vec<buffer_splitter::OwnedLocalBuffer> =
+                                                layouts
+                                                    .iter()
+                                                    .map(|&(slot, bpr, nr, cr)| {
+                                                        buffer_splitter::OwnedLocalBuffer {
+                                                            data: vec![0u8; bpr * nr],
+                                                            bytes_per_row: bpr,
+                                                            num_rows: nr,
+                                                            channel_rect: cr,
+                                                            buffer_index: slot,
+                                                        }
+                                                    })
+                                                    .collect();
+                                            let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> =
+                                                (0..num_buffer_slots).map(|_| None).collect();
+                                            for olb in owned.iter_mut() {
+                                                local_bufs[olb.buffer_index] =
+                                                    Some(JxlOutputBuffer::new(
+                                                        &mut olb.data,
+                                                        olb.num_rows,
+                                                        olb.bytes_per_row,
+                                                    ));
+                                            }
+                                            render_group::render(
+                                                ctx,
+                                                &view,
+                                                (item.gx, item.gy),
+                                                item.image_area,
+                                                &mut local_bufs,
+                                            )?;
+                                            drop(local_bufs);
+                                            Ok(owned)
+                                        })();
+                                    match result {
+                                        Ok(owned) => Some(owned),
+                                        Err(e) => {
+                                            let mut err = first_error.lock().unwrap();
+                                            if err.is_none() {
+                                                *err = Some(e);
+                                            }
+                                            None
+                                        }
+                                    }
+                                },
+                            )
+                            .collect();
+
+                    if let Some(e) = first_error.into_inner().unwrap() {
+                        return Err(e);
+                    }
+
+                    // Sequential copy-back (no band split available).
+                    let output = buffer_splitter.get_full_buffers();
+                    for owned in render_outputs.iter().flatten() {
+                        buffer_splitter::copy_back_local_buffers(owned, output);
+                    }
+                }
             }
             phase3b_dur += phase3b_start.elapsed();
 
@@ -877,10 +1169,18 @@ impl Frame {
         // Save one VarDCT buffer for reuse in next call.
         self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
 
-        // Restore HF coefficient images after all batches complete.
-        if let Some([a, b, c]) = hf_disjoint {
-            self.hf_coefficients = Some((a.into_image(), b.into_image(), c.into_image()));
+        // Restore HF coefficient buffers after all batches complete.
+        if let Some(ref mut channels) = hf_coefficients {
+            for gw in &mut work {
+                if let Some(coeffs) = gw.hf_coeffs.take() {
+                    let [a, b, c] = coeffs;
+                    channels[0][gw.group] = a;
+                    channels[1][gw.group] = b;
+                    channels[2][gw.group] = c;
+                }
+            }
         }
+        self.hf_coefficients = hf_coefficients;
 
         if phase_timing {
             let batches = num_groups.div_ceil(decode_batch_size);

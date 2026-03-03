@@ -25,6 +25,7 @@ use crate::headers::frame_header::FrameType;
 #[cfg(test)]
 use crate::render::SimpleRenderPipeline;
 use crate::render::buffer_splitter::BufferSplitter;
+use crate::transforms::transform_map::*;
 use crate::util::{SmallVec, mirror};
 use crate::{
     GROUP_DIM,
@@ -44,7 +45,6 @@ use crate::{
     render::RenderPipeline,
     util::{CeilLog2, Xorshift128Plus, tracing_wrappers::*},
 };
-use crate::transforms::transform_map::*;
 
 use crate::headers::CustomTransformData;
 use crate::render::RenderPipelineInOutStage;
@@ -472,17 +472,14 @@ impl Frame {
 
     /// Parallel LF group decode for VarDCT frames.
     ///
-    /// Each LF group writes to disjoint rects of `lf_image`, `quant_lf`, and
-    /// `hf_meta` (determined by `lf_group_rect(group)`). Uses `SharedImageView`
-    /// to provide parallel mutable access to non-overlapping regions, following
-    /// the same safety pattern as `ParallelOutputAccess`.
+    /// Each LF group decodes into locally-owned `Image` buffers (no shared
+    /// mutable state). Results are copied back into the parent images
+    /// sequentially after the parallel section.
     #[cfg(feature = "threads")]
-    #[allow(unsafe_code)]
     pub fn decode_lf_groups_vardct_parallel(
         &mut self,
         sections: Vec<(usize, Vec<u8>)>,
     ) -> Result<()> {
-        use crate::image::SharedImageView;
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -500,156 +497,211 @@ impl Frame {
         let modular = &lf_global.modular_global;
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
         let has_lf_frame = header.has_lf_frame();
-
-        // Create SharedImageViews for parallel mutable access to disjoint rects.
-        let lf_image = self.lf_image.as_mut().unwrap();
-        let lf_views: [SharedImageView<f32>; 3] = [
-            lf_image[0].shared_view(),
-            lf_image[1].shared_view(),
-            lf_image[2].shared_view(),
-        ];
-        let quant_lf_view = self.quant_lf.shared_view();
-
-        let hf_meta = self.hf_meta.as_mut().unwrap();
-        let ytox_view = hf_meta.ytox_map.shared_view();
-        let ytob_view = hf_meta.ytob_map.shared_view();
-        let transform_view = hf_meta.transform_map.shared_view();
-        let raw_quant_view = hf_meta.raw_quant_map.shared_view();
-        let epf_view = hf_meta.epf_map.shared_view();
         let used_hf_types = AtomicU32::new(0);
 
-        sections.into_par_iter().try_for_each(|(group, data)| {
-            stop.check()?;
-            let mut br = BitReader::new(&data);
-            let r = header.lf_group_rect(group);
+        /// Per-group decode output, owned by the parallel task.
+        struct LfGroupOutput {
+            group: usize,
+            /// LF coefficients (3 channels, only if !has_lf_frame).
+            lf_local: Option<[Image<f32>; 3]>,
+            /// Quantized LF (only if !has_lf_frame).
+            quant_lf_local: Option<Image<u8>>,
+            /// HF metadata maps.
+            ytox_local: Image<i8>,
+            ytob_local: Image<i8>,
+            transform_local: Image<u8>,
+            raw_quant_local: Image<i32>,
+            epf_local: Image<u8>,
+        }
 
-            // Phase 1: Decode VarDCT LF coefficients (writes to lf_image + quant_lf).
-            if !has_lf_frame {
-                let extra_precision = br.read(2)?;
-                let mul = 1.0 / (1 << extra_precision) as f32;
-                let stream_id = ModularStreamId::VarDCTLF(group).get_id(header);
-                let shrink_rect = |size: (usize, usize), c| {
-                    (
-                        size.0 >> header.hshift(c),
-                        size.1 >> header.vshift(c),
-                    )
+        let results: Vec<LfGroupOutput> = sections
+            .into_par_iter()
+            .map(|(group, data)| -> Result<LfGroupOutput> {
+                stop.check()?;
+                let mut br = BitReader::new(&data);
+                let r = header.lf_group_rect(group);
+
+                // Phase 1: Decode VarDCT LF coefficients into local images.
+                let (lf_local, quant_lf_local) = if !has_lf_frame {
+                    let extra_precision = br.read(2)?;
+                    let mul = 1.0 / (1 << extra_precision) as f32;
+                    let stream_id = ModularStreamId::VarDCTLF(group).get_id(header);
+                    let shrink_rect = |size: (usize, usize), c| {
+                        (size.0 >> header.hshift(c), size.1 >> header.vshift(c))
+                    };
+                    let mut buffers = [
+                        super::modular::ModularChannel::new(
+                            shrink_rect(r.size, 1),
+                            image_metadata.bit_depth,
+                        )?,
+                        super::modular::ModularChannel::new(
+                            shrink_rect(r.size, 0),
+                            image_metadata.bit_depth,
+                        )?,
+                        super::modular::ModularChannel::new(
+                            shrink_rect(r.size, 2),
+                            image_metadata.bit_depth,
+                        )?,
+                    ];
+                    super::modular::decode::decode_modular_subbitstream(
+                        buffers.iter_mut().collect(),
+                        stream_id,
+                        None,
+                        tree,
+                        &mut br,
+                    )?;
+
+                    // Allocate local images for this group's rect.
+                    let lf_sizes: [(usize, usize); 3] = if header.is444() {
+                        [r.size; 3]
+                    } else {
+                        core::array::from_fn(|c| shrink_rect(r.size, c))
+                    };
+                    let mut lf_images: [Image<f32>; 3] = [
+                        Image::new(lf_sizes[0])?,
+                        Image::new(lf_sizes[1])?,
+                        Image::new(lf_sizes[2])?,
+                    ];
+                    let mut quant_lf_img = Image::<u8>::new(r.size)?;
+
+                    // dequant_lf writes into these local images.
+                    // Destructure to avoid multiple mutable borrows of the array.
+                    let full_rect = |sz: (usize, usize)| Rect {
+                        origin: (0, 0),
+                        size: sz,
+                    };
+                    let [ref mut lf0, ref mut lf1, ref mut lf2] = lf_images;
+                    let lf_rects = [
+                        lf0.get_rect_mut(full_rect(lf_sizes[0])),
+                        lf1.get_rect_mut(full_rect(lf_sizes[1])),
+                        lf2.get_rect_mut(full_rect(lf_sizes[2])),
+                    ];
+                    let quant_lf_rect = quant_lf_img.get_rect_mut(full_rect(r.size));
+                    super::modular::dequant_lf(
+                        r,
+                        lf_rects,
+                        quant_lf_rect,
+                        [&buffers[0].data, &buffers[1].data, &buffers[2].data],
+                        color_correlation,
+                        quant_params,
+                        lf_quant,
+                        mul,
+                        header,
+                        bctx,
+                    )?;
+                    (Some(lf_images), Some(quant_lf_img))
+                } else {
+                    (None, None)
                 };
-                let mut buffers = [
-                    super::modular::ModularChannel::new(
-                        shrink_rect(r.size, 1),
-                        image_metadata.bit_depth,
-                    )?,
-                    super::modular::ModularChannel::new(
-                        shrink_rect(r.size, 0),
-                        image_metadata.bit_depth,
-                    )?,
-                    super::modular::ModularChannel::new(
-                        shrink_rect(r.size, 2),
-                        image_metadata.bit_depth,
-                    )?,
-                ];
-                super::modular::decode::decode_modular_subbitstream(
-                    buffers.iter_mut().collect(),
-                    stream_id,
-                    None,
+
+                // Phase 2: Modular LF stream (uses RefCell internally, already thread-safe).
+                modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)?;
+
+                // Phase 3: Decode HF metadata into local images.
+                let cr = Rect {
+                    origin: (r.origin.0 >> 3, r.origin.1 >> 3),
+                    size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
+                };
+                let mut ytox_local = Image::<i8>::new(cr.size)?;
+                let mut ytob_local = Image::<i8>::new(cr.size)?;
+                let mut transform_local =
+                    Image::<u8>::new_with_value(r.size, HfTransformType::INVALID_TRANSFORM)?;
+                let mut raw_quant_local = Image::<i32>::new(r.size)?;
+                let mut epf_local = Image::<u8>::new(r.size)?;
+                let full_cr = Rect {
+                    origin: (0, 0),
+                    size: cr.size,
+                };
+                let full_r = Rect {
+                    origin: (0, 0),
+                    size: r.size,
+                };
+                let used = decode_hf_metadata_into_rects(
+                    group,
+                    header,
+                    image_metadata,
                     tree,
+                    r,
+                    cr,
+                    ytox_local.get_rect_mut(full_cr),
+                    ytob_local.get_rect_mut(full_cr),
+                    transform_local.get_rect_mut(full_r),
+                    raw_quant_local.get_rect_mut(full_r),
+                    epf_local.get_rect_mut(full_r),
                     &mut br,
                 )?;
+                used_hf_types.fetch_or(used, Ordering::Relaxed);
 
-                // SAFETY: Each group writes to lf_group_rect(group) which is
-                // non-overlapping across groups (structurally guaranteed by the
-                // LF group grid partitioning).
-                let lf_rects = if header.is444() {
-                    unsafe {
-                        [
-                            lf_views[0].get_rect_mut(r),
-                            lf_views[1].get_rect_mut(r),
-                            lf_views[2].get_rect_mut(r),
-                        ]
-                    }
-                } else {
-                    unsafe {
-                        [
-                            lf_views[0].get_rect_mut(Rect {
-                                origin: (
-                                    r.origin.0 >> header.hshift(0),
-                                    r.origin.1 >> header.vshift(0),
-                                ),
-                                size: (
-                                    r.size.0 >> header.hshift(0),
-                                    r.size.1 >> header.vshift(0),
-                                ),
-                            }),
-                            lf_views[1].get_rect_mut(Rect {
-                                origin: (
-                                    r.origin.0 >> header.hshift(1),
-                                    r.origin.1 >> header.vshift(1),
-                                ),
-                                size: (
-                                    r.size.0 >> header.hshift(1),
-                                    r.size.1 >> header.vshift(1),
-                                ),
-                            }),
-                            lf_views[2].get_rect_mut(Rect {
-                                origin: (
-                                    r.origin.0 >> header.hshift(2),
-                                    r.origin.1 >> header.vshift(2),
-                                ),
-                                size: (
-                                    r.size.0 >> header.hshift(2),
-                                    r.size.1 >> header.vshift(2),
-                                ),
-                            }),
-                        ]
-                    }
-                };
-                // SAFETY: quant_lf rect is non-overlapping per group.
-                let quant_lf_rect = unsafe { quant_lf_view.get_rect_mut(r) };
-                super::modular::dequant_lf(
-                    r,
-                    lf_rects,
-                    quant_lf_rect,
-                    [&buffers[0].data, &buffers[1].data, &buffers[2].data],
-                    color_correlation,
-                    quant_params,
-                    lf_quant,
-                    mul,
-                    header,
-                    bctx,
-                )?;
+                Ok(LfGroupOutput {
+                    group,
+                    lf_local,
+                    quant_lf_local,
+                    ytox_local,
+                    ytob_local,
+                    transform_local,
+                    raw_quant_local,
+                    epf_local,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Sequential copy-back: write each group's local images into the parent images.
+        let lf_image = self.lf_image.as_mut().unwrap();
+        let hf_meta = self.hf_meta.as_mut().unwrap();
+
+        /// Copy rows from a local image into a rect of the parent image.
+        fn copy_image_to_rect<T: crate::image::ImageDataType + Copy>(
+            src: &Image<T>,
+            dst: &mut Image<T>,
+            dst_rect: Rect,
+        ) {
+            let src_size = src.size();
+            debug_assert_eq!(src_size, dst_rect.size);
+            for y in 0..src_size.1 {
+                let src_row = src.row(y);
+                let dst_row = dst.row_mut(dst_rect.origin.1 + y);
+                dst_row[dst_rect.origin.0..dst_rect.origin.0 + src_size.0]
+                    .copy_from_slice(&src_row[..src_size.0]);
             }
+        }
 
-            // Phase 2: Modular LF stream (uses RefCell internally, already thread-safe).
-            modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)?;
-
-            // Phase 3: Decode HF metadata (writes to hf_meta maps).
+        for output in results {
+            let r = header.lf_group_rect(output.group);
             let cr = Rect {
                 origin: (r.origin.0 >> 3, r.origin.1 >> 3),
                 size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
             };
-            // SAFETY: Each group's cr/r rects are non-overlapping.
-            let ytox_rect = unsafe { ytox_view.get_rect_mut(cr) };
-            let ytob_rect = unsafe { ytob_view.get_rect_mut(cr) };
-            let transform_rect = unsafe { transform_view.get_rect_mut(r) };
-            let raw_quant_rect = unsafe { raw_quant_view.get_rect_mut(r) };
-            let epf_rect = unsafe { epf_view.get_rect_mut(r) };
-            let used = decode_hf_metadata_into_rects(
-                group,
-                header,
-                image_metadata,
-                tree,
-                r,
-                cr,
-                ytox_rect,
-                ytob_rect,
-                transform_rect,
-                raw_quant_rect,
-                epf_rect,
-                &mut br,
-            )?;
-            used_hf_types.fetch_or(used, Ordering::Relaxed);
-            Ok::<(), crate::error::Error>(())
-        })?;
+
+            // Copy LF coefficients + quant_lf.
+            if let Some(lf_local) = &output.lf_local {
+                if header.is444() {
+                    for c in 0..3 {
+                        copy_image_to_rect(&lf_local[c], &mut lf_image[c], r);
+                    }
+                } else {
+                    for c in 0..3 {
+                        let shifted_rect = Rect {
+                            origin: (
+                                r.origin.0 >> header.hshift(c),
+                                r.origin.1 >> header.vshift(c),
+                            ),
+                            size: (r.size.0 >> header.hshift(c), r.size.1 >> header.vshift(c)),
+                        };
+                        copy_image_to_rect(&lf_local[c], &mut lf_image[c], shifted_rect);
+                    }
+                }
+            }
+            if let Some(ref quant_lf_local) = output.quant_lf_local {
+                copy_image_to_rect(quant_lf_local, &mut self.quant_lf, r);
+            }
+
+            // Copy HF metadata maps.
+            copy_image_to_rect(&output.ytox_local, &mut hf_meta.ytox_map, cr);
+            copy_image_to_rect(&output.ytob_local, &mut hf_meta.ytob_map, cr);
+            copy_image_to_rect(&output.transform_local, &mut hf_meta.transform_map, r);
+            copy_image_to_rect(&output.raw_quant_local, &mut hf_meta.raw_quant_map, r);
+            copy_image_to_rect(&output.epf_local, &mut hf_meta.epf_map, r);
+        }
 
         // Merge the atomic used_hf_types back.
         self.hf_meta.as_mut().unwrap().used_hf_types |= used_hf_types.load(Ordering::Relaxed);
@@ -703,14 +755,20 @@ impl Frame {
         self.hf_coefficients = if passes.len() <= 1 {
             None
         } else {
-            let xs = GROUP_DIM * GROUP_DIM;
-            let ys = self.header.num_groups();
+            let coeffs_per_group = GROUP_DIM * GROUP_DIM;
+            let num_groups = self.header.num_groups();
             let tracker = &self.decoder_state.memory_tracker;
-            Some((
-                Image::new_tracked((xs, ys), tracker)?,
-                Image::new_tracked((xs, ys), tracker)?,
-                Image::new_tracked((xs, ys), tracker)?,
-            ))
+            tracker.try_allocate(
+                (coeffs_per_group * num_groups * 3 * std::mem::size_of::<i32>()) as u64,
+            )?;
+            let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+            for ch in &mut channels {
+                ch.reserve_exact(num_groups);
+                for _ in 0..num_groups {
+                    ch.push(vec![0i32; coeffs_per_group]);
+                }
+            }
+            Some(channels)
         };
         self.hf_global = Some(HfGlobalState {
             num_histograms,
@@ -866,10 +924,13 @@ impl Frame {
             info!("Decoding VarDCT group {group}");
             let hf_global = self.hf_global.as_ref().unwrap();
             let hf_meta = self.hf_meta.as_ref().unwrap();
-            let hf_coeffs = self
-                .hf_coefficients
-                .as_mut()
-                .map(|(a, b, c)| [a.row_mut(group), b.row_mut(group), c.row_mut(group)]);
+            let hf_coeffs = self.hf_coefficients.as_mut().map(|[a, b, c]| {
+                [
+                    a[group].as_mut_slice(),
+                    b[group].as_mut_slice(),
+                    c[group].as_mut_slice(),
+                ]
+            });
             let mut pixels = if do_render {
                 Some([
                     pipeline!(self, p, p.get_buffer(0))?,

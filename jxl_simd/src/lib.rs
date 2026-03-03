@@ -47,24 +47,24 @@ pub use scalar::ScalarDescriptor;
 // Concrete token types must keep their original names (no aliases) because
 // the #[arcane] proc macro matches on the last path segment to determine
 // which #[target_feature] attributes to emit.
-#[doc(hidden)]
-pub use archmage::arcane as __arcane;
-#[doc(hidden)]
-pub use archmage::SimdToken as __SimdToken;
-#[doc(hidden)]
-pub use archmage::ScalarToken;
-#[cfg(target_arch = "x86_64")]
-#[doc(hidden)]
-pub use archmage::{X64V2Token, X64V3Token};
-#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-#[doc(hidden)]
-pub use archmage::X64V4Token;
 #[cfg(target_arch = "aarch64")]
 #[doc(hidden)]
 pub use archmage::NeonToken;
+#[doc(hidden)]
+pub use archmage::ScalarToken;
+#[doc(hidden)]
+pub use archmage::SimdToken as __SimdToken;
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub use archmage::Wasm128Token;
+#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+#[doc(hidden)]
+pub use archmage::X64V4Token;
+#[doc(hidden)]
+pub use archmage::arcane as __arcane;
+#[cfg(target_arch = "x86_64")]
+#[doc(hidden)]
+pub use archmage::{X64V2Token, X64V3Token};
 
 pub trait SimdDescriptor: Sized + Copy + Debug + Send + Sync {
     type F32Vec: F32SimdVec<Descriptor = Self>;

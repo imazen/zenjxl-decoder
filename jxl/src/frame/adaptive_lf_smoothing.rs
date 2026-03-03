@@ -60,55 +60,74 @@ pub fn adaptive_lf_smoothing(
 
     #[cfg(feature = "threads")]
     if parallel && ysize > 4 {
-        use crate::image::SharedImageView;
         use rayon::prelude::*;
 
-        // Create shared views for parallel mutable access to disjoint rows.
-        let smoothed_views: [SharedImageView<f32>; 3] = [
-            smoothed[0].shared_view(),
-            smoothed[1].shared_view(),
-            smoothed[2].shared_view(),
-        ];
+        // Parallel smoothing: each row produces owned output, copied back sequentially.
+        // Rows 1..ysize-1 are independent (each reads y-1, y, y+1 from lf_image).
+        let interior_rows = ysize - 2;
+        let row_results: Vec<[Vec<f32>; 3]> = (1..ysize - 1)
+            .into_par_iter()
+            .map(|y| {
+                let rows_in: [(&[f32], &[f32], &[f32]); 3] = core::array::from_fn(|c| {
+                    (
+                        lf_image[c].row(y - 1),
+                        lf_image[c].row(y),
+                        lf_image[c].row(y + 1),
+                    )
+                });
 
-        // Each row y in 1..ysize-1 reads from lf_image rows y-1, y, y+1
-        // and writes to smoothed row y. Rows are independent.
-        (1..ysize - 1).into_par_iter().try_for_each(|y| -> Result<()> {
-            let rows_in: [(&[f32], &[f32], &[f32]); 3] = core::array::from_fn(|c| {
-                (lf_image[c].row(y - 1), lf_image[c].row(y), lf_image[c].row(y + 1))
-            });
+                let mut out: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                    let mut v = vec![0.0f32; xsize];
+                    // Copy border columns.
+                    v[0] = rows_in[c].1[0];
+                    v[xsize - 1] = rows_in[c].1[xsize - 1];
+                    v
+                });
 
-            // SAFETY: each iteration writes to a distinct row y of smoothed.
-            let rows_out: [&mut [f32]; 3] = core::array::from_fn(|c| {
-                #[allow(unsafe_code)]
-                unsafe {
-                    smoothed_views[c].row_mut(y)
+                #[allow(clippy::needless_range_loop)] // x indexes 6+ parallel arrays
+                for x in 1..xsize - 1 {
+                    let gap = 0.5;
+                    let (mc_x, sm_x, gap) = compute_pixel_channel(
+                        lf_factors[0],
+                        gap,
+                        x,
+                        rows_in[0].0,
+                        rows_in[0].1,
+                        rows_in[0].2,
+                    );
+                    let (mc_y, sm_y, gap) = compute_pixel_channel(
+                        lf_factors[1],
+                        gap,
+                        x,
+                        rows_in[1].0,
+                        rows_in[1].1,
+                        rows_in[1].2,
+                    );
+                    let (mc_b, sm_b, gap) = compute_pixel_channel(
+                        lf_factors[2],
+                        gap,
+                        x,
+                        rows_in[2].0,
+                        rows_in[2].1,
+                        rows_in[2].2,
+                    );
+                    let factor = (3.0 - 4.0 * gap).max(0.0);
+                    out[0][x] = (sm_x - mc_x) * factor + mc_x;
+                    out[1][x] = (sm_y - mc_y) * factor + mc_y;
+                    out[2][x] = (sm_b - mc_b) * factor + mc_b;
                 }
-            });
+                out
+            })
+            .collect();
 
-            // Copy border columns.
+        // Sequential copy-back: write parallel results into smoothed images.
+        let _ = interior_rows;
+        for (i, row_data) in row_results.into_iter().enumerate() {
+            let y = i + 1; // rows 1..ysize-1
             for c in 0..3 {
-                rows_out[c][0] = rows_in[c].1[0];
-                rows_out[c][xsize - 1] = rows_in[c].1[xsize - 1];
+                smoothed[c].row_mut(y).copy_from_slice(&row_data[c]);
             }
-
-            for x in 1..xsize - 1 {
-                let gap = 0.5;
-                let (mc_x, sm_x, gap) =
-                    compute_pixel_channel(lf_factors[0], gap, x, rows_in[0].0, rows_in[0].1, rows_in[0].2);
-                let (mc_y, sm_y, gap) =
-                    compute_pixel_channel(lf_factors[1], gap, x, rows_in[1].0, rows_in[1].1, rows_in[1].2);
-                let (mc_b, sm_b, gap) =
-                    compute_pixel_channel(lf_factors[2], gap, x, rows_in[2].0, rows_in[2].1, rows_in[2].2);
-                let factor = (3.0 - 4.0 * gap).max(0.0);
-                rows_out[0][x] = (sm_x - mc_x) * factor + mc_x;
-                rows_out[1][x] = (sm_y - mc_y) * factor + mc_y;
-                rows_out[2][x] = (sm_b - mc_b) * factor + mc_b;
-            }
-            Ok(())
-        })?;
-
-        // Suppress unused warnings — views are consumed.
-        drop(smoothed_views);
+        }
     } else {
         smooth_serial(lf_factors, lf_image, &mut smoothed, xsize, ysize);
     }

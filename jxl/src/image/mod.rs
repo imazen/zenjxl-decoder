@@ -4,8 +4,6 @@
 // license that can be found in the LICENSE file.
 
 mod data_type;
-#[cfg(feature = "threads")]
-pub(crate) mod disjoint;
 mod internal;
 mod output_buffer;
 mod raw;
@@ -17,10 +15,6 @@ mod typed;
 pub use data_type::DataTypeTag;
 pub use data_type::ImageDataType;
 pub use output_buffer::JxlOutputBuffer;
-#[cfg(feature = "threads")]
-pub(crate) use output_buffer::SharedOutputView;
 pub use raw::{OwnedRawImage, RawImageRect, RawImageRectMut};
 pub use rect::Rect;
 pub use typed::{Image, ImageRect, ImageRectMut};
-#[cfg(feature = "threads")]
-pub(crate) use typed::SharedImageView;
