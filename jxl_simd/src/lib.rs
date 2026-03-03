@@ -105,8 +105,12 @@ pub trait SimdDescriptor: Sized + Copy + Debug + Send + Sync {
 
 /// # Safety
 ///
-/// Implementors are required to respect the safety promises of the methods in this trait.
-/// Specifically, this applies to the store_*_uninit methods.
+/// Implementors must uphold the following invariants:
+/// - `store_interleaved_*_uninit` methods must write only initialized data to the
+///   `MaybeUninit` output slices. They must never read from the output and must write
+///   exactly the documented number of elements.
+/// - `load` and `store` methods must correctly enforce that the slice has at least
+///   `Self::LEN` elements before performing any unsafe pointer operations.
 pub unsafe trait F32SimdVec:
     Sized
     + Copy
@@ -144,20 +148,10 @@ pub unsafe trait F32SimdVec:
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self;
 
     /// Loads Self::LEN f32 values starting at `mem[offset..]`.
-    /// Equivalent to `Self::load(d, &mem[offset..])` but avoids the subslice bounds check.
-    /// Callers must ensure `offset + Self::LEN <= mem.len()` (checked in debug mode).
+    /// Equivalent to `Self::load(d, &mem[offset..])`.
     #[inline(always)]
     fn load_from(d: Self::Descriptor, mem: &[f32], offset: usize) -> Self {
-        debug_assert!(
-            offset + Self::LEN <= mem.len(),
-            "load_from: offset {} + LEN {} > len {}",
-            offset,
-            Self::LEN,
-            mem.len()
-        );
-        // SAFETY: debug_assert above verifies bounds. Callers in EPF/render stages
-        // assert row lengths before the hot loop, making this provably in-bounds.
-        Self::load(d, unsafe { mem.get_unchecked(offset..) })
+        Self::load(d, &mem[offset..])
     }
 
     fn load_array(d: Self::Descriptor, mem: &Self::UnderlyingArray) -> Self;
@@ -166,19 +160,10 @@ pub unsafe trait F32SimdVec:
     fn store(&self, mem: &mut [f32]);
 
     /// Stores Self::LEN f32 values starting at `mem[offset..]`.
-    /// Equivalent to `self.store(&mut mem[offset..])` but avoids the subslice bounds check.
-    /// Callers must ensure `offset + Self::LEN <= mem.len()` (checked in debug mode).
+    /// Equivalent to `self.store(&mut mem[offset..])`.
     #[inline(always)]
     fn store_at(&self, mem: &mut [f32], offset: usize) {
-        debug_assert!(
-            offset + Self::LEN <= mem.len(),
-            "store_at: offset {} + LEN {} > len {}",
-            offset,
-            Self::LEN,
-            mem.len()
-        );
-        // SAFETY: debug_assert above verifies bounds.
-        self.store(unsafe { mem.get_unchecked_mut(offset..) });
+        self.store(&mut mem[offset..]);
     }
 
     fn store_array(&self, mem: &mut Self::UnderlyingArray);
@@ -187,8 +172,10 @@ pub unsafe trait F32SimdVec:
     /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
-        // SAFETY: f32 and MaybeUninit<f32> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<f32> is guaranteed to have the same layout as f32
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<f32>, dest.len())
         };
@@ -199,8 +186,10 @@ pub unsafe trait F32SimdVec:
     /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
-        // SAFETY: f32 and MaybeUninit<f32> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<f32> is guaranteed to have the same layout as f32
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<f32>, dest.len())
         };
@@ -211,8 +200,10 @@ pub unsafe trait F32SimdVec:
     /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
-        // SAFETY: f32 and MaybeUninit<f32> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<f32> is guaranteed to have the same layout as f32
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<f32>, dest.len())
         };
@@ -279,19 +270,10 @@ pub unsafe trait F32SimdVec:
     fn round_store_u8(self, dest: &mut [u8]);
 
     /// Rounds to nearest integer and stores as u8 at the given offset.
-    /// Equivalent to `self.round_store_u8(&mut dest[offset..])` but avoids the subslice bounds check.
-    /// Callers must ensure `offset + Self::LEN <= dest.len()` (checked in debug mode).
+    /// Equivalent to `self.round_store_u8(&mut dest[offset..])`.
     #[inline(always)]
     fn round_store_u8_at(self, dest: &mut [u8], offset: usize) {
-        debug_assert!(
-            offset + Self::LEN <= dest.len(),
-            "round_store_u8_at: offset {} + LEN {} > len {}",
-            offset,
-            Self::LEN,
-            dest.len()
-        );
-        // SAFETY: debug_assert above verifies bounds.
-        self.round_store_u8(unsafe { dest.get_unchecked_mut(offset..) });
+        self.round_store_u8(&mut dest[offset..]);
     }
 
     /// Rounds to nearest integer and stores as u16.
@@ -399,18 +381,10 @@ pub trait I32SimdVec:
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self;
 
     /// Loads Self::LEN i32 values starting at `mem[offset..]`.
-    /// Equivalent to `Self::load(d, &mem[offset..])` but avoids the subslice bounds check.
+    /// Equivalent to `Self::load(d, &mem[offset..])`.
     #[inline(always)]
     fn load_from(d: Self::Descriptor, mem: &[i32], offset: usize) -> Self {
-        debug_assert!(
-            offset + Self::LEN <= mem.len(),
-            "I32 load_from: offset {} + LEN {} > len {}",
-            offset,
-            Self::LEN,
-            mem.len()
-        );
-        // SAFETY: debug_assert above verifies offset + Self::LEN <= mem.len()
-        Self::load(d, unsafe { mem.get_unchecked(offset..) })
+        Self::load(d, &mem[offset..])
     }
 
     // Requires `mem.len() >= Self::LEN` or it will panic.
@@ -456,8 +430,12 @@ pub trait U32SimdVec: Sized + Copy + Debug + Send + Sync {
 
 /// # Safety
 ///
-/// Implementors are required to respect the safety promises of the methods in this trait.
-/// Specifically, this applies to the store_*_uninit methods.
+/// Implementors must uphold the following invariants:
+/// - `store_interleaved_*_uninit` methods must write only initialized data to the
+///   `MaybeUninit` output slices. They must never read from the output and must write
+///   exactly the documented number of elements.
+/// - `load` and `store` methods must correctly enforce that the slice has at least
+///   `Self::LEN` elements before performing any unsafe pointer operations.
 pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
     type Descriptor: SimdDescriptor;
 
@@ -471,8 +449,10 @@ pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
     /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
-        // SAFETY: u8 and MaybeUninit<u8> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<u8> is guaranteed to have the same layout as u8
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u8>, dest.len())
         };
@@ -483,8 +463,10 @@ pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
     /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
-        // SAFETY: u8 and MaybeUninit<u8> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<u8> is guaranteed to have the same layout as u8
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u8>, dest.len())
         };
@@ -495,8 +477,10 @@ pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
     /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
-        // SAFETY: u8 and MaybeUninit<u8> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<u8> is guaranteed to have the same layout as u8
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u8>, dest.len())
         };
@@ -525,8 +509,12 @@ pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
 
 /// # Safety
 ///
-/// Implementors are required to respect the safety promises of the methods in this trait.
-/// Specifically, this applies to the store_*_uninit methods.
+/// Implementors must uphold the following invariants:
+/// - `store_interleaved_*_uninit` methods must write only initialized data to the
+///   `MaybeUninit` output slices. They must never read from the output and must write
+///   exactly the documented number of elements.
+/// - `load` and `store` methods must correctly enforce that the slice has at least
+///   `Self::LEN` elements before performing any unsafe pointer operations.
 pub unsafe trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
     type Descriptor: SimdDescriptor;
 
@@ -540,8 +528,10 @@ pub unsafe trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
     /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
-        // SAFETY: u16 and MaybeUninit<u16> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<u16> is guaranteed to have the same layout as u16
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u16>, dest.len())
         };
@@ -552,8 +542,10 @@ pub unsafe trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
     /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
-        // SAFETY: u16 and MaybeUninit<u16> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<u16> is guaranteed to have the same layout as u16
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u16>, dest.len())
         };
@@ -564,8 +556,10 @@ pub unsafe trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
     /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
-        // SAFETY: u16 and MaybeUninit<u16> have the same layout.
-        // We are writing to initialized memory, so treating it as uninit for writing is fine.
+        // SAFETY: MaybeUninit<u16> is guaranteed to have the same layout as u16
+        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
+        // The source slice is already initialized, and the _uninit method only writes
+        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
         let dest = unsafe {
             std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u16>, dest.len())
         };
@@ -1579,61 +1573,50 @@ mod test {
     test_all_instruction_sets!(test_store_interleaved_4_u16);
 }
 
-/// Demonstrates soundness holes in the current SIMD API.
+/// Soundness regression tests for the SIMD API.
 ///
 /// Every test in this module uses **only safe code** — no `unsafe` blocks.
-/// In debug builds, `debug_assert!` catches the violation and the test panics.
-/// In release builds, the `debug_assert!` is stripped and these become **silent
-/// undefined behavior** — out-of-bounds reads/writes with no panic or signal.
+/// All out-of-bounds accesses are caught as panics in **all build profiles**
+/// (debug and release) thanks to checked slice indexing in trait defaults
+/// and `assert!` guards in backend load/store implementations.
 ///
-/// These are not theoretical: the `jxl` crate's render pipeline calls
-/// `load_from`/`store_at` 103 times, relying on caller discipline for soundness.
-///
-/// To verify UB with Miri (must use release-mode debug_assertions=off):
-/// ```sh
-/// MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test \
-///   -p zenjxl-decoder-simd --lib soundness -- --ignored
-/// ```
+/// These tests serve as regression tests: if any future change weakens
+/// the bounds checking (e.g. replacing `assert!` with `debug_assert!`),
+/// the release-mode tests will fail.
 #[cfg(test)]
 mod soundness_tests {
     use super::*;
     use std::num::Wrapping;
 
     // =========================================================================
-    // Category 1: Trait default methods with get_unchecked behind debug_assert
+    // Category 1: Trait default methods with checked slice indexing
     //
-    // These are unsound for ALL backends (including scalar) because the UB
-    // comes from get_unchecked creating an invalid slice reference, before the
-    // backend's load/store is even called.
+    // These use `&mem[offset..]` / `&mut mem[offset..]` which panics on
+    // out-of-bounds access in all build profiles. Previously used
+    // `get_unchecked` behind `debug_assert` — now fully sound.
     // =========================================================================
 
     /// `F32SimdVec::load_from` with offset past end of slice.
-    ///
-    /// Internally calls `mem.get_unchecked(offset..)` which creates a dangling
-    /// reference when offset > len. This is instant UB per the Rust reference,
-    /// regardless of what load() does afterwards.
-    ///
-    /// No `unsafe` in this function body.
+    /// Panics from checked slice indexing.
     #[test]
-    #[should_panic(expected = "load_from")]
+    #[should_panic(expected = "range start index")]
     fn soundness_f32_load_from_oob_offset() {
         let data = [1.0f32, 2.0];
         let _ = f32::load_from(ScalarDescriptor, &data, 5);
     }
 
-    /// Same hole on the I32 side.
+    /// Same on the I32 side.
     #[test]
-    #[should_panic(expected = "load_from")]
+    #[should_panic(expected = "range start index")]
     fn soundness_i32_load_from_oob_offset() {
         let data = [1i32, 2];
         let _ = Wrapping::<i32>::load_from(ScalarDescriptor, &data, 5);
     }
 
     /// `F32SimdVec::store_at` with offset past end of slice.
-    ///
-    /// Internally calls `mem.get_unchecked_mut(offset..)` — same UB pattern.
+    /// Panics from checked slice indexing.
     #[test]
-    #[should_panic(expected = "store_at")]
+    #[should_panic(expected = "range start index")]
     fn soundness_f32_store_at_oob_offset() {
         let mut data = [0.0f32; 2];
         let v = f32::splat(ScalarDescriptor, 42.0);
@@ -1642,7 +1625,7 @@ mod soundness_tests {
 
     /// `F32SimdVec::round_store_u8_at` with offset past end of slice.
     #[test]
-    #[should_panic(expected = "round_store_u8_at")]
+    #[should_panic(expected = "range start index")]
     fn soundness_f32_round_store_u8_at_oob() {
         let mut data = [0u8; 2];
         let v = f32::splat(ScalarDescriptor, 42.0);
@@ -1650,34 +1633,23 @@ mod soundness_tests {
     }
 
     /// `load_from` with offset exactly at len (offset == len, LEN == 1).
-    ///
-    /// get_unchecked(2..) on a 2-element slice creates an empty slice at
-    /// one-past-end (technically valid pointer), but then scalar `load` does
-    /// `mem[0]` which panics. For SIMD backends, the unsafe pointer read
-    /// would be UB (reading from the one-past-end address).
+    /// Slice `&data[2..]` is empty, then `load` panics on the short slice.
     #[test]
     #[should_panic]
     fn soundness_f32_load_from_at_exact_len() {
         let data = [1.0f32, 2.0];
-        // offset=2 on a 2-element slice. Scalar panics at mem[0] on empty
-        // subslice. SIMD backends would read past the allocation.
         let _ = f32::load_from(ScalarDescriptor, &data, 2);
     }
 
     // =========================================================================
     // Category 2: SIMD backend load/store with too-short slices
     //
-    // The load() and store() trait methods are declared safe but backend
-    // implementations guard only with debug_assert before raw pointer ops.
-    // Scalar is safe here (uses bounds-checked indexing), but all SIMD
-    // backends (SSE4.2, AVX2, NEON, WASM128) are UB in release.
-    //
-    // We demonstrate with scalar (which panics normally) to show the API
-    // *permits* the call. The unsoundness requires a SIMD backend + release.
+    // The load() and store() trait methods are declared safe. All backends
+    // (including SIMD) now use `assert!` before unsafe pointer operations,
+    // catching violations in all build profiles.
     // =========================================================================
 
-    /// `F32SimdVec::load` with empty slice. Scalar panics (safe), but SIMD
-    /// backends would read 16/32/64 bytes from a zero-length allocation.
+    /// `F32SimdVec::load` with empty slice.
     #[test]
     #[should_panic]
     fn soundness_f32_load_empty_slice() {
@@ -1705,10 +1677,9 @@ mod soundness_tests {
     // =========================================================================
     // Category 3: Interleaved store to too-short destination
     //
-    // store_interleaved_2 etc. require dest.len() >= 2 * LEN. Scalar impls
-    // use bounds-checked writes. SIMD impls use debug_assert + raw pointer
-    // stores. The default method also does from_raw_parts_mut to cast the
-    // slice, but that part is layout-safe.
+    // store_interleaved_2 etc. require dest.len() >= 2 * LEN. All backends
+    // now use `assert!` guards (not `debug_assert!`), catching violations
+    // in all build profiles.
     // =========================================================================
 
     /// `store_interleaved_2` with destination smaller than 2 * LEN.
@@ -1731,231 +1702,98 @@ mod soundness_tests {
     }
 
     // =========================================================================
-    // Category 4: SIMD-backend-specific tests (only run when ISA available)
+    // Category 4: SIMD-backend-specific bounds checking
     //
-    // These demonstrate the *actual* UB path: SIMD backends with too-short
-    // slices. In debug mode, debug_assert fires. In release mode, the raw
-    // pointer loads/stores read/write out of bounds.
+    // These verify that SIMD backends correctly panic on too-short slices
+    // in all build profiles. Now that backends use `assert!` (not
+    // `debug_assert!`), behavior is consistent across debug/release.
+    //
+    // Scalar (LEN=1) is skipped since 1-element operations on 1-element
+    // slices are valid. We use catch_unwind to assert the panic for SIMD.
     // =========================================================================
 
-    // The following tests demonstrate that SIMD backends accept invalid
-    // arguments from safe code. Each test panics in debug mode (from
-    // debug_assert!). In release mode, the debug_assert is stripped and
-    // these become silent UB — out-of-bounds SIMD loads/stores.
-    //
-    // We test per-ISA because scalar impls use bounds-checked indexing
-    // (safe), while SIMD impls use debug_assert + raw pointer ops (unsound).
-    //
-    // The test functions return early for scalar (LEN==1) since scalar is
-    // actually safe. For SIMD backends, #[should_panic] catches the
-    // debug_assert. The point: nothing in the *type system* prevents this.
+    fn soundness_simd_load_short_slice<D: SimdDescriptor>(d: D) {
+        if D::F32Vec::LEN <= 1 {
+            return; // scalar: 1 element from 1-element slice is valid
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let data = [1.0f32]; // 1 element, SIMD needs 4/8/16
+            let _ = D::F32Vec::load(d, &data);
+        }));
+        assert!(
+            result.is_err(),
+            "load from 1-element slice should panic for LEN={}",
+            D::F32Vec::LEN
+        );
+    }
+    test_all_instruction_sets!(soundness_simd_load_short_slice);
 
-    fn soundness_simd_load_short_slice_impl<D: SimdDescriptor>(d: D) {
+    fn soundness_simd_store_short_slice<D: SimdDescriptor>(d: D) {
         if D::F32Vec::LEN <= 1 {
             return;
         }
-        let data = [1.0f32]; // 1 element, SIMD needs 4/8/16
-        let _ = D::F32Vec::load(d, &data);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let v = D::F32Vec::splat(d, 42.0);
+            let mut data = [0.0f32]; // 1 element
+            v.store(&mut data);
+        }));
+        assert!(
+            result.is_err(),
+            "store to 1-element slice should panic for LEN={}",
+            D::F32Vec::LEN
+        );
     }
+    test_all_instruction_sets!(soundness_simd_store_short_slice);
 
-    // Scalar: safe (uses bounds-checked indexing), just returns.
-    #[test]
-    fn soundness_simd_load_short_slice_scalar_ok() {
-        soundness_simd_load_short_slice_impl(ScalarDescriptor);
-    }
-
-    // SSE4.2: debug_assert fires, release = UB (reads 16B from 4B alloc)
-    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_load_short_slice_sse42() {
-        if let Some(d) = Sse42Descriptor::new() {
-            soundness_simd_load_short_slice_impl(d);
-        }
-    }
-
-    // AVX2: debug_assert fires, release = UB (reads 32B from 4B alloc)
-    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_load_short_slice_avx() {
-        if let Some(d) = AvxDescriptor::new() {
-            soundness_simd_load_short_slice_impl(d);
-        }
-    }
-
-    // AVX-512: debug_assert fires, release = UB (reads 64B from 4B alloc)
-    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_load_short_slice_avx512() {
-        if let Some(d) = Avx512Descriptor::new() {
-            soundness_simd_load_short_slice_impl(d);
-        }
-    }
-
-    fn soundness_simd_store_short_slice_impl<D: SimdDescriptor>(d: D) {
+    fn soundness_simd_load_from_partial_oob<D: SimdDescriptor>(d: D) {
         if D::F32Vec::LEN <= 1 {
             return;
         }
-        let v = D::F32Vec::splat(d, 42.0);
-        let mut data = [0.0f32]; // 1 element
-        v.store(&mut data);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Provide exactly LEN elements, offset=1 → only LEN-1 remain.
+            let data: Vec<f32> = (0..D::F32Vec::LEN).map(|i| i as f32).collect();
+            let _ = D::F32Vec::load_from(d, &data, 1);
+        }));
+        assert!(
+            result.is_err(),
+            "load_from with partial OOB should panic for LEN={}",
+            D::F32Vec::LEN
+        );
     }
+    test_all_instruction_sets!(soundness_simd_load_from_partial_oob);
 
-    #[test]
-    fn soundness_simd_store_short_slice_scalar_ok() {
-        soundness_simd_store_short_slice_impl(ScalarDescriptor);
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_store_short_slice_sse42() {
-        if let Some(d) = Sse42Descriptor::new() {
-            soundness_simd_store_short_slice_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_store_short_slice_avx() {
-        if let Some(d) = AvxDescriptor::new() {
-            soundness_simd_store_short_slice_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_store_short_slice_avx512() {
-        if let Some(d) = Avx512Descriptor::new() {
-            soundness_simd_store_short_slice_impl(d);
-        }
-    }
-
-    fn soundness_simd_load_from_partial_oob_impl<D: SimdDescriptor>(d: D) {
+    fn soundness_simd_interleaved_2_short<D: SimdDescriptor>(d: D) {
         if D::F32Vec::LEN <= 1 {
             return;
         }
-        // Provide exactly LEN elements, offset=1 → only LEN-1 remain.
-        let data: Vec<f32> = (0..D::F32Vec::LEN).map(|i| i as f32).collect();
-        let _ = D::F32Vec::load_from(d, &data, 1);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let a = D::F32Vec::splat(d, 1.0);
+            let b = D::F32Vec::splat(d, 2.0);
+            let mut dest = vec![0.0f32; D::F32Vec::LEN]; // need 2*LEN
+            D::F32Vec::store_interleaved_2(a, b, &mut dest);
+        }));
+        assert!(
+            result.is_err(),
+            "interleaved_2 with short dest should panic for LEN={}",
+            D::F32Vec::LEN
+        );
     }
+    test_all_instruction_sets!(soundness_simd_interleaved_2_short);
 
-    #[test]
-    fn soundness_simd_load_from_partial_oob_scalar_ok() {
-        soundness_simd_load_from_partial_oob_impl(ScalarDescriptor);
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-    #[test]
-    #[should_panic(expected = "load_from")]
-    fn soundness_simd_load_from_partial_oob_sse42() {
-        if let Some(d) = Sse42Descriptor::new() {
-            soundness_simd_load_from_partial_oob_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-    #[test]
-    #[should_panic(expected = "load_from")]
-    fn soundness_simd_load_from_partial_oob_avx() {
-        if let Some(d) = AvxDescriptor::new() {
-            soundness_simd_load_from_partial_oob_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-    #[test]
-    #[should_panic(expected = "load_from")]
-    fn soundness_simd_load_from_partial_oob_avx512() {
-        if let Some(d) = Avx512Descriptor::new() {
-            soundness_simd_load_from_partial_oob_impl(d);
-        }
-    }
-
-    fn soundness_simd_interleaved_2_short_impl<D: SimdDescriptor>(d: D) {
+    fn soundness_simd_round_store_u8_short<D: SimdDescriptor>(d: D) {
         if D::F32Vec::LEN <= 1 {
             return;
         }
-        let a = D::F32Vec::splat(d, 1.0);
-        let b = D::F32Vec::splat(d, 2.0);
-        let mut dest = vec![0.0f32; D::F32Vec::LEN]; // need 2*LEN
-        D::F32Vec::store_interleaved_2(a, b, &mut dest);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let v = D::F32Vec::splat(d, 128.0);
+            let mut dest = [0u8; 1]; // need LEN bytes
+            v.round_store_u8(&mut dest);
+        }));
+        assert!(
+            result.is_err(),
+            "round_store_u8 with short dest should panic for LEN={}",
+            D::F32Vec::LEN
+        );
     }
-
-    #[test]
-    fn soundness_simd_interleaved_2_short_scalar_ok() {
-        soundness_simd_interleaved_2_short_impl(ScalarDescriptor);
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_interleaved_2_short_sse42() {
-        if let Some(d) = Sse42Descriptor::new() {
-            soundness_simd_interleaved_2_short_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_interleaved_2_short_avx() {
-        if let Some(d) = AvxDescriptor::new() {
-            soundness_simd_interleaved_2_short_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_interleaved_2_short_avx512() {
-        if let Some(d) = Avx512Descriptor::new() {
-            soundness_simd_interleaved_2_short_impl(d);
-        }
-    }
-
-    fn soundness_simd_round_store_u8_short_impl<D: SimdDescriptor>(d: D) {
-        if D::F32Vec::LEN <= 1 {
-            return;
-        }
-        let v = D::F32Vec::splat(d, 128.0);
-        let mut dest = [0u8; 1]; // need LEN bytes
-        v.round_store_u8(&mut dest);
-    }
-
-    #[test]
-    fn soundness_simd_round_store_u8_short_scalar_ok() {
-        soundness_simd_round_store_u8_short_impl(ScalarDescriptor);
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_round_store_u8_short_sse42() {
-        if let Some(d) = Sse42Descriptor::new() {
-            soundness_simd_round_store_u8_short_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_round_store_u8_short_avx() {
-        if let Some(d) = AvxDescriptor::new() {
-            soundness_simd_round_store_u8_short_impl(d);
-        }
-    }
-
-    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn soundness_simd_round_store_u8_short_avx512() {
-        if let Some(d) = Avx512Descriptor::new() {
-            soundness_simd_round_store_u8_short_impl(d);
-        }
-    }
+    test_all_instruction_sets!(soundness_simd_round_store_u8_short);
 }

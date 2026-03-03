@@ -193,6 +193,11 @@ simd_function!(
         let mat = mat.map(|x| D::F32Vec::splat(d, x));
         let intensity_scale = D::F32Vec::splat(d, intensity_scale);
 
+        // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
+        assert!(row_x.len() >= xsize);
+        assert!(row_y.len() >= xsize);
+        assert!(row_b.len() >= xsize);
+
         for idx in (0..xsize).step_by(D::F32Vec::LEN) {
             let x = D::F32Vec::load_from(d, row_x, idx);
             let y = D::F32Vec::load_from(d, row_y, idx);
@@ -383,6 +388,14 @@ simd_function!(
         let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
 
         let end = xsize.next_multiple_of(D::F32Vec::LEN);
+        // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
+        assert!(in_x.len() >= end);
+        assert!(in_y.len() >= end);
+        assert!(in_b.len() >= end);
+        assert!(out_r[0].len() >= end);
+        assert!(out_g[0].len() >= end);
+        assert!(out_b[0].len() >= end);
+
         for idx in (0..end).step_by(D::F32Vec::LEN) {
             let x = D::F32Vec::load_from(d, in_x, idx);
             let y = D::F32Vec::load_from(d, in_y, idx);
@@ -450,6 +463,14 @@ simd_function!(
         let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
 
         let end = xsize.next_multiple_of(D::F32Vec::LEN);
+        // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
+        assert!(in_x.len() >= end);
+        assert!(in_y.len() >= end);
+        assert!(in_b.len() >= end);
+        assert!(out_r[0].len() >= end);
+        assert!(out_g[0].len() >= end);
+        assert!(out_b[0].len() >= end);
+
         for idx in (0..end).step_by(D::F32Vec::LEN) {
             let x = D::F32Vec::load_from(d, in_x, idx);
             let y = D::F32Vec::load_from(d, in_y, idx);

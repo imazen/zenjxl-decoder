@@ -159,6 +159,13 @@ fn dequant_block<D: SimdDescriptor>(
     let matrices = dequant_matrices.matrix(hf_type, 0);
 
     assert!(BLOCK_SIZE.is_multiple_of(D::F32Vec::LEN));
+    // Pre-loop assertions: prove buffer lengths so LLVM can eliminate bounds checks.
+    let total = covered_blocks * BLOCK_SIZE;
+    assert!(matrices.len() >= 2 * size + total);
+    for c in 0..3 {
+        assert!(qblock[c].len() >= total);
+        assert!(block[c].len() >= total);
+    }
     for k in (0..covered_blocks * BLOCK_SIZE).step_by(D::F32Vec::LEN) {
         dequant_lane(
             d,

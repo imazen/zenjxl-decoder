@@ -65,6 +65,22 @@ fn epf2_process_row_chunk(
     let (input_x, input_y, input_b) = (&input_rows[0], &input_rows[1], &input_rows[2]);
     let (output_x, output_y, output_b) = output_rows.split_first_3_mut();
 
+    // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
+    // EPF2 has BORDER=1, so 3 input rows per channel (indices 0-2).
+    // Max column access: row[2 + x] where x goes up to xsize - VEC_LEN,
+    // and load reads VEC_LEN elements. So min row len = 2 + xsize.
+    let min_in_len = 2 + xsize;
+    let min_out_len = xsize;
+    for ch in [input_x, input_y, input_b] {
+        assert!(ch.len() >= 3);
+        for r in 0..3 {
+            assert!(ch[r].len() >= min_in_len);
+        }
+    }
+    assert!(output_x[0].len() >= min_out_len);
+    assert!(output_y[0].len() >= min_out_len);
+    assert!(output_b[0].len() >= min_out_len);
+
     let row_sigma = stage.sigma.row(ypos / BLOCK_DIM);
 
     const { assert!(D::F32Vec::LEN <= 16) };
