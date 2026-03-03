@@ -931,11 +931,11 @@ impl Frame {
                         .enumerate()
                         .map(|(slot_idx, buf_opt)| {
                             buf_opt.as_mut().map(|buf| {
-                                let split_cols_refs: Vec<&[usize]> =
-                                    slot_split_cols_per_band[slot_idx]
-                                        .iter()
-                                        .map(|v| v.as_slice())
-                                        .collect();
+                                let split_cols_refs: Vec<&[usize]> = slot_split_cols_per_band
+                                    [slot_idx]
+                                    .iter()
+                                    .map(|v| v.as_slice())
+                                    .collect();
                                 buf.split_into_tile_grid(
                                     &slot_split_rows[slot_idx],
                                     &split_cols_refs,
@@ -950,8 +950,8 @@ impl Frame {
                     // Build per-item fragment sets by taking from the grid.
                     // Each item gets one fragment per slot, plus the fragment's
                     // absolute column offset so rect() can adjust correctly.
-                    let mut item_fragments: Vec<Vec<Option<JxlOutputBuffer<'_>>>> = (0
-                        ..all_items.len())
+                    let mut item_fragments: Vec<Vec<Option<JxlOutputBuffer<'_>>>> = (0..all_items
+                        .len())
                         .map(|_| (0..num_buffer_slots).map(|_| None).collect())
                         .collect();
                     let mut item_col_offsets: Vec<Vec<usize>> =
@@ -972,9 +972,8 @@ impl Frame {
                                 let frag_idx = slot_frag_idx[slot_idx];
                                 slot_frag_idx[slot_idx] += 1;
                                 if let Some(grid) = slot_grids[slot_idx].as_mut()
-                                    && let Some(frag) = grid[band_idx]
-                                        .get_mut(frag_idx)
-                                        .and_then(|o| o.take())
+                                    && let Some(frag) =
+                                        grid[band_idx].get_mut(frag_idx).and_then(|o| o.take())
                                 {
                                     item_fragments[item_idx][slot_idx] = Some(frag);
                                     // Fragment col offset: 0 for first fragment,
@@ -996,63 +995,54 @@ impl Frame {
 
                     // Process all tiles in parallel with direct fragment writes.
                     let first_error: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
-                    item_fragments
-                        .par_iter_mut()
-                        .enumerate()
-                        .for_each_init(
-                            || factory.create(1).ok(),
-                            |ctx_opt, (item_idx, slot_bufs)| {
-                                if first_error.lock().unwrap().is_some() {
-                                    return;
+                    item_fragments.par_iter_mut().enumerate().for_each_init(
+                        || factory.create(1).ok(),
+                        |ctx_opt, (item_idx, slot_bufs)| {
+                            if first_error.lock().unwrap().is_some() {
+                                return;
+                            }
+                            let result = (|| -> Result<()> {
+                                stop.check()?;
+                                let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                let item = &all_items[item_idx];
+                                // Create rect sub-views from fragments.
+                                // Fragments cover the full band; rect() narrows
+                                // to the tile's exact row range and resets to 0-based.
+                                let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> = slot_bufs
+                                    .iter_mut()
+                                    .enumerate()
+                                    .map(|(slot_idx, frag_opt)| {
+                                        let frag = frag_opt.as_mut()?;
+                                        let cr = all_layouts[item_idx]
+                                            .iter()
+                                            .find(|&&(s, _, _, _)| s == slot_idx)
+                                            .map(|&(_, _, _, cr)| cr)?;
+                                        // Adjust column origin: fragment starts at
+                                        // col_offset, tile starts at cr.origin.0.
+                                        let col_offset = item_col_offsets[item_idx][slot_idx];
+                                        Some(frag.rect(Rect {
+                                            origin: (cr.origin.0 - col_offset, cr.origin.1),
+                                            size: cr.size,
+                                        }))
+                                    })
+                                    .collect();
+                                render_group::render(
+                                    ctx,
+                                    &view,
+                                    (item.gx, item.gy),
+                                    item.image_area,
+                                    &mut local_bufs,
+                                )?;
+                                Ok(())
+                            })();
+                            if let Err(e) = result {
+                                let mut err = first_error.lock().unwrap();
+                                if err.is_none() {
+                                    *err = Some(e);
                                 }
-                                let result = (|| -> Result<()> {
-                                    stop.check()?;
-                                    let ctx =
-                                        ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
-                                    let item = &all_items[item_idx];
-                                    // Create rect sub-views from fragments.
-                                    // Fragments cover the full band; rect() narrows
-                                    // to the tile's exact row range and resets to 0-based.
-                                    let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> =
-                                        slot_bufs
-                                            .iter_mut()
-                                            .enumerate()
-                                            .map(|(slot_idx, frag_opt)| {
-                                                let frag = frag_opt.as_mut()?;
-                                                let cr = all_layouts[item_idx]
-                                                    .iter()
-                                                    .find(|&&(s, _, _, _)| s == slot_idx)
-                                                    .map(|&(_, _, _, cr)| cr)?;
-                                                // Adjust column origin: fragment starts at
-                                                // col_offset, tile starts at cr.origin.0.
-                                                let col_offset =
-                                                    item_col_offsets[item_idx][slot_idx];
-                                                Some(frag.rect(Rect {
-                                                    origin: (
-                                                        cr.origin.0 - col_offset,
-                                                        cr.origin.1,
-                                                    ),
-                                                    size: cr.size,
-                                                }))
-                                            })
-                                            .collect();
-                                    render_group::render(
-                                        ctx,
-                                        &view,
-                                        (item.gx, item.gy),
-                                        item.image_area,
-                                        &mut local_bufs,
-                                    )?;
-                                    Ok(())
-                                })();
-                                if let Err(e) = result {
-                                    let mut err = first_error.lock().unwrap();
-                                    if err.is_none() {
-                                        *err = Some(e);
-                                    }
-                                }
-                            },
-                        );
+                            }
+                        },
+                    );
 
                     drop(item_fragments);
 

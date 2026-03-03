@@ -150,9 +150,7 @@ impl<'a> JxlOutputBuffer<'a> {
                 let start = local_row * *bytes_between_rows;
                 &mut data[start..start + self.bytes_per_row]
             }
-            BufferStorage::Fragmented { rows } => {
-                &mut rows[local_row][..self.bytes_per_row]
-            }
+            BufferStorage::Fragmented { rows } => &mut rows[local_row][..self.bytes_per_row],
         }
     }
 
@@ -304,17 +302,13 @@ impl<'a> JxlOutputBuffer<'a> {
         for (i, &col) in split_cols.iter().enumerate() {
             assert!(col <= bpr, "split_col {col} exceeds bytes_per_row {bpr}");
             if i > 0 {
-                assert!(
-                    col >= split_cols[i - 1],
-                    "split_cols must be sorted"
-                );
+                assert!(col >= split_cols[i - 1], "split_cols must be sorted");
             }
         }
 
         // Pre-allocate fragment row collectors.
-        let mut fragment_rows: Vec<Vec<&mut [u8]>> = (0..num_frags)
-            .map(|_| Vec::with_capacity(nrows))
-            .collect();
+        let mut fragment_rows: Vec<Vec<&mut [u8]>> =
+            (0..num_frags).map(|_| Vec::with_capacity(nrows)).collect();
 
         match &mut self.storage {
             BufferStorage::Contiguous {
@@ -328,11 +322,7 @@ impl<'a> JxlOutputBuffer<'a> {
                     // Always consume via split_at_mut so the borrow checker
                     // sees `remaining` is moved, not aliased.
                     let tmp = remaining;
-                    let split_point = if row_idx < nrows - 1 {
-                        btr
-                    } else {
-                        tmp.len()
-                    };
+                    let split_point = if row_idx < nrows - 1 { btr } else { tmp.len() };
                     let (chunk, rest) = tmp.split_at_mut(split_point);
                     remaining = rest;
                     let row_useful = &mut chunk[..bpr];
@@ -537,8 +527,7 @@ impl<'a> JxlOutputBuffer<'a> {
             BufferStorage::Fragmented { rows } => {
                 let col_start = rect.origin.0;
                 let col_end = col_start + rect.size.0;
-                let sub_rows: Vec<&mut [u8]> = rows
-                    [local_y..local_y + rect.size.1]
+                let sub_rows: Vec<&mut [u8]> = rows[local_y..local_y + rect.size.1]
                     .iter_mut()
                     .map(|row| &mut row[col_start..col_end])
                     .collect();

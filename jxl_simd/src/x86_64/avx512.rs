@@ -25,7 +25,7 @@ impl Avx512Descriptor {
     /// # Safety
     /// The caller must guarantee that "avx512f" and "avx512bw" target features are available.
     #[inline]
-    pub unsafe fn new_unchecked() -> Self {
+    pub(crate) unsafe fn new_unchecked() -> Self {
         Self(())
     }
 
@@ -126,7 +126,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `d`.
         Self(unsafe { _mm512_loadu_ps(mem.as_ptr()) }, d)
@@ -134,7 +134,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [f32]) {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `self.1`.
         unsafe { _mm512_storeu_ps(mem.as_mut_ptr(), self.0) }
@@ -145,7 +145,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
         fn store_interleaved_2_impl(a: __m512, b: __m512, dest: &mut [MaybeUninit<f32>]) {
-            debug_assert!(dest.len() >= 2 * F32VecAvx512::LEN);
+            assert!(dest.len() >= 2 * F32VecAvx512::LEN);
             // a = [a0..a15], b = [b0..b15]
             // Output: [a0, b0, a1, b1, ..., a15, b15]
             // unpacklo within each 128-bit lane: lane0=[a0,b0,a1,b1], lane1=[a4,b4,a5,b5], etc.
@@ -185,7 +185,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             c: __m512,
             dest: &mut [MaybeUninit<f32>],
         ) {
-            debug_assert!(dest.len() >= 3 * F32VecAvx512::LEN);
+            assert!(dest.len() >= 3 * F32VecAvx512::LEN);
 
             let idx_ab0 = _mm512_setr_epi32(0, 16, 0, 1, 17, 0, 2, 18, 0, 3, 19, 0, 4, 20, 0, 5);
             let idx_c0 = _mm512_setr_epi32(0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0);
@@ -236,7 +236,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             d: __m512,
             dest: &mut [MaybeUninit<f32>],
         ) {
-            debug_assert!(dest.len() >= 4 * F32VecAvx512::LEN);
+            assert!(dest.len() >= 4 * F32VecAvx512::LEN);
             // a = [a0..a15], b = [b0..b15], c = [c0..c15], d = [d0..d15]
             // Output: [a0,b0,c0,d0, a1,b1,c1,d1, ..., a15,b15,c15,d15]
 
@@ -344,7 +344,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             h: __m512,
             dest: &mut [f32],
         ) {
-            debug_assert!(dest.len() >= 8 * F32VecAvx512::LEN);
+            assert!(dest.len() >= 8 * F32VecAvx512::LEN);
             // a..h each have 16 elements. Output is 128 elements interleaved:
             // [a0,b0,c0,d0,e0,f0,g0,h0, a1,b1,c1,d1,e1,f1,g1,h1, ..., a15,b15,...,h15]
             // Each output vector is 16 floats = 2 groups of 8.
@@ -465,7 +465,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
         fn load_deinterleaved_2_impl(src: &[f32]) -> (__m512, __m512) {
-            debug_assert!(src.len() >= 2 * F32VecAvx512::LEN);
+            assert!(src.len() >= 2 * F32VecAvx512::LEN);
             // Input: [a0,b0,a1,b1,...,a15,b15]
             // Output: a = [a0..a15], b = [b0..b15]
             // SAFETY: we just checked that src has enough space.
@@ -498,7 +498,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
         fn load_deinterleaved_3_impl(src: &[f32]) -> (__m512, __m512, __m512) {
-            debug_assert!(src.len() >= 3 * F32VecAvx512::LEN);
+            assert!(src.len() >= 3 * F32VecAvx512::LEN);
             // Input layout (48 floats in 3x16-float vectors):
             // in0: [a0,b0,c0,a1,b1,c1,a2,b2,c2,a3,b3,c3,a4,b4,c4,a5]
             // in1: [b5,c5,a6,b6,c6,a7,b7,c7,a8,b8,c8,a9,b9,c9,a10,b10]
@@ -555,7 +555,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
         fn load_deinterleaved_4_impl(src: &[f32]) -> (__m512, __m512, __m512, __m512) {
-            debug_assert!(src.len() >= 4 * F32VecAvx512::LEN);
+            assert!(src.len() >= 4 * F32VecAvx512::LEN);
             // Input: [a0,b0,c0,d0,a1,b1,c1,d1,...] (64 floats)
             // Output: a = [a0..a15], b = [b0..b15], c = [c0..c15], d = [d0..d15]
             // SAFETY: we just checked that src has enough space.
@@ -704,7 +704,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f", enable = "avx512bw")]
         #[inline]
         fn round_store_u8_impl(v: __m512, dest: &mut [u8]) {
-            debug_assert!(dest.len() >= F32VecAvx512::LEN);
+            assert!(dest.len() >= F32VecAvx512::LEN);
             // Round to nearest integer
             let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
             // Convert to i32
@@ -726,7 +726,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f", enable = "avx512bw")]
         #[inline]
         fn round_store_u16_impl(v: __m512, dest: &mut [u16]) {
-            debug_assert!(dest.len() >= F32VecAvx512::LEN);
+            assert!(dest.len() >= F32VecAvx512::LEN);
             // Round to nearest integer
             let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
             // Convert to i32
@@ -766,7 +766,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
         fn store_f16_bits_impl(v: __m512, dest: &mut [u16]) {
-            debug_assert!(dest.len() >= F32VecAvx512::LEN);
+            assert!(dest.len() >= F32VecAvx512::LEN);
             let bits = _mm512_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             // SAFETY: dest.len() >= 16 is checked above
             unsafe { _mm256_storeu_si256(dest.as_mut_ptr() as *mut __m256i, bits) };
@@ -999,7 +999,7 @@ impl I32SimdVec for I32VecAvx512 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `d`.
         Self(unsafe { _mm512_loadu_epi32(mem.as_ptr()) }, d)
@@ -1007,7 +1007,7 @@ impl I32SimdVec for I32VecAvx512 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [i32]) {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `self.1`.
         unsafe { _mm512_storeu_epi32(mem.as_mut_ptr(), self.0) }
@@ -1076,7 +1076,7 @@ impl I32SimdVec for I32VecAvx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
         fn store_u16_impl(v: __m512i, dest: &mut [u16]) {
-            debug_assert!(dest.len() >= I32VecAvx512::LEN);
+            assert!(dest.len() >= I32VecAvx512::LEN);
             let tmp = _mm512_cvtepi32_epi16(v);
             // SAFETY: We just checked `dst` has enough space.
             unsafe { _mm256_storeu_epi32(dest.as_mut_ptr().cast(), tmp) };
@@ -1230,7 +1230,7 @@ unsafe impl U8SimdVec for U8VecAvx512 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `d`.
         unsafe { Self(_mm512_loadu_si512(mem.as_ptr() as *const _), d) }
@@ -1244,7 +1244,7 @@ unsafe impl U8SimdVec for U8VecAvx512 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [u8]) {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `d`.
         unsafe { _mm512_storeu_si512(mem.as_mut_ptr() as *mut _, self.0) }
@@ -1255,7 +1255,7 @@ unsafe impl U8SimdVec for U8VecAvx512 {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
         fn impl_u8_2(a: __m512i, b: __m512i, dest: &mut [MaybeUninit<u8>]) {
-            debug_assert!(dest.len() >= 2 * U8VecAvx512::LEN);
+            assert!(dest.len() >= 2 * U8VecAvx512::LEN);
             let lo = _mm512_unpacklo_epi8(a, b);
             let hi = _mm512_unpackhi_epi8(a, b);
             let idx0 = _mm512_setr_epi64(0, 1, 8, 9, 2, 3, 10, 11);
@@ -1279,7 +1279,7 @@ unsafe impl U8SimdVec for U8VecAvx512 {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
         fn impl_u8_3(a: __m512i, b: __m512i, c: __m512i, dest: &mut [MaybeUninit<u8>]) {
-            debug_assert!(dest.len() >= 3 * U8VecAvx512::LEN);
+            assert!(dest.len() >= 3 * U8VecAvx512::LEN);
 
             let mask_a0 = _mm512_broadcast_i32x4(_mm_setr_epi8(
                 0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1, 5,
@@ -1368,7 +1368,7 @@ unsafe impl U8SimdVec for U8VecAvx512 {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
         fn impl_u8_4(a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [MaybeUninit<u8>]) {
-            debug_assert!(dest.len() >= 4 * U8VecAvx512::LEN);
+            assert!(dest.len() >= 4 * U8VecAvx512::LEN);
             let ab_lo = _mm512_unpacklo_epi8(a, b);
             let ab_hi = _mm512_unpackhi_epi8(a, b);
             let cd_lo = _mm512_unpacklo_epi8(c, d);
@@ -1421,7 +1421,7 @@ unsafe impl U16SimdVec for U16VecAvx512 {
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `d`.
         unsafe { Self(_mm512_loadu_si512(mem.as_ptr() as *const _), d) }
@@ -1435,7 +1435,7 @@ unsafe impl U16SimdVec for U16VecAvx512 {
 
     #[inline(always)]
     fn store(&self, mem: &mut [u16]) {
-        debug_assert!(mem.len() >= Self::LEN);
+        assert!(mem.len() >= Self::LEN);
         // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
         // from the safety invariant on `d`.
         unsafe { _mm512_storeu_si512(mem.as_mut_ptr() as *mut _, self.0) }
@@ -1446,7 +1446,7 @@ unsafe impl U16SimdVec for U16VecAvx512 {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
         fn impl_u16_2(a: __m512i, b: __m512i, dest: &mut [MaybeUninit<u16>]) {
-            debug_assert!(dest.len() >= 2 * U16VecAvx512::LEN);
+            assert!(dest.len() >= 2 * U16VecAvx512::LEN);
             let lo = _mm512_unpacklo_epi16(a, b);
             let hi = _mm512_unpackhi_epi16(a, b);
             let idx0 = _mm512_setr_epi64(0, 1, 8, 9, 2, 3, 10, 11);
@@ -1470,7 +1470,7 @@ unsafe impl U16SimdVec for U16VecAvx512 {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
         fn impl_u16_3(a: __m512i, b: __m512i, c: __m512i, dest: &mut [MaybeUninit<u16>]) {
-            debug_assert!(dest.len() >= 3 * U16VecAvx512::LEN);
+            assert!(dest.len() >= 3 * U16VecAvx512::LEN);
 
             let mask_a0 = _mm512_broadcast_i32x4(_mm_setr_epi8(
                 0, 1, -1, -1, -1, -1, 2, 3, -1, -1, -1, -1, 4, 5, -1, -1,
@@ -1568,7 +1568,7 @@ unsafe impl U16SimdVec for U16VecAvx512 {
             d: __m512i,
             dest: &mut [MaybeUninit<u16>],
         ) {
-            debug_assert!(dest.len() >= 4 * U16VecAvx512::LEN);
+            assert!(dest.len() >= 4 * U16VecAvx512::LEN);
             let ab_lo = _mm512_unpacklo_epi16(a, b);
             let ab_hi = _mm512_unpackhi_epi16(a, b);
             let cd_lo = _mm512_unpacklo_epi16(c, d);
