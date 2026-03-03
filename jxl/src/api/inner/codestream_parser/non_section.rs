@@ -217,6 +217,7 @@ impl CodestreamParser {
             decoder_state.render_spotcolors = decode_options.render_spot_colors;
             decoder_state.high_precision = decode_options.high_precision;
             decoder_state.premultiply_output = decode_options.premultiply_output;
+            decoder_state.desired_intensity_target = decode_options.desired_intensity_target;
             decoder_state.embedded_color_profile = self.embedded_color_profile.clone();
             decoder_state.limits = decode_options.limits.clone();
             decoder_state.stop = Arc::clone(&decode_options.stop);

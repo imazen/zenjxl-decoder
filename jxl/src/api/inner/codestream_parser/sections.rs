@@ -120,8 +120,7 @@ impl CodestreamParser {
                 let lf_global_dur = t0.elapsed();
 
                 #[cfg(feature = "threads")]
-                let use_parallel_lf = frame.decoder_state.parallel
-                    && self.lf_sections.len() > 1;
+                let use_parallel_lf = frame.decoder_state.parallel && self.lf_sections.len() > 1;
                 #[cfg(not(feature = "threads"))]
                 let use_parallel_lf = false;
 
@@ -315,6 +314,7 @@ impl CodestreamParser {
             if let Some(fh) = self.saved_file_header.take() {
                 let mut new_state = crate::frame::DecoderState::new(fh);
                 new_state.render_spotcolors = decode_options.render_spot_colors;
+                new_state.desired_intensity_target = decode_options.desired_intensity_target;
                 new_state.limits = decode_options.limits.clone();
                 new_state.stop = std::sync::Arc::clone(&decode_options.stop);
                 self.decoder_state = Some(new_state);

@@ -129,6 +129,10 @@ pub struct DecoderState {
     pub stop: std::sync::Arc<dyn enough::Stop>,
     /// Memory tracker for enforcing max_memory_bytes limits.
     pub memory_tracker: MemoryTracker,
+    /// Desired display intensity target in nits. When set, the decoder applies
+    /// tone mapping (Rec.2408 for PQ, OOTF for HLG) to map from the image's
+    /// embedded intensity target to this value.
+    pub desired_intensity_target: Option<f32>,
     /// Whether parallel decoding/rendering is enabled.
     pub(super) parallel: bool,
 }
@@ -148,6 +152,7 @@ impl DecoderState {
             nonvisible_frame_index: 0,
             high_precision: false,
             premultiply_output: false,
+            desired_intensity_target: None,
             embedded_color_profile: None,
             limits: crate::api::JxlDecoderLimits::default(),
             stop: std::sync::Arc::new(enough::Unstoppable),

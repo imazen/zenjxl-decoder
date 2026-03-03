@@ -1725,7 +1725,7 @@ impl TF_HLG {
 fn create_table_curve(
     n: usize,
     tf: &JxlTransferFunction,
-    tone_map: bool,
+    _tone_map: bool,
 ) -> Result<Vec<f32>, Error> {
     // ICC Specification (v4.4, section 10.6) for `curveType` with `curv`
     // processing elements states the table can have at most 4096 entries.
@@ -1739,8 +1739,6 @@ fn create_table_curve(
 
     // The peak luminance for PQ decoding, as specified in the original C++ code.
     const PQ_INTENSITY_TARGET: f64 = 10000.0;
-    // The target peak luminance for SDR, used if tone mapping is applied.
-    const DEFAULT_INTENSITY_TARGET: f64 = 255.0; // Placeholder value
 
     let mut table = Vec::with_capacity(n);
     for i in 0..n {
@@ -1759,16 +1757,12 @@ fn create_table_curve(
             _ => unreachable!(), // Already checked above.
         };
 
-        // Apply tone mapping if requested.
-        if tone_map
-            && *tf == JxlTransferFunction::PQ
-            && PQ_INTENSITY_TARGET > DEFAULT_INTENSITY_TARGET
-        {
-            // TODO(firsching): add tone mapping here. (make y mutable for this)
-            // let linear_luminance = y * PQ_INTENSITY_TARGET;
-            // let tone_mapped_luminance = rec2408_tone_map(linear_luminance)?;
-            // y = tone_mapped_luminance / DEFAULT_INTENSITY_TARGET;
-        }
+        // Note: the tone_map parameter is unused in the default build. When
+        // kEnable3DToneMapping is true (the default, matching libjxl), HDR
+        // content takes the 3D LUT path via create_icc_lut_atob_tag_for_hdr()
+        // instead of this 1D curve, so tone_map is always false here. The
+        // parameter is retained for API compatibility with a hypothetical
+        // non-3D-LUT build.
 
         // Clamp the final value to the valid range [0.0, 1.0]. This is
         // particularly important for HLG, which can exceed 1.0.
