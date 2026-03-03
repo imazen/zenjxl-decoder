@@ -439,8 +439,8 @@ mod test {
         let output =
             make_and_run_simple_pipeline(stage, &[input_r, input_g, input_b], (1, 1), 0, 256)?;
 
-        for c in 0..3 {
-            let val = output[c].row(0)[0];
+        for (c, img) in output.iter().enumerate().take(3) {
+            let val = img.row(0)[0];
             assert!(val >= 0.0, "Channel {c} value {val} is negative");
         }
         Ok(())

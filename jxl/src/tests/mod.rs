@@ -14,6 +14,7 @@ pub mod coverage_boost;
 pub mod decode_api;
 pub mod entropy;
 pub mod feature_tests;
+pub mod hdr;
 #[cfg(feature = "jpeg")]
 pub mod jpeg_reconstruction;
 pub mod parity;
