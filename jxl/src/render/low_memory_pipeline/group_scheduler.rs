@@ -562,8 +562,7 @@ pub(super) fn extract_borders(
         if by != 0 {
             for y in 0..(2 * by).min(sy) {
                 topbottom.row_mut(y)[..sx].copy_from_slice(input.row(y));
-                topbottom.row_mut(4 * by - 1 - y)[..sx]
-                    .copy_from_slice(input.row(sy - y - 1));
+                topbottom.row_mut(4 * by - 1 - y)[..sx].copy_from_slice(input.row(sy - y - 1));
             }
         }
         if bx != 0 {

@@ -127,10 +127,7 @@ impl RawImageBuffer {
     /// Returns mutable slices for distinct rows. Panics if any rows are equal.
     /// Note: this is quadratic in the number of rows.
     #[inline(always)]
-    pub(super) fn distinct_rows_mut<I: DistinctRowsIndexes>(
-        &mut self,
-        rows: I,
-    ) -> I::Output<'_> {
+    pub(super) fn distinct_rows_mut<I: DistinctRowsIndexes>(&mut self, rows: I) -> I::Output<'_> {
         rows.get_rows_mut(self)
     }
 
@@ -163,9 +160,9 @@ impl RawImageBuffer {
         // Allocate with extra space for alignment padding
         let total_len = data_len + CACHE_LINE_BYTE_SIZE - 1;
         let mut storage = Vec::new();
-        storage.try_reserve(total_len).map_err(|_| {
-            Error::ImageOutOfMemory(bytes_per_row, num_rows)
-        })?;
+        storage
+            .try_reserve(total_len)
+            .map_err(|_| Error::ImageOutOfMemory(bytes_per_row, num_rows))?;
         if uninit {
             // SAFETY: try_reserve succeeded so capacity >= total_len.
             // Caller guarantees all bytes will be written before being read.
@@ -236,12 +233,11 @@ pub trait DistinctRowsIndexes {
     type Output<'a>;
     type CastOutput<'a, T: 'static>;
 
-    fn get_rows_mut<'a>(
-        &self,
-        image: &'a mut RawImageBuffer,
-    ) -> Self::Output<'a>;
+    fn get_rows_mut<'a>(&self, image: &'a mut RawImageBuffer) -> Self::Output<'a>;
 
-    fn cast_rows<'a, T: crate::image::ImageDataType>(rows: Self::Output<'a>) -> Self::CastOutput<'a, T>;
+    fn cast_rows<'a, T: crate::image::ImageDataType>(
+        rows: Self::Output<'a>,
+    ) -> Self::CastOutput<'a, T>;
 }
 
 #[allow(private_interfaces)]
@@ -250,10 +246,7 @@ impl<const S: usize> DistinctRowsIndexes for [usize; S] {
     type CastOutput<'a, T: 'static> = [&'a mut [T]; S];
 
     #[inline(always)]
-    fn get_rows_mut<'a>(
-        &self,
-        image: &'a mut RawImageBuffer,
-    ) -> Self::Output<'a> {
+    fn get_rows_mut<'a>(&self, image: &'a mut RawImageBuffer) -> Self::Output<'a> {
         for i in 0..S {
             assert!(self[i] < image.num_rows);
             for j in i + 1..S {
@@ -273,7 +266,9 @@ impl<const S: usize> DistinctRowsIndexes for [usize; S] {
     }
 
     #[inline(always)]
-    fn cast_rows<'a, T: crate::image::ImageDataType>(rows: Self::Output<'a>) -> Self::CastOutput<'a, T> {
+    fn cast_rows<'a, T: crate::image::ImageDataType>(
+        rows: Self::Output<'a>,
+    ) -> Self::CastOutput<'a, T> {
         rows.map(|row| bytemuck::cast_slice_mut(row))
     }
 }
@@ -284,7 +279,8 @@ fn get_distinct_slices<const S: usize>(
     ranges: [std::ops::Range<usize>; S],
 ) -> [&mut [u8]; S] {
     // Create index-range pairs sorted by start position
-    let mut indexed: [(usize, std::ops::Range<usize>); S] = std::array::from_fn(|i| (i, ranges[i].clone()));
+    let mut indexed: [(usize, std::ops::Range<usize>); S] =
+        std::array::from_fn(|i| (i, ranges[i].clone()));
     // Sort by range start (simple insertion sort for small S)
     for i in 1..S {
         let mut j = i;

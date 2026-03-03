@@ -196,7 +196,12 @@ fn sub_rect<'a>(
     rect: Rect,
 ) -> RawImageRect<'a> {
     if rect.size.0 == 0 || rect.size.1 == 0 {
-        return RawImageRect { storage: &[], bytes_per_row: 0, num_rows: 0, bytes_between_rows: 0 };
+        return RawImageRect {
+            storage: &[],
+            bytes_per_row: 0,
+            num_rows: 0,
+            bytes_between_rows: 0,
+        };
     }
     assert!(rect.origin.1 + rect.size.1 <= nr);
     assert!(rect.origin.0 + rect.size.0 <= bpr);
@@ -221,7 +226,12 @@ fn sub_rect_mut<'a>(
     rect: Rect,
 ) -> RawImageRectMut<'a> {
     if rect.size.0 == 0 || rect.size.1 == 0 {
-        return RawImageRectMut { storage: &mut [], bytes_per_row: 0, num_rows: 0, bytes_between_rows: 0 };
+        return RawImageRectMut {
+            storage: &mut [],
+            bytes_per_row: 0,
+            num_rows: 0,
+            bytes_between_rows: 0,
+        };
     }
     assert!(rect.origin.1 + rect.size.1 <= nr);
     assert!(rect.origin.0 + rect.size.0 <= bpr);
@@ -256,7 +266,13 @@ impl<'a> RawImageRect<'a> {
 
     #[inline]
     pub fn rect(&self, rect: Rect) -> RawImageRect<'a> {
-        sub_rect(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
+        sub_rect(
+            self.storage,
+            self.bytes_per_row,
+            self.num_rows,
+            self.bytes_between_rows,
+            rect,
+        )
     }
 
     #[inline]
@@ -293,7 +309,13 @@ impl<'a> RawImageRectMut<'a> {
 
     #[inline]
     pub fn rect_mut(&mut self, rect: Rect) -> RawImageRectMut<'_> {
-        sub_rect_mut(self.storage, self.bytes_per_row, self.num_rows, self.bytes_between_rows, rect)
+        sub_rect_mut(
+            self.storage,
+            self.bytes_per_row,
+            self.num_rows,
+            self.bytes_between_rows,
+            rect,
+        )
     }
 
     pub fn as_rect(&self) -> RawImageRect<'_> {
@@ -328,10 +350,23 @@ impl<'a> RawImageRectMut<'a> {
         bytes_between_rows: usize,
     ) -> Self {
         RawImageBuffer::check_vals(num_rows, bytes_per_row, bytes_between_rows);
-        let expected_len = if num_rows == 0 { 0 } else { (num_rows - 1) * bytes_between_rows + bytes_per_row };
-        assert!(buf.len() >= expected_len, "buffer too small: {} < {}", buf.len(), expected_len);
+        let expected_len = if num_rows == 0 {
+            0
+        } else {
+            (num_rows - 1) * bytes_between_rows + bytes_per_row
+        };
+        assert!(
+            buf.len() >= expected_len,
+            "buffer too small: {} < {}",
+            buf.len(),
+            expected_len
+        );
         RawImageRectMut {
-            storage: if expected_len == 0 { &mut [] } else { &mut buf[..expected_len] },
+            storage: if expected_len == 0 {
+                &mut []
+            } else {
+                &mut buf[..expected_len]
+            },
             bytes_per_row,
             num_rows,
             bytes_between_rows,

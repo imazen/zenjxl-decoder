@@ -210,7 +210,8 @@ pub struct Frame {
     /// Multi-pass HF coefficient accumulation buffer. Separate from HfGlobalState
     /// so that `&HfGlobalState` and `&mut hf_coefficients` can be borrowed independently,
     /// enabling parallel VarDCT group decode for single-pass frames.
-    hf_coefficients: Option<(Image<i32>, Image<i32>, Image<i32>)>,
+    /// Each element is a Vec of per-group coefficient buffers (one Vec<i32> per group per channel).
+    hf_coefficients: Option<[Vec<Vec<i32>>; 3]>,
     lf_image: Option<[Image<f32>; 3]>,
     quant_lf: Image<u8>,
     hf_meta: Option<HfMetadata>,

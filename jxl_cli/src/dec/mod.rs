@@ -320,7 +320,8 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
 
     if cli_timing {
         let total = start.elapsed();
-        let decode_render = total - header_dur - setup_dur - total_section_dur - total_buf_alloc_dur;
+        let decode_render =
+            total - header_dur - setup_dur - total_section_dur - total_buf_alloc_dur;
         eprintln!(
             "[JXL_CLI_TIMING] header: {:.2}ms | setup: {:.2}ms | \
              sections: {:.2}ms | buf_alloc: {:.2}ms | \

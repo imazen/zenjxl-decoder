@@ -313,7 +313,6 @@ impl Frame {
     /// Requirements:
     /// - More than 1 group
     #[cfg(feature = "threads")]
-    #[allow(unsafe_code)]
     fn decode_groups_parallel(
         &mut self,
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
@@ -323,10 +322,9 @@ impl Frame {
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
         use crate::image::{Image, OwnedRawImage};
-        use crate::render::buffer_splitter::ParallelOutputAccess;
+        use crate::render::buffer_splitter;
         use crate::render::low_memory_pipeline::render_group;
 
-        use crate::image::disjoint::DisjointRowAccess;
         use crate::util::{SmallVec, Xorshift128Plus};
         use rayon::prelude::*;
 
@@ -378,6 +376,8 @@ impl Frame {
             complete: bool,
             do_render: bool,
             pixels: Option<[Image<f32>; 3]>,
+            /// Owned per-group HF coefficient buffers (multi-pass only).
+            hf_coeffs: Option<[Vec<i32>; 3]>,
         }
 
         struct GroupRenderInfo {
@@ -385,6 +385,10 @@ impl Frame {
             do_render: bool,
             has_items: bool,
         }
+
+        // Take ownership of per-group HF coefficient buffers before Phase 1.
+        // Each group owns its own Vec<i32> — no shared mutable state.
+        let mut hf_coefficients = self.hf_coefficients.take();
 
         // Phase 1: Sequential — compute render decisions (NO pixel allocation).
         // Pixel buffers are allocated on-demand in Phase 2 (parallel) to avoid
@@ -410,12 +414,22 @@ impl Frame {
                 num_needs_pixels += 1;
             }
 
+            // Take this group's owned coefficient buffers (multi-pass only).
+            let hf_coeffs = hf_coefficients.as_mut().map(|[a, b, c]| {
+                [
+                    std::mem::take(&mut a[group]),
+                    std::mem::take(&mut b[group]),
+                    std::mem::take(&mut c[group]),
+                ]
+            });
+
             work.push(GroupWork {
                 group,
                 passes,
                 complete,
                 do_render,
                 pixels: None, // Deferred to Phase 2
+                hf_coeffs,
             });
         }
 
@@ -462,17 +476,6 @@ impl Frame {
             num_groups // fully unbatched
         };
         let is_batched = decode_batch_size < num_groups;
-
-        // Take ownership of HF coefficient images — persists across all batches.
-        // Each group writes to its own row — no cross-group writes.
-        // DisjointRowAccess wraps the images with safe, debug-checked row access.
-        let hf_disjoint = self.hf_coefficients.take().map(|(a, b, c)| {
-            [
-                DisjointRowAccess::from_image(a),
-                DisjointRowAccess::from_image(b),
-                DisjointRowAccess::from_image(c),
-            ]
-        });
 
         // VarDCT scratch buffer pool — persists across all batches.
         let mut vb_pool: Vec<VarDctBuffers> = Vec::new();
@@ -561,16 +564,9 @@ impl Frame {
 
                             if !(gw.pixels.is_none() && gw.do_render) {
                                 // Each parallel task uses a distinct gw.group —
-                                // DisjointRowAccess verifies this in debug builds.
-                                let mut guards = hf_disjoint.as_ref().map(|splits| {
-                                    [
-                                        splits[0].row_guard(gw.group),
-                                        splits[1].row_guard(gw.group),
-                                        splits[2].row_guard(gw.group),
-                                    ]
-                                });
-                                let hf_coeffs = guards.as_mut().map(|[g0, g1, g2]| {
-                                    [g0.as_mut_slice(), g1.as_mut_slice(), g2.as_mut_slice()]
+                                // each group owns its own Vec<i32>, no shared state.
+                                let hf_coeffs = gw.hf_coeffs.as_mut().map(|[a, b, c]| {
+                                    [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()]
                                 });
                                 decode_vardct_group(
                                     gw.group,
@@ -809,43 +805,87 @@ impl Frame {
             phase3a_prepare_dur += phase3a_prep_start.elapsed();
 
             // Phase 3b: Parallel render — render all work items across threads.
+            // Each task renders into locally-owned buffers (no shared mutable state),
+            // then results are copied back sequentially.
             let phase3b_start = std::time::Instant::now();
-            if !all_items.is_empty() {
-                // Exclusively borrows buffer_splitter — compiler prevents any other
-                // access while shared_bufs exists. Debug builds verify non-overlap.
-                let shared_bufs = buffer_splitter.parallel_access();
-
-                {
+            let work_item_outputs: Vec<Vec<buffer_splitter::OwnedLocalBuffer>> =
+                if !all_items.is_empty() {
                     let p = lmp_ref!();
                     let view = p.read_view();
                     let (frame_origin, full_image_size) = p.extend_origin_size();
                     let sbi = p.save_buffer_info();
                     let input_size = p.input_size();
                     let factory = p.context_factory();
+                    let num_buffer_slots = buffer_splitter.get_full_buffers().len();
 
-                    all_items.par_iter().try_for_each_init(
-                        || factory.create(1).ok(),
-                        |ctx_opt, item| -> Result<()> {
-                            stop.check()?;
-                            let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
-                            let mut local_buffers = shared_bufs.get_local_buffers(
-                                sbi,
-                                item.image_area,
-                                input_size,
-                                full_image_size,
-                                frame_origin,
-                            );
-                            render_group::render(
-                                ctx,
-                                &view,
-                                (item.gx, item.gy),
-                                item.image_area,
-                                &mut local_buffers,
-                            )
-                        },
-                    )?;
-                }
-                shared_bufs.clear_tracking();
+                    all_items
+                        .par_iter()
+                        .map_init(
+                            || factory.create(1).ok(),
+                            |ctx_opt, item| -> Result<Vec<buffer_splitter::OwnedLocalBuffer>> {
+                                stop.check()?;
+                                let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+
+                                // Compute which output buffer slots this work item needs.
+                                let layouts = buffer_splitter::compute_local_buffer_layouts(
+                                    sbi,
+                                    num_buffer_slots,
+                                    item.image_area,
+                                    input_size,
+                                    full_image_size,
+                                    frame_origin,
+                                );
+
+                                // Allocate owned local buffers for each needed slot.
+                                let mut owned: Vec<buffer_splitter::OwnedLocalBuffer> = layouts
+                                    .iter()
+                                    .map(|&(idx, bpr, nr, cr)| buffer_splitter::OwnedLocalBuffer {
+                                        data: vec![0u8; bpr * nr],
+                                        bytes_per_row: bpr,
+                                        num_rows: nr,
+                                        channel_rect: cr,
+                                        buffer_index: idx,
+                                    })
+                                    .collect();
+
+                                // Build the JxlOutputBuffer view array for render_group::render.
+                                // Each view borrows from a distinct OwnedLocalBuffer.
+                                let mut local_buffers: Vec<Option<JxlOutputBuffer<'_>>> =
+                                    (0..num_buffer_slots).map(|_| None).collect();
+                                for (layout_idx, olb) in owned.iter_mut().enumerate() {
+                                    let _ = layout_idx;
+                                    local_buffers[olb.buffer_index] = Some(JxlOutputBuffer::new(
+                                        &mut olb.data,
+                                        olb.num_rows,
+                                        olb.bytes_per_row,
+                                    ));
+                                }
+
+                                render_group::render(
+                                    ctx,
+                                    &view,
+                                    (item.gx, item.gy),
+                                    item.image_area,
+                                    &mut local_buffers,
+                                )?;
+
+                                // Drop the JxlOutputBuffer views before returning owned data.
+                                drop(local_buffers);
+                                Ok(owned)
+                            },
+                        )
+                        .collect::<Result<Vec<_>>>()?
+                } else {
+                    Vec::new()
+                };
+
+            // Sequential copy-back: write each work item's local buffers
+            // into the real output.
+            for item_bufs in &work_item_outputs {
+                buffer_splitter::copy_back_local_buffers(
+                    item_bufs,
+                    buffer_splitter.get_full_buffers(),
+                );
             }
             phase3b_dur += phase3b_start.elapsed();
 
@@ -877,10 +917,18 @@ impl Frame {
         // Save one VarDCT buffer for reuse in next call.
         self.vardct_buffers = buffer_pool.into_inner().unwrap().pop();
 
-        // Restore HF coefficient images after all batches complete.
-        if let Some([a, b, c]) = hf_disjoint {
-            self.hf_coefficients = Some((a.into_image(), b.into_image(), c.into_image()));
+        // Restore HF coefficient buffers after all batches complete.
+        if let Some(ref mut channels) = hf_coefficients {
+            for gw in &mut work {
+                if let Some(coeffs) = gw.hf_coeffs.take() {
+                    let [a, b, c] = coeffs;
+                    channels[0][gw.group] = a;
+                    channels[1][gw.group] = b;
+                    channels[2][gw.group] = c;
+                }
+            }
         }
+        self.hf_coefficients = hf_coefficients;
 
         if phase_timing {
             let batches = num_groups.div_ceil(decode_batch_size);

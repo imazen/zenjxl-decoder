@@ -5,6 +5,7 @@
 
 use std::{cmp::min, fmt::Debug};
 
+use crate::transforms::transform_map::*;
 use crate::{
     bit_reader::BitReader,
     error::{Error, Result},
@@ -20,7 +21,6 @@ use crate::{
     image::{Image, ImageRectMut, Rect},
     util::{AtomicRefCell, CeilLog2, tracing_wrappers::*},
 };
-use crate::transforms::transform_map::*;
 
 mod borrowed_buffers;
 pub(crate) mod decode;

@@ -660,4 +660,3 @@ pub fn transform_to_pixels_impl<D: SimdDescriptor>(
         }
     };
 }
-

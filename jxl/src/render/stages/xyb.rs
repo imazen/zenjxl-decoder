@@ -9,8 +9,8 @@ use crate::api::{
 };
 use crate::error::Result;
 use crate::headers::{FileHeader, OpsinInverseMatrix};
-use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
 use crate::render::stages::from_linear;
+use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
 use crate::util::{Matrix3x3, eval_rational_poly_simd, inv_3x3_matrix, mul_3x3_matrix};
 use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask, simd_function};
 

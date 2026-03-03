@@ -123,12 +123,9 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<f32>]) {
         debug_assert!(dest.len() >= 2 * Self::LEN);
         // a=[a0,a1,a2,a3], b=[b0,b1,b2,b3] → [a0,b0,a1,b1, a2,b2,a3,b3]
-        let lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            a.0, b.0,
-        );
-        let hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            a.0, b.0,
-        );
+        let lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(a.0, b.0);
+        let hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(a.0, b.0);
         // SAFETY: we just checked that `dest` has enough space.
         unsafe {
             let ptr = dest.as_mut_ptr() as *mut v128;
@@ -179,28 +176,22 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     ) {
         debug_assert!(dest.len() >= 4 * Self::LEN);
         // Two-stage interleave: first pairs, then combine
-        let ab_lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            a.0, b.0,
-        );
-        let ab_hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            a.0, b.0,
-        );
-        let cd_lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            c.0, d.0,
-        );
-        let cd_hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            c.0, d.0,
-        );
+        let ab_lo =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(a.0, b.0);
+        let ab_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(a.0, b.0);
+        let cd_lo =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(c.0, d.0);
+        let cd_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(c.0, d.0);
         // Combine: low 64 bits of each pair
-        let out0 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            ab_lo, cd_lo,
-        );
+        let out0 =
+            i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(ab_lo, cd_lo);
         let out1 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ab_lo, cd_lo,
         );
-        let out2 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            ab_hi, cd_hi,
-        );
+        let out2 =
+            i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(ab_hi, cd_hi);
         let out3 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ab_hi, cd_hi,
         );
@@ -229,53 +220,41 @@ unsafe impl F32SimdVec for F32VecWasm128 {
         debug_assert!(dest.len() >= 8 * Self::LEN);
         // Interleave abcd and efgh separately (4-way), then interleave the two halves.
         // abcd interleave (reuse the same pattern as store_interleaved_4):
-        let ab_lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            a.0, b.0,
-        );
-        let ab_hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            a.0, b.0,
-        );
-        let cd_lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            c.0, d.0,
-        );
-        let cd_hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            c.0, d.0,
-        );
-        let abcd_0 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            ab_lo, cd_lo,
-        );
+        let ab_lo =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(a.0, b.0);
+        let ab_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(a.0, b.0);
+        let cd_lo =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(c.0, d.0);
+        let cd_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(c.0, d.0);
+        let abcd_0 =
+            i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(ab_lo, cd_lo);
         let abcd_1 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ab_lo, cd_lo,
         );
-        let abcd_2 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            ab_hi, cd_hi,
-        );
+        let abcd_2 =
+            i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(ab_hi, cd_hi);
         let abcd_3 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ab_hi, cd_hi,
         );
 
         // efgh interleave
-        let ef_lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            e.0, f.0,
-        );
-        let ef_hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            e.0, f.0,
-        );
-        let gh_lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            g.0, h.0,
-        );
-        let gh_hi = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
-            g.0, h.0,
-        );
-        let efgh_0 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            ef_lo, gh_lo,
-        );
+        let ef_lo =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(e.0, f.0);
+        let ef_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(e.0, f.0);
+        let gh_lo =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(g.0, h.0);
+        let gh_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(g.0, h.0);
+        let efgh_0 =
+            i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(ef_lo, gh_lo);
         let efgh_1 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ef_lo, gh_lo,
         );
-        let efgh_2 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            ef_hi, gh_hi,
-        );
+        let efgh_2 =
+            i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(ef_hi, gh_hi);
         let efgh_3 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ef_hi, gh_hi,
         );
@@ -304,12 +283,8 @@ unsafe impl F32SimdVec for F32VecWasm128 {
             let ptr = src.as_ptr() as *const v128;
             (v128_load(ptr), v128_load(ptr.add(1)))
         };
-        let a = i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(
-            lo, hi,
-        );
-        let b = i8x16_shuffle::<4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23, 28, 29, 30, 31>(
-            lo, hi,
-        );
+        let a = i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(lo, hi);
+        let b = i8x16_shuffle::<4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23, 28, 29, 30, 31>(lo, hi);
         (Self(a, d), Self(b, d))
     }
 
@@ -358,28 +333,20 @@ unsafe impl F32SimdVec for F32VecWasm128 {
         };
         // v0=[a0,b0,c0,d0], v1=[a1,b1,c1,d1], v2=[a2,b2,c2,d2], v3=[a3,b3,c3,d3]
         // Step 1: group pairs
-        let ab_lo = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            v0, v1,
-        );
-        let cd_lo = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
-            v0, v1,
-        );
-        let ab_hi = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            v2, v3,
-        );
-        let cd_hi = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
-            v2, v3,
-        );
+        let ab_lo = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v0, v1);
+        let cd_lo =
+            i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(v0, v1);
+        let ab_hi = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v2, v3);
+        let cd_hi =
+            i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(v2, v3);
         // Step 2: deinterleave pairs
-        let a = i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(
-            ab_lo, ab_hi,
-        );
+        let a =
+            i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(ab_lo, ab_hi);
         let b = i8x16_shuffle::<4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23, 28, 29, 30, 31>(
             ab_lo, ab_hi,
         );
-        let c = i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(
-            cd_lo, cd_hi,
-        );
+        let c =
+            i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(cd_lo, cd_hi);
         let e = i8x16_shuffle::<4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23, 28, 29, 30, 31>(
             cd_lo, cd_hi,
         );
@@ -397,32 +364,20 @@ unsafe impl F32SimdVec for F32VecWasm128 {
 
         // 4x4 transpose via two rounds of 2-element interleave
         // Stage 1: trn1/trn2 equivalent — interleave 32-bit pairs
-        let t0 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27>(
-            p0, p1,
-        );
-        let t1 = i8x16_shuffle::<4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31>(
-            p0, p1,
-        );
-        let t2 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27>(
-            p2, p3,
-        );
-        let t3 = i8x16_shuffle::<4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31>(
-            p2, p3,
-        );
+        let t0 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27>(p0, p1);
+        let t1 =
+            i8x16_shuffle::<4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31>(p0, p1);
+        let t2 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27>(p2, p3);
+        let t3 =
+            i8x16_shuffle::<4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31>(p2, p3);
 
         // Stage 2: combine 64-bit halves
-        let r0 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            t0, t2,
-        );
-        let r1 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(
-            t1, t3,
-        );
-        let r2 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
-            t0, t2,
-        );
-        let r3 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
-            t1, t3,
-        );
+        let r0 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(t0, t2);
+        let r1 = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(t1, t3);
+        let r2 =
+            i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(t0, t2);
+        let r3 =
+            i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(t1, t3);
 
         // SAFETY: we verified bounds above.
         unsafe {
@@ -936,12 +891,9 @@ unsafe impl U8SimdVec for U8VecWasm128 {
     fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u8>]) {
         debug_assert!(dest.len() >= 2 * Self::LEN);
         // Interleave bytes: [a0,b0,a1,b1,...,a15,b15]
-        let lo = i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(
-            a.0, b.0,
-        );
-        let hi = i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(
-            a.0, b.0,
-        );
+        let lo = i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(a.0, b.0);
+        let hi =
+            i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(a.0, b.0);
         // SAFETY: we just checked that `dest` has enough space.
         unsafe {
             let ptr = dest.as_mut_ptr() as *mut v128;
@@ -988,28 +940,22 @@ unsafe impl U8SimdVec for U8VecWasm128 {
     ) {
         debug_assert!(dest.len() >= 4 * Self::LEN);
         // 4-way byte interleave: two rounds of 2-way interleave
-        let ab_lo = i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(
-            a.0, b.0,
-        );
-        let ab_hi = i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(
-            a.0, b.0,
-        );
-        let cd_lo = i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(
-            c.0, d.0,
-        );
-        let cd_hi = i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(
-            c.0, d.0,
-        );
+        let ab_lo =
+            i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(a.0, b.0);
+        let ab_hi =
+            i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(a.0, b.0);
+        let cd_lo =
+            i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(c.0, d.0);
+        let cd_hi =
+            i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(c.0, d.0);
         // Now interleave the pairs (treating as u16 elements)
-        let out0 = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(
-            ab_lo, cd_lo,
-        );
+        let out0 =
+            i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(ab_lo, cd_lo);
         let out1 = i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(
             ab_lo, cd_lo,
         );
-        let out2 = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(
-            ab_hi, cd_hi,
-        );
+        let out2 =
+            i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(ab_hi, cd_hi);
         let out3 = i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(
             ab_hi, cd_hi,
         );
@@ -1059,12 +1005,9 @@ unsafe impl U16SimdVec for U16VecWasm128 {
     fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u16>]) {
         debug_assert!(dest.len() >= 2 * Self::LEN);
         // Interleave u16 elements
-        let lo = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(
-            a.0, b.0,
-        );
-        let hi = i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(
-            a.0, b.0,
-        );
+        let lo = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(a.0, b.0);
+        let hi =
+            i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(a.0, b.0);
         // SAFETY: we just checked that `dest` has enough space.
         unsafe {
             let ptr = dest.as_mut_ptr() as *mut v128;
@@ -1111,28 +1054,22 @@ unsafe impl U16SimdVec for U16VecWasm128 {
     ) {
         debug_assert!(dest.len() >= 4 * Self::LEN);
         // 4-way u16 interleave: two rounds of 2-way
-        let ab_lo = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(
-            a.0, b.0,
-        );
-        let ab_hi = i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(
-            a.0, b.0,
-        );
-        let cd_lo = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(
-            c.0, d.0,
-        );
-        let cd_hi = i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(
-            c.0, d.0,
-        );
+        let ab_lo =
+            i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(a.0, b.0);
+        let ab_hi =
+            i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(a.0, b.0);
+        let cd_lo =
+            i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(c.0, d.0);
+        let cd_hi =
+            i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(c.0, d.0);
         // Interleave the 32-bit pairs
-        let out0 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            ab_lo, cd_lo,
-        );
+        let out0 =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(ab_lo, cd_lo);
         let out1 = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
             ab_lo, cd_lo,
         );
-        let out2 = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(
-            ab_hi, cd_hi,
-        );
+        let out2 =
+            i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(ab_hi, cd_hi);
         let out3 = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
             ab_hi, cd_hi,
         );

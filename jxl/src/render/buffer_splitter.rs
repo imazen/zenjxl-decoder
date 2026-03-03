@@ -3,8 +3,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#[cfg(feature = "threads")]
-use crate::image::SharedOutputView;
 use crate::{api::JxlOutputBuffer, headers::Orientation, image::Rect, util::ShiftRightCeil};
 
 // Information for splitting the output buffers.
@@ -105,9 +103,8 @@ impl<'a, 'b> BufferSplitter<'a, 'b> {
 }
 
 /// Computes the channel rect for a given save buffer info and image rect.
-/// Shared between BufferSplitter::get_local_buffers and ParallelOutputAccess::get_local_buffers.
 #[cfg(feature = "threads")]
-fn compute_channel_rect(
+pub(crate) fn compute_channel_rect(
     bi: &SaveStageBufferInfo,
     rect: Rect,
     frame_size: (usize, usize),
@@ -149,132 +146,80 @@ fn compute_channel_rect(
     Some(channel_rect.to_byte_rect_sz(bi.byte_size))
 }
 
-/// Safe parallel access to output buffers for multi-threaded rendering.
-///
-/// Created via [`BufferSplitter::parallel_access`], which exclusively borrows
-/// the buffer splitter — the compiler prevents any other access while this
-/// guard exists. Internally uses raw pointers (like [`DisjointRowAccess`]) but
-/// exposes a safe API. Debug builds track outstanding rects and assert no overlap.
-///
-/// [`DisjointRowAccess`]: crate::image::disjoint::DisjointRowAccess
+/// One locally-owned output buffer for a single channel of a single work item.
+/// The render pipeline writes into `data` (tightly packed rows), and the
+/// `channel_rect` records where this data should be copied in the real output.
 #[cfg(feature = "threads")]
-pub(crate) struct ParallelOutputAccess<'a> {
-    views: Vec<Option<SharedOutputView>>,
-    #[cfg(debug_assertions)]
-    outstanding: std::sync::Mutex<Vec<(usize, Rect)>>,
-    _marker: std::marker::PhantomData<&'a ()>,
+pub(crate) struct OwnedLocalBuffer {
+    pub(crate) data: Vec<u8>,
+    pub(crate) bytes_per_row: usize,
+    pub(crate) num_rows: usize,
+    pub(crate) channel_rect: Rect,
+    pub(crate) buffer_index: usize,
 }
 
-// SAFETY: All fields are Sync (SharedOutputView has manual Sync impl,
-// Mutex is Sync, PhantomData is Sync). The raw pointers inside
-// SharedOutputView are derived from the exclusively-borrowed BufferSplitter
-// and only used to create non-overlapping sub-views.
+/// Render output from one parallel work item. Contains owned buffers
+/// that need to be copied back into the real output.
 #[cfg(feature = "threads")]
-#[allow(unsafe_code)]
-unsafe impl Sync for ParallelOutputAccess<'_> {}
+pub(crate) struct WorkItemOutput {
+    pub(crate) buffers: Vec<OwnedLocalBuffer>,
+}
 
+/// Computes which output buffer slots are needed for a work item and their sizes.
+/// Returns (buffer_index, bytes_per_row, num_rows, channel_rect) for each active slot.
 #[cfg(feature = "threads")]
-#[allow(unsafe_code)]
-impl ParallelOutputAccess<'_> {
-    /// Creates local buffer sub-views for a given image rect.
-    ///
-    /// Each work item's rect must be non-overlapping with all other concurrent
-    /// rects. This invariant is structurally guaranteed by `emit_work_items`,
-    /// which partitions the image into non-overlapping regions via the serial
-    /// `is_ready` assignment protocol.
-    ///
-    /// Debug builds verify non-overlap at runtime; release builds compile the
-    /// check out (same pattern as `DisjointRowAccess`).
-    pub(crate) fn get_local_buffers(
-        &self,
-        save_buffer_info: &[Option<SaveStageBufferInfo>],
-        rect: Rect,
-        frame_size: (usize, usize),
-        full_image_size: (usize, usize),
-        frame_origin: (isize, isize),
-    ) -> Vec<Option<JxlOutputBuffer<'_>>> {
-        let rect = rect.clip(frame_size);
-        let mut local_buffers: Vec<Option<JxlOutputBuffer<'_>>> =
-            Vec::with_capacity(self.views.len());
-        for _ in 0..self.views.len() {
-            local_buffers.push(None);
+pub(crate) fn compute_local_buffer_layouts(
+    save_buffer_info: &[Option<SaveStageBufferInfo>],
+    num_buffer_slots: usize,
+    rect: Rect,
+    frame_size: (usize, usize),
+    full_image_size: (usize, usize),
+    frame_origin: (isize, isize),
+) -> Vec<(usize, usize, usize, Rect)> {
+    let rect = rect.clip(frame_size);
+    let mut layouts = Vec::new();
+
+    for (i, info) in save_buffer_info.iter().enumerate() {
+        let Some(bi) = info else {
+            continue;
+        };
+        if i >= num_buffer_slots {
+            continue;
         }
-        for (i, (info, view)) in save_buffer_info.iter().zip(self.views.iter()).enumerate() {
-            let Some(bi) = info else {
-                continue;
-            };
-            let Some(view) = view else {
-                continue;
-            };
-            let Some(channel_rect) =
-                compute_channel_rect(bi, rect, frame_size, full_image_size, frame_origin)
-            else {
-                continue;
-            };
-            #[cfg(debug_assertions)]
-            {
-                let mut outstanding = self.outstanding.lock().unwrap();
-                for &(ch, ref existing) in outstanding.iter() {
-                    if ch == i {
-                        assert!(
-                            !rects_overlap(existing, &channel_rect),
-                            "ParallelOutputAccess: overlapping rects on channel {i}: \
-                             existing {existing:?} vs new {channel_rect:?}"
-                        );
-                    }
-                }
-                outstanding.push((i, channel_rect));
-            }
-            // SAFETY: The work items are structurally non-overlapping (guaranteed
-            // by emit_work_items' serial is_ready protocol). Debug builds verify
-            // this above. The raw pointer is valid for the buffer splitter's
-            // lifetime (enforced by the PhantomData lifetime on this struct).
-            local_buffers[i] = Some(unsafe { view.sub_view(channel_rect) });
+        let Some(channel_rect) =
+            compute_channel_rect(bi, rect, frame_size, full_image_size, frame_origin)
+        else {
+            continue;
+        };
+        let bytes_per_row = channel_rect.size.0;
+        let num_rows = channel_rect.size.1;
+        if bytes_per_row == 0 || num_rows == 0 {
+            continue;
         }
-        local_buffers
+        layouts.push((i, bytes_per_row, num_rows, channel_rect));
     }
-
-    /// Clears the debug overlap tracker. Call after all parallel work items
-    /// for a batch have completed (i.e., after `par_iter().try_for_each()`
-    /// returns).
-    #[cfg(debug_assertions)]
-    pub(crate) fn clear_tracking(&self) {
-        self.outstanding.lock().unwrap().clear();
-    }
-
-    /// No-op in release builds.
-    #[cfg(not(debug_assertions))]
-    pub(crate) fn clear_tracking(&self) {}
+    layouts
 }
 
-#[cfg(all(feature = "threads", debug_assertions))]
-fn rects_overlap(a: &Rect, b: &Rect) -> bool {
-    let a_x1 = a.origin.0 + a.size.0;
-    let a_y1 = a.origin.1 + a.size.1;
-    let b_x1 = b.origin.0 + b.size.0;
-    let b_y1 = b.origin.1 + b.size.1;
-    a.origin.0 < b_x1 && b.origin.0 < a_x1 && a.origin.1 < b_y1 && b.origin.1 < a_y1
-}
-
+/// Copies locally-owned render output back into the real output buffers.
+///
+/// Called sequentially after the parallel render completes.
 #[cfg(feature = "threads")]
-#[allow(unsafe_code)]
-impl<'a, 'b> BufferSplitter<'a, 'b> {
-    /// Creates a parallel output access guard that exclusively borrows this
-    /// buffer splitter. The compiler prevents any other use of the splitter
-    /// while the guard exists.
-    pub(crate) fn parallel_access(&mut self) -> ParallelOutputAccess<'_> {
-        let buffers = self.get_full_buffers();
-        ParallelOutputAccess {
-            views: buffers
-                .iter()
-                // SAFETY: The returned ParallelOutputAccess borrows `self` for
-                // its entire lifetime, so the backing data remains valid and
-                // no other code can access these buffers concurrently.
-                .map(|buf| buf.as_ref().map(|b| unsafe { b.shared_view() }))
-                .collect(),
-            #[cfg(debug_assertions)]
-            outstanding: std::sync::Mutex::new(Vec::new()),
-            _marker: std::marker::PhantomData,
+pub(crate) fn copy_back_local_buffers(
+    owned_buffers: &[OwnedLocalBuffer],
+    output: &mut [Option<JxlOutputBuffer<'_>>],
+) {
+    for olb in owned_buffers {
+        let Some(buf) = output[olb.buffer_index].as_mut() else {
+            continue;
+        };
+        let channel_rect = olb.channel_rect;
+        let mut target = buf.rect(channel_rect);
+        for row in 0..olb.num_rows {
+            let src_start = row * olb.bytes_per_row;
+            let src_end = src_start + olb.bytes_per_row;
+            let dst_row = target.row_mut(row);
+            dst_row[..olb.bytes_per_row].copy_from_slice(&olb.data[src_start..src_end]);
         }
     }
 }

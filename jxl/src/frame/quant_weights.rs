@@ -7,6 +7,7 @@ use std::{borrow::Cow, f32::consts::SQRT_2, sync::OnceLock};
 
 use crate::util::f16;
 
+use crate::transforms::transform_map::*;
 use crate::{
     BLOCK_DIM, BLOCK_SIZE,
     bit_reader::BitReader,
@@ -24,7 +25,6 @@ use crate::{
     headers::{bit_depth::BitDepth, frame_header::FrameHeader},
     image::Rect,
 };
-use crate::transforms::transform_map::*;
 
 pub const INV_LF_QUANT: [f32; 3] = [4096.0, 512.0, 256.0];
 
