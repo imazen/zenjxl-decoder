@@ -1578,3 +1578,384 @@ mod test {
     }
     test_all_instruction_sets!(test_store_interleaved_4_u16);
 }
+
+/// Demonstrates soundness holes in the current SIMD API.
+///
+/// Every test in this module uses **only safe code** — no `unsafe` blocks.
+/// In debug builds, `debug_assert!` catches the violation and the test panics.
+/// In release builds, the `debug_assert!` is stripped and these become **silent
+/// undefined behavior** — out-of-bounds reads/writes with no panic or signal.
+///
+/// These are not theoretical: the `jxl` crate's render pipeline calls
+/// `load_from`/`store_at` 103 times, relying on caller discipline for soundness.
+///
+/// To verify UB with Miri (must use release-mode debug_assertions=off):
+/// ```sh
+/// MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test \
+///   -p zenjxl-decoder-simd --lib soundness -- --ignored
+/// ```
+#[cfg(test)]
+mod soundness_tests {
+    use super::*;
+    use std::num::Wrapping;
+
+    // =========================================================================
+    // Category 1: Trait default methods with get_unchecked behind debug_assert
+    //
+    // These are unsound for ALL backends (including scalar) because the UB
+    // comes from get_unchecked creating an invalid slice reference, before the
+    // backend's load/store is even called.
+    // =========================================================================
+
+    /// `F32SimdVec::load_from` with offset past end of slice.
+    ///
+    /// Internally calls `mem.get_unchecked(offset..)` which creates a dangling
+    /// reference when offset > len. This is instant UB per the Rust reference,
+    /// regardless of what load() does afterwards.
+    ///
+    /// No `unsafe` in this function body.
+    #[test]
+    #[should_panic(expected = "load_from")]
+    fn soundness_f32_load_from_oob_offset() {
+        let data = [1.0f32, 2.0];
+        let _ = f32::load_from(ScalarDescriptor, &data, 5);
+    }
+
+    /// Same hole on the I32 side.
+    #[test]
+    #[should_panic(expected = "load_from")]
+    fn soundness_i32_load_from_oob_offset() {
+        let data = [1i32, 2];
+        let _ = Wrapping::<i32>::load_from(ScalarDescriptor, &data, 5);
+    }
+
+    /// `F32SimdVec::store_at` with offset past end of slice.
+    ///
+    /// Internally calls `mem.get_unchecked_mut(offset..)` — same UB pattern.
+    #[test]
+    #[should_panic(expected = "store_at")]
+    fn soundness_f32_store_at_oob_offset() {
+        let mut data = [0.0f32; 2];
+        let v = f32::splat(ScalarDescriptor, 42.0);
+        v.store_at(&mut data, 5);
+    }
+
+    /// `F32SimdVec::round_store_u8_at` with offset past end of slice.
+    #[test]
+    #[should_panic(expected = "round_store_u8_at")]
+    fn soundness_f32_round_store_u8_at_oob() {
+        let mut data = [0u8; 2];
+        let v = f32::splat(ScalarDescriptor, 42.0);
+        v.round_store_u8_at(&mut data, 5);
+    }
+
+    /// `load_from` with offset exactly at len (offset == len, LEN == 1).
+    ///
+    /// get_unchecked(2..) on a 2-element slice creates an empty slice at
+    /// one-past-end (technically valid pointer), but then scalar `load` does
+    /// `mem[0]` which panics. For SIMD backends, the unsafe pointer read
+    /// would be UB (reading from the one-past-end address).
+    #[test]
+    #[should_panic]
+    fn soundness_f32_load_from_at_exact_len() {
+        let data = [1.0f32, 2.0];
+        // offset=2 on a 2-element slice. Scalar panics at mem[0] on empty
+        // subslice. SIMD backends would read past the allocation.
+        let _ = f32::load_from(ScalarDescriptor, &data, 2);
+    }
+
+    // =========================================================================
+    // Category 2: SIMD backend load/store with too-short slices
+    //
+    // The load() and store() trait methods are declared safe but backend
+    // implementations guard only with debug_assert before raw pointer ops.
+    // Scalar is safe here (uses bounds-checked indexing), but all SIMD
+    // backends (SSE4.2, AVX2, NEON, WASM128) are UB in release.
+    //
+    // We demonstrate with scalar (which panics normally) to show the API
+    // *permits* the call. The unsoundness requires a SIMD backend + release.
+    // =========================================================================
+
+    /// `F32SimdVec::load` with empty slice. Scalar panics (safe), but SIMD
+    /// backends would read 16/32/64 bytes from a zero-length allocation.
+    #[test]
+    #[should_panic]
+    fn soundness_f32_load_empty_slice() {
+        let data: &[f32] = &[];
+        let _ = f32::load(ScalarDescriptor, data);
+    }
+
+    /// `F32SimdVec::store` with empty destination.
+    #[test]
+    #[should_panic]
+    fn soundness_f32_store_empty_slice() {
+        let v = f32::splat(ScalarDescriptor, 1.0);
+        let mut data: Vec<f32> = vec![];
+        v.store(&mut data);
+    }
+
+    /// `I32SimdVec::load` with empty slice.
+    #[test]
+    #[should_panic]
+    fn soundness_i32_load_empty_slice() {
+        let data: &[i32] = &[];
+        let _ = Wrapping::<i32>::load(ScalarDescriptor, data);
+    }
+
+    // =========================================================================
+    // Category 3: Interleaved store to too-short destination
+    //
+    // store_interleaved_2 etc. require dest.len() >= 2 * LEN. Scalar impls
+    // use bounds-checked writes. SIMD impls use debug_assert + raw pointer
+    // stores. The default method also does from_raw_parts_mut to cast the
+    // slice, but that part is layout-safe.
+    // =========================================================================
+
+    /// `store_interleaved_2` with destination smaller than 2 * LEN.
+    #[test]
+    #[should_panic]
+    fn soundness_f32_store_interleaved_2_short_dest() {
+        let a = f32::splat(ScalarDescriptor, 1.0);
+        let b = f32::splat(ScalarDescriptor, 2.0);
+        // LEN=1 for scalar, so need 2 elements. Provide only 1.
+        let mut dest = [0.0f32; 1];
+        f32::store_interleaved_2(a, b, &mut dest);
+    }
+
+    /// `load_deinterleaved_2` with source smaller than 2 * LEN.
+    #[test]
+    #[should_panic]
+    fn soundness_f32_load_deinterleaved_2_short_src() {
+        let src = [1.0f32]; // Need 2 for scalar (2 * LEN where LEN=1)
+        let _ = f32::load_deinterleaved_2(ScalarDescriptor, &src);
+    }
+
+    // =========================================================================
+    // Category 4: SIMD-backend-specific tests (only run when ISA available)
+    //
+    // These demonstrate the *actual* UB path: SIMD backends with too-short
+    // slices. In debug mode, debug_assert fires. In release mode, the raw
+    // pointer loads/stores read/write out of bounds.
+    // =========================================================================
+
+    // The following tests demonstrate that SIMD backends accept invalid
+    // arguments from safe code. Each test panics in debug mode (from
+    // debug_assert!). In release mode, the debug_assert is stripped and
+    // these become silent UB — out-of-bounds SIMD loads/stores.
+    //
+    // We test per-ISA because scalar impls use bounds-checked indexing
+    // (safe), while SIMD impls use debug_assert + raw pointer ops (unsound).
+    //
+    // The test functions return early for scalar (LEN==1) since scalar is
+    // actually safe. For SIMD backends, #[should_panic] catches the
+    // debug_assert. The point: nothing in the *type system* prevents this.
+
+    fn soundness_simd_load_short_slice_impl<D: SimdDescriptor>(d: D) {
+        if D::F32Vec::LEN <= 1 {
+            return;
+        }
+        let data = [1.0f32]; // 1 element, SIMD needs 4/8/16
+        let _ = D::F32Vec::load(d, &data);
+    }
+
+    // Scalar: safe (uses bounds-checked indexing), just returns.
+    #[test]
+    fn soundness_simd_load_short_slice_scalar_ok() {
+        soundness_simd_load_short_slice_impl(ScalarDescriptor);
+    }
+
+    // SSE4.2: debug_assert fires, release = UB (reads 16B from 4B alloc)
+    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_load_short_slice_sse42() {
+        if let Some(d) = Sse42Descriptor::new() {
+            soundness_simd_load_short_slice_impl(d);
+        }
+    }
+
+    // AVX2: debug_assert fires, release = UB (reads 32B from 4B alloc)
+    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_load_short_slice_avx() {
+        if let Some(d) = AvxDescriptor::new() {
+            soundness_simd_load_short_slice_impl(d);
+        }
+    }
+
+    // AVX-512: debug_assert fires, release = UB (reads 64B from 4B alloc)
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_load_short_slice_avx512() {
+        if let Some(d) = Avx512Descriptor::new() {
+            soundness_simd_load_short_slice_impl(d);
+        }
+    }
+
+    fn soundness_simd_store_short_slice_impl<D: SimdDescriptor>(d: D) {
+        if D::F32Vec::LEN <= 1 {
+            return;
+        }
+        let v = D::F32Vec::splat(d, 42.0);
+        let mut data = [0.0f32]; // 1 element
+        v.store(&mut data);
+    }
+
+    #[test]
+    fn soundness_simd_store_short_slice_scalar_ok() {
+        soundness_simd_store_short_slice_impl(ScalarDescriptor);
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_store_short_slice_sse42() {
+        if let Some(d) = Sse42Descriptor::new() {
+            soundness_simd_store_short_slice_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_store_short_slice_avx() {
+        if let Some(d) = AvxDescriptor::new() {
+            soundness_simd_store_short_slice_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_store_short_slice_avx512() {
+        if let Some(d) = Avx512Descriptor::new() {
+            soundness_simd_store_short_slice_impl(d);
+        }
+    }
+
+    fn soundness_simd_load_from_partial_oob_impl<D: SimdDescriptor>(d: D) {
+        if D::F32Vec::LEN <= 1 {
+            return;
+        }
+        // Provide exactly LEN elements, offset=1 → only LEN-1 remain.
+        let data: Vec<f32> = (0..D::F32Vec::LEN).map(|i| i as f32).collect();
+        let _ = D::F32Vec::load_from(d, &data, 1);
+    }
+
+    #[test]
+    fn soundness_simd_load_from_partial_oob_scalar_ok() {
+        soundness_simd_load_from_partial_oob_impl(ScalarDescriptor);
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
+    #[test]
+    #[should_panic(expected = "load_from")]
+    fn soundness_simd_load_from_partial_oob_sse42() {
+        if let Some(d) = Sse42Descriptor::new() {
+            soundness_simd_load_from_partial_oob_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+    #[test]
+    #[should_panic(expected = "load_from")]
+    fn soundness_simd_load_from_partial_oob_avx() {
+        if let Some(d) = AvxDescriptor::new() {
+            soundness_simd_load_from_partial_oob_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    #[test]
+    #[should_panic(expected = "load_from")]
+    fn soundness_simd_load_from_partial_oob_avx512() {
+        if let Some(d) = Avx512Descriptor::new() {
+            soundness_simd_load_from_partial_oob_impl(d);
+        }
+    }
+
+    fn soundness_simd_interleaved_2_short_impl<D: SimdDescriptor>(d: D) {
+        if D::F32Vec::LEN <= 1 {
+            return;
+        }
+        let a = D::F32Vec::splat(d, 1.0);
+        let b = D::F32Vec::splat(d, 2.0);
+        let mut dest = vec![0.0f32; D::F32Vec::LEN]; // need 2*LEN
+        D::F32Vec::store_interleaved_2(a, b, &mut dest);
+    }
+
+    #[test]
+    fn soundness_simd_interleaved_2_short_scalar_ok() {
+        soundness_simd_interleaved_2_short_impl(ScalarDescriptor);
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_interleaved_2_short_sse42() {
+        if let Some(d) = Sse42Descriptor::new() {
+            soundness_simd_interleaved_2_short_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_interleaved_2_short_avx() {
+        if let Some(d) = AvxDescriptor::new() {
+            soundness_simd_interleaved_2_short_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_interleaved_2_short_avx512() {
+        if let Some(d) = Avx512Descriptor::new() {
+            soundness_simd_interleaved_2_short_impl(d);
+        }
+    }
+
+    fn soundness_simd_round_store_u8_short_impl<D: SimdDescriptor>(d: D) {
+        if D::F32Vec::LEN <= 1 {
+            return;
+        }
+        let v = D::F32Vec::splat(d, 128.0);
+        let mut dest = [0u8; 1]; // need LEN bytes
+        v.round_store_u8(&mut dest);
+    }
+
+    #[test]
+    fn soundness_simd_round_store_u8_short_scalar_ok() {
+        soundness_simd_round_store_u8_short_impl(ScalarDescriptor);
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_round_store_u8_short_sse42() {
+        if let Some(d) = Sse42Descriptor::new() {
+            soundness_simd_round_store_u8_short_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_round_store_u8_short_avx() {
+        if let Some(d) = AvxDescriptor::new() {
+            soundness_simd_round_store_u8_short_impl(d);
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn soundness_simd_round_store_u8_short_avx512() {
+        if let Some(d) = Avx512Descriptor::new() {
+            soundness_simd_round_store_u8_short_impl(d);
+        }
+    }
+}
