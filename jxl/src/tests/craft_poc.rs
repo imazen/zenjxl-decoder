@@ -12,7 +12,13 @@ fn test_find_max_properties() {
     };
     use crate::image::{Image, Rect};
 
-    let test_dir = "/home/lilith/work/jxl-rs/jxl/resources/test/conformance_test_images";
+    let test_dir_buf = std::env::var("JXL_CONFORMANCE_DIR")
+        .unwrap_or_else(|_| {
+            let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            manifest.join("resources/test/conformance_test_images")
+                .to_string_lossy().into_owned()
+        });
+    let test_dir: &str = &test_dir_buf;
     let paths: Vec<_> = std::fs::read_dir(test_dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -145,7 +151,14 @@ fn test_spot_jxl() {
     };
     use crate::image::{Image, Rect};
 
-    let path = "/home/lilith/work/jxl-rs/jxl/resources/test/conformance_test_images/spot.jxl";
+    let path_buf = std::env::var("JXL_CONFORMANCE_DIR")
+        .map(|d| format!("{}/spot.jxl", d))
+        .unwrap_or_else(|_| {
+            let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            manifest.join("resources/test/conformance_test_images/spot.jxl")
+                .to_string_lossy().into_owned()
+        });
+    let path: &str = &path_buf;
     let data = std::fs::read(path).unwrap();
     eprintln!("\n=== Testing {} ({} bytes) ===\n", path, data.len());
 

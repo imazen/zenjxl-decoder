@@ -295,7 +295,6 @@ pub fn codec_corpus_jxl_dir() -> Option<std::path::PathBuf> {
     let candidates = [
         manifest_dir.join("../../codec-eval/codec-corpus/jxl"),
         manifest_dir.join("../../../codec-eval/codec-corpus/jxl"),
-        std::path::PathBuf::from("/home/lilith/work/codec-eval/codec-corpus/jxl"),
     ];
 
     for candidate in &candidates {

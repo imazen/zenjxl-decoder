@@ -20,10 +20,10 @@ fn codec_corpus_path() -> Option<PathBuf> {
         }
     }
 
-    // Try common locations
+    // Try common relative locations
     let candidates = [
-        PathBuf::from("/home/lilith/work/codec-eval/codec-corpus"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../codec-eval/codec-corpus"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../codec-eval/codec-corpus"),
     ];
 
     for p in candidates {

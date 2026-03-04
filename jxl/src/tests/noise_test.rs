@@ -3,7 +3,9 @@
 fn test_decode_noise_12mp() {
     use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
 
-    let path = "/mnt/v/output/jxl-dos-test/noise_12mp.jxl";
+    let base = std::env::var("JXL_TEST_OUTPUT_DIR")
+        .unwrap_or_else(|_| "/mnt/v/output".into());
+    let path = format!("{}/jxl-dos-test/noise_12mp.jxl", base);
     if !std::path::Path::new(path).exists() {
         eprintln!("File not found: {}", path);
         return;
