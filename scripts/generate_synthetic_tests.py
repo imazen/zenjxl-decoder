@@ -16,14 +16,17 @@ import tempfile
 import zlib
 from pathlib import Path
 
-# Find cjxl
+# Find cjxl: check CJXL_PATH env var first, then common locations
 CJXL_PATHS = [
     Path(__file__).parent.parent.parent / "jxl-efforts/libjxl/build/tools/cjxl",
-    Path("/home/lilith/work/jxl-efforts/libjxl/build/tools/cjxl"),
+    Path.home() / "work/jxl-efforts/libjxl/build/tools/cjxl",
     Path.home() / "work/libjxl/build/tools/cjxl",
 ]
 
 def find_cjxl():
+    env_path = os.environ.get("CJXL_PATH")
+    if env_path:
+        return env_path
     for p in CJXL_PATHS:
         if p.exists():
             return str(p)
