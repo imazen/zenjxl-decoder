@@ -4,10 +4,10 @@
 // license that can be found in the LICENSE file.
 
 #![allow(clippy::too_many_arguments)]
+#![deny(unsafe_code)]
 
 use std::{
     fmt::Debug,
-    mem::MaybeUninit,
     ops::{
         Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
         DivAssign, Mul, MulAssign, Neg, Sub, SubAssign,
@@ -103,15 +103,7 @@ pub trait SimdDescriptor: Sized + Copy + Debug + Send + Sync {
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R;
 }
 
-/// # Safety
-///
-/// Implementors must uphold the following invariants:
-/// - `store_interleaved_*_uninit` methods must write only initialized data to the
-///   `MaybeUninit` output slices. They must never read from the output and must write
-///   exactly the documented number of elements.
-/// - `load` and `store` methods must correctly enforce that the slice has at least
-///   `Self::LEN` elements before performing any unsafe pointer operations.
-pub unsafe trait F32SimdVec:
+pub trait F32SimdVec:
     Sized
     + Copy
     + Debug
@@ -170,70 +162,15 @@ pub unsafe trait F32SimdVec:
 
     /// Stores two vectors interleaved: [a0, b0, a1, b1, a2, b2, ...].
     /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
-        // SAFETY: MaybeUninit<f32> is guaranteed to have the same layout as f32
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<f32>, dest.len())
-        };
-        Self::store_interleaved_2_uninit(a, b, dest);
-    }
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]);
 
     /// Stores three vectors interleaved: [a0, b0, c0, a1, b1, c1, ...].
     /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
-        // SAFETY: MaybeUninit<f32> is guaranteed to have the same layout as f32
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<f32>, dest.len())
-        };
-        Self::store_interleaved_3_uninit(a, b, c, dest);
-    }
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]);
 
     /// Stores four vectors interleaved: [a0, b0, c0, d0, a1, b1, c1, d1, ...].
     /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
-        // SAFETY: MaybeUninit<f32> is guaranteed to have the same layout as f32
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<f32>, dest.len())
-        };
-        Self::store_interleaved_4_uninit(a, b, c, d, dest);
-    }
-
-    /// Stores two vectors interleaved: [a0, b0, a1, b1, a2, b2, ...].
-    /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
-    ///
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<f32>]);
-
-    /// Stores three vectors interleaved: [a0, b0, c0, a1, b1, c1, ...].
-    /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<f32>]);
-
-    /// Stores four vectors interleaved: [a0, b0, c0, d0, a1, b1, c1, d1, ...].
-    /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<f32>],
-    );
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]);
 
     /// Stores eight vectors interleaved: [a0, b0, c0, d0, e0, f0, g0, h0, a1, ...].
     /// Requires `dest.len() >= 8 * Self::LEN` or it will panic.
@@ -428,15 +365,7 @@ pub trait U32SimdVec: Sized + Copy + Debug + Send + Sync {
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self;
 }
 
-/// # Safety
-///
-/// Implementors must uphold the following invariants:
-/// - `store_interleaved_*_uninit` methods must write only initialized data to the
-///   `MaybeUninit` output slices. They must never read from the output and must write
-///   exactly the documented number of elements.
-/// - `load` and `store` methods must correctly enforce that the slice has at least
-///   `Self::LEN` elements before performing any unsafe pointer operations.
-pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
+pub trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
     type Descriptor: SimdDescriptor;
 
     const LEN: usize;
@@ -447,75 +376,18 @@ pub unsafe trait U8SimdVec: Sized + Copy + Debug + Send + Sync {
 
     /// Stores two vectors interleaved: [a0, b0, a1, b1, a2, b2, ...].
     /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
-        // SAFETY: MaybeUninit<u8> is guaranteed to have the same layout as u8
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u8>, dest.len())
-        };
-        Self::store_interleaved_2_uninit(a, b, dest);
-    }
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]);
 
     /// Stores three vectors interleaved: [a0, b0, c0, a1, b1, c1, ...].
     /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
-        // SAFETY: MaybeUninit<u8> is guaranteed to have the same layout as u8
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u8>, dest.len())
-        };
-        Self::store_interleaved_3_uninit(a, b, c, dest);
-    }
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]);
 
     /// Stores four vectors interleaved: [a0, b0, c0, d0, a1, b1, c1, d1, ...].
     /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
-        // SAFETY: MaybeUninit<u8> is guaranteed to have the same layout as u8
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u8>, dest.len())
-        };
-        Self::store_interleaved_4_uninit(a, b, c, d, dest);
-    }
-
-    /// Stores two vectors interleaved: [a0, b0, a1, b1, a2, b2, ...].
-    /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
-    ///
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u8>]);
-
-    /// Stores three vectors interleaved: [a0, b0, c0, a1, b1, c1, ...].
-    /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u8>]);
-
-    /// Stores four vectors interleaved: [a0, b0, c0, d0, a1, b1, c1, d1, ...].
-    /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_4_uninit(a: Self, b: Self, c: Self, d: Self, dest: &mut [MaybeUninit<u8>]);
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]);
 }
 
-/// # Safety
-///
-/// Implementors must uphold the following invariants:
-/// - `store_interleaved_*_uninit` methods must write only initialized data to the
-///   `MaybeUninit` output slices. They must never read from the output and must write
-///   exactly the documented number of elements.
-/// - `load` and `store` methods must correctly enforce that the slice has at least
-///   `Self::LEN` elements before performing any unsafe pointer operations.
-pub unsafe trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
+pub trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
     type Descriptor: SimdDescriptor;
 
     const LEN: usize;
@@ -526,70 +398,15 @@ pub unsafe trait U16SimdVec: Sized + Copy + Debug + Send + Sync {
 
     /// Stores two vectors interleaved: [a0, b0, a1, b1, a2, b2, ...].
     /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
-        // SAFETY: MaybeUninit<u16> is guaranteed to have the same layout as u16
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u16>, dest.len())
-        };
-        Self::store_interleaved_2_uninit(a, b, dest);
-    }
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]);
 
     /// Stores three vectors interleaved: [a0, b0, c0, a1, b1, c1, ...].
     /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
-        // SAFETY: MaybeUninit<u16> is guaranteed to have the same layout as u16
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u16>, dest.len())
-        };
-        Self::store_interleaved_3_uninit(a, b, c, dest);
-    }
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]);
 
     /// Stores four vectors interleaved: [a0, b0, c0, d0, a1, b1, c1, d1, ...].
     /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
-    #[inline(always)]
-    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
-        // SAFETY: MaybeUninit<u16> is guaranteed to have the same layout as u16
-        // (https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#layout-1).
-        // The source slice is already initialized, and the _uninit method only writes
-        // (never reads) the output, so reinterpreting as MaybeUninit is sound.
-        let dest = unsafe {
-            std::slice::from_raw_parts_mut(dest.as_mut_ptr() as *mut MaybeUninit<u16>, dest.len())
-        };
-        Self::store_interleaved_4_uninit(a, b, c, d, dest);
-    }
-
-    /// Stores two vectors interleaved: [a0, b0, a1, b1, a2, b2, ...].
-    /// Requires `dest.len() >= 2 * Self::LEN` or it will panic.
-    ///
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u16>]);
-
-    /// Stores three vectors interleaved: [a0, b0, c0, a1, b1, c1, ...].
-    /// Requires `dest.len() >= 3 * Self::LEN` or it will panic.
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u16>]);
-
-    /// Stores four vectors interleaved: [a0, b0, c0, d0, a1, b1, c1, d1, ...].
-    /// Requires `dest.len() >= 4 * Self::LEN` or it will panic.
-    /// Safety note:
-    /// Does not write uninitialized data into `dest`.
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<u16>],
-    );
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]);
 }
 
 #[macro_export]
