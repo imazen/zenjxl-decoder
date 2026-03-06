@@ -114,10 +114,22 @@ pub unsafe trait F32SimdVec:
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self;
 
+    /// Load from `mem[offset..]`. Requires `mem[offset..].len() >= Self::LEN`.
+    #[inline(always)]
+    fn load_from(d: Self::Descriptor, mem: &[f32], offset: usize) -> Self {
+        Self::load(d, &mem[offset..])
+    }
+
     fn load_array(d: Self::Descriptor, mem: &Self::UnderlyingArray) -> Self;
 
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn store(&self, mem: &mut [f32]);
+
+    /// Store to `mem[offset..]`. Requires `mem[offset..].len() >= Self::LEN`.
+    #[inline(always)]
+    fn store_at(&self, mem: &mut [f32], offset: usize) {
+        self.store(&mut mem[offset..])
+    }
 
     fn store_array(&self, mem: &mut Self::UnderlyingArray);
 
@@ -320,8 +332,20 @@ pub trait I32SimdVec:
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self;
 
+    /// Load from `mem[offset..]`. Requires `mem[offset..].len() >= Self::LEN`.
+    #[inline(always)]
+    fn load_from(d: Self::Descriptor, mem: &[i32], offset: usize) -> Self {
+        Self::load(d, &mem[offset..])
+    }
+
     // Requires `mem.len() >= Self::LEN` or it will panic.
     fn store(&self, mem: &mut [i32]);
+
+    /// Store to `mem[offset..]`. Requires `mem[offset..].len() >= Self::LEN`.
+    #[inline(always)]
+    fn store_at(&self, mem: &mut [i32], offset: usize) {
+        self.store(&mut mem[offset..])
+    }
 
     fn abs(self) -> Self;
 

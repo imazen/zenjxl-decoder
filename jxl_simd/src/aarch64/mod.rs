@@ -20,7 +20,6 @@ macro_rules! simd_function {
         #[inline(always)]
         $(#[$($attr)*])*
         $pub fn $name<$descr_ty: $crate::SimdDescriptor>($descr: $descr_ty, $($arg: $ty),*) $(-> $ret)? $body
-        #[allow(unsafe_code)]
         $(#[$($attr)*])*
         $pub fn $dname($($arg: $ty),*) $(-> $ret)? {
             #[allow(unused)]
@@ -37,16 +36,11 @@ macro_rules! simd_function {
 macro_rules! simd_function_body_neon {
     ($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )?; ($($val:expr),* $(,)?)) => {
         if cfg!(target_feature = "neon") {
-            // SAFETY: we just checked for neon.
-            let d = unsafe { $crate::NeonDescriptor::new_unchecked() };
+            // Compile-time guaranteed: new() always succeeds.
+            let d = $crate::NeonDescriptor::new().unwrap();
             return $name(d, $($val),*);
         } else if let Some(d) = $crate::NeonDescriptor::new() {
-            #[target_feature(enable = "neon")]
-            fn neon(d: $crate::NeonDescriptor, $($arg: $ty),*) $(-> $ret)? {
-                $name(d, $($val),*)
-            }
-            // SAFETY: we just checked for neon.
-            return unsafe { neon(d, $($arg),*) };
+            return d.call(|d| $name(d, $($val),*));
         }
     };
 }
@@ -81,18 +75,11 @@ macro_rules! test_all_instruction_sets {
 macro_rules! test_neon {
     ($name:ident) => {
         paste::paste! {
-            #[allow(unsafe_code)]
             #[test]
             fn [<$name _neon>]() {
                 use $crate::SimdDescriptor;
                 let Some(d) = $crate::NeonDescriptor::new() else { return; };
-                #[target_feature(enable = "neon")]
-                fn inner(d: $crate::NeonDescriptor) {
-                    $name(d)
-                }
-                // SAFETY: we just checked for neon.
-                return unsafe { inner(d) };
-
+                d.call(|d| $name(d));
             }
         }
     };
