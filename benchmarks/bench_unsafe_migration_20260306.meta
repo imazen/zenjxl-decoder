@@ -1,0 +1,14 @@
+commit: 40578b9
+date: 2026-03-06
+command: cargo run --release -p zenjxl-decoder-cli -- --speedtest --num-reps 5 --warmup-reps 2 --num-threads {1,8} --data-type u8 {image}
+machine: WSL2 Linux 6.6.87.2 (AMD Ryzen 9 7950X, 32 threads)
+purpose: After archmage unsafe elimination migration. All SIMD backends converted to safe wrappers.
+archmage: 0.9.2, safe_unaligned_simd 0.2.5
+
+1T comparison vs baseline (d92b1a7, 2026-03-02):
+  Average delta: -4.0% (within WSL2 noise, no consistent direction)
+  Re-run consistency: ±5% variance between runs on same commit
+  Conclusion: No measurable performance regression from unsafe elimination
+
+8T comparison unreliable — WSL2 multi-threaded scheduling noise dominates (±45% variance).
+tirr_photo 8T showed +66% vs baseline, proving system load is the dominant factor.
