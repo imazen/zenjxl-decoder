@@ -3,6 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// The simd_function! macro generates dispatch wrappers that inherit all params.
+#![allow(clippy::too_many_arguments)]
+
 use num_traits::Float;
 
 use crate::transforms::{transform::*, transform_map::*};

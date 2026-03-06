@@ -1149,10 +1149,10 @@ impl DequantMatrices {
 
                 // Save raw quant table for JPEG reconstruction (table 0 = DCT8)
                 #[cfg(feature = "jpeg")]
-                if i == 0 {
-                    if let QuantEncoding::Raw { qtable, qtable_den } = &encoding {
-                        raw_qtable = Some((qtable.clone(), *qtable_den));
-                    }
+                if i == 0
+                    && let QuantEncoding::Raw { qtable, qtable_den } = &encoding
+                {
+                    raw_qtable = Some((qtable.clone(), *qtable_den));
                 }
 
                 let table = match encoding {

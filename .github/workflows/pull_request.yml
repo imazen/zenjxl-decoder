@@ -58,7 +58,7 @@ jobs:
       fail-fast: false
       matrix:
         features: [all, none]
-        os: [ubuntu-24.04-arm, ubuntu-latest]
+        os: [ubuntu-24.04-arm, ubuntu-latest, windows-11-arm, macos-26-intel]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04-arm, ubuntu-latest]
+        os: [ubuntu-24.04-arm, ubuntu-latest, windows-11-arm, macos-26-intel]
         simd: [none]
         include:
           - os: ubuntu-latest
@@ -133,7 +133,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Rust cache
-      uses: Swatinem/rust-cache@v2.7.3
+      uses: Swatinem/rust-cache@v2.8.0
 
     - name: Install llvm-cov
       run: cargo +stable install cargo-llvm-cov --locked
@@ -190,10 +190,10 @@ jobs:
         components: clippy, rustfmt
 
     - name: Rust cache
-      uses: Swatinem/rust-cache@v2.7.3
+      uses: Swatinem/rust-cache@v2.8.0
 
-    - name: Build jxl_cli
-      run: cargo build --release --bin jxl_cli
+    - name: Build CLI
+      run: cargo build --release --bin zenjxl-decoder-cli
 
     - name: Setup python3
       uses: actions/setup-python@v5
@@ -208,11 +208,11 @@ jobs:
 
     - name: Run jxl-rs conformance tests with ICC
       id: icc_conformance
-      run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_jxl-rs.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/jxl_cli %s %s --icc-out %s'" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs.json --lax
+      run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_jxl-rs.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/zenjxl-decoder-cli %s %s --icc-out %s'" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs.json --lax
 
     - name: Run jxl-rs conformance tests wrapped in PNG
       id: png_conformance
-      run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_png.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/jxl_cli --override-bitdepth=16 %s %s '" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs_via_png.json --lax
+      run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_png.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/zenjxl-decoder-cli --override-bitdepth=16 %s %s '" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs_via_png.json --lax
       continue-on-error: true
 
     - name: Export step summary
@@ -244,7 +244,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Rust cache
-      uses: Swatinem/rust-cache@v2.7.3
+      uses: Swatinem/rust-cache@v2.8.0
       with:
         prefix-key: benchmark
 

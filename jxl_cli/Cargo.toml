@@ -3,8 +3,10 @@ name = "zenjxl-decoder-cli"
 description = "CLI tool for decoding JPEG XL images using zenjxl-decoder"
 version = "0.3.0"
 edition = "2024"
+rust-version = "1.88"
 license = "BSD-3-Clause"
 repository = "https://github.com/imazen/zenjxl-decoder"
+publish = false
 default-run = "zenjxl-decoder-cli"
 
 [dependencies]

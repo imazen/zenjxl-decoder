@@ -145,9 +145,9 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
         let _count0 = read_u32_jbrd(&mut reader, &[0, 1], &[(3, 2), (8, 0)])?;
         let mut counts = [0u32; 16];
         let mut max_depth_idx = 0;
-        for i in 0..16 {
-            counts[i] = read_u32_jbrd(&mut reader, &[0, 1], &[(3, 2), (8, 0)])?;
-            if counts[i] > 0 {
+        for (i, count) in counts.iter_mut().enumerate() {
+            *count = read_u32_jbrd(&mut reader, &[0, 1], &[(3, 2), (8, 0)])?;
+            if *count > 0 {
                 max_depth_idx = i;
             }
         }
@@ -294,8 +294,8 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
     // COM marker data (same format as APP: [marker_byte, len_hi, len_lo, payload...])
     let mut com_data = Vec::with_capacity(num_com as usize);
-    for i in 0..num_com as usize {
-        let len = com_data_lengths[i] as usize;
+    for &com_len in com_data_lengths.iter().take(num_com as usize) {
+        let len = com_len as usize;
         if data_pos + len > decompressed.len() {
             return Err(Error::InvalidJbrd("truncated COM data".into()));
         }
@@ -306,8 +306,11 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
     // Inter-marker data
     let mut inter_marker_data = Vec::with_capacity(num_intermarker as usize);
-    for i in 0..num_intermarker as usize {
-        let len = inter_marker_data_lengths[i] as usize;
+    for &im_len in inter_marker_data_lengths
+        .iter()
+        .take(num_intermarker as usize)
+    {
+        let len = im_len as usize;
         if data_pos + len > decompressed.len() {
             return Err(Error::InvalidJbrd("truncated inter-marker data".into()));
         }
@@ -332,8 +335,8 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
     // Initial block dimensions assuming 4:4:4. For subsampled images,
     // jpeg_reconstruct() overrides these using the frame header's jpeg_upsampling.
-    let xsize_blocks = (width + 7) / 8;
-    let ysize_blocks = (height + 7) / 8;
+    let xsize_blocks = width.div_ceil(8);
+    let ysize_blocks = height.div_ceil(8);
     for comp in &mut components {
         comp.width_in_blocks = xsize_blocks;
         comp.height_in_blocks = ysize_blocks;

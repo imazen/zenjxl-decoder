@@ -2,6 +2,8 @@
 
 A JPEG XL decoder in safe Rust. Fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs) with security hardening, bug fixes, and parallel decoding.
 
+Maintained by [Lilith River](https://github.com/lilith) at [Imazen](https://github.com/imazen).
+
 ```toml
 [dependencies]
 zenjxl-decoder = "0.3"
@@ -120,6 +122,7 @@ Set `parallel: false` on `JxlDecoderOptions` to force single-threaded mode at ru
 | `jpeg` | JPEG reconstruction from JXL containers |
 | `all-simd` | All SIMD backends (SSE4.2, AVX2, AVX-512, NEON) |
 | `sse42` / `avx` / `avx512` / `neon` | Individual SIMD targets |
+| `allow-unsafe` | Enable `unsafe` fast paths in the main crate (safe fallbacks used otherwise) |
 
 ## Conformance
 

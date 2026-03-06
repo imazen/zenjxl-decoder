@@ -341,8 +341,8 @@ impl<'a> JpegWriter<'a> {
                 .map(|c| c.v_samp_factor)
                 .max()
                 .unwrap_or(1);
-            let mcu_cols = (jpeg.width + max_h * 8 - 1) / (max_h * 8);
-            let mcu_rows = (jpeg.height + max_v * 8 - 1) / (max_v * 8);
+            let mcu_cols = jpeg.width.div_ceil(max_h * 8);
+            let mcu_rows = jpeg.height.div_ceil(max_v * 8);
             (mcu_rows, mcu_cols)
         } else {
             let comp_idx = scan.component_indices[0] as usize;
@@ -368,9 +368,7 @@ impl<'a> JpegWriter<'a> {
                     self.out.push(rst_marker);
 
                     // Reset DC prediction
-                    for dc in &mut dc_pred {
-                        *dc = 0;
-                    }
+                    dc_pred.fill(0);
                     reset_point_idx += 1;
                 }
 
@@ -454,7 +452,7 @@ fn encode_dc(bw: &mut BitWriter, dc: i32, dc_pred: &mut i32, table: &HuffmanEnco
     let (category, extra_bits, extra_len) = categorize(diff);
     bw.write_huffman(table, category as u8);
     if extra_len > 0 {
-        bw.write_bits(extra_bits as u32, extra_len);
+        bw.write_bits(extra_bits, extra_len);
     }
 }
 
@@ -492,7 +490,7 @@ fn encode_ac(bw: &mut BitWriter, block: &[i16], table: &HuffmanEncodeTable) {
         let symbol = ((zero_run as u8) << 4) | (category as u8);
         bw.write_huffman(table, symbol);
         if extra_len > 0 {
-            bw.write_bits(extra_bits as u32, extra_len);
+            bw.write_bits(extra_bits, extra_len);
         }
         zero_run = 0;
     }
@@ -599,7 +597,7 @@ impl BitWriter {
     }
 
     fn pad_to_byte(&mut self, padding_bits: &[u8], padding_idx: &mut usize) {
-        while self.bits_in_buffer % 8 != 0 {
+        while !self.bits_in_buffer.is_multiple_of(8) {
             let bit = if *padding_idx < padding_bits.len() {
                 let b = padding_bits[*padding_idx];
                 *padding_idx += 1;

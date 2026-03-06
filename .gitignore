@@ -6,3 +6,6 @@ perf.data.old
 # Coverage reports
 coverage_html/
 coverage.json
+
+# Large test images (not needed for CI; excluded from crate via resources/)
+jxl/resources/test/portrait_4k_q90.jxl

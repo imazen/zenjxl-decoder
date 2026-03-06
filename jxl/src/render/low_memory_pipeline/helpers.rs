@@ -38,7 +38,9 @@ pub(super) fn get_distinct_indices<'a, T>(
         // SAFETY: indices are guaranteed distinct (no two (outer, inner) pairs are equal),
         // so each &mut T points to a different element. We use raw pointers to avoid
         // the borrow checker's inability to prove non-aliasing across loop iterations.
+        // Both pointer operations share this single safety justification.
         let ptr = unsafe { buf.as_mut_ptr().add(inner) };
+        // SAFETY: `ptr` is in-bounds (asserted above) and unique (indices are distinct).
         answer_buffer[pos] = Some(unsafe { &mut *ptr });
     }
 

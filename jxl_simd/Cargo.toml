@@ -5,9 +5,10 @@ version = "0.3.0"
 readme = "../README.md"
 keywords = ["jpeg-xl", "simd"]
 categories = ["multimedia::images"]
-authors = ["Luca Versari <veluca93@gmail.com>"]
+authors = ["Luca Versari <veluca93@gmail.com>", "Lilith River <lilith@imazen.io>"]
 repository = "https://github.com/imazen/zenjxl-decoder"
 edition = "2024"
+rust-version = "1.87"
 license = "BSD-3-Clause"
 
 [dependencies]

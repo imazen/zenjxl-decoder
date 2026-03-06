@@ -191,12 +191,12 @@ impl CodestreamParser {
             if !self.sections.is_empty() {
                 // Try to pick up JBRD data that may have arrived during box parsing
                 #[cfg(feature = "jpeg")]
-                if self.jbrd_data.is_none() {
-                    if let Some(data) = box_parser.take_jbrd_data() {
-                        self.jbrd_data = Some(data);
-                        if let Some(frame) = &mut self.frame {
-                            frame.enable_jpeg_reconstruction();
-                        }
+                if self.jbrd_data.is_none()
+                    && let Some(data) = box_parser.take_jbrd_data()
+                {
+                    self.jbrd_data = Some(data);
+                    if let Some(frame) = &mut self.frame {
+                        frame.enable_jpeg_reconstruction();
                     }
                 }
 
@@ -396,16 +396,16 @@ impl CodestreamParser {
                 if self.frame.is_some() {
                     // Transfer JBRD data from box parser and enable JPEG reconstruction
                     #[cfg(feature = "jpeg")]
-                    if self.jbrd_data.is_none() {
-                        if let Some(data) = box_parser.take_jbrd_data() {
-                            self.jbrd_data = Some(data);
-                        }
+                    if self.jbrd_data.is_none()
+                        && let Some(data) = box_parser.take_jbrd_data()
+                    {
+                        self.jbrd_data = Some(data);
                     }
                     #[cfg(feature = "jpeg")]
-                    if self.jbrd_data.is_some() {
-                        if let Some(frame) = &mut self.frame {
-                            frame.enable_jpeg_reconstruction();
-                        }
+                    if self.jbrd_data.is_some()
+                        && let Some(frame) = &mut self.frame
+                    {
+                        frame.enable_jpeg_reconstruction();
                     }
 
                     // Check if this is a preview frame that should be skipped

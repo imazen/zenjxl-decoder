@@ -296,13 +296,13 @@ impl CodestreamParser {
 
         // Reconstruct JPEG if we have JBRD data (before frame is consumed by finalize)
         #[cfg(feature = "jpeg")]
-        if let Some(jbrd_data) = &self.jbrd_data {
-            if let Some(frame) = &self.frame {
-                match frame.jpeg_reconstruct(jbrd_data) {
-                    Ok(bytes) => self.jpeg_bytes = Some(bytes),
-                    Err(_) => {} // Reconstruction failed; normal decode continues
-                }
+        if let Some(jbrd_data) = &self.jbrd_data
+            && let Some(frame) = &self.frame
+        {
+            if let Ok(bytes) = frame.jpeg_reconstruct(jbrd_data) {
+                self.jpeg_bytes = Some(bytes);
             }
+            // Reconstruction failure is non-fatal; normal decode continues
         }
 
         let decoder_state = self.frame.take().unwrap().finalize()?;

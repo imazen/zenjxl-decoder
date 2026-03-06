@@ -451,12 +451,12 @@ impl Frame {
         let scaled_qtable: [[i32; 64]; 3] = {
             let mut sq = [[0i32; 64]; 3];
             for c in [0usize, 2] {
-                for j in 0..64 {
+                for (j, sq_val) in sq[c].iter_mut().enumerate() {
                     let jxl_pos = (j % 8) * 8 + (j / 8);
                     let num = raw_qt[64 + jxl_pos]; // Y channel (JXL c1)
                     let den = raw_qt[c * 64 + jxl_pos]; // Chroma channel
                     if num > 0 && den > 0 {
-                        sq[c][j] = ((num as i32) << CFL_FP) / (den as i32);
+                        *sq_val = (num << CFL_FP) / den;
                     }
                 }
             }
@@ -492,7 +492,7 @@ impl Frame {
             let hshift_c = maxhs - self.header.raw_hshift(jxl_c);
             let vshift_c = maxvs - self.header.raw_vshift(jxl_c);
 
-            let q_dc = raw_qt[jxl_c * 64] as i32;
+            let q_dc = raw_qt[jxl_c * 64];
             let dcoff = if use_dcoff && q_dc != 0 {
                 1024 / q_dc
             } else {
@@ -529,31 +529,32 @@ impl Frame {
                     //   stored_chroma = original_chroma - cfl_factor
                     // We undo it:
                     //   original_chroma = stored_chroma + cfl_factor
-                    if is_444 && (jxl_c == 0 || jxl_c == 2) {
-                        if let Some(meta) = hf_meta {
-                            let tile_x = frame_bx / color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS;
-                            let tile_y = frame_by / color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS;
-                            let map_val = if jxl_c == 0 {
-                                meta.ytox_map.row(tile_y)[tile_x] as i32
-                            } else {
-                                meta.ytob_map.row(tile_y)[tile_x] as i32
-                            };
+                    if is_444
+                        && (jxl_c == 0 || jxl_c == 2)
+                        && let Some(meta) = hf_meta
+                    {
+                        let tile_x = frame_bx / color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS;
+                        let tile_y = frame_by / color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS;
+                        let map_val = if jxl_c == 0 {
+                            meta.ytox_map.row(tile_y)[tile_x] as i32
+                        } else {
+                            meta.ytob_map.row(tile_y)[tile_x] as i32
+                        };
 
-                            if map_val != 0 {
-                                // RatioJPEG: factor * (1 << CFL_FP) / kDefaultColorFactor
-                                let scale = map_val * (1 << CFL_FP) / COLOR_FACTOR;
-                                let round = 1i32 << (CFL_FP - 1);
+                        if map_val != 0 {
+                            // RatioJPEG: factor * (1 << CFL_FP) / kDefaultColorFactor
+                            let scale = map_val * (1 << CFL_FP) / COLOR_FACTOR;
+                            let round = 1i32 << (CFL_FP - 1);
 
-                                // Y coefficients at the same frame block position (JXL c1)
-                                let y_offset = src_offset;
+                            // Y coefficients at the same frame block position (JXL c1)
+                            let y_offset = src_offset;
 
-                                for k in 1..64 {
-                                    let y_coeff = jpeg_coeffs[1][y_offset + k] as i32;
-                                    let qt = scaled_qtable[jxl_c][k];
-                                    let coeff_scale = (qt * scale + round) >> CFL_FP;
-                                    let cfl_factor = (y_coeff * coeff_scale + round) >> CFL_FP;
-                                    comp.coeffs[block_idx * 64 + k] += cfl_factor as i16;
-                                }
+                            for k in 1..64 {
+                                let y_coeff = jpeg_coeffs[1][y_offset + k] as i32;
+                                let qt = scaled_qtable[jxl_c][k];
+                                let coeff_scale = (qt * scale + round) >> CFL_FP;
+                                let cfl_factor = (y_coeff * coeff_scale + round) >> CFL_FP;
+                                comp.coeffs[block_idx * 64 + k] += cfl_factor as i16;
                             }
                         }
                     }
