@@ -3,6 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#![allow(unsafe_code)]
 #![allow(clippy::identity_op)]
 
 #[cfg(feature = "avx")]
@@ -23,53 +24,98 @@ macro_rules! simd_function {
         #[inline(always)]
         $(#[$($attr)*])*
         $pub fn $name<$descr_ty: $crate::SimdDescriptor>($descr: $descr_ty, $($arg: $ty),*) $(-> $ret)? $body
-
-        paste::paste! {
-            #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-            #[$crate::__arcane]
-            $(#[$($attr)*])*
-            fn [<$dname __v4>](_token: $crate::X64V4Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::Avx512Descriptor::from_token(_token), $($arg),*)
-            }
-
-            #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-            #[$crate::__arcane]
-            $(#[$($attr)*])*
-            fn [<$dname __v3>](_token: $crate::X64V3Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::AvxDescriptor::from_token(_token), $($arg),*)
-            }
-
-            #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-            #[$crate::__arcane]
-            $(#[$($attr)*])*
-            fn [<$dname __v2>](_token: $crate::X64V2Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::Sse42Descriptor::from_token(_token), $($arg),*)
-            }
-
-            $(#[$($attr)*])*
-            fn [<$dname __scalar>](_token: $crate::ScalarToken, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::ScalarDescriptor::from_token(_token), $($arg),*)
-            }
-
-            $(#[$($attr)*])*
-            $pub fn $dname($($arg: $ty),*) $(-> $ret)? {
-                use $crate::__SimdToken;
-                #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-                if let Some(t) = $crate::X64V4Token::summon() {
-                    return [<$dname __v4>](t, $($arg),*);
-                }
-                #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-                if let Some(t) = $crate::X64V3Token::summon() {
-                    return [<$dname __v3>](t, $($arg),*);
-                }
-                #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
-                if let Some(t) = $crate::X64V2Token::summon() {
-                    return [<$dname __v2>](t, $($arg),*);
-                }
-                [<$dname __scalar>]($crate::ScalarToken::summon().unwrap(), $($arg),*)
-            }
+        #[allow(unsafe_code)]
+        $(#[$($attr)*])*
+        $pub fn $dname($($arg: $ty),*) $(-> $ret)? {
+            #[allow(unused)]
+            use $crate::SimdDescriptor;
+            $crate::simd_function_body_avx512!($name($($arg: $ty),*) $(-> $ret)?; ($($arg),*));
+            $crate::simd_function_body_avx!($name($($arg: $ty),*) $(-> $ret)?; ($($arg),*));
+            $crate::simd_function_body_sse42!($name($($arg: $ty),*) $(-> $ret)?; ($($arg),*));
+            $name($crate::ScalarDescriptor::new().unwrap(), $($arg),*)
         }
     };
+}
+
+#[cfg(feature = "sse42")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! simd_function_body_sse42 {
+    ($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )?; ($($val:expr),* $(,)?)) => {
+        if cfg!(target_feature = "sse4.2") {
+            // SAFETY: we just checked for sse4.2.
+            let d = unsafe { $crate::Sse42Descriptor::new_unchecked() };
+            return $name(d, $($val),*);
+        } else if let Some(d) = $crate::Sse42Descriptor::new() {
+            #[target_feature(enable = "sse4.2")]
+            fn sse42(d: $crate::Sse42Descriptor, $($arg: $ty),*) $(-> $ret)? {
+                $name(d, $($val),*)
+            }
+            // SAFETY: we just checked for sse4.2.
+            return unsafe { sse42(d, $($arg),*) };
+        }
+    };
+}
+
+#[cfg(feature = "avx")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! simd_function_body_avx {
+    ($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )?; ($($val:expr),* $(,)?)) => {
+        if cfg!(all(target_feature = "avx2", target_feature = "fma", target_feature = "f16c")) {
+            // SAFETY: we just checked for avx2, fma and f16c.
+            let d = unsafe { $crate::AvxDescriptor::new_unchecked() };
+            return $name(d, $($val),*);
+        } else if let Some(d) = $crate::AvxDescriptor::new() {
+            #[target_feature(enable = "avx2,fma,f16c")]
+            fn avx(d: $crate::AvxDescriptor, $($arg: $ty),*) $(-> $ret)? {
+                $name(d, $($val),*)
+            }
+            // SAFETY: we just checked for avx2, fma and f16c.
+            return unsafe { avx(d, $($arg),*) };
+        }
+    };
+}
+
+#[cfg(feature = "avx512")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! simd_function_body_avx512 {
+    ($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )?; ($($val:expr),* $(,)?)) => {
+        if cfg!(target_feature = "avx512f") {
+            // SAFETY: we just checked for avx512f.
+            let d = unsafe { $crate::Avx512Descriptor::new_unchecked() };
+            return $name(d, $($val),*);
+        } else if let Some(d) = $crate::Avx512Descriptor::new() {
+            #[target_feature(enable = "avx512f")]
+            fn avx512(d: $crate::Avx512Descriptor, $($arg: $ty),*) $(-> $ret)? {
+                $name(d, $($val),*)
+            }
+            // SAFETY: we just checked for avx512f.
+            return unsafe { avx512(d, $($arg),*) };
+        }
+    };
+}
+
+#[cfg(not(feature = "sse42"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! simd_function_body_sse42 {
+    ($($ignore:tt)*) => {};
+}
+
+#[cfg(not(feature = "avx"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! simd_function_body_avx {
+    ($($ignore:tt)*) => {};
+}
+
+#[cfg(not(feature = "avx512"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! simd_function_body_avx512 {
+    ($($ignore:tt)*) => {};
 }
 
 #[macro_export]
@@ -97,15 +143,17 @@ macro_rules! test_all_instruction_sets {
 macro_rules! test_sse42 {
     ($name:ident) => {
         paste::paste! {
+            #[allow(unsafe_code)]
             #[test]
             fn [<$name _sse42>]() {
-                use $crate::__SimdToken;
-                let Some(token) = $crate::X64V2Token::summon() else { return; };
-                #[$crate::__arcane]
-                fn inner(token: $crate::X64V2Token) {
-                    $name($crate::Sse42Descriptor::from_token(token))
+                use $crate::SimdDescriptor;
+                let Some(d) = $crate::Sse42Descriptor::new() else { return; };
+                #[target_feature(enable = "sse4.2")]
+                fn inner(d: $crate::Sse42Descriptor) {
+                    $name(d)
                 }
-                inner(token);
+                // SAFETY: we just checked for sse4.2.
+                return unsafe { inner(d) };
             }
         }
     };
@@ -117,15 +165,17 @@ macro_rules! test_sse42 {
 macro_rules! test_avx {
     ($name:ident) => {
         paste::paste! {
+            #[allow(unsafe_code)]
             #[test]
             fn [<$name _avx>]() {
-                use $crate::__SimdToken;
-                let Some(token) = $crate::X64V3Token::summon() else { return; };
-                #[$crate::__arcane]
-                fn inner(token: $crate::X64V3Token) {
-                    $name($crate::AvxDescriptor::from_token(token))
+                use $crate::SimdDescriptor;
+                let Some(d) = $crate::AvxDescriptor::new() else { return; };
+                #[target_feature(enable = "avx2,fma,f16c")]
+                fn inner(d: $crate::AvxDescriptor) {
+                    $name(d)
                 }
-                inner(token);
+                // SAFETY: we just checked for avx2, fma and f16c.
+                return unsafe { inner(d) };
             }
         }
     };
@@ -137,15 +187,17 @@ macro_rules! test_avx {
 macro_rules! test_avx512 {
     ($name:ident) => {
         paste::paste! {
+            #[allow(unsafe_code)]
             #[test]
             fn [<$name _avx512>]() {
-                use $crate::__SimdToken;
-                let Some(token) = $crate::X64V4Token::summon() else { return; };
-                #[$crate::__arcane]
-                fn inner(token: $crate::X64V4Token) {
-                    $name($crate::Avx512Descriptor::from_token(token))
+                use $crate::SimdDescriptor;
+                let Some(d) = $crate::Avx512Descriptor::new() else { return; };
+                #[target_feature(enable = "avx512f")]
+                fn inner(d: $crate::Avx512Descriptor) {
+                    $name(d)
                 }
-                inner(token);
+                // SAFETY: we just checked for avx512f.
+                return unsafe { inner(d) };
             }
         }
     };
@@ -180,67 +232,29 @@ macro_rules! bench_all_instruction_sets {
     ) => {
         #[allow(unused)]
         use $crate::SimdDescriptor;
-        $crate::bench_avx512!($name, $criterion);
-        $crate::bench_avx!($name, $criterion);
-        $crate::bench_sse42!($name, $criterion);
+        // `simd_function_body_*` does early return; wrap it with an immediately-invoked closure
+        (|| {
+            $crate::simd_function_body_avx512!(
+                $name($criterion: &mut ::criterion::BenchmarkGroup<'_, impl ::criterion::measurement::Measurement>);
+                ($criterion, "avx512")
+            );
+        })();
+        (|| {
+            $crate::simd_function_body_avx!(
+                $name($criterion: &mut ::criterion::BenchmarkGroup<'_, impl ::criterion::measurement::Measurement>);
+                ($criterion, "avx")
+            );
+        })();
+        (|| {
+            $crate::simd_function_body_sse42!(
+                $name($criterion: &mut ::criterion::BenchmarkGroup<'_, impl ::criterion::measurement::Measurement>);
+                ($criterion, "sse42")
+            );
+        })();
         $name(
             $crate::ScalarDescriptor::new().unwrap(),
             $criterion,
             "scalar",
         );
     };
-}
-
-#[cfg(feature = "avx512")]
-#[doc(hidden)]
-#[macro_export]
-macro_rules! bench_avx512 {
-    ($name:ident, $criterion:ident) => {
-        if let Some(d) = $crate::Avx512Descriptor::new() {
-            d.call(|d| $name(d, $criterion, "avx512"));
-        }
-    };
-}
-
-#[cfg(feature = "avx")]
-#[doc(hidden)]
-#[macro_export]
-macro_rules! bench_avx {
-    ($name:ident, $criterion:ident) => {
-        if let Some(d) = $crate::AvxDescriptor::new() {
-            d.call(|d| $name(d, $criterion, "avx"));
-        }
-    };
-}
-
-#[cfg(feature = "sse42")]
-#[doc(hidden)]
-#[macro_export]
-macro_rules! bench_sse42 {
-    ($name:ident, $criterion:ident) => {
-        if let Some(d) = $crate::Sse42Descriptor::new() {
-            d.call(|d| $name(d, $criterion, "sse42"));
-        }
-    };
-}
-
-#[cfg(not(feature = "avx512"))]
-#[doc(hidden)]
-#[macro_export]
-macro_rules! bench_avx512 {
-    ($name:ident, $criterion:ident) => {};
-}
-
-#[cfg(not(feature = "avx"))]
-#[doc(hidden)]
-#[macro_export]
-macro_rules! bench_avx {
-    ($name:ident, $criterion:ident) => {};
-}
-
-#[cfg(not(feature = "sse42"))]
-#[doc(hidden)]
-#[macro_export]
-macro_rules! bench_sse42 {
-    ($name:ident, $criterion:ident) => {};
 }

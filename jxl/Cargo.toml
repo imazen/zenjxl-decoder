@@ -45,13 +45,12 @@ jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", versio
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
-all-simd = ["jxl_simd/all-simd", "sse42", "avx", "avx512", "neon", "wasm128"]
+all-simd = ["jxl_simd/all-simd", "sse42", "avx", "avx512", "neon"]
 profiling = []
 sse42 = ["jxl_simd/sse42"]
 avx = ["jxl_simd/avx"]
 avx512 = ["jxl_simd/avx512"]
 neon = ["jxl_simd/neon"]
-wasm128 = ["jxl_simd/wasm128"]
 cms = ["moxcms"]
 jpeg = ["dep:brotli"]
 allow-unsafe = []
