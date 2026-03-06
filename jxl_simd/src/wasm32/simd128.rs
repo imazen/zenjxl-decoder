@@ -3,14 +3,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use std::{
-    arch::wasm32::*,
-    mem::MaybeUninit,
-    ops::{
-        Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
-        DivAssign, Mul, MulAssign, Neg, Sub, SubAssign,
-    },
+use std::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Sub, SubAssign,
 };
+
+use archmage::intrinsics::wasm32::*;
 
 use crate::U32SimdVec;
 
@@ -66,8 +64,9 @@ impl SimdDescriptor for Wasm128Descriptor {
     }
 }
 
-// Wrapper macro for wasm SIMD methods that need #[target_feature(enable = "simd128")].
-// Similar to fn_neon! but for wasm32.
+// Wrapper macro for wasm SIMD methods.
+// On wasm32, simd128 intrinsics are always available at compile time —
+// no #[target_feature] gate or unsafe block needed.
 macro_rules! fn_wasm128 {
     {} => {};
     {$(
@@ -76,8 +75,6 @@ macro_rules! fn_wasm128 {
     )*} => {$(
         #[inline(always)]
         fn $name(self: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-            // On wasm32, simd128 intrinsics are always available at compile time —
-            // no #[target_feature] gate or unsafe block needed.
             let $this = self;
             $body
         }
@@ -88,9 +85,7 @@ macro_rules! fn_wasm128 {
 #[repr(transparent)]
 pub struct F32VecWasm128(v128, Wasm128Descriptor);
 
-// SAFETY: The methods in this implementation that write to `MaybeUninit` (store_interleaved_*)
-// ensure that they write valid data to the output slice without reading uninitialized memory.
-unsafe impl F32SimdVec for F32VecWasm128 {
+impl F32SimdVec for F32VecWasm128 {
     type Descriptor = Wasm128Descriptor;
 
     const LEN: usize = 4;
@@ -108,34 +103,28 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        Self(unsafe { v128_load(mem.as_ptr() as *const v128) }, d)
+        Self(v128_load(mem.first_chunk::<4>().unwrap()), d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [f32]) {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        unsafe { v128_store(mem.as_mut_ptr() as *mut v128, self.0) }
+        v128_store(mem.first_chunk_mut::<4>().unwrap(), self.0)
     }
 
     #[inline(always)]
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<f32>]) {
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
         assert!(dest.len() >= 2 * Self::LEN);
         // a=[a0,a1,a2,a3], b=[b0,b1,b2,b3] → [a0,b0,a1,b1, a2,b2,a3,b3]
         let lo = i8x16_shuffle::<0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23>(a.0, b.0);
         let hi =
             i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(a.0, b.0);
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, lo);
-            v128_store(ptr.add(1), hi);
-        }
+        v128_store(dest[..4].first_chunk_mut::<4>().unwrap(), lo);
+        v128_store(dest[4..].first_chunk_mut::<4>().unwrap(), hi);
     }
 
     #[inline(always)]
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<f32>]) {
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
         assert!(dest.len() >= 3 * Self::LEN);
         // a=[a0,a1,a2,a3], b=[b0,b1,b2,b3], c=[c0,c1,c2,c3]
         // → [a0,b0,c0,a1, b1,c1,a2,b2, c2,a3,b3,c3]
@@ -157,23 +146,13 @@ unsafe impl F32SimdVec for F32VecWasm128 {
             f32x4_extract_lane::<3>(b.0),
             f32x4_extract_lane::<3>(c.0),
         );
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, out0);
-            v128_store(ptr.add(1), out1);
-            v128_store(ptr.add(2), out2);
-        }
+        v128_store(dest[..4].first_chunk_mut::<4>().unwrap(), out0);
+        v128_store(dest[4..8].first_chunk_mut::<4>().unwrap(), out1);
+        v128_store(dest[8..].first_chunk_mut::<4>().unwrap(), out2);
     }
 
     #[inline(always)]
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<f32>],
-    ) {
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
         assert!(dest.len() >= 4 * Self::LEN);
         // Two-stage interleave: first pairs, then combine
         let ab_lo =
@@ -195,14 +174,10 @@ unsafe impl F32SimdVec for F32VecWasm128 {
         let out3 = i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(
             ab_hi, cd_hi,
         );
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, out0);
-            v128_store(ptr.add(1), out1);
-            v128_store(ptr.add(2), out2);
-            v128_store(ptr.add(3), out3);
-        }
+        v128_store(dest[..4].first_chunk_mut::<4>().unwrap(), out0);
+        v128_store(dest[4..8].first_chunk_mut::<4>().unwrap(), out1);
+        v128_store(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
+        v128_store(dest[12..].first_chunk_mut::<4>().unwrap(), out3);
     }
 
     #[inline(always)]
@@ -260,29 +235,22 @@ unsafe impl F32SimdVec for F32VecWasm128 {
         );
 
         // Output: [abcd_0, efgh_0, abcd_1, efgh_1, abcd_2, efgh_2, abcd_3, efgh_3]
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, abcd_0);
-            v128_store(ptr.add(1), efgh_0);
-            v128_store(ptr.add(2), abcd_1);
-            v128_store(ptr.add(3), efgh_1);
-            v128_store(ptr.add(4), abcd_2);
-            v128_store(ptr.add(5), efgh_2);
-            v128_store(ptr.add(6), abcd_3);
-            v128_store(ptr.add(7), efgh_3);
-        }
+        v128_store(dest[..4].first_chunk_mut::<4>().unwrap(), abcd_0);
+        v128_store(dest[4..8].first_chunk_mut::<4>().unwrap(), efgh_0);
+        v128_store(dest[8..12].first_chunk_mut::<4>().unwrap(), abcd_1);
+        v128_store(dest[12..16].first_chunk_mut::<4>().unwrap(), efgh_1);
+        v128_store(dest[16..20].first_chunk_mut::<4>().unwrap(), abcd_2);
+        v128_store(dest[20..24].first_chunk_mut::<4>().unwrap(), efgh_2);
+        v128_store(dest[24..28].first_chunk_mut::<4>().unwrap(), abcd_3);
+        v128_store(dest[28..].first_chunk_mut::<4>().unwrap(), efgh_3);
     }
 
     #[inline(always)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
         assert!(src.len() >= 2 * Self::LEN);
         // src = [a0,b0,a1,b1, a2,b2,a3,b3]
-        // SAFETY: we just checked that `src` has enough space.
-        let (lo, hi) = unsafe {
-            let ptr = src.as_ptr() as *const v128;
-            (v128_load(ptr), v128_load(ptr.add(1)))
-        };
+        let lo = v128_load(src[..4].first_chunk::<4>().unwrap());
+        let hi = v128_load(src[4..].first_chunk::<4>().unwrap());
         let a = i8x16_shuffle::<0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27>(lo, hi);
         let b = i8x16_shuffle::<4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23, 28, 29, 30, 31>(lo, hi);
         (Self(a, d), Self(b, d))
@@ -292,11 +260,9 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
         assert!(src.len() >= 3 * Self::LEN);
         // src = [a0,b0,c0,a1, b1,c1,a2,b2, c2,a3,b3,c3]
-        // SAFETY: we just checked that `src` has enough space.
-        let (v0, v1, v2) = unsafe {
-            let ptr = src.as_ptr() as *const v128;
-            (v128_load(ptr), v128_load(ptr.add(1)), v128_load(ptr.add(2)))
-        };
+        let v0 = v128_load(src[..4].first_chunk::<4>().unwrap());
+        let v1 = v128_load(src[4..8].first_chunk::<4>().unwrap());
+        let v2 = v128_load(src[8..].first_chunk::<4>().unwrap());
         let a = f32x4(
             f32x4_extract_lane::<0>(v0),
             f32x4_extract_lane::<3>(v0),
@@ -321,16 +287,10 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     #[inline(always)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
         assert!(src.len() >= 4 * Self::LEN);
-        // SAFETY: we just checked that `src` has enough space.
-        let (v0, v1, v2, v3) = unsafe {
-            let ptr = src.as_ptr() as *const v128;
-            (
-                v128_load(ptr),
-                v128_load(ptr.add(1)),
-                v128_load(ptr.add(2)),
-                v128_load(ptr.add(3)),
-            )
-        };
+        let v0 = v128_load(src[..4].first_chunk::<4>().unwrap());
+        let v1 = v128_load(src[4..8].first_chunk::<4>().unwrap());
+        let v2 = v128_load(src[8..12].first_chunk::<4>().unwrap());
+        let v3 = v128_load(src[12..].first_chunk::<4>().unwrap());
         // v0=[a0,b0,c0,d0], v1=[a1,b1,c1,d1], v2=[a2,b2,c2,d2], v3=[a3,b3,c3,d3]
         // Step 1: group pairs
         let ab_lo = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23>(v0, v1);
@@ -356,11 +316,10 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     #[inline(always)]
     fn transpose_square(_d: Wasm128Descriptor, data: &mut [[f32; 4]], stride: usize) {
         assert!(data.len() > 3 * stride);
-        // SAFETY: we just verified bounds.
-        let p0 = unsafe { v128_load(data[0].as_ptr() as *const v128) };
-        let p1 = unsafe { v128_load(data[stride].as_ptr() as *const v128) };
-        let p2 = unsafe { v128_load(data[2 * stride].as_ptr() as *const v128) };
-        let p3 = unsafe { v128_load(data[3 * stride].as_ptr() as *const v128) };
+        let p0 = v128_load(&data[0]);
+        let p1 = v128_load(&data[stride]);
+        let p2 = v128_load(&data[2 * stride]);
+        let p3 = v128_load(&data[3 * stride]);
 
         // 4x4 transpose via two rounds of 2-element interleave
         // Stage 1: trn1/trn2 equivalent — interleave 32-bit pairs
@@ -379,13 +338,10 @@ unsafe impl F32SimdVec for F32VecWasm128 {
         let r3 =
             i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31>(t1, t3);
 
-        // SAFETY: we verified bounds above.
-        unsafe {
-            v128_store(data[0].as_mut_ptr() as *mut v128, r0);
-            v128_store(data[stride].as_mut_ptr() as *mut v128, r1);
-            v128_store(data[2 * stride].as_mut_ptr() as *mut v128, r2);
-            v128_store(data[3 * stride].as_mut_ptr() as *mut v128, r3);
-        }
+        v128_store(&mut data[0], r0);
+        v128_store(&mut data[stride], r1);
+        v128_store(&mut data[2 * stride], r2);
+        v128_store(&mut data[3 * stride], r3);
     }
 
     crate::impl_f32_array_interface!();
@@ -455,12 +411,11 @@ unsafe impl F32SimdVec for F32VecWasm128 {
             let i16s = i16x8_narrow_i32x4(i32s, zeros);
             let zeros_i16 = i16x8_splat(0);
             let u8s = u8x16_narrow_i16x8(i16s, zeros_i16);
-            // First 4 bytes contain our values
-            let packed = i32x4_extract_lane::<0>(u8s);
-            // SAFETY: we checked dest has enough space; write_unaligned avoids alignment UB.
-            unsafe {
-                dest.as_mut_ptr().cast::<i32>().write_unaligned(packed);
-            }
+            // First 4 bytes contain our values — extract individually
+            dest[0] = u8x16_extract_lane::<0>(u8s);
+            dest[1] = u8x16_extract_lane::<1>(u8s);
+            dest[2] = u8x16_extract_lane::<2>(u8s);
+            dest[3] = u8x16_extract_lane::<3>(u8s);
         }
 
         fn round_store_u16(this: F32VecWasm128, dest: &mut [u16]) {
@@ -470,20 +425,18 @@ unsafe impl F32SimdVec for F32VecWasm128 {
             // Narrow i32→u16 with unsigned saturation
             let zeros = i32x4_splat(0);
             let u16s = u16x8_narrow_i32x4(i32s, zeros);
-            // First 4 u16 values = 8 bytes = one i64 lane
-            let packed = i64x2_extract_lane::<0>(u16s);
-            // SAFETY: we checked dest has enough space; write_unaligned avoids alignment UB.
-            unsafe {
-                dest.as_mut_ptr().cast::<i64>().write_unaligned(packed);
-            }
+            // First 4 u16 values — extract individually
+            dest[0] = u16x8_extract_lane::<0>(u16s);
+            dest[1] = u16x8_extract_lane::<1>(u16s);
+            dest[2] = u16x8_extract_lane::<2>(u16s);
+            dest[3] = u16x8_extract_lane::<3>(u16s);
         }
 
         fn store_f16_bits(this: F32VecWasm128, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecWasm128::LEN);
             // Software f32→f16 conversion (no hardware f16 on wasm).
             let mut arr = [0.0f32; 4];
-            // SAFETY: arr has exactly 4 elements.
-            unsafe { v128_store(arr.as_mut_ptr() as *mut v128, this.0); }
+            v128_store(&mut arr, this.0);
             dest[0] = crate::f16::from_f32(arr[0]).to_bits();
             dest[1] = crate::f16::from_f32(arr[1]).to_bits();
             dest[2] = crate::f16::from_f32(arr[2]).to_bits();
@@ -506,9 +459,8 @@ unsafe impl F32SimdVec for F32VecWasm128 {
     fn prepare_table_bf16_8(_d: Wasm128Descriptor, table: &[f32; 8]) -> Bf16Table8Wasm128 {
         // Convert f32 table to BF16 packed into 16 bytes.
         // BF16 is the upper 16 bits of f32.
-        // SAFETY: table has exactly 8 elements.
-        let table_lo = unsafe { v128_load(table.as_ptr() as *const v128) };
-        let table_hi = unsafe { v128_load(table.as_ptr().add(4) as *const v128) };
+        let table_lo = v128_load(table[..4].first_chunk::<4>().unwrap());
+        let table_hi = v128_load(table[4..].first_chunk::<4>().unwrap());
 
         // Shift right by 16 to get BF16 in lower 16 bits of each 32-bit lane.
         let bf16_lo_u32 = u32x4_shr(table_lo, 16);
@@ -635,15 +587,13 @@ impl I32SimdVec for I32VecWasm128 {
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        Self(unsafe { v128_load(mem.as_ptr() as *const v128) }, d)
+        Self(v128_load(mem.first_chunk::<4>().unwrap()), d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [i32]) {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        unsafe { v128_store(mem.as_mut_ptr() as *mut v128, self.0) }
+        v128_store(mem.first_chunk_mut::<4>().unwrap(), self.0)
     }
 
     fn_wasm128! {
@@ -862,17 +812,14 @@ impl U32SimdVec for U32VecWasm128 {
 #[repr(transparent)]
 pub struct U8VecWasm128(v128, Wasm128Descriptor);
 
-// SAFETY: The methods in this implementation that write to `MaybeUninit` (store_interleaved_*)
-// ensure that they write valid data to the output slice without reading uninitialized memory.
-unsafe impl U8SimdVec for U8VecWasm128 {
+impl U8SimdVec for U8VecWasm128 {
     type Descriptor = Wasm128Descriptor;
     const LEN: usize = 16;
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        Self(unsafe { v128_load(mem.as_ptr() as *const v128) }, d)
+        Self(v128_load(mem.first_chunk::<16>().unwrap()), d)
     }
 
     #[inline(always)]
@@ -883,61 +830,41 @@ unsafe impl U8SimdVec for U8VecWasm128 {
     #[inline(always)]
     fn store(&self, mem: &mut [u8]) {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        unsafe { v128_store(mem.as_mut_ptr() as *mut v128, self.0) }
+        v128_store(mem.first_chunk_mut::<16>().unwrap(), self.0)
     }
 
     #[inline(always)]
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u8>]) {
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
         assert!(dest.len() >= 2 * Self::LEN);
         // Interleave bytes: [a0,b0,a1,b1,...,a15,b15]
         let lo = i8x16_shuffle::<0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23>(a.0, b.0);
         let hi =
             i8x16_shuffle::<8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31>(a.0, b.0);
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, lo);
-            v128_store(ptr.add(1), hi);
-        }
+        v128_store(dest[..16].first_chunk_mut::<16>().unwrap(), lo);
+        v128_store(dest[16..].first_chunk_mut::<16>().unwrap(), hi);
     }
 
     #[inline(always)]
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u8>]) {
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
         assert!(dest.len() >= 3 * Self::LEN);
         // 3-way byte interleave: use array-based approach for clarity
         let mut a_arr = [0u8; 16];
         let mut b_arr = [0u8; 16];
         let mut c_arr = [0u8; 16];
-        // SAFETY: arrays are large enough.
-        unsafe {
-            v128_store(a_arr.as_mut_ptr() as *mut v128, a.0);
-            v128_store(b_arr.as_mut_ptr() as *mut v128, b.0);
-            v128_store(c_arr.as_mut_ptr() as *mut v128, c.0);
-        }
+        v128_store(&mut a_arr, a.0);
+        v128_store(&mut b_arr, b.0);
+        v128_store(&mut c_arr, c.0);
         let mut out = [0u8; 48];
         for i in 0..16 {
             out[3 * i] = a_arr[i];
             out[3 * i + 1] = b_arr[i];
             out[3 * i + 2] = c_arr[i];
         }
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, v128_load(out.as_ptr() as *const v128));
-            v128_store(ptr.add(1), v128_load(out.as_ptr().add(16) as *const v128));
-            v128_store(ptr.add(2), v128_load(out.as_ptr().add(32) as *const v128));
-        }
+        dest[..48].copy_from_slice(&out);
     }
 
     #[inline(always)]
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<u8>],
-    ) {
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
         assert!(dest.len() >= 4 * Self::LEN);
         // 4-way byte interleave: two rounds of 2-way interleave
         let ab_lo =
@@ -959,14 +886,10 @@ unsafe impl U8SimdVec for U8VecWasm128 {
         let out3 = i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(
             ab_hi, cd_hi,
         );
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, out0);
-            v128_store(ptr.add(1), out1);
-            v128_store(ptr.add(2), out2);
-            v128_store(ptr.add(3), out3);
-        }
+        v128_store(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
+        v128_store(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
+        v128_store(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
+        v128_store(dest[48..].first_chunk_mut::<16>().unwrap(), out3);
     }
 }
 
@@ -976,17 +899,14 @@ unsafe impl U8SimdVec for U8VecWasm128 {
 #[repr(transparent)]
 pub struct U16VecWasm128(v128, Wasm128Descriptor);
 
-// SAFETY: The methods in this implementation that write to `MaybeUninit` (store_interleaved_*)
-// ensure that they write valid data to the output slice without reading uninitialized memory.
-unsafe impl U16SimdVec for U16VecWasm128 {
+impl U16SimdVec for U16VecWasm128 {
     type Descriptor = Wasm128Descriptor;
     const LEN: usize = 8;
 
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        Self(unsafe { v128_load(mem.as_ptr() as *const v128) }, d)
+        Self(v128_load(mem.first_chunk::<8>().unwrap()), d)
     }
 
     #[inline(always)]
@@ -997,61 +917,41 @@ unsafe impl U16SimdVec for U16VecWasm128 {
     #[inline(always)]
     fn store(&self, mem: &mut [u16]) {
         assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space.
-        unsafe { v128_store(mem.as_mut_ptr() as *mut v128, self.0) }
+        v128_store(mem.first_chunk_mut::<8>().unwrap(), self.0)
     }
 
     #[inline(always)]
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u16>]) {
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
         assert!(dest.len() >= 2 * Self::LEN);
         // Interleave u16 elements
         let lo = i8x16_shuffle::<0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23>(a.0, b.0);
         let hi =
             i8x16_shuffle::<8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31>(a.0, b.0);
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, lo);
-            v128_store(ptr.add(1), hi);
-        }
+        v128_store(dest[..8].first_chunk_mut::<8>().unwrap(), lo);
+        v128_store(dest[8..].first_chunk_mut::<8>().unwrap(), hi);
     }
 
     #[inline(always)]
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u16>]) {
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
         assert!(dest.len() >= 3 * Self::LEN);
         // 3-way u16 interleave: use array-based approach
         let mut a_arr = [0u16; 8];
         let mut b_arr = [0u16; 8];
         let mut c_arr = [0u16; 8];
-        // SAFETY: arrays are large enough.
-        unsafe {
-            v128_store(a_arr.as_mut_ptr() as *mut v128, a.0);
-            v128_store(b_arr.as_mut_ptr() as *mut v128, b.0);
-            v128_store(c_arr.as_mut_ptr() as *mut v128, c.0);
-        }
+        v128_store(&mut a_arr, a.0);
+        v128_store(&mut b_arr, b.0);
+        v128_store(&mut c_arr, c.0);
         let mut out = [0u16; 24];
         for i in 0..8 {
             out[3 * i] = a_arr[i];
             out[3 * i + 1] = b_arr[i];
             out[3 * i + 2] = c_arr[i];
         }
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, v128_load(out.as_ptr() as *const v128));
-            v128_store(ptr.add(1), v128_load(out.as_ptr().add(8) as *const v128));
-            v128_store(ptr.add(2), v128_load(out.as_ptr().add(16) as *const v128));
-        }
+        dest[..24].copy_from_slice(&out);
     }
 
     #[inline(always)]
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<u16>],
-    ) {
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
         assert!(dest.len() >= 4 * Self::LEN);
         // 4-way u16 interleave: two rounds of 2-way
         let ab_lo =
@@ -1073,14 +973,10 @@ unsafe impl U16SimdVec for U16VecWasm128 {
         let out3 = i8x16_shuffle::<8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31>(
             ab_hi, cd_hi,
         );
-        // SAFETY: we just checked that `dest` has enough space.
-        unsafe {
-            let ptr = dest.as_mut_ptr() as *mut v128;
-            v128_store(ptr, out0);
-            v128_store(ptr.add(1), out1);
-            v128_store(ptr.add(2), out2);
-            v128_store(ptr.add(3), out3);
-        }
+        v128_store(dest[..8].first_chunk_mut::<8>().unwrap(), out0);
+        v128_store(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
+        v128_store(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
+        v128_store(dest[24..].first_chunk_mut::<8>().unwrap(), out3);
     }
 }
 
