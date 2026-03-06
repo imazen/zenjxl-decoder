@@ -37,7 +37,7 @@ impl Avx512Descriptor {
     #[inline]
     pub fn as_avx(&self) -> AvxDescriptor {
         // SAFETY: the safety invariant on `self` guarantees avx512f is available, which implies
-        // avx2 and fma.
+        // avx2, fma, and f16c (required by all AVX-512 implementations per the x86-64 psABI).
         unsafe { AvxDescriptor::new_unchecked() }
     }
 }
@@ -72,8 +72,11 @@ impl SimdDescriptor for Avx512Descriptor {
     }
 
     fn new() -> Option<Self> {
-        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
-            // SAFETY: we just checked avx512f and avx512bw.
+        if is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("f16c")
+        {
+            // SAFETY: we just checked avx512f, avx512bw, and f16c.
             Some(Self(()))
         } else {
             None

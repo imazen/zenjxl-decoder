@@ -457,9 +457,9 @@ unsafe impl F32SimdVec for F32VecWasm128 {
             let u8s = u8x16_narrow_i16x8(i16s, zeros_i16);
             // First 4 bytes contain our values
             let packed = i32x4_extract_lane::<0>(u8s);
-            // SAFETY: we checked dest has enough space.
+            // SAFETY: we checked dest has enough space; write_unaligned avoids alignment UB.
             unsafe {
-                *(dest.as_mut_ptr() as *mut i32) = packed;
+                dest.as_mut_ptr().cast::<i32>().write_unaligned(packed);
             }
         }
 
@@ -472,9 +472,9 @@ unsafe impl F32SimdVec for F32VecWasm128 {
             let u16s = u16x8_narrow_i32x4(i32s, zeros);
             // First 4 u16 values = 8 bytes = one i64 lane
             let packed = i64x2_extract_lane::<0>(u16s);
-            // SAFETY: we checked dest has enough space.
+            // SAFETY: we checked dest has enough space; write_unaligned avoids alignment UB.
             unsafe {
-                *(dest.as_mut_ptr() as *mut i64) = packed;
+                dest.as_mut_ptr().cast::<i64>().write_unaligned(packed);
             }
         }
 

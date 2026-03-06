@@ -585,10 +585,10 @@ unsafe impl F32SimdVec for F32VecSse42 {
             let u16s = _mm_packus_epi32(i32s, i32s);
             let u8s = _mm_packus_epi16(u16s, u16s);
             // Store lower 4 bytes
-            // SAFETY: we checked dest has enough space
+            // SAFETY: we checked dest has enough space; write_unaligned avoids alignment UB.
             unsafe {
-                let ptr = dest.as_mut_ptr() as *mut i32;
-                *ptr = _mm_cvtsi128_si32(u8s);
+                let val = _mm_cvtsi128_si32(u8s);
+                dest.as_mut_ptr().cast::<i32>().write_unaligned(val);
             }
         }
         // SAFETY: sse4.2 is available from the safety invariant on the descriptor.

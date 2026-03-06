@@ -298,11 +298,10 @@ impl CodestreamParser {
         #[cfg(feature = "jpeg")]
         if let Some(jbrd_data) = &self.jbrd_data
             && let Some(frame) = &self.frame
+            && let Ok(bytes) = frame.jpeg_reconstruct(jbrd_data)
         {
-            if let Ok(bytes) = frame.jpeg_reconstruct(jbrd_data) {
-                self.jpeg_bytes = Some(bytes);
-            }
             // Reconstruction failure is non-fatal; normal decode continues
+            self.jpeg_bytes = Some(bytes);
         }
 
         let decoder_state = self.frame.take().unwrap().finalize()?;

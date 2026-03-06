@@ -24,7 +24,7 @@ pub(super) fn get_distinct_indices<'a, T>(
     let mut prev_outer = usize::MAX;
     let mut prev_inner = usize::MAX;
     for &(outer, inner, pos) in idx {
-        debug_assert!(
+        assert!(
             prev_outer == usize::MAX
                 || outer > prev_outer
                 || (outer == prev_outer && inner > prev_inner),

@@ -17,9 +17,6 @@ resolver = "2"
 [workspace.lints.clippy]
 missing_safety_doc = "deny"
 undocumented_unsafe_blocks = "deny"
-# SIMD features conditionally require newer Rust (e.g. avx512 needs 1.89).
-# The declared rust-version is the base MSRV; feature-gated code may need newer.
-incompatible_msrv = "allow"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
