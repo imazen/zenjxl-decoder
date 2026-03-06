@@ -7,28 +7,18 @@ use super::super::{
     AvxDescriptor, F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, U16SimdVec,
 };
 use crate::{Sse42Descriptor, U32SimdVec, impl_f32_array_interface};
-use std::{
-    arch::x86_64::*,
-    mem::MaybeUninit,
-    ops::{
-        Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
-        DivAssign, Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
-    },
+use archmage::SimdToken;
+use archmage::intrinsics::x86_64::*;
+use std::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
 // Safety invariant: this type is only ever constructed if avx512f and avx512bw are available.
 #[derive(Clone, Copy, Debug)]
 pub struct Avx512Descriptor(());
 
-#[allow(unused)]
 impl Avx512Descriptor {
-    /// # Safety
-    /// The caller must guarantee that "avx512f" and "avx512bw" target features are available.
-    #[inline]
-    pub(crate) unsafe fn new_unchecked() -> Self {
-        Self(())
-    }
-
     #[inline]
     pub fn from_token(_token: archmage::X64V4Token) -> Self {
         Self(())
@@ -36,9 +26,8 @@ impl Avx512Descriptor {
 
     #[inline]
     pub fn as_avx(&self) -> AvxDescriptor {
-        // SAFETY: the safety invariant on `self` guarantees avx512f is available, which implies
-        // avx2, fma, and f16c (required by all AVX-512 implementations per the x86-64 psABI).
-        unsafe { AvxDescriptor::new_unchecked() }
+        // X64V4 implies X64V3, so summon() will always succeed here.
+        AvxDescriptor::from_token(archmage::X64V3Token::summon().unwrap())
     }
 }
 
@@ -72,41 +61,35 @@ impl SimdDescriptor for Avx512Descriptor {
     }
 
     fn new() -> Option<Self> {
-        if is_x86_feature_detected!("avx512f")
-            && is_x86_feature_detected!("avx512bw")
-            && is_x86_feature_detected!("f16c")
-        {
-            // SAFETY: we just checked avx512f, avx512bw, and f16c.
-            Some(Self(()))
-        } else {
-            None
-        }
+        archmage::X64V4Token::summon().map(Self::from_token)
     }
 
+    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        unsafe fn inner<R>(d: Avx512Descriptor, f: impl FnOnce(Avx512Descriptor) -> R) -> R {
+        fn inner<R>(d: Avx512Descriptor, f: impl FnOnce(Avx512Descriptor) -> R) -> R {
             f(d)
         }
-        // SAFETY: the safety invariant on `self` guarantees avx512f.
+        // SAFETY: Avx512Descriptor is only constructed via from_token (which requires
+        // X64V4Token proving avx512 availability) or new() (which uses summon()).
         unsafe { inner(self, f) }
     }
 }
 
-// TODO(veluca): retire this macro once we have #[unsafe(target_feature)].
 macro_rules! fn_avx {
     (
         $this:ident: $self_ty:ty,
         fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )? $body: block) => {
         #[inline(always)]
+        #[allow(unsafe_code)]
         fn $name(self: $self_ty, $($arg: $ty),*) $(-> $ret)? {
             #[target_feature(enable = "avx512f")]
             #[inline]
             fn inner($this: $self_ty, $($arg: $ty),*) $(-> $ret)? {
                 $body
             }
-            // SAFETY: `self.1` is constructed iff avx512f is available.
+            // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
             unsafe { inner(self, $($arg),*) }
         }
     };
@@ -120,34 +103,42 @@ pub struct F32VecAvx512(__m512, Avx512Descriptor);
 #[repr(transparent)]
 pub struct MaskAvx512(__mmask16, Avx512Descriptor);
 
-// SAFETY: The methods in this implementation that write to `MaybeUninit` (store_interleaved_*)
-// ensure that they write valid data to the output slice without reading uninitialized memory.
-unsafe impl F32SimdVec for F32VecAvx512 {
+#[allow(unsafe_code)]
+impl F32SimdVec for F32VecAvx512 {
     type Descriptor = Avx512Descriptor;
 
     const LEN: usize = 16;
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `d`.
-        Self(unsafe { _mm512_loadu_ps(mem.as_ptr()) }, d)
-    }
-
-    #[inline(always)]
-    fn store(&self, mem: &mut [f32]) {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `self.1`.
-        unsafe { _mm512_storeu_ps(mem.as_mut_ptr(), self.0) }
-    }
-
-    #[inline(always)]
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<f32>]) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn store_interleaved_2_impl(a: __m512, b: __m512, dest: &mut [MaybeUninit<f32>]) {
+        fn inner(mem: &[f32]) -> __m512 {
+            _mm512_loadu_ps(mem.first_chunk::<16>().unwrap())
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(mem) }, d)
+    }
+
+    #[inline(always)]
+    #[allow(unsafe_code)]
+    fn store(&self, mem: &mut [f32]) {
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &mut [f32], v: __m512) {
+            _mm512_storeu_ps(mem.first_chunk_mut::<16>().unwrap(), v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(mem, self.0) }
+    }
+
+    #[inline(always)]
+    #[allow(unsafe_code)]
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(a: __m512, b: __m512, dest: &mut [f32]) {
             assert!(dest.len() >= 2 * F32VecAvx512::LEN);
             // a = [a0..a15], b = [b0..b15]
             // Output: [a0, b0, a1, b1, ..., a15, b15]
@@ -166,28 +157,20 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             let out0 = _mm512_permutex2var_ps(lo, idx_lo, hi);
             let out1 = _mm512_permutex2var_ps(lo, idx_hi, hi);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<f32>` through `*mut f32` is valid.
-            unsafe {
-                let dest_ptr = dest.as_mut_ptr() as *mut f32;
-                _mm512_storeu_ps(dest_ptr, out0);
-                _mm512_storeu_ps(dest_ptr.add(16), out1);
-            }
+            _mm512_storeu_ps(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
+            _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        unsafe { store_interleaved_2_impl(a.0, b.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(a.0, b.0, dest) }
     }
 
     #[inline(always)]
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<f32>]) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn store_interleaved_3_impl(
-            a: __m512,
-            b: __m512,
-            c: __m512,
-            dest: &mut [MaybeUninit<f32>],
-        ) {
+        fn inner(a: __m512, b: __m512, c: __m512, dest: &mut [f32]) {
             assert!(dest.len() >= 3 * F32VecAvx512::LEN);
 
             let idx_ab0 = _mm512_setr_epi32(0, 16, 0, 1, 17, 0, 2, 18, 0, 3, 19, 0, 4, 20, 0, 5);
@@ -209,36 +192,21 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             let out2 = _mm512_permutex2var_ps(a, idx_ab2, b);
             let out2 = _mm512_mask_permutexvar_ps(out2, 0b1001001001001001, idx_c2, c);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<f32>` through `*mut f32` is valid.
-            unsafe {
-                let dest_ptr = dest.as_mut_ptr() as *mut f32;
-                _mm512_storeu_ps(dest_ptr, out0);
-                _mm512_storeu_ps(dest_ptr.add(16), out1);
-                _mm512_storeu_ps(dest_ptr.add(32), out2);
-            }
+            _mm512_storeu_ps(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
+            _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
+            _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        unsafe { store_interleaved_3_impl(a.0, b.0, c.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(a.0, b.0, c.0, dest) }
     }
 
     #[inline(always)]
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<f32>],
-    ) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn store_interleaved_4_impl(
-            a: __m512,
-            b: __m512,
-            c: __m512,
-            d: __m512,
-            dest: &mut [MaybeUninit<f32>],
-        ) {
+        fn inner(a: __m512, b: __m512, c: __m512, d: __m512, dest: &mut [f32]) {
             assert!(dest.len() >= 4 * F32VecAvx512::LEN);
             // a = [a0..a15], b = [b0..b15], c = [c0..c15], d = [d0..d15]
             // Output: [a0,b0,c0,d0, a1,b1,c1,d1, ..., a15,b15,c15,d15]
@@ -308,21 +276,18 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             let out1 = _mm512_permutex2var_ps(pair01_13, idx_0, pair23_13);
             let out3 = _mm512_permutex2var_ps(pair01_13, idx_1, pair23_13);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<f32>` through `*mut f32` is valid.
-            unsafe {
-                let dest_ptr = dest.as_mut_ptr() as *mut f32;
-                _mm512_storeu_ps(dest_ptr, out0);
-                _mm512_storeu_ps(dest_ptr.add(16), out1);
-                _mm512_storeu_ps(dest_ptr.add(32), out2);
-                _mm512_storeu_ps(dest_ptr.add(48), out3);
-            }
+            _mm512_storeu_ps(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
+            _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
+            _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
+            _mm512_storeu_ps(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        unsafe { store_interleaved_4_impl(a.0, b.0, c.0, d.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn store_interleaved_8(
         a: Self,
         b: Self,
@@ -336,7 +301,7 @@ unsafe impl F32SimdVec for F32VecAvx512 {
     ) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn store_interleaved_8_impl(
+        fn inner(
             a: __m512,
             b: __m512,
             c: __m512,
@@ -445,39 +410,31 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             let out6 = _mm512_permutex2var_ps(full_0_13, idx_hi, full_1_13);
             let out7 = _mm512_permutex2var_ps(full_2_13, idx_hi, full_3_13);
 
-            // SAFETY: we just checked that dest has enough space.
-            unsafe {
-                let ptr = dest.as_mut_ptr();
-                _mm512_storeu_ps(ptr, out0);
-                _mm512_storeu_ps(ptr.add(16), out1);
-                _mm512_storeu_ps(ptr.add(32), out2);
-                _mm512_storeu_ps(ptr.add(48), out3);
-                _mm512_storeu_ps(ptr.add(64), out4);
-                _mm512_storeu_ps(ptr.add(80), out5);
-                _mm512_storeu_ps(ptr.add(96), out6);
-                _mm512_storeu_ps(ptr.add(112), out7);
-            }
+            _mm512_storeu_ps(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
+            _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
+            _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
+            _mm512_storeu_ps(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
+            _mm512_storeu_ps(dest[64..80].first_chunk_mut::<16>().unwrap(), out4);
+            _mm512_storeu_ps(dest[80..96].first_chunk_mut::<16>().unwrap(), out5);
+            _mm512_storeu_ps(dest[96..112].first_chunk_mut::<16>().unwrap(), out6);
+            _mm512_storeu_ps(dest[112..128].first_chunk_mut::<16>().unwrap(), out7);
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        unsafe { store_interleaved_8_impl(a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest) }
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn load_deinterleaved_2_impl(src: &[f32]) -> (__m512, __m512) {
+        fn inner(src: &[f32]) -> (__m512, __m512) {
             assert!(src.len() >= 2 * F32VecAvx512::LEN);
             // Input: [a0,b0,a1,b1,...,a15,b15]
             // Output: a = [a0..a15], b = [b0..b15]
-            // SAFETY: we just checked that src has enough space.
-            let (in0, in1) = unsafe {
-                (
-                    _mm512_loadu_ps(src.as_ptr()),
-                    _mm512_loadu_ps(src.as_ptr().add(16)),
-                )
-            };
+            let in0 = _mm512_loadu_ps(src[..16].first_chunk::<16>().unwrap());
+            let in1 = _mm512_loadu_ps(src[16..32].first_chunk::<16>().unwrap());
 
             // Use permutex2var to gather even/odd indices
             let idx_a =
@@ -491,16 +448,17 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             (a, b)
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        let (a, b) = unsafe { load_deinterleaved_2_impl(src) };
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        let (a, b) = unsafe { inner(src) };
         (Self(a, d), Self(b, d))
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn load_deinterleaved_3_impl(src: &[f32]) -> (__m512, __m512, __m512) {
+        fn inner(src: &[f32]) -> (__m512, __m512, __m512) {
             assert!(src.len() >= 3 * F32VecAvx512::LEN);
             // Input layout (48 floats in 3x16-float vectors):
             // in0: [a0,b0,c0,a1,b1,c1,a2,b2,c2,a3,b3,c3,a4,b4,c4,a5]
@@ -508,14 +466,9 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             // in2: [c10,a11,b11,c11,a12,b12,c12,a13,b13,c13,a14,b14,c14,a15,b15,c15]
             // Output: a = [a0..a15], b = [b0..b15], c = [c0..c15]
 
-            // SAFETY: we just checked that src has enough space.
-            let (in0, in1, in2) = unsafe {
-                (
-                    _mm512_loadu_ps(src.as_ptr()),
-                    _mm512_loadu_ps(src.as_ptr().add(16)),
-                    _mm512_loadu_ps(src.as_ptr().add(32)),
-                )
-            };
+            let in0 = _mm512_loadu_ps(src[..16].first_chunk::<16>().unwrap());
+            let in1 = _mm512_loadu_ps(src[16..32].first_chunk::<16>().unwrap());
+            let in2 = _mm512_loadu_ps(src[32..48].first_chunk::<16>().unwrap());
 
             // Use permutex2var to gather elements from pairs of vectors, then blend.
             // For 'a': positions 0,3,6,9,12,15 from in0; 2,5,8,11,14 from in1; 1,4,7,10,13 from in2
@@ -548,28 +501,24 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             (a, b, c)
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        let (a, b, c) = unsafe { load_deinterleaved_3_impl(src) };
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        let (a, b, c) = unsafe { inner(src) };
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn load_deinterleaved_4_impl(src: &[f32]) -> (__m512, __m512, __m512, __m512) {
+        fn inner(src: &[f32]) -> (__m512, __m512, __m512, __m512) {
             assert!(src.len() >= 4 * F32VecAvx512::LEN);
             // Input: [a0,b0,c0,d0,a1,b1,c1,d1,...] (64 floats)
             // Output: a = [a0..a15], b = [b0..b15], c = [c0..c15], d = [d0..d15]
-            // SAFETY: we just checked that src has enough space.
-            let (in0, in1, in2, in3) = unsafe {
-                (
-                    _mm512_loadu_ps(src.as_ptr()),
-                    _mm512_loadu_ps(src.as_ptr().add(16)),
-                    _mm512_loadu_ps(src.as_ptr().add(32)),
-                    _mm512_loadu_ps(src.as_ptr().add(48)),
-                )
-            };
+            let in0 = _mm512_loadu_ps(src[..16].first_chunk::<16>().unwrap());
+            let in1 = _mm512_loadu_ps(src[16..32].first_chunk::<16>().unwrap());
+            let in2 = _mm512_loadu_ps(src[32..48].first_chunk::<16>().unwrap());
+            let in3 = _mm512_loadu_ps(src[48..64].first_chunk::<16>().unwrap());
 
             // Use permutex2var to gather every 4th element
             let idx_a = _mm512_setr_epi32(0, 4, 8, 12, 16, 20, 24, 28, 0, 4, 8, 12, 16, 20, 24, 28);
@@ -599,8 +548,8 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             (a, b, c, dv)
         }
 
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        let (a, b, c, dv) = unsafe { load_deinterleaved_4_impl(src) };
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        let (a, b, c, dv) = unsafe { inner(src) };
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -613,15 +562,27 @@ unsafe impl F32SimdVec for F32VecAvx512 {
     });
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: f32) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `d`.
-        unsafe { Self(_mm512_set1_ps(v), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(v: f32) -> __m512 {
+            _mm512_set1_ps(v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(v) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn zero(d: Self::Descriptor) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `d`.
-        unsafe { Self(_mm512_setzero_ps(), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner() -> __m512 {
+            _mm512_setzero_ps()
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner() }, d)
     }
 
     fn_avx!(this: F32VecAvx512, fn abs() -> F32VecAvx512 {
@@ -678,35 +639,41 @@ unsafe impl F32SimdVec for F32VecAvx512 {
     });
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn prepare_table_bf16_8(_d: Avx512Descriptor, table: &[f32; 8]) -> Bf16Table8Avx512 {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn prepare_impl(table: &[f32; 8]) -> __m512 {
-            // SAFETY: avx512f is available from target_feature, and we load 8 elements,
-            // exactly as many as are present in `table`.
-            let table_256 = unsafe { _mm256_loadu_ps(table.as_ptr()) };
+        fn inner(table: &[f32; 8]) -> __m512 {
+            let table_256 = _mm256_loadu_ps(table[..8].first_chunk::<8>().unwrap());
             // Zero-extend to 512-bit; vpermutexvar with indices 0-7 only reads first 256 bits
             _mm512_castps256_ps512(table_256)
         }
-        // SAFETY: avx512f is available from the safety invariant on the descriptor
-        Bf16Table8Avx512(unsafe { prepare_impl(table) })
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Bf16Table8Avx512(unsafe { inner(table) })
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn table_lookup_bf16_8(
         d: Avx512Descriptor,
         table: Bf16Table8Avx512,
         indices: I32VecAvx512,
     ) -> Self {
-        // SAFETY: avx512f is available from the safety invariant on the descriptor
-        F32VecAvx512(unsafe { _mm512_permutexvar_ps(indices.0, table.0) }, d)
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(indices: __m512i, table: __m512) -> __m512 {
+            _mm512_permutexvar_ps(indices, table)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        F32VecAvx512(unsafe { inner(indices.0, table.0) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn round_store_u8(self, dest: &mut [u8]) {
         #[target_feature(enable = "avx512f", enable = "avx512bw")]
         #[inline]
-        fn round_store_u8_impl(v: __m512, dest: &mut [u8]) {
+        fn inner(v: __m512, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
             // Round to nearest integer
             let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
@@ -715,20 +682,18 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             // Use pmovusdb: saturating conversion from 32-bit to 8-bit unsigned
             let u8s = _mm512_cvtusepi32_epi8(i32s);
             // Store 16 bytes
-            // SAFETY: we checked dest has enough space
-            unsafe {
-                _mm_storeu_si128(dest.as_mut_ptr() as *mut __m128i, u8s);
-            }
+            _mm_storeu_si128(dest.first_chunk_mut::<16>().unwrap(), u8s);
         }
-        // SAFETY: avx512f and avx512bw are available from the safety invariant on the descriptor.
-        unsafe { round_store_u8_impl(self.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(self.0, dest) }
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn round_store_u16(self, dest: &mut [u16]) {
         #[target_feature(enable = "avx512f", enable = "avx512bw")]
         #[inline]
-        fn round_store_u16_impl(v: __m512, dest: &mut [u16]) {
+        fn inner(v: __m512, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
             // Round to nearest integer
             let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
@@ -737,52 +702,50 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             // Use pmovusdw: saturating conversion from 32-bit to 16-bit unsigned
             let u16s = _mm512_cvtusepi32_epi16(i32s);
             // Store 16 u16s (32 bytes)
-            // SAFETY: we checked dest has enough space
-            unsafe {
-                _mm256_storeu_si256(dest.as_mut_ptr() as *mut __m256i, u16s);
-            }
+            _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), u16s);
         }
-        // SAFETY: avx512f and avx512bw are available from the safety invariant on the descriptor.
-        unsafe { round_store_u16_impl(self.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(self.0, dest) }
     }
 
     impl_f32_array_interface!();
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load_f16_bits(d: Self::Descriptor, mem: &[u16]) -> Self {
         // AVX512 implies F16C, so we can always use hardware conversion
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn load_f16_impl(d: Avx512Descriptor, mem: &[u16]) -> F32VecAvx512 {
+        fn inner(d: Avx512Descriptor, mem: &[u16]) -> F32VecAvx512 {
             assert!(mem.len() >= F32VecAvx512::LEN);
-            // SAFETY: mem.len() >= 16 is checked above
-            let bits = unsafe { _mm256_loadu_si256(mem.as_ptr() as *const __m256i) };
+            let bits = _mm256_loadu_si256(mem.first_chunk::<16>().unwrap());
             F32VecAvx512(_mm512_cvtph_ps(bits), d)
         }
-        // SAFETY: avx512f is available from the safety invariant on the descriptor
-        unsafe { load_f16_impl(d, mem) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(d, mem) }
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn store_f16_bits(self, dest: &mut [u16]) {
         // AVX512 implies F16C, so we can always use hardware conversion
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn store_f16_bits_impl(v: __m512, dest: &mut [u16]) {
+        fn inner(v: __m512, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
             let bits = _mm512_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
-            // SAFETY: dest.len() >= 16 is checked above
-            unsafe { _mm256_storeu_si256(dest.as_mut_ptr() as *mut __m256i, bits) };
+            _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), bits);
         }
-        // SAFETY: avx512f is available from the safety invariant on the descriptor
-        unsafe { store_f16_bits_impl(self.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(self.0, dest) }
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn transpose16x16f32(d: Avx512Descriptor, data: &mut [[f32; 16]], stride: usize) {
+        fn inner(d: Avx512Descriptor, data: &mut [[f32; 16]], stride: usize) {
             assert!(data.len() > stride * 15);
 
             let r0 = F32VecAvx512::load_array(d, &data[0]).0;
@@ -932,9 +895,9 @@ unsafe impl F32SimdVec for F32VecAvx512 {
             F32VecAvx512(o14, d).store_array(&mut data[14 * stride]);
             F32VecAvx512(o15, d).store_array(&mut data[15 * stride]);
         }
-        // SAFETY: the safety invariant on `d` guarantees avx512f
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
         unsafe {
-            transpose16x16f32(d, data, stride);
+            inner(d, data, stride);
         }
     }
 }
@@ -995,31 +958,46 @@ impl DivAssign<F32VecAvx512> for F32VecAvx512 {
 #[repr(transparent)]
 pub struct I32VecAvx512(__m512i, Avx512Descriptor);
 
+#[allow(unsafe_code)]
 impl I32SimdVec for I32VecAvx512 {
     type Descriptor = Avx512Descriptor;
 
     const LEN: usize = 16;
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `d`.
-        Self(unsafe { _mm512_loadu_epi32(mem.as_ptr()) }, d)
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &[i32]) -> __m512i {
+            _mm512_loadu_epi32(mem.first_chunk::<16>().unwrap())
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(mem) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [i32]) {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `self.1`.
-        unsafe { _mm512_storeu_epi32(mem.as_mut_ptr(), self.0) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &mut [i32], v: __m512i) {
+            _mm512_storeu_epi32(mem.first_chunk_mut::<16>().unwrap(), v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(mem, self.0) }
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: i32) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `d`.
-        unsafe { Self(_mm512_set1_epi32(v), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(v: i32) -> __m512i {
+            _mm512_set1_epi32(v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(v) }, d)
     }
 
     fn_avx!(this: I32VecAvx512, fn as_f32() -> F32VecAvx512 {
@@ -1056,15 +1034,27 @@ impl I32SimdVec for I32VecAvx512 {
     });
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `d`.
-        unsafe { I32VecAvx512(_mm512_slli_epi32::<AMOUNT_U>(self.0), self.1) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner<const AMOUNT_U: u32>(v: __m512i) -> __m512i {
+            _mm512_slli_epi32::<AMOUNT_U>(v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner::<AMOUNT_U>(self.0) }, self.1)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `d`.
-        unsafe { I32VecAvx512(_mm512_srai_epi32::<AMOUNT_U>(self.0), self.1) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner<const AMOUNT_U: u32>(v: __m512i) -> __m512i {
+            _mm512_srai_epi32::<AMOUNT_U>(v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner::<AMOUNT_U>(self.0) }, self.1)
     }
 
     fn_avx!(this: I32VecAvx512, fn mul_wide_take_high(rhs: I32VecAvx512) -> I32VecAvx512 {
@@ -1075,17 +1065,17 @@ impl I32SimdVec for I32VecAvx512 {
     });
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn store_u16(self, dest: &mut [u16]) {
         #[target_feature(enable = "avx512f")]
         #[inline]
-        fn store_u16_impl(v: __m512i, dest: &mut [u16]) {
+        fn inner(v: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= I32VecAvx512::LEN);
             let tmp = _mm512_cvtepi32_epi16(v);
-            // SAFETY: We just checked `dst` has enough space.
-            unsafe { _mm256_storeu_epi32(dest.as_mut_ptr().cast(), tmp) };
+            _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), tmp);
         }
-        // SAFETY: avx512f is available from the safety invariant on the descriptor.
-        unsafe { store_u16_impl(self.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(self.0, dest) }
     }
 }
 
@@ -1204,6 +1194,7 @@ impl BitXorAssign<I32VecAvx512> for I32VecAvx512 {
 #[repr(transparent)]
 pub struct U32VecAvx512(__m512i, Avx512Descriptor);
 
+#[allow(unsafe_code)]
 impl U32SimdVec for U32VecAvx512 {
     type Descriptor = Avx512Descriptor;
 
@@ -1215,9 +1206,15 @@ impl U32SimdVec for U32VecAvx512 {
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `self.1`.
-        unsafe { Self(_mm512_srli_epi32::<AMOUNT_U>(self.0), self.1) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner<const AMOUNT_U: u32>(v: __m512i) -> __m512i {
+            _mm512_srli_epi32::<AMOUNT_U>(v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner::<AMOUNT_U>(self.0) }, self.1)
     }
 }
 
@@ -1225,39 +1222,53 @@ impl U32SimdVec for U32VecAvx512 {
 #[repr(transparent)]
 pub struct U8VecAvx512(__m512i, Avx512Descriptor);
 
-// SAFETY: The methods in this implementation that write to `MaybeUninit` (store_interleaved_*)
-// ensure that they write valid data to the output slice without reading uninitialized memory.
-unsafe impl U8SimdVec for U8VecAvx512 {
+#[allow(unsafe_code)]
+impl U8SimdVec for U8VecAvx512 {
     type Descriptor = Avx512Descriptor;
     const LEN: usize = 64;
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `d`.
-        unsafe { Self(_mm512_loadu_si512(mem.as_ptr() as *const _), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &[u8]) -> __m512i {
+            _mm512_loadu_si512(mem.first_chunk::<64>().unwrap())
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(mem) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u8) -> Self {
-        // SAFETY: We know avx512f is available from the safety invariant on `d`.
-        unsafe { Self(_mm512_set1_epi8(v as i8), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(v: u8) -> __m512i {
+            _mm512_set1_epi8(v as i8)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(v) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u8]) {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `d`.
-        unsafe { _mm512_storeu_si512(mem.as_mut_ptr() as *mut _, self.0) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &mut [u8], v: __m512i) {
+            _mm512_storeu_si512(mem.first_chunk_mut::<64>().unwrap(), v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(mem, self.0) }
     }
 
     #[inline(always)]
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u8>]) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
-        fn impl_u8_2(a: __m512i, b: __m512i, dest: &mut [MaybeUninit<u8>]) {
+        fn inner(a: __m512i, b: __m512i, dest: &mut [u8]) {
             assert!(dest.len() >= 2 * U8VecAvx512::LEN);
             let lo = _mm512_unpacklo_epi8(a, b);
             let hi = _mm512_unpackhi_epi8(a, b);
@@ -1266,22 +1277,19 @@ unsafe impl U8SimdVec for U8VecAvx512 {
             let out0 = _mm512_permutex2var_epi64(lo, idx0, hi);
             let out1 = _mm512_permutex2var_epi64(lo, idx1, hi);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<u8>` through `*mut __m512i` is valid.
-            unsafe {
-                let ptr = dest.as_mut_ptr() as *mut __m512i;
-                _mm512_storeu_si512(ptr, out0);
-                _mm512_storeu_si512(ptr.add(1), out1);
-            }
+            _mm512_storeu_si512(dest[..64].first_chunk_mut::<64>().unwrap(), out0);
+            _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), out1);
         }
-        // SAFETY: We know avx512f and avx512bw are available from the safety invariant on `d`.
-        unsafe { impl_u8_2(a.0, b.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(a.0, b.0, dest) }
     }
 
     #[inline(always)]
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u8>]) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
-        fn impl_u8_3(a: __m512i, b: __m512i, c: __m512i, dest: &mut [MaybeUninit<u8>]) {
+        fn inner(a: __m512i, b: __m512i, c: __m512i, dest: &mut [u8]) {
             assert!(dest.len() >= 3 * U8VecAvx512::LEN);
 
             let mask_a0 = _mm512_broadcast_i32x4(_mm_setr_epi8(
@@ -1348,29 +1356,20 @@ unsafe impl U8SimdVec for U8VecAvx512 {
             let idx_f2 = _mm512_setr_epi64(0, 1, 2, 3, 14, 15, 4, 5);
             let final2 = _mm512_permutex2var_epi64(part_a2, idx_f2, res1);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<u8>` through `*mut __m512i` is valid.
-            unsafe {
-                let ptr = dest.as_mut_ptr() as *mut __m512i;
-                _mm512_storeu_si512(ptr, final0);
-                _mm512_storeu_si512(ptr.add(1), final1);
-                _mm512_storeu_si512(ptr.add(2), final2);
-            }
+            _mm512_storeu_si512(dest[..64].first_chunk_mut::<64>().unwrap(), final0);
+            _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), final1);
+            _mm512_storeu_si512(dest[128..192].first_chunk_mut::<64>().unwrap(), final2);
         }
-        // SAFETY: We know avx512f and avx512bw are available from the safety invariant on `d`.
-        unsafe { impl_u8_3(a.0, b.0, c.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(a.0, b.0, c.0, dest) }
     }
 
     #[inline(always)]
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<u8>],
-    ) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
-        fn impl_u8_4(a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [MaybeUninit<u8>]) {
+        fn inner(a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [u8]) {
             assert!(dest.len() >= 4 * U8VecAvx512::LEN);
             let ab_lo = _mm512_unpacklo_epi8(a, b);
             let ab_hi = _mm512_unpackhi_epi8(a, b);
@@ -1398,17 +1397,13 @@ unsafe impl U8SimdVec for U8VecAvx512 {
             let out2 = _mm512_permutex2var_epi64(pair01_13, idx_0, pair23_13);
             let out3 = _mm512_permutex2var_epi64(pair01_13, idx_1, pair23_13);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<u8>` through `*mut __m512i` is valid.
-            unsafe {
-                let ptr = dest.as_mut_ptr() as *mut __m512i;
-                _mm512_storeu_si512(ptr, out0);
-                _mm512_storeu_si512(ptr.add(1), out1);
-                _mm512_storeu_si512(ptr.add(2), out2);
-                _mm512_storeu_si512(ptr.add(3), out3);
-            }
+            _mm512_storeu_si512(dest[..64].first_chunk_mut::<64>().unwrap(), out0);
+            _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), out1);
+            _mm512_storeu_si512(dest[128..192].first_chunk_mut::<64>().unwrap(), out2);
+            _mm512_storeu_si512(dest[192..256].first_chunk_mut::<64>().unwrap(), out3);
         }
-        // SAFETY: We know avx512f and avx512bw are available from the safety invariant on `d`.
-        unsafe { impl_u8_4(a.0, b.0, c.0, d.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
     }
 }
 
@@ -1416,39 +1411,53 @@ unsafe impl U8SimdVec for U8VecAvx512 {
 #[repr(transparent)]
 pub struct U16VecAvx512(__m512i, Avx512Descriptor);
 
-// SAFETY: The methods in this implementation that write to `MaybeUninit` (store_interleaved_*)
-// ensure that they write valid data to the output slice without reading uninitialized memory.
-unsafe impl U16SimdVec for U16VecAvx512 {
+#[allow(unsafe_code)]
+impl U16SimdVec for U16VecAvx512 {
     type Descriptor = Avx512Descriptor;
     const LEN: usize = 32;
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `d`.
-        unsafe { Self(_mm512_loadu_si512(mem.as_ptr() as *const _), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &[u16]) -> __m512i {
+            _mm512_loadu_si512(mem.first_chunk::<32>().unwrap())
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(mem) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u16) -> Self {
-        // SAFETY: avx512 available.
-        unsafe { Self(_mm512_set1_epi16(v as i16), d) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(v: u16) -> __m512i {
+            _mm512_set1_epi16(v as i16)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        Self(unsafe { inner(v) }, d)
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u16]) {
-        assert!(mem.len() >= Self::LEN);
-        // SAFETY: we just checked that `mem` has enough space. Moreover, we know avx512f is available
-        // from the safety invariant on `d`.
-        unsafe { _mm512_storeu_si512(mem.as_mut_ptr() as *mut _, self.0) }
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        fn inner(mem: &mut [u16], v: __m512i) {
+            _mm512_storeu_si512(mem.first_chunk_mut::<32>().unwrap(), v)
+        }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
+        unsafe { inner(mem, self.0) }
     }
 
     #[inline(always)]
-    fn store_interleaved_2_uninit(a: Self, b: Self, dest: &mut [MaybeUninit<u16>]) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
-        fn impl_u16_2(a: __m512i, b: __m512i, dest: &mut [MaybeUninit<u16>]) {
+        fn inner(a: __m512i, b: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= 2 * U16VecAvx512::LEN);
             let lo = _mm512_unpacklo_epi16(a, b);
             let hi = _mm512_unpackhi_epi16(a, b);
@@ -1457,22 +1466,19 @@ unsafe impl U16SimdVec for U16VecAvx512 {
             let out0 = _mm512_permutex2var_epi64(lo, idx0, hi);
             let out1 = _mm512_permutex2var_epi64(lo, idx1, hi);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<u16>` through `*mut __m512i` is valid.
-            unsafe {
-                let ptr = dest.as_mut_ptr() as *mut __m512i;
-                _mm512_storeu_si512(ptr, out0);
-                _mm512_storeu_si512(ptr.add(1), out1);
-            }
+            _mm512_storeu_si512(dest[..32].first_chunk_mut::<32>().unwrap(), out0);
+            _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), out1);
         }
-        // SAFETY: We know avx512f and avx512bw are available from the safety invariant on `d`.
-        unsafe { impl_u16_2(a.0, b.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(a.0, b.0, dest) }
     }
 
     #[inline(always)]
-    fn store_interleaved_3_uninit(a: Self, b: Self, c: Self, dest: &mut [MaybeUninit<u16>]) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
-        fn impl_u16_3(a: __m512i, b: __m512i, c: __m512i, dest: &mut [MaybeUninit<u16>]) {
+        fn inner(a: __m512i, b: __m512i, c: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= 3 * U16VecAvx512::LEN);
 
             let mask_a0 = _mm512_broadcast_i32x4(_mm_setr_epi8(
@@ -1542,35 +1548,20 @@ unsafe impl U16SimdVec for U16VecAvx512 {
             let idx_f2 = _mm512_setr_epi64(0, 1, 2, 3, 14, 15, 4, 5);
             let final2 = _mm512_permutex2var_epi64(part_a2, idx_f2, res1);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<u16>` through `*mut __m512i` is valid.
-            unsafe {
-                let ptr = dest.as_mut_ptr() as *mut __m512i;
-                _mm512_storeu_si512(ptr, final0);
-                _mm512_storeu_si512(ptr.add(1), final1);
-                _mm512_storeu_si512(ptr.add(2), final2);
-            }
+            _mm512_storeu_si512(dest[..32].first_chunk_mut::<32>().unwrap(), final0);
+            _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), final1);
+            _mm512_storeu_si512(dest[64..96].first_chunk_mut::<32>().unwrap(), final2);
         }
-        // SAFETY: We know avx512f and avx512bw are available from the safety invariant on `d`.
-        unsafe { impl_u16_3(a.0, b.0, c.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(a.0, b.0, c.0, dest) }
     }
 
     #[inline(always)]
-    fn store_interleaved_4_uninit(
-        a: Self,
-        b: Self,
-        c: Self,
-        d: Self,
-        dest: &mut [MaybeUninit<u16>],
-    ) {
+    #[allow(unsafe_code)]
+    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
         #[target_feature(enable = "avx512f,avx512bw")]
         #[inline]
-        fn impl_u16_4(
-            a: __m512i,
-            b: __m512i,
-            c: __m512i,
-            d: __m512i,
-            dest: &mut [MaybeUninit<u16>],
-        ) {
+        fn inner(a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= 4 * U16VecAvx512::LEN);
             let ab_lo = _mm512_unpacklo_epi16(a, b);
             let ab_hi = _mm512_unpackhi_epi16(a, b);
@@ -1599,17 +1590,13 @@ unsafe impl U16SimdVec for U16VecAvx512 {
             let out2 = _mm512_permutex2var_epi64(pair01_13, idx_0, pair23_13);
             let out3 = _mm512_permutex2var_epi64(pair01_13, idx_1, pair23_13);
 
-            // SAFETY: `dest` has enough space and writing to `MaybeUninit<u16>` through `*mut __m512i` is valid.
-            unsafe {
-                let ptr = dest.as_mut_ptr() as *mut __m512i;
-                _mm512_storeu_si512(ptr, out0);
-                _mm512_storeu_si512(ptr.add(1), out1);
-                _mm512_storeu_si512(ptr.add(2), out2);
-                _mm512_storeu_si512(ptr.add(3), out3);
-            }
+            _mm512_storeu_si512(dest[..32].first_chunk_mut::<32>().unwrap(), out0);
+            _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), out1);
+            _mm512_storeu_si512(dest[64..96].first_chunk_mut::<32>().unwrap(), out2);
+            _mm512_storeu_si512(dest[96..128].first_chunk_mut::<32>().unwrap(), out3);
         }
-        // SAFETY: We know avx512f and avx512bw are available from the safety invariant on `d`.
-        unsafe { impl_u16_4(a.0, b.0, c.0, d.0, dest) }
+        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
+        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
     }
 }
 

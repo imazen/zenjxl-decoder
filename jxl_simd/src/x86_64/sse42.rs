@@ -9,8 +9,8 @@ use super::super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, 
 use archmage::SimdToken;
 use archmage::intrinsics::x86_64::*;
 use std::ops::{
-    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
-    DivAssign, Mul, MulAssign, Neg, Sub, SubAssign,
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
 // Safety invariant: this type is only ever constructed if sse4.2 is available.
@@ -59,6 +59,7 @@ impl SimdDescriptor for Sse42Descriptor {
         }
         // SAFETY: Sse42Descriptor is only constructed via from_token (which requires
         // X64V2Token proving sse4.2 availability) or new() (which uses summon()).
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(self, f) }
     }
 }
@@ -208,8 +209,14 @@ impl F32SimdVec for F32VecSse42 {
         #[target_feature(enable = "sse4.2")]
         #[inline]
         fn inner(
-            a: __m128, b: __m128, c: __m128, d: __m128,
-            e: __m128, f: __m128, g: __m128, h: __m128,
+            a: __m128,
+            b: __m128,
+            c: __m128,
+            d: __m128,
+            e: __m128,
+            f: __m128,
+            g: __m128,
+            h: __m128,
             dest: &mut [f32],
         ) {
             assert!(dest.len() >= 8 * F32VecSse42::LEN);
@@ -617,6 +624,7 @@ impl I32SimdVec for I32VecSse42 {
         fn inner(mem: &[i32]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<4>().unwrap())
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner(mem) }, d)
     }
 
@@ -628,6 +636,7 @@ impl I32SimdVec for I32VecSse42 {
         fn inner(mem: &mut [i32], v: __m128i) {
             _mm_storeu_si128(mem.first_chunk_mut::<4>().unwrap(), v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(mem, self.0) }
     }
 
@@ -639,6 +648,7 @@ impl I32SimdVec for I32VecSse42 {
         fn inner(v: i32) -> __m128i {
             _mm_set1_epi32(v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner(v) }, d)
     }
 
@@ -693,6 +703,7 @@ impl I32SimdVec for I32VecSse42 {
         fn inner<const AMOUNT_I: i32>(v: __m128i) -> __m128i {
             _mm_slli_epi32::<AMOUNT_I>(v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
     }
 
@@ -704,6 +715,7 @@ impl I32SimdVec for I32VecSse42 {
         fn inner<const AMOUNT_I: i32>(v: __m128i) -> __m128i {
             _mm_srai_epi32::<AMOUNT_I>(v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
     }
 
@@ -728,6 +740,7 @@ impl I32SimdVec for I32VecSse42 {
                 dest[i] = tmp[i] as u16;
             }
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(self.0, dest) }
     }
 }
@@ -839,6 +852,7 @@ impl U32SimdVec for U32VecSse42 {
         fn inner<const AMOUNT_I: i32>(v: __m128i) -> __m128i {
             _mm_srli_epi32::<AMOUNT_I>(v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
     }
 }
@@ -860,6 +874,7 @@ impl U8SimdVec for U8VecSse42 {
         fn inner(mem: &[u8]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<16>().unwrap())
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner(mem) }, d)
     }
 
@@ -871,6 +886,7 @@ impl U8SimdVec for U8VecSse42 {
         fn inner(v: u8) -> __m128i {
             _mm_set1_epi8(v as i8)
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner(v) }, d)
     }
 
@@ -882,6 +898,7 @@ impl U8SimdVec for U8VecSse42 {
         fn inner(mem: &mut [u8], v: __m128i) {
             _mm_storeu_si128(mem.first_chunk_mut::<16>().unwrap(), v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(mem, self.0) }
     }
 
@@ -897,6 +914,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[..16].first_chunk_mut::<16>().unwrap(), lo);
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), hi);
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(a.0, b.0, dest) }
     }
 
@@ -916,9 +934,15 @@ impl U8SimdVec for U8VecSse42 {
             let mask_b1 = _mm_setr_epi8(5, -1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1, 10);
             let mask_c1 = _mm_setr_epi8(-1, 5, -1, -1, 6, -1, -1, 7, -1, -1, 8, -1, -1, 9, -1, -1);
 
-            let mask_a2 = _mm_setr_epi8(-1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1);
-            let mask_b2 = _mm_setr_epi8(-1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1);
-            let mask_c2 = _mm_setr_epi8(10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15);
+            let mask_a2 = _mm_setr_epi8(
+                -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1, -1,
+            );
+            let mask_b2 = _mm_setr_epi8(
+                -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15, -1,
+            );
+            let mask_c2 = _mm_setr_epi8(
+                10, -1, -1, 11, -1, -1, 12, -1, -1, 13, -1, -1, 14, -1, -1, 15,
+            );
 
             let out0 = _mm_or_si128(
                 _mm_or_si128(_mm_shuffle_epi8(a, mask_a0), _mm_shuffle_epi8(b, mask_b0)),
@@ -937,6 +961,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(a.0, b.0, c.0, dest) }
     }
 
@@ -962,6 +987,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm_storeu_si128(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(a.0, b.0, c.0, d.0, dest) }
     }
 }
@@ -983,6 +1009,7 @@ impl U16SimdVec for U16VecSse42 {
         fn inner(mem: &[u16]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<8>().unwrap())
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner(mem) }, d)
     }
 
@@ -994,6 +1021,7 @@ impl U16SimdVec for U16VecSse42 {
         fn inner(v: u16) -> __m128i {
             _mm_set1_epi16(v as i16)
         }
+        // SAFETY: descriptor guarantees target features are available.
         Self(unsafe { inner(v) }, d)
     }
 
@@ -1005,6 +1033,7 @@ impl U16SimdVec for U16VecSse42 {
         fn inner(mem: &mut [u16], v: __m128i) {
             _mm_storeu_si128(mem.first_chunk_mut::<8>().unwrap(), v)
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(mem, self.0) }
     }
 
@@ -1020,6 +1049,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[..8].first_chunk_mut::<8>().unwrap(), lo);
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), hi);
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(a.0, b.0, dest) }
     }
 
@@ -1039,9 +1069,15 @@ impl U16SimdVec for U16VecSse42 {
             let mask_b1 = _mm_setr_epi8(-1, -1, -1, -1, 6, 7, -1, -1, -1, -1, 8, 9, -1, -1, -1, -1);
             let mask_c1 = _mm_setr_epi8(4, 5, -1, -1, -1, -1, 6, 7, -1, -1, -1, -1, 8, 9, -1, -1);
 
-            let mask_a2 = _mm_setr_epi8(-1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1);
-            let mask_b2 = _mm_setr_epi8(10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1);
-            let mask_c2 = _mm_setr_epi8(-1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15);
+            let mask_a2 = _mm_setr_epi8(
+                -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1, -1, -1,
+            );
+            let mask_b2 = _mm_setr_epi8(
+                10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15, -1, -1,
+            );
+            let mask_c2 = _mm_setr_epi8(
+                -1, -1, 10, 11, -1, -1, -1, -1, 12, 13, -1, -1, -1, -1, 14, 15,
+            );
 
             let out0 = _mm_or_si128(
                 _mm_or_si128(_mm_shuffle_epi8(a, mask_a0), _mm_shuffle_epi8(b, mask_b0)),
@@ -1060,6 +1096,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(a.0, b.0, c.0, dest) }
     }
 
@@ -1085,6 +1122,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
             _mm_storeu_si128(dest[24..32].first_chunk_mut::<8>().unwrap(), out3);
         }
+        // SAFETY: descriptor guarantees target features are available.
         unsafe { inner(a.0, b.0, c.0, d.0, dest) }
     }
 }

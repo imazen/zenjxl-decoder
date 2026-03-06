@@ -22,7 +22,7 @@ arbtest = "0.3.2"
 all-simd = ["sse42", "avx", "avx512", "neon", "wasm128"]
 sse42 = []
 avx = ["sse42"]
-avx512 = ["avx"]
+avx512 = ["avx", "archmage/avx512"]
 neon = []
 wasm128 = []
 
