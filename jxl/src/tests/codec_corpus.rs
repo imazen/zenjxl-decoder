@@ -109,12 +109,10 @@ fn decode_jxl_to_pixels_with_options(
 
     // If linear output is requested (reference PNG has gAMA=100000), set output
     // color profile to linear TF so decoded values match the linear reference.
-    if output_linear {
-        if let JxlColorProfile::Simple(enc) = decoder.output_color_profile().clone() {
-            decoder
-                .set_output_color_profile(JxlColorProfile::Simple(enc.with_linear_tf()))
-                .map_err(|e| format!("Failed to set linear output profile: {:?}", e))?;
-        }
+    if output_linear && let JxlColorProfile::Simple(enc) = decoder.output_color_profile().clone() {
+        decoder
+            .set_output_color_profile(JxlColorProfile::Simple(enc.with_linear_tf()))
+            .map_err(|e| format!("Failed to set linear output profile: {:?}", e))?;
     }
 
     // Advance to frame info

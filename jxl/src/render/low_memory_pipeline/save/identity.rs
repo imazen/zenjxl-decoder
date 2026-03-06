@@ -3,14 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#![cfg_attr(feature = "allow-unsafe", allow(unsafe_code))]
-
 use std::ops::Range;
 
-#[cfg(feature = "allow-unsafe")]
-use std::mem::MaybeUninit;
-
-#[cfg(feature = "allow-unsafe")]
 use jxl_simd::{F32SimdVec, SimdDescriptor, U8SimdVec, U16SimdVec, simd_function};
 
 use crate::{
@@ -18,14 +12,13 @@ use crate::{
     render::low_memory_pipeline::row_buffers::RowBuffer,
 };
 
-#[cfg(feature = "allow-unsafe")]
 macro_rules! define_run_interleaved {
     ($fn_name:ident, $ty:ty, $vec_trait:ident, $store_fn:ident, $cnt:expr, $($arg:ident),+) => {
         #[inline(always)]
         fn $fn_name<D: SimdDescriptor>(
             d: D,
             $($arg: &[$ty]),+,
-            out: &mut [MaybeUninit<$ty>],
+            out: &mut [$ty],
         ) -> usize {
             let len = D::$vec_trait::LEN;
             let mut n = 0;
@@ -70,33 +63,30 @@ macro_rules! define_run_interleaved {
     };
 }
 
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_2_f32,
     f32,
     F32Vec,
-    store_interleaved_2_uninit,
+    store_interleaved_2,
     2,
     a,
     b
 );
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_3_f32,
     f32,
     F32Vec,
-    store_interleaved_3_uninit,
+    store_interleaved_3,
     3,
     a,
     b,
     c
 );
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_4_f32,
     f32,
     F32Vec,
-    store_interleaved_4_uninit,
+    store_interleaved_4,
     4,
     a,
     b,
@@ -104,13 +94,12 @@ define_run_interleaved!(
     e
 );
 
-#[cfg(feature = "allow-unsafe")]
 simd_function!(
     store_interleaved_f32,
     d: D,
     fn store_interleaved_impl_f32(
         inputs: &[&[f32]],
-        output: &mut [MaybeUninit<f32>]
+        output: &mut [f32]
     ) -> usize {
         match inputs.len() {
             2 => run_interleaved_2_f32(d, inputs[0], inputs[1], output),
@@ -121,33 +110,30 @@ simd_function!(
     }
 );
 
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_2_u8,
     u8,
     U8Vec,
-    store_interleaved_2_uninit,
+    store_interleaved_2,
     2,
     a,
     b
 );
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_3_u8,
     u8,
     U8Vec,
-    store_interleaved_3_uninit,
+    store_interleaved_3,
     3,
     a,
     b,
     c
 );
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_4_u8,
     u8,
     U8Vec,
-    store_interleaved_4_uninit,
+    store_interleaved_4,
     4,
     a,
     b,
@@ -155,13 +141,12 @@ define_run_interleaved!(
     e
 );
 
-#[cfg(feature = "allow-unsafe")]
 simd_function!(
     store_interleaved_u8,
     d: D,
     fn store_interleaved_impl_u8(
         inputs: &[&[u8]],
-        output: &mut [MaybeUninit<u8>]
+        output: &mut [u8]
     ) -> usize {
         match inputs.len() {
             2 => run_interleaved_2_u8(d, inputs[0], inputs[1], output),
@@ -172,33 +157,30 @@ simd_function!(
     }
 );
 
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_2_u16,
     u16,
     U16Vec,
-    store_interleaved_2_uninit,
+    store_interleaved_2,
     2,
     a,
     b
 );
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_3_u16,
     u16,
     U16Vec,
-    store_interleaved_3_uninit,
+    store_interleaved_3,
     3,
     a,
     b,
     c
 );
-#[cfg(feature = "allow-unsafe")]
 define_run_interleaved!(
     run_interleaved_4_u16,
     u16,
     U16Vec,
-    store_interleaved_4_uninit,
+    store_interleaved_4,
     4,
     a,
     b,
@@ -206,13 +188,12 @@ define_run_interleaved!(
     e
 );
 
-#[cfg(feature = "allow-unsafe")]
 simd_function!(
     store_interleaved_u16,
     d: D,
     fn store_interleaved_impl_u16(
         inputs: &[&[u16]],
-        output: &mut [MaybeUninit<u16>]
+        output: &mut [u16]
     ) -> usize {
         match inputs.len() {
             2 => run_interleaved_2_u16(d, inputs[0], inputs[1], output),
@@ -222,15 +203,6 @@ simd_function!(
         }
     }
 );
-
-#[cfg(feature = "allow-unsafe")]
-#[inline(always)]
-unsafe fn as_maybe_uninit_slice(buf: &mut [u8]) -> &mut [MaybeUninit<u8>] {
-    // SAFETY: MaybeUninit<u8> has identical layout to u8. Converting initialized
-    // memory to MaybeUninit is always valid. The SIMD functions guarantee they
-    // only write initialized data.
-    unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<MaybeUninit<u8>>(), buf.len()) }
-}
 
 pub(super) fn store(
     input_buf: &[&RowBuffer],
@@ -262,7 +234,6 @@ pub(super) fn store(
             output_buf.copy_from_slice(input_buf);
             input_buf.len() / data_format.bytes_per_sample()
         }
-        #[cfg(feature = "allow-unsafe")]
         (channels, 1, true) if (2..=4).contains(&channels) => {
             let start_u8 = byte_start;
             let end_u8 = byte_end;
@@ -270,24 +241,10 @@ pub(super) fn store(
             for (i, buf) in input_buf.iter().enumerate() {
                 slices[i] = &buf.get_row::<u8>(input_y)[start_u8..end_u8];
             }
-            // SAFETY: output_buf is initialized &mut [u8]; MaybeUninit<u8> has identical layout.
-            // The SIMD interleave functions never write uninitialized memory.
-            let output_uninit = unsafe { as_maybe_uninit_slice(output_buf) };
-            store_interleaved_u8(&slices[..channels], output_uninit)
+            store_interleaved_u8(&slices[..channels], output_buf)
         }
-        #[cfg(feature = "allow-unsafe")]
         (channels, 2, true) if (2..=4).contains(&channels) => {
-            let ptr = output_buf.as_mut_ptr();
-            if ptr.align_offset(std::mem::align_of::<u16>()) == 0 {
-                let len_u16 = output_buf.len() / 2;
-                // SAFETY: we checked alignment above, and the size is correct.
-                // MaybeUninit<u16> has the same size and alignment as u16.
-                let output_u16 = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        output_buf.as_mut_ptr().cast::<MaybeUninit<u16>>(),
-                        len_u16,
-                    )
-                };
+            if let Ok(output_u16) = bytemuck::try_cast_slice_mut::<u8, u16>(output_buf) {
                 let start_u16 = byte_start / 2;
                 let end_u16 = byte_end / 2;
                 let mut slices = [&[] as &[u16]; 4];
@@ -299,28 +256,14 @@ pub(super) fn store(
                 0
             }
         }
-        #[cfg(feature = "allow-unsafe")]
         (channels, 4, true) if (2..=4).contains(&channels) => {
-            let ptr = output_buf.as_mut_ptr();
-            if ptr.align_offset(std::mem::align_of::<f32>()) == 0 {
-                let len_f32 = output_buf.len() / std::mem::size_of::<f32>();
-                // SAFETY: we checked alignment above, and the size is correct.
-                // MaybeUninit<f32> has the same size and alignment as f32.
-                let output_f32 = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        output_buf.as_mut_ptr().cast::<MaybeUninit<f32>>(),
-                        len_f32,
-                    )
-                };
-
+            if let Ok(output_f32) = bytemuck::try_cast_slice_mut::<u8, f32>(output_buf) {
                 let start_f32 = byte_start / 4;
                 let end_f32 = byte_end / 4;
-
                 let mut slices = [&[] as &[f32]; 4];
                 for (i, buf) in input_buf.iter().enumerate() {
                     slices[i] = &buf.get_row::<f32>(input_y)[start_f32..end_f32];
                 }
-
                 store_interleaved_f32(&slices[..channels], output_f32)
             } else {
                 0

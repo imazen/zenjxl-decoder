@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn test_aligned_vec_with_capacity() {
         let vec: AlignedVec<f32> = aligned_vec_with_capacity(1024).unwrap();
-        assert!(vec.as_ptr() as usize % SIMD_ALIGN == 0);
+        assert!((vec.as_ptr() as usize).is_multiple_of(SIMD_ALIGN));
     }
 
     #[test]
@@ -125,7 +125,7 @@ mod tests {
         let vec: AlignedVec<f32> = aligned_vec_zeroed(1024).unwrap();
         assert_eq!(vec.len(), 1024);
         assert!(vec.iter().all(|&x| x == 0.0));
-        assert!(vec.as_ptr() as usize % SIMD_ALIGN == 0);
+        assert!((vec.as_ptr() as usize).is_multiple_of(SIMD_ALIGN));
     }
 
     #[test]

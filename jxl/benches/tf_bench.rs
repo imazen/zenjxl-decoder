@@ -7,7 +7,7 @@
 //!
 //! Run with: cargo bench -p zenjxl-decoder --bench tf_bench
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask};
 use std::hint::black_box;
 
@@ -111,7 +111,7 @@ fn fast_srgb8_f32_to_u8(f: f32) -> u8 {
     let maxv = f32::from_bits(0x3f7fffff); // 1.0 - epsilon
     let minv = f32::from_bits(MINV_BITS);
     let mut input = f;
-    if !(input > minv) {
+    if input <= minv {
         input = minv;
     }
     if input > maxv {
@@ -137,6 +137,7 @@ fn fast_srgb8_batch(input: &[f32], output: &mut [u8]) {
 // ============================================================================
 
 // Generate the 4096-entry encode table at compile time
+#[allow(dead_code)]
 const fn generate_encode_table_4096() -> [f32; 4096] {
     let mut table = [0.0f32; 4096];
     let mut i = 0;

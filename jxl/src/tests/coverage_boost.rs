@@ -26,13 +26,7 @@ fn codec_corpus_path() -> Option<PathBuf> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../codec-eval/codec-corpus"),
     ];
 
-    for p in candidates {
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    None
+    candidates.into_iter().find(|p| p.exists())
 }
 
 fn get_test_file(category: &str, name: &str) -> Option<PathBuf> {
