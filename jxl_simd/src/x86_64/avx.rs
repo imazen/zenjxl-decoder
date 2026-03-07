@@ -151,7 +151,11 @@ impl SimdDescriptor for AvxDescriptor {
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
         #[arcane]
-        fn impl_<R>(_: archmage::X64V3Token, d: AvxDescriptor, f: impl FnOnce(AvxDescriptor) -> R) -> R {
+        fn impl_<R>(
+            _: archmage::X64V3Token,
+            d: AvxDescriptor,
+            f: impl FnOnce(AvxDescriptor) -> R,
+        ) -> R {
             f(d)
         }
         impl_(token(), self, f)
@@ -264,7 +268,14 @@ impl F32SimdVec for F32VecAvx {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
         #[arcane]
-        fn impl_(_: archmage::X64V3Token, a: __m256, b: __m256, c: __m256, d: __m256, dest: &mut [f32]) {
+        fn impl_(
+            _: archmage::X64V3Token,
+            a: __m256,
+            b: __m256,
+            c: __m256,
+            d: __m256,
+            dest: &mut [f32],
+        ) {
             assert!(dest.len() >= 4 * F32VecAvx::LEN);
             // First interleave pairs
             let ab_lo = _mm256_unpacklo_ps(a, b);
@@ -1106,7 +1117,14 @@ impl U8SimdVec for U8VecAvx {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
         #[arcane]
-        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, c: __m256i, d: __m256i, dest: &mut [u8]) {
+        fn impl_(
+            _: archmage::X64V3Token,
+            a: __m256i,
+            b: __m256i,
+            c: __m256i,
+            d: __m256i,
+            dest: &mut [u8],
+        ) {
             assert!(dest.len() >= 4 * U8VecAvx::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm256_unpacklo_epi8(a, b);
@@ -1278,7 +1296,14 @@ impl U16SimdVec for U16VecAvx {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
         #[arcane]
-        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, c: __m256i, d: __m256i, dest: &mut [u16]) {
+        fn impl_(
+            _: archmage::X64V3Token,
+            a: __m256i,
+            b: __m256i,
+            c: __m256i,
+            d: __m256i,
+            dest: &mut [u16],
+        ) {
             assert!(dest.len() >= 4 * U16VecAvx::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm256_unpacklo_epi16(a, b);
