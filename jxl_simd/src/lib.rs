@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file.
 
 #![allow(clippy::too_many_arguments)]
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 
 use std::{
     fmt::Debug,

@@ -7,19 +7,24 @@ use crate::{U32SimdVec, impl_f32_array_interface, x86_64::sse42::Sse42Descriptor
 
 use super::super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, U16SimdVec};
 use archmage::SimdToken;
+use archmage::arcane;
 use archmage::intrinsics::x86_64::*;
 use std::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
+fn token() -> archmage::X64V3Token {
+    archmage::X64V3Token::summon().unwrap()
+}
+
 /// Core 8x8 transpose algorithm for AVX2.
 /// Takes 8 __m256 vectors representing rows and returns 8 transposed vectors.
 /// Used by both store_interleaved_8 and transpose_square.
-#[allow(unsafe_code)]
-#[target_feature(enable = "avx2")]
+#[arcane]
 #[inline]
 fn transpose_8x8_core(
+    _t: archmage::X64V3Token,
     r0: __m256,
     r1: __m256,
     r2: __m256,
@@ -144,17 +149,12 @@ impl SimdDescriptor for AvxDescriptor {
         archmage::X64V3Token::summon().map(Self::from_token)
     }
 
-    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner<R>(d: AvxDescriptor, f: impl FnOnce(AvxDescriptor) -> R) -> R {
+        #[arcane]
+        fn impl_<R>(_: archmage::X64V3Token, d: AvxDescriptor, f: impl FnOnce(AvxDescriptor) -> R) -> R {
             f(d)
         }
-        // SAFETY: AvxDescriptor is only constructed via from_token (which requires
-        // X64V3Token proving avx2/fma/f16c availability) or new() (which uses summon()).
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(self, f) }
+        impl_(token(), self, f)
     }
 }
 
@@ -163,15 +163,11 @@ macro_rules! fn_avx {
         $this:ident: $self_ty:ty,
         fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )? $body: block) => {
         #[inline(always)]
-        #[allow(unsafe_code)]
         fn $name(self: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-            #[target_feature(enable = "avx2,fma,f16c")]
-            #[inline]
-            fn inner($this: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-                $body
-            }
-            // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-            unsafe { inner(self, $($arg),*) }
+            #[arcane]
+            #[inline(always)]
+            fn impl_(_t: archmage::X64V3Token, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
+            impl_(token(), self, $($arg),*)
         }
     };
 }
@@ -184,42 +180,33 @@ pub struct F32VecAvx(__m256, AvxDescriptor);
 #[repr(transparent)]
 pub struct MaskAvx(__m256, AvxDescriptor);
 
-#[allow(unsafe_code)]
 impl F32SimdVec for F32VecAvx {
     type Descriptor = AvxDescriptor;
 
     const LEN: usize = 8;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &[f32]) -> __m256 {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, mem: &[f32]) -> __m256 {
             _mm256_loadu_ps(mem.first_chunk::<8>().unwrap())
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [f32]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &mut [f32], v: __m256) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256, mem: &mut [f32]) {
             _mm256_storeu_ps(mem.first_chunk_mut::<8>().unwrap(), v)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256, b: __m256, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256, b: __m256, dest: &mut [f32]) {
             assert!(dest.len() >= 2 * F32VecAvx::LEN);
             // a = [a0, a1, a2, a3, a4, a5, a6, a7], b = [b0, b1, b2, b3, b4, b5, b6, b7]
             // Output: [a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7]
@@ -231,16 +218,13 @@ impl F32SimdVec for F32VecAvx {
             _mm256_storeu_ps(dest[..8].first_chunk_mut::<8>().unwrap(), out0);
             _mm256_storeu_ps(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256, b: __m256, c: __m256, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256, b: __m256, c: __m256, dest: &mut [f32]) {
             assert!(dest.len() >= 3 * F32VecAvx::LEN);
 
             let idx_a0 = _mm256_setr_epi32(0, 0, 0, 1, 0, 0, 2, 0);
@@ -274,16 +258,13 @@ impl F32SimdVec for F32VecAvx {
             _mm256_storeu_ps(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
             _mm256_storeu_ps(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256, b: __m256, c: __m256, d: __m256, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256, b: __m256, c: __m256, d: __m256, dest: &mut [f32]) {
             assert!(dest.len() >= 4 * F32VecAvx::LEN);
             // First interleave pairs
             let ab_lo = _mm256_unpacklo_ps(a, b);
@@ -320,12 +301,10 @@ impl F32SimdVec for F32VecAvx {
             _mm256_storeu_ps(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
             _mm256_storeu_ps(dest[24..32].first_chunk_mut::<8>().unwrap(), out3);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_8(
         a: Self,
         b: Self,
@@ -337,9 +316,9 @@ impl F32SimdVec for F32VecAvx {
         h: Self,
         dest: &mut [f32],
     ) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(
+        #[arcane]
+        fn impl_(
+            _: archmage::X64V3Token,
             r0: __m256,
             r1: __m256,
             r2: __m256,
@@ -353,7 +332,7 @@ impl F32SimdVec for F32VecAvx {
             assert!(dest.len() >= 8 * F32VecAvx::LEN);
             // This is essentially an 8x8 transpose, same algorithm as transpose_square
             let (c0, c1, c2, c3, c4, c5, c6, c7) =
-                transpose_8x8_core(r0, r1, r2, r3, r4, r5, r6, r7);
+                transpose_8x8_core(token(), r0, r1, r2, r3, r4, r5, r6, r7);
 
             _mm256_storeu_ps(dest[..8].first_chunk_mut::<8>().unwrap(), c0);
             _mm256_storeu_ps(dest[8..16].first_chunk_mut::<8>().unwrap(), c1);
@@ -364,16 +343,13 @@ impl F32SimdVec for F32VecAvx {
             _mm256_storeu_ps(dest[48..56].first_chunk_mut::<8>().unwrap(), c6);
             _mm256_storeu_ps(dest[56..64].first_chunk_mut::<8>().unwrap(), c7);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m256, __m256) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, src: &[f32]) -> (__m256, __m256) {
             assert!(src.len() >= 2 * F32VecAvx::LEN);
             // Input: [a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7]
             // Output: a = [a0, a1, a2, a3, a4, a5, a6, a7], b = [b0, b1, b2, b3, b4, b5, b6, b7]
@@ -391,17 +367,14 @@ impl F32SimdVec for F32VecAvx {
 
             (a_lo, b_lo)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        let (a, b) = unsafe { inner(src) };
+        let (a, b) = impl_(token(), src);
         (Self(a, d), Self(b, d))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m256, __m256, __m256) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, src: &[f32]) -> (__m256, __m256, __m256) {
             assert!(src.len() >= 3 * F32VecAvx::LEN);
             // Input layout (24 floats):
             // in0: [a0, b0, c0, a1, b1, c1, a2, b2]
@@ -448,17 +421,14 @@ impl F32SimdVec for F32VecAvx {
 
             (a_out, b_out, c_out)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        let (a, b, c) = unsafe { inner(src) };
+        let (a, b, c) = impl_(token(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m256, __m256, __m256, __m256) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, src: &[f32]) -> (__m256, __m256, __m256, __m256) {
             assert!(src.len() >= 4 * F32VecAvx::LEN);
             // Input: [a0,b0,c0,d0, a1,b1,c1,d1, a2,b2,c2,d2, a3,b3,c3,d3, ...]
             // Output: a = [a0..a7], b = [b0..b7], c = [c0..c7], d = [d0..d7]
@@ -489,8 +459,7 @@ impl F32SimdVec for F32VecAvx {
 
             (a, b, c, dv)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        let (a, b, c, dv) = unsafe { inner(src) };
+        let (a, b, c, dv) = impl_(token(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -503,27 +472,21 @@ impl F32SimdVec for F32VecAvx {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: f32) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: f32) -> __m256 {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: f32) -> __m256 {
             _mm256_set1_ps(v)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn zero(d: Self::Descriptor) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner() -> __m256 {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token) -> __m256 {
             _mm256_setzero_ps()
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        Self(unsafe { inner() }, d)
+        Self(impl_(token()), d)
     }
 
     fn_avx!(this: F32VecAvx, fn abs() -> F32VecAvx {
@@ -574,35 +537,27 @@ impl F32SimdVec for F32VecAvx {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn prepare_table_bf16_8(_d: AvxDescriptor, table: &[f32; 8]) -> Bf16Table8Avx {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(table: &[f32; 8]) -> __m256 {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, table: &[f32; 8]) -> __m256 {
             _mm256_loadu_ps(table)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        Bf16Table8Avx(unsafe { inner(table) })
+        Bf16Table8Avx(impl_(token(), table))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn table_lookup_bf16_8(d: AvxDescriptor, table: Bf16Table8Avx, indices: I32VecAvx) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(table: __m256, indices: __m256i) -> __m256 {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, table: __m256, indices: __m256i) -> __m256 {
             _mm256_permutevar8x32_ps(table, indices)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        F32VecAvx(unsafe { inner(table.0, indices.0) }, d)
+        F32VecAvx(impl_(token(), table.0, indices.0), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn round_store_u8(self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: __m256, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecAvx::LEN);
             // Round to nearest integer
             let rounded = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
@@ -618,16 +573,13 @@ impl F32SimdVec for F32VecAvx {
             // Store lower 8 bytes
             _mm_storel_epi64(dest.first_chunk_mut::<16>().unwrap(), u8s);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn round_store_u16(self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: __m256, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx::LEN);
             // Round to nearest integer
             let rounded = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
@@ -641,46 +593,37 @@ impl F32SimdVec for F32VecAvx {
             // Store 8 u16s (16 bytes)
             _mm_storeu_si128(dest.first_chunk_mut::<8>().unwrap(), u16s);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     impl_f32_array_interface!();
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_f16_bits(d: Self::Descriptor, mem: &[u16]) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &[u16]) -> __m256 {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, mem: &[u16]) -> __m256 {
             assert!(mem.len() >= F32VecAvx::LEN);
             let bits = _mm_loadu_si128(mem.first_chunk::<8>().unwrap());
             _mm256_cvtph_ps(bits)
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        F32VecAvx(unsafe { inner(mem) }, d)
+        F32VecAvx(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_f16_bits(self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: __m256, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx::LEN);
-            let bits = _mm256_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
+            let bits = _mm256_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
             _mm_storeu_si128(dest.first_chunk_mut::<8>().unwrap(), bits);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(d: AvxDescriptor, data: &mut [[f32; 8]], stride: usize) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, d: AvxDescriptor, data: &mut [[f32; 8]], stride: usize) {
             assert!(data.len() > stride * 7);
 
             let r0 = F32VecAvx::load_array(d, &data[0]).0;
@@ -693,7 +636,7 @@ impl F32SimdVec for F32VecAvx {
             let r7 = F32VecAvx::load_array(d, &data[7 * stride]).0;
 
             let (c0, c1, c2, c3, c4, c5, c6, c7) =
-                transpose_8x8_core(r0, r1, r2, r3, r4, r5, r6, r7);
+                transpose_8x8_core(token(), r0, r1, r2, r3, r4, r5, r6, r7);
 
             F32VecAvx(c0, d).store_array(&mut data[0]);
             F32VecAvx(c1, d).store_array(&mut data[1 * stride]);
@@ -704,8 +647,7 @@ impl F32SimdVec for F32VecAvx {
             F32VecAvx(c6, d).store_array(&mut data[6 * stride]);
             F32VecAvx(c7, d).store_array(&mut data[7 * stride]);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(d, data, stride) }
+        impl_(token(), d, data, stride)
     }
 }
 
@@ -765,46 +707,36 @@ impl DivAssign<F32VecAvx> for F32VecAvx {
 #[repr(transparent)]
 pub struct I32VecAvx(__m256i, AvxDescriptor);
 
-#[allow(unsafe_code)]
 impl I32SimdVec for I32VecAvx {
     type Descriptor = AvxDescriptor;
 
     const LEN: usize = 8;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &[i32]) -> __m256i {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, mem: &[i32]) -> __m256i {
             _mm256_loadu_si256(mem.first_chunk::<8>().unwrap())
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [i32]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &mut [i32], v: __m256i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256i, mem: &mut [i32]) {
             _mm256_storeu_si256(mem.first_chunk_mut::<8>().unwrap(), v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: i32) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: i32) -> __m256i {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: i32) -> __m256i {
             _mm256_set1_epi32(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     fn_avx!(this: I32VecAvx, fn as_f32() -> F32VecAvx {
@@ -849,27 +781,21 @@ impl I32SimdVec for I32VecAvx {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner<const AMOUNT_I: i32>(v: __m256i) -> __m256i {
+        #[arcane]
+        fn impl_<const AMOUNT_I: i32>(_: archmage::X64V3Token, v: __m256i) -> __m256i {
             _mm256_slli_epi32::<AMOUNT_I>(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner<const AMOUNT_I: i32>(v: __m256i) -> __m256i {
+        #[arcane]
+        fn impl_<const AMOUNT_I: i32>(_: archmage::X64V3Token, v: __m256i) -> __m256i {
             _mm256_srai_epi32::<AMOUNT_I>(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
     }
 
     fn_avx!(this: I32VecAvx, fn mul_wide_take_high(rhs: I32VecAvx) -> I32VecAvx {
@@ -881,11 +807,9 @@ impl I32SimdVec for I32VecAvx {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_u16(self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: __m256i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256i, dest: &mut [u16]) {
             assert!(dest.len() >= I32VecAvx::LEN);
             let tmp = _mm256_shuffle_epi8(
                 v,
@@ -900,8 +824,7 @@ impl I32SimdVec for I32VecAvx {
                 _mm256_extracti128_si256::<0>(tmp),
             );
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 }
 
@@ -1020,7 +943,6 @@ impl BitXorAssign<I32VecAvx> for I32VecAvx {
 #[repr(transparent)]
 pub struct U32VecAvx(__m256i, AvxDescriptor);
 
-#[allow(unsafe_code)]
 impl U32SimdVec for U32VecAvx {
     type Descriptor = AvxDescriptor;
 
@@ -1032,15 +954,12 @@ impl U32SimdVec for U32VecAvx {
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner<const AMOUNT_I: i32>(v: __m256i) -> __m256i {
+        #[arcane]
+        fn impl_<const AMOUNT_I: i32>(_: archmage::X64V3Token, v: __m256i) -> __m256i {
             _mm256_srli_epi32::<AMOUNT_I>(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
     }
 }
 
@@ -1048,53 +967,41 @@ impl U32SimdVec for U32VecAvx {
 #[repr(transparent)]
 pub struct U8VecAvx(__m256i, AvxDescriptor);
 
-#[allow(unsafe_code)]
 impl U8SimdVec for U8VecAvx {
     type Descriptor = AvxDescriptor;
     const LEN: usize = 32;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &[u8]) -> __m256i {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, mem: &[u8]) -> __m256i {
             _mm256_loadu_si256(mem.first_chunk::<32>().unwrap())
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u8) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: u8) -> __m256i {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: u8) -> __m256i {
             _mm256_set1_epi8(v as i8)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u8]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &mut [u8], v: __m256i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256i, mem: &mut [u8]) {
             _mm256_storeu_si256(mem.first_chunk_mut::<32>().unwrap(), v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256i, b: __m256i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, dest: &mut [u8]) {
             assert!(dest.len() >= 2 * U8VecAvx::LEN);
             // a = [A0..A15 | A16..A31]
             // b = [B0..B15 | B16..B31]
@@ -1109,16 +1016,13 @@ impl U8SimdVec for U8VecAvx {
             _mm256_storeu_si256(dest[..32].first_chunk_mut::<32>().unwrap(), out0);
             _mm256_storeu_si256(dest[32..64].first_chunk_mut::<32>().unwrap(), out1);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256i, b: __m256i, c: __m256i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, c: __m256i, dest: &mut [u8]) {
             assert!(dest.len() >= 3 * U8VecAvx::LEN);
 
             // U8 Masks
@@ -1196,16 +1100,13 @@ impl U8SimdVec for U8VecAvx {
             _mm256_storeu_si256(dest[32..64].first_chunk_mut::<32>().unwrap(), out1);
             _mm256_storeu_si256(dest[64..96].first_chunk_mut::<32>().unwrap(), out2);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256i, b: __m256i, c: __m256i, d: __m256i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, c: __m256i, d: __m256i, dest: &mut [u8]) {
             assert!(dest.len() >= 4 * U8VecAvx::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm256_unpacklo_epi8(a, b);
@@ -1230,8 +1131,7 @@ impl U8SimdVec for U8VecAvx {
             _mm256_storeu_si256(dest[64..96].first_chunk_mut::<32>().unwrap(), out2);
             _mm256_storeu_si256(dest[96..128].first_chunk_mut::<32>().unwrap(), out3);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
@@ -1239,53 +1139,41 @@ impl U8SimdVec for U8VecAvx {
 #[repr(transparent)]
 pub struct U16VecAvx(__m256i, AvxDescriptor);
 
-#[allow(unsafe_code)]
 impl U16SimdVec for U16VecAvx {
     type Descriptor = AvxDescriptor;
     const LEN: usize = 16;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &[u16]) -> __m256i {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, mem: &[u16]) -> __m256i {
             _mm256_loadu_si256(mem.first_chunk::<16>().unwrap())
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u16) -> Self {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(v: u16) -> __m256i {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: u16) -> __m256i {
             _mm256_set1_epi16(v as i16)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(mem: &mut [u16], v: __m256i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, v: __m256i, mem: &mut [u16]) {
             _mm256_storeu_si256(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256i, b: __m256i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, dest: &mut [u16]) {
             assert!(dest.len() >= 2 * U16VecAvx::LEN);
             // a = [A0..A7 | A8..A15]
             // b = [B0..B7 | B8..B15]
@@ -1300,16 +1188,13 @@ impl U16SimdVec for U16VecAvx {
             _mm256_storeu_si256(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
             _mm256_storeu_si256(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256i, b: __m256i, c: __m256i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, c: __m256i, dest: &mut [u16]) {
             assert!(dest.len() >= 3 * U16VecAvx::LEN);
 
             // U16 Masks
@@ -1387,16 +1272,13 @@ impl U16SimdVec for U16VecAvx {
             _mm256_storeu_si256(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm256_storeu_si256(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx2,fma,f16c")]
-        #[inline]
-        fn inner(a: __m256i, b: __m256i, c: __m256i, d: __m256i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V3Token, a: __m256i, b: __m256i, c: __m256i, d: __m256i, dest: &mut [u16]) {
             assert!(dest.len() >= 4 * U16VecAvx::LEN);
             // First interleave pairs: ab and cd
             let ab_lo = _mm256_unpacklo_epi16(a, b);
@@ -1421,8 +1303,7 @@ impl U16SimdVec for U16VecAvx {
             _mm256_storeu_si256(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm256_storeu_si256(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
-        // SAFETY: AvxDescriptor is only constructed when avx2, fma, and f16c are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
