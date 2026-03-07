@@ -7,5 +7,5 @@
 for hash in $(git log --format='%h' | head -n 100); do
   email=$(git log --format='%ae' "$hash^!")
   name=$(git log --format='%an' "$hash^!")
-  "$(dirname $(realpath "$0"))/check_author.py" "${email}" "${name}" || return
+  "$(dirname $(realpath "$0"))/check_author.py" "${email}" "${name}" || exit 1
 done

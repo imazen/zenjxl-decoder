@@ -283,7 +283,11 @@ jobs:
       run: |
         echo "## Performance Benchmark" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        cat benchmark.txt >> $GITHUB_STEP_SUMMARY
+        if [ -f benchmark.txt ]; then
+          cat benchmark.txt >> $GITHUB_STEP_SUMMARY
+        else
+          echo "Benchmark was not run (checkout or build failed)." >> $GITHUB_STEP_SUMMARY
+        fi
         echo "" >> $GITHUB_STEP_SUMMARY
 
     - uses: actions/upload-artifact@v4
