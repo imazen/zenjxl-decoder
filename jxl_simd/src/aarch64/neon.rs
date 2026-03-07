@@ -8,6 +8,7 @@ use std::ops::{
     Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
+use archmage::SimdToken;
 use archmage::arcane;
 use archmage::intrinsics::aarch64::*;
 
@@ -68,7 +69,11 @@ impl SimdDescriptor for NeonDescriptor {
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
         #[arcane]
-        fn impl_<R>(_: archmage::NeonToken, d: NeonDescriptor, f: impl FnOnce(NeonDescriptor) -> R) -> R {
+        fn impl_<R>(
+            _: archmage::NeonToken,
+            d: NeonDescriptor,
+            f: impl FnOnce(NeonDescriptor) -> R,
+        ) -> R {
             f(d)
         }
         impl_(token(), self, f)
@@ -141,10 +146,7 @@ impl F32SimdVec for F32VecNeon {
         #[arcane]
         fn impl_(_: archmage::NeonToken, a: float32x4_t, b: float32x4_t, dest: &mut [f32]) {
             assert!(dest.len() >= 2 * F32VecNeon::LEN);
-            vst2q_f32(
-                dest.first_chunk_mut::<8>().unwrap(),
-                float32x4x2_t(a, b),
-            )
+            vst2q_f32(dest.first_chunk_mut::<8>().unwrap(), float32x4x2_t(a, b))
         }
         impl_(token(), a.0, b.0, dest)
     }
@@ -152,7 +154,13 @@ impl F32SimdVec for F32VecNeon {
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, a: float32x4_t, b: float32x4_t, c: float32x4_t, dest: &mut [f32]) {
+        fn impl_(
+            _: archmage::NeonToken,
+            a: float32x4_t,
+            b: float32x4_t,
+            c: float32x4_t,
+            dest: &mut [f32],
+        ) {
             assert!(dest.len() >= 3 * F32VecNeon::LEN);
             vst3q_f32(
                 dest.first_chunk_mut::<12>().unwrap(),
@@ -165,7 +173,14 @@ impl F32SimdVec for F32VecNeon {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, a: float32x4_t, b: float32x4_t, c: float32x4_t, d: float32x4_t, dest: &mut [f32]) {
+        fn impl_(
+            _: archmage::NeonToken,
+            a: float32x4_t,
+            b: float32x4_t,
+            c: float32x4_t,
+            d: float32x4_t,
+            dest: &mut [f32],
+        ) {
             assert!(dest.len() >= 4 * F32VecNeon::LEN);
             vst4q_f32(
                 dest.first_chunk_mut::<16>().unwrap(),
@@ -293,7 +308,10 @@ impl F32SimdVec for F32VecNeon {
     #[inline(always)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, src: &[f32]) -> (float32x4_t, float32x4_t, float32x4_t, float32x4_t) {
+        fn impl_(
+            _: archmage::NeonToken,
+            src: &[f32],
+        ) -> (float32x4_t, float32x4_t, float32x4_t, float32x4_t) {
             assert!(src.len() >= 4 * F32VecNeon::LEN);
             let float32x4x4_t(a, b, c, e) = vld4q_f32(src.first_chunk::<16>().unwrap());
             (a, b, c, e)
@@ -305,7 +323,12 @@ impl F32SimdVec for F32VecNeon {
     #[inline(always)]
     fn transpose_square(d: NeonDescriptor, data: &mut [[f32; 4]], stride: usize) {
         #[arcane]
-        fn transpose4x4f32(_: archmage::NeonToken, d: NeonDescriptor, data: &mut [[f32; 4]], stride: usize) {
+        fn transpose4x4f32(
+            _: archmage::NeonToken,
+            d: NeonDescriptor,
+            data: &mut [[f32; 4]],
+            stride: usize,
+        ) {
             assert!(data.len() > 3 * stride);
 
             let p0 = F32VecNeon::load_array(d, &data[0]).0;
@@ -330,7 +353,11 @@ impl F32SimdVec for F32VecNeon {
         }
 
         #[arcane]
-        fn transpose4x4f32_contiguous(_: archmage::NeonToken, d: NeonDescriptor, data: &mut [[f32; 4]]) {
+        fn transpose4x4f32_contiguous(
+            _: archmage::NeonToken,
+            d: NeonDescriptor,
+            data: &mut [[f32; 4]],
+        ) {
             assert!(data.len() > 3);
 
             let float32x4x4_t(p0, p1, p2, p3) =
@@ -483,7 +510,11 @@ impl F32SimdVec for F32VecNeon {
     #[inline(always)]
     fn table_lookup_bf16_8(d: NeonDescriptor, table: Bf16Table8Neon, indices: I32VecNeon) -> Self {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, bf16_table: uint8x16_t, indices: int32x4_t) -> float32x4_t {
+        fn impl_(
+            _: archmage::NeonToken,
+            bf16_table: uint8x16_t,
+            indices: int32x4_t,
+        ) -> float32x4_t {
             let indices_u32 = vreinterpretq_u32_s32(indices);
             let shl17 = vshlq_n_u32::<17>(indices_u32);
             let shl25 = vshlq_n_u32::<25>(indices_u32);
@@ -819,10 +850,7 @@ impl U8SimdVec for U8VecNeon {
         #[arcane]
         fn impl_(_: archmage::NeonToken, a: uint8x16_t, b: uint8x16_t, dest: &mut [u8]) {
             assert!(dest.len() >= 2 * U8VecNeon::LEN);
-            vst2q_u8(
-                dest.first_chunk_mut::<32>().unwrap(),
-                uint8x16x2_t(a, b),
-            )
+            vst2q_u8(dest.first_chunk_mut::<32>().unwrap(), uint8x16x2_t(a, b))
         }
         impl_(token(), a.0, b.0, dest)
     }
@@ -830,12 +858,15 @@ impl U8SimdVec for U8VecNeon {
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, a: uint8x16_t, b: uint8x16_t, c: uint8x16_t, dest: &mut [u8]) {
+        fn impl_(
+            _: archmage::NeonToken,
+            a: uint8x16_t,
+            b: uint8x16_t,
+            c: uint8x16_t,
+            dest: &mut [u8],
+        ) {
             assert!(dest.len() >= 3 * U8VecNeon::LEN);
-            vst3q_u8(
-                dest.first_chunk_mut::<48>().unwrap(),
-                uint8x16x3_t(a, b, c),
-            )
+            vst3q_u8(dest.first_chunk_mut::<48>().unwrap(), uint8x16x3_t(a, b, c))
         }
         impl_(token(), a.0, b.0, c.0, dest)
     }
@@ -843,7 +874,14 @@ impl U8SimdVec for U8VecNeon {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, a: uint8x16_t, b: uint8x16_t, c: uint8x16_t, d: uint8x16_t, dest: &mut [u8]) {
+        fn impl_(
+            _: archmage::NeonToken,
+            a: uint8x16_t,
+            b: uint8x16_t,
+            c: uint8x16_t,
+            d: uint8x16_t,
+            dest: &mut [u8],
+        ) {
             assert!(dest.len() >= 4 * U8VecNeon::LEN);
             vst4q_u8(
                 dest.first_chunk_mut::<64>().unwrap(),
@@ -896,10 +934,7 @@ impl U16SimdVec for U16VecNeon {
         #[arcane]
         fn impl_(_: archmage::NeonToken, a: uint16x8_t, b: uint16x8_t, dest: &mut [u16]) {
             assert!(dest.len() >= 2 * U16VecNeon::LEN);
-            vst2q_u16(
-                dest.first_chunk_mut::<16>().unwrap(),
-                uint16x8x2_t(a, b),
-            )
+            vst2q_u16(dest.first_chunk_mut::<16>().unwrap(), uint16x8x2_t(a, b))
         }
         impl_(token(), a.0, b.0, dest)
     }
@@ -907,12 +942,15 @@ impl U16SimdVec for U16VecNeon {
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, a: uint16x8_t, b: uint16x8_t, c: uint16x8_t, dest: &mut [u16]) {
+        fn impl_(
+            _: archmage::NeonToken,
+            a: uint16x8_t,
+            b: uint16x8_t,
+            c: uint16x8_t,
+            dest: &mut [u16],
+        ) {
             assert!(dest.len() >= 3 * U16VecNeon::LEN);
-            vst3q_u16(
-                dest.first_chunk_mut::<24>().unwrap(),
-                uint16x8x3_t(a, b, c),
-            )
+            vst3q_u16(dest.first_chunk_mut::<24>().unwrap(), uint16x8x3_t(a, b, c))
         }
         impl_(token(), a.0, b.0, c.0, dest)
     }
@@ -920,7 +958,14 @@ impl U16SimdVec for U16VecNeon {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
         #[arcane]
-        fn impl_(_: archmage::NeonToken, a: uint16x8_t, b: uint16x8_t, c: uint16x8_t, d: uint16x8_t, dest: &mut [u16]) {
+        fn impl_(
+            _: archmage::NeonToken,
+            a: uint16x8_t,
+            b: uint16x8_t,
+            c: uint16x8_t,
+            d: uint16x8_t,
+            dest: &mut [u16],
+        ) {
             assert!(dest.len() >= 4 * U16VecNeon::LEN);
             vst4q_u16(
                 dest.first_chunk_mut::<32>().unwrap(),
