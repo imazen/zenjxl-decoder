@@ -1,3 +1,8 @@
+// Copyright (c) the JPEG XL Project Authors. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Tests demonstrating the property_ranges memory amplification in MA tree decoding.
 //!
 //! See SECURITY-VULNERABILITY-REPORT.md for full details.
