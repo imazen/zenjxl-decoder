@@ -454,7 +454,7 @@ impl F32SimdVec for F32VecNeon {
             assert!(dest.len() >= F32VecNeon::LEN);
             // Scalar f16 conversion: stdarch incorrectly requires fp16 target feature for vcvt_f16_f32
             let mut arr = [0f32; 4];
-            vst1q_f32(arr.as_mut_ptr(), v);
+            vst1q_f32(&mut arr, v);
             for i in 0..4 {
                 dest[i] = crate::f16::from_f32(arr[i]).to_bits();
             }
@@ -472,7 +472,7 @@ impl F32SimdVec for F32VecNeon {
             for i in 0..4 {
                 arr[i] = crate::f16::from_bits(mem[i]).to_f32();
             }
-            vld1q_f32(arr.as_ptr())
+            vld1q_f32(&arr)
         }
         F32VecNeon(impl_(token(), mem), d)
     }
@@ -646,14 +646,6 @@ impl I32SimdVec for I32VecNeon {
         let h = vmull_high_s32(this.0, rhs.0);
         let h = vreinterpretq_s32_s64(h);
         I32VecNeon(vuzp2q_s32(l, h), this.1)
-    });
-
-    fn_neon!(this: I32VecNeon, fn wrapping_add(rhs: I32VecNeon) -> I32VecNeon {
-        this + rhs
-    });
-
-    fn_neon!(this: I32VecNeon, fn wrapping_sub(rhs: I32VecNeon) -> I32VecNeon {
-        this - rhs
     });
 
     #[inline(always)]
