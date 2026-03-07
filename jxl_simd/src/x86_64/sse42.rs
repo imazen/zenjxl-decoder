@@ -7,13 +7,17 @@ use crate::{U32SimdVec, impl_f32_array_interface};
 
 use super::super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, U16SimdVec};
 use archmage::SimdToken;
+use archmage::arcane;
 use archmage::intrinsics::x86_64::*;
 use std::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
-// Safety invariant: this type is only ever constructed if sse4.2 is available.
+fn token() -> archmage::X64V2Token {
+    archmage::X64V2Token::summon().unwrap()
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Sse42Descriptor(());
 
@@ -50,17 +54,12 @@ impl SimdDescriptor for Sse42Descriptor {
         archmage::X64V2Token::summon().map(Self::from_token)
     }
 
-    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner<R>(d: Sse42Descriptor, f: impl FnOnce(Sse42Descriptor) -> R) -> R {
+        #[arcane]
+        fn impl_<R>(_: archmage::X64V2Token, d: Sse42Descriptor, f: impl FnOnce(Sse42Descriptor) -> R) -> R {
             f(d)
         }
-        // SAFETY: Sse42Descriptor is only constructed via from_token (which requires
-        // X64V2Token proving sse4.2 availability) or new() (which uses summon()).
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(self, f) }
+        impl_(token(), self, f)
     }
 }
 
@@ -69,15 +68,11 @@ macro_rules! fn_sse42 {
         $this:ident: $self_ty:ty,
         fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )? $body: block) => {
         #[inline(always)]
-        #[allow(unsafe_code)]
         fn $name(self: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-            #[target_feature(enable = "sse4.2")]
-            #[inline]
-            fn inner($this: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-                $body
-            }
-            // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-            unsafe { inner(self, $($arg),*) }
+            #[arcane]
+            #[inline(always)]
+            fn impl_(_t: archmage::X64V2Token, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
+            impl_(token(), self, $($arg),*)
         }
     };
 }
@@ -95,58 +90,46 @@ pub struct F32VecSse42(__m128, Sse42Descriptor);
 #[repr(transparent)]
 pub struct MaskSse42(__m128, Sse42Descriptor);
 
-#[allow(unsafe_code)]
 impl F32SimdVec for F32VecSse42 {
     type Descriptor = Sse42Descriptor;
 
     const LEN: usize = 4;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &[f32]) -> __m128 {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, mem: &[f32]) -> __m128 {
             _mm_loadu_ps(mem.first_chunk::<4>().unwrap())
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [f32]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &mut [f32], v: __m128) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128, mem: &mut [f32]) {
             _mm_storeu_ps(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128, b: __m128, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128, b: __m128, dest: &mut [f32]) {
             assert!(dest.len() >= 2 * F32VecSse42::LEN);
             let lo = _mm_unpacklo_ps(a, b);
             let hi = _mm_unpackhi_ps(a, b);
             _mm_storeu_ps(dest[..4].first_chunk_mut::<4>().unwrap(), lo);
             _mm_storeu_ps(dest[4..8].first_chunk_mut::<4>().unwrap(), hi);
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128, b: __m128, c: __m128, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128, b: __m128, c: __m128, dest: &mut [f32]) {
             assert!(dest.len() >= 3 * F32VecSse42::LEN);
             let p_ab_lo = _mm_unpacklo_ps(a, b);
             let p_ab_hi = _mm_unpackhi_ps(a, b);
@@ -163,16 +146,13 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[4..8].first_chunk_mut::<4>().unwrap(), out1);
             _mm_storeu_ps(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128, b: __m128, c: __m128, d: __m128, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128, b: __m128, c: __m128, d: __m128, dest: &mut [f32]) {
             assert!(dest.len() >= 4 * F32VecSse42::LEN);
             let ab_lo = _mm_unpacklo_ps(a, b);
             let ab_hi = _mm_unpackhi_ps(a, b);
@@ -189,12 +169,10 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
             _mm_storeu_ps(dest[12..16].first_chunk_mut::<4>().unwrap(), out3);
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_8(
         a: Self,
         b: Self,
@@ -206,9 +184,9 @@ impl F32SimdVec for F32VecSse42 {
         h: Self,
         dest: &mut [f32],
     ) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(
+        #[arcane]
+        fn impl_(
+            _: archmage::X64V2Token,
             a: __m128,
             b: __m128,
             c: __m128,
@@ -247,16 +225,13 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[24..28].first_chunk_mut::<4>().unwrap(), abcd_3);
             _mm_storeu_ps(dest[28..32].first_chunk_mut::<4>().unwrap(), efgh_3);
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m128, __m128) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, src: &[f32]) -> (__m128, __m128) {
             assert!(src.len() >= 2 * F32VecSse42::LEN);
             let in0 = _mm_loadu_ps(src[..4].first_chunk::<4>().unwrap());
             let in1 = _mm_loadu_ps(src[4..8].first_chunk::<4>().unwrap());
@@ -264,17 +239,14 @@ impl F32SimdVec for F32VecSse42 {
             let b = _mm_shuffle_ps::<0xDD>(in0, in1);
             (a, b)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        let (a, b) = unsafe { inner(src) };
+        let (a, b) = impl_(token(), src);
         (Self(a, d), Self(b, d))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m128, __m128, __m128) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, src: &[f32]) -> (__m128, __m128, __m128) {
             assert!(src.len() >= 3 * F32VecSse42::LEN);
             let in0 = _mm_loadu_ps(src[..4].first_chunk::<4>().unwrap());
             let in1 = _mm_loadu_ps(src[4..8].first_chunk::<4>().unwrap());
@@ -294,17 +266,14 @@ impl F32SimdVec for F32VecSse42 {
 
             (a, b, c)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        let (a, b, c) = unsafe { inner(src) };
+        let (a, b, c) = impl_(token(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m128, __m128, __m128, __m128) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, src: &[f32]) -> (__m128, __m128, __m128, __m128) {
             assert!(src.len() >= 4 * F32VecSse42::LEN);
             let in0 = _mm_loadu_ps(src[..4].first_chunk::<4>().unwrap());
             let in1 = _mm_loadu_ps(src[4..8].first_chunk::<4>().unwrap());
@@ -323,8 +292,7 @@ impl F32SimdVec for F32VecSse42 {
 
             (a, b, c, dv)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        let (a, b, c, dv) = unsafe { inner(src) };
+        let (a, b, c, dv) = impl_(token(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -337,27 +305,21 @@ impl F32SimdVec for F32VecSse42 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: f32) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: f32) -> __m128 {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: f32) -> __m128 {
             _mm_set1_ps(v)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn zero(d: Self::Descriptor) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner() -> __m128 {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token) -> __m128 {
             _mm_setzero_ps()
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        Self(unsafe { inner() }, d)
+        Self(impl_(token()), d)
     }
 
     fn_sse42!(this: F32VecSse42, fn abs() -> F32VecSse42 {
@@ -418,11 +380,9 @@ impl F32SimdVec for F32VecSse42 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn prepare_table_bf16_8(_d: Sse42Descriptor, table: &[f32; 8]) -> Bf16Table8Sse42 {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(table: &[f32; 8]) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, table: &[f32; 8]) -> __m128i {
             let table_lo = _mm_loadu_ps(table[..4].first_chunk::<4>().unwrap());
             let table_hi = _mm_loadu_ps(table[4..8].first_chunk::<4>().unwrap());
             let table_lo_i32 = _mm_castps_si128(table_lo);
@@ -434,20 +394,17 @@ impl F32SimdVec for F32VecSse42 {
             let bf16_hi = _mm_shuffle_epi8(table_hi_i32, bf16_extract);
             _mm_unpacklo_epi64(bf16_lo, bf16_hi)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        Bf16Table8Sse42(unsafe { inner(table) })
+        Bf16Table8Sse42(impl_(token(), table))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn table_lookup_bf16_8(
         d: Sse42Descriptor,
         table: Bf16Table8Sse42,
         indices: I32VecSse42,
     ) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(bf16_table: __m128i, indices: __m128i) -> __m128 {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, bf16_table: __m128i, indices: __m128i) -> __m128 {
             let shl17 = _mm_slli_epi32::<17>(indices);
             let shl25 = _mm_slli_epi32::<25>(indices);
             let base = _mm_set1_epi32(0x01008080u32 as i32);
@@ -455,16 +412,13 @@ impl F32SimdVec for F32VecSse42 {
             let result = _mm_shuffle_epi8(bf16_table, shuffle_mask);
             _mm_castsi128_ps(result)
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        F32VecSse42(unsafe { inner(table.0, indices.0) }, d)
+        F32VecSse42(impl_(token(), table.0, indices.0), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn round_store_u8(self, dest: &mut [u8]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: __m128, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecSse42::LEN);
             let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             let i32s = _mm_cvtps_epi32(rounded);
@@ -473,28 +427,23 @@ impl F32SimdVec for F32VecSse42 {
             let val = _mm_cvtsi128_si32(u8s);
             dest[..4].copy_from_slice(&val.to_ne_bytes());
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn round_store_u16(self, dest: &mut [u16]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: __m128, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecSse42::LEN);
             let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             let i32s = _mm_cvtps_epi32(rounded);
             let u16s = _mm_packus_epi32(i32s, i32s);
-            // Extract each u16 from the packed result
             dest[0] = _mm_extract_epi16::<0>(u16s) as u16;
             dest[1] = _mm_extract_epi16::<1>(u16s) as u16;
             dest[2] = _mm_extract_epi16::<2>(u16s) as u16;
             dest[3] = _mm_extract_epi16::<3>(u16s) as u16;
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     impl_f32_array_interface!();
@@ -522,11 +471,9 @@ impl F32SimdVec for F32VecSse42 {
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(d: Sse42Descriptor, data: &mut [[f32; 4]], stride: usize) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, d: Sse42Descriptor, data: &mut [[f32; 4]], stride: usize) {
             assert!(data.len() > stride * 3);
 
             let p0 = F32VecSse42::load_array(d, &data[0]).0;
@@ -549,8 +496,7 @@ impl F32SimdVec for F32VecSse42 {
             F32VecSse42(r2, d).store_array(&mut data[2 * stride]);
             F32VecSse42(r3, d).store_array(&mut data[3 * stride]);
         }
-        // SAFETY: Sse42Descriptor is only constructed when sse4.2 is available.
-        unsafe { inner(d, data, stride) }
+        impl_(token(), d, data, stride)
     }
 }
 
@@ -610,46 +556,36 @@ impl DivAssign<F32VecSse42> for F32VecSse42 {
 #[repr(transparent)]
 pub struct I32VecSse42(__m128i, Sse42Descriptor);
 
-#[allow(unsafe_code)]
 impl I32SimdVec for I32VecSse42 {
     type Descriptor = Sse42Descriptor;
 
     const LEN: usize = 4;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &[i32]) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, mem: &[i32]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<4>().unwrap())
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [i32]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &mut [i32], v: __m128i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [i32]) {
             _mm_storeu_si128(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: i32) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: i32) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: i32) -> __m128i {
             _mm_set1_epi32(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     fn_sse42!(this: I32VecSse42, fn as_f32() -> F32VecSse42 {
@@ -696,27 +632,21 @@ impl I32SimdVec for I32VecSse42 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner<const AMOUNT_I: i32>(v: __m128i) -> __m128i {
+        #[arcane]
+        fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_slli_epi32::<AMOUNT_I>(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner<const AMOUNT_I: i32>(v: __m128i) -> __m128i {
+        #[arcane]
+        fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_srai_epi32::<AMOUNT_I>(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
     }
 
     fn_sse42!(this: I32VecSse42, fn mul_wide_take_high(rhs: I32VecSse42) -> I32VecSse42 {
@@ -728,11 +658,9 @@ impl I32SimdVec for I32VecSse42 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_u16(self, dest: &mut [u16]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: __m128i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= I32VecSse42::LEN);
             let mut tmp = [0i32; 4];
             _mm_storeu_si128(&mut tmp, v);
@@ -740,8 +668,7 @@ impl I32SimdVec for I32VecSse42 {
                 dest[i] = tmp[i] as u16;
             }
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 }
 
@@ -845,15 +772,12 @@ impl U32SimdVec for U32VecSse42 {
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner<const AMOUNT_I: i32>(v: __m128i) -> __m128i {
+        #[arcane]
+        fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_srli_epi32::<AMOUNT_I>(v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner::<AMOUNT_I>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
     }
 }
 
@@ -861,69 +785,54 @@ impl U32SimdVec for U32VecSse42 {
 #[repr(transparent)]
 pub struct U8VecSse42(__m128i, Sse42Descriptor);
 
-#[allow(unsafe_code)]
 impl U8SimdVec for U8VecSse42 {
     type Descriptor = Sse42Descriptor;
     const LEN: usize = 16;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &[u8]) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, mem: &[u8]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<16>().unwrap())
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u8) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: u8) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: u8) -> __m128i {
             _mm_set1_epi8(v as i8)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u8]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &mut [u8], v: __m128i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [u8]) {
             _mm_storeu_si128(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128i, b: __m128i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, dest: &mut [u8]) {
             assert!(dest.len() >= 2 * U8VecSse42::LEN);
             let lo = _mm_unpacklo_epi8(a, b);
             let hi = _mm_unpackhi_epi8(a, b);
             _mm_storeu_si128(dest[..16].first_chunk_mut::<16>().unwrap(), lo);
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), hi);
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128i, b: __m128i, c: __m128i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, dest: &mut [u8]) {
             assert!(dest.len() >= 3 * U8VecSse42::LEN);
 
             let mask_a0 = _mm_setr_epi8(0, -1, -1, 1, -1, -1, 2, -1, -1, 3, -1, -1, 4, -1, -1, 5);
@@ -961,16 +870,13 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128i, b: __m128i, c: __m128i, d: __m128i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, d: __m128i, dest: &mut [u8]) {
             assert!(dest.len() >= 4 * U8VecSse42::LEN);
             let ab_lo = _mm_unpacklo_epi8(a, b);
             let ab_hi = _mm_unpackhi_epi8(a, b);
@@ -987,8 +893,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm_storeu_si128(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
@@ -996,69 +901,54 @@ impl U8SimdVec for U8VecSse42 {
 #[repr(transparent)]
 pub struct U16VecSse42(__m128i, Sse42Descriptor);
 
-#[allow(unsafe_code)]
 impl U16SimdVec for U16VecSse42 {
     type Descriptor = Sse42Descriptor;
     const LEN: usize = 8;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &[u16]) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, mem: &[u16]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<8>().unwrap())
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u16) -> Self {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(v: u16) -> __m128i {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: u16) -> __m128i {
             _mm_set1_epi16(v as i16)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u16]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(mem: &mut [u16], v: __m128i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [u16]) {
             _mm_storeu_si128(mem.first_chunk_mut::<8>().unwrap(), v)
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128i, b: __m128i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= 2 * U16VecSse42::LEN);
             let lo = _mm_unpacklo_epi16(a, b);
             let hi = _mm_unpackhi_epi16(a, b);
             _mm_storeu_si128(dest[..8].first_chunk_mut::<8>().unwrap(), lo);
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), hi);
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128i, b: __m128i, c: __m128i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= 3 * U16VecSse42::LEN);
 
             let mask_a0 = _mm_setr_epi8(0, 1, -1, -1, -1, -1, 2, 3, -1, -1, -1, -1, 4, 5, -1, -1);
@@ -1096,16 +986,13 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "sse4.2")]
-        #[inline]
-        fn inner(a: __m128i, b: __m128i, c: __m128i, d: __m128i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, d: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= 4 * U16VecSse42::LEN);
             let ab_lo = _mm_unpacklo_epi16(a, b);
             let ab_hi = _mm_unpackhi_epi16(a, b);
@@ -1122,8 +1009,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
             _mm_storeu_si128(dest[24..32].first_chunk_mut::<8>().unwrap(), out3);
         }
-        // SAFETY: descriptor guarantees target features are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 

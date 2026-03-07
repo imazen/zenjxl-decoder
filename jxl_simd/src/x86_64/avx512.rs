@@ -8,13 +8,17 @@ use super::super::{
 };
 use crate::{Sse42Descriptor, U32SimdVec, impl_f32_array_interface};
 use archmage::SimdToken;
+use archmage::arcane;
 use archmage::intrinsics::x86_64::*;
 use std::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-// Safety invariant: this type is only ever constructed if avx512f and avx512bw are available.
+fn token() -> archmage::X64V4Token {
+    archmage::X64V4Token::summon().unwrap()
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Avx512Descriptor(());
 
@@ -64,16 +68,12 @@ impl SimdDescriptor for Avx512Descriptor {
         archmage::X64V4Token::summon().map(Self::from_token)
     }
 
-    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner<R>(d: Avx512Descriptor, f: impl FnOnce(Avx512Descriptor) -> R) -> R {
+        #[arcane]
+        fn impl_<R>(_: archmage::X64V4Token, d: Avx512Descriptor, f: impl FnOnce(Avx512Descriptor) -> R) -> R {
             f(d)
         }
-        // SAFETY: Avx512Descriptor is only constructed via from_token (which requires
-        // X64V4Token proving avx512 availability) or new() (which uses summon()).
-        unsafe { inner(self, f) }
+        impl_(token(), self, f)
     }
 }
 
@@ -82,15 +82,11 @@ macro_rules! fn_avx {
         $this:ident: $self_ty:ty,
         fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )? $body: block) => {
         #[inline(always)]
-        #[allow(unsafe_code)]
         fn $name(self: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-            #[target_feature(enable = "avx512f")]
-            #[inline]
-            fn inner($this: $self_ty, $($arg: $ty),*) $(-> $ret)? {
-                $body
-            }
-            // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-            unsafe { inner(self, $($arg),*) }
+            #[arcane]
+            #[inline(always)]
+            fn impl_(_t: archmage::X64V4Token, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
+            impl_(token(), self, $($arg),*)
         }
     };
 }
@@ -103,42 +99,33 @@ pub struct F32VecAvx512(__m512, Avx512Descriptor);
 #[repr(transparent)]
 pub struct MaskAvx512(__mmask16, Avx512Descriptor);
 
-#[allow(unsafe_code)]
 impl F32SimdVec for F32VecAvx512 {
     type Descriptor = Avx512Descriptor;
 
     const LEN: usize = 16;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &[f32]) -> __m512 {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, mem: &[f32]) -> __m512 {
             _mm512_loadu_ps(mem.first_chunk::<16>().unwrap())
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [f32]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &mut [f32], v: __m512) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512, mem: &mut [f32]) {
             _mm512_storeu_ps(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(a: __m512, b: __m512, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512, b: __m512, dest: &mut [f32]) {
             assert!(dest.len() >= 2 * F32VecAvx512::LEN);
             // a = [a0..a15], b = [b0..b15]
             // Output: [a0, b0, a1, b1, ..., a15, b15]
@@ -160,17 +147,13 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
             _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(a: __m512, b: __m512, c: __m512, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512, b: __m512, c: __m512, dest: &mut [f32]) {
             assert!(dest.len() >= 3 * F32VecAvx512::LEN);
 
             let idx_ab0 = _mm512_setr_epi32(0, 16, 0, 1, 17, 0, 2, 18, 0, 3, 19, 0, 4, 20, 0, 5);
@@ -196,17 +179,13 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(a: __m512, b: __m512, c: __m512, d: __m512, dest: &mut [f32]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512, b: __m512, c: __m512, d: __m512, dest: &mut [f32]) {
             assert!(dest.len() >= 4 * F32VecAvx512::LEN);
             // a = [a0..a15], b = [b0..b15], c = [c0..c15], d = [d0..d15]
             // Output: [a0,b0,c0,d0, a1,b1,c1,d1, ..., a15,b15,c15,d15]
@@ -281,13 +260,10 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm512_storeu_ps(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_8(
         a: Self,
         b: Self,
@@ -299,9 +275,9 @@ impl F32SimdVec for F32VecAvx512 {
         h: Self,
         dest: &mut [f32],
     ) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(
+        #[arcane]
+        fn impl_(
+            _: archmage::X64V4Token,
             a: __m512,
             b: __m512,
             c: __m512,
@@ -419,17 +395,13 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[96..112].first_chunk_mut::<16>().unwrap(), out6);
             _mm512_storeu_ps(dest[112..128].first_chunk_mut::<16>().unwrap(), out7);
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m512, __m512) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, src: &[f32]) -> (__m512, __m512) {
             assert!(src.len() >= 2 * F32VecAvx512::LEN);
             // Input: [a0,b0,a1,b1,...,a15,b15]
             // Output: a = [a0..a15], b = [b0..b15]
@@ -447,18 +419,14 @@ impl F32SimdVec for F32VecAvx512 {
 
             (a, b)
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        let (a, b) = unsafe { inner(src) };
+        let (a, b) = impl_(token(), src);
         (Self(a, d), Self(b, d))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m512, __m512, __m512) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, src: &[f32]) -> (__m512, __m512, __m512) {
             assert!(src.len() >= 3 * F32VecAvx512::LEN);
             // Input layout (48 floats in 3x16-float vectors):
             // in0: [a0,b0,c0,a1,b1,c1,a2,b2,c2,a3,b3,c3,a4,b4,c4,a5]
@@ -500,18 +468,14 @@ impl F32SimdVec for F32VecAvx512 {
 
             (a, b, c)
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        let (a, b, c) = unsafe { inner(src) };
+        let (a, b, c) = impl_(token(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(src: &[f32]) -> (__m512, __m512, __m512, __m512) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, src: &[f32]) -> (__m512, __m512, __m512, __m512) {
             assert!(src.len() >= 4 * F32VecAvx512::LEN);
             // Input: [a0,b0,c0,d0,a1,b1,c1,d1,...] (64 floats)
             // Output: a = [a0..a15], b = [b0..b15], c = [c0..c15], d = [d0..d15]
@@ -547,9 +511,7 @@ impl F32SimdVec for F32VecAvx512 {
 
             (a, b, c, dv)
         }
-
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        let (a, b, c, dv) = unsafe { inner(src) };
+        let (a, b, c, dv) = impl_(token(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -562,27 +524,21 @@ impl F32SimdVec for F32VecAvx512 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: f32) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(v: f32) -> __m512 {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: f32) -> __m512 {
             _mm512_set1_ps(v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn zero(d: Self::Descriptor) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner() -> __m512 {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token) -> __m512 {
             _mm512_setzero_ps()
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner() }, d)
+        Self(impl_(token()), d)
     }
 
     fn_avx!(this: F32VecAvx512, fn abs() -> F32VecAvx512 {
@@ -639,41 +595,33 @@ impl F32SimdVec for F32VecAvx512 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn prepare_table_bf16_8(_d: Avx512Descriptor, table: &[f32; 8]) -> Bf16Table8Avx512 {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(table: &[f32; 8]) -> __m512 {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, table: &[f32; 8]) -> __m512 {
             let table_256 = _mm256_loadu_ps(table[..8].first_chunk::<8>().unwrap());
             // Zero-extend to 512-bit; vpermutexvar with indices 0-7 only reads first 256 bits
             _mm512_castps256_ps512(table_256)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Bf16Table8Avx512(unsafe { inner(table) })
+        Bf16Table8Avx512(impl_(token(), table))
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn table_lookup_bf16_8(
         d: Avx512Descriptor,
         table: Bf16Table8Avx512,
         indices: I32VecAvx512,
     ) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(indices: __m512i, table: __m512) -> __m512 {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, indices: __m512i, table: __m512) -> __m512 {
             _mm512_permutexvar_ps(indices, table)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        F32VecAvx512(unsafe { inner(indices.0, table.0) }, d)
+        F32VecAvx512(impl_(token(), indices.0, table.0), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn round_store_u8(self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx512f", enable = "avx512bw")]
-        #[inline]
-        fn inner(v: __m512, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
             // Round to nearest integer
             let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
@@ -684,16 +632,13 @@ impl F32SimdVec for F32VecAvx512 {
             // Store 16 bytes
             _mm_storeu_si128(dest.first_chunk_mut::<16>().unwrap(), u8s);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn round_store_u16(self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx512f", enable = "avx512bw")]
-        #[inline]
-        fn inner(v: __m512, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
             // Round to nearest integer
             let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
@@ -704,48 +649,39 @@ impl F32SimdVec for F32VecAvx512 {
             // Store 16 u16s (32 bytes)
             _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), u16s);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     impl_f32_array_interface!();
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load_f16_bits(d: Self::Descriptor, mem: &[u16]) -> Self {
         // AVX512 implies F16C, so we can always use hardware conversion
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(d: Avx512Descriptor, mem: &[u16]) -> F32VecAvx512 {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, d: Avx512Descriptor, mem: &[u16]) -> F32VecAvx512 {
             assert!(mem.len() >= F32VecAvx512::LEN);
             let bits = _mm256_loadu_si256(mem.first_chunk::<16>().unwrap());
             F32VecAvx512(_mm512_cvtph_ps(bits), d)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(d, mem) }
+        impl_(token(), d, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_f16_bits(self, dest: &mut [u16]) {
         // AVX512 implies F16C, so we can always use hardware conversion
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(v: __m512, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
             let bits = _mm512_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), bits);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(d: Avx512Descriptor, data: &mut [[f32; 16]], stride: usize) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, d: Avx512Descriptor, data: &mut [[f32; 16]], stride: usize) {
             assert!(data.len() > stride * 15);
 
             let r0 = F32VecAvx512::load_array(d, &data[0]).0;
@@ -895,10 +831,7 @@ impl F32SimdVec for F32VecAvx512 {
             F32VecAvx512(o14, d).store_array(&mut data[14 * stride]);
             F32VecAvx512(o15, d).store_array(&mut data[15 * stride]);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe {
-            inner(d, data, stride);
-        }
+        impl_(token(), d, data, stride)
     }
 }
 
@@ -958,46 +891,36 @@ impl DivAssign<F32VecAvx512> for F32VecAvx512 {
 #[repr(transparent)]
 pub struct I32VecAvx512(__m512i, Avx512Descriptor);
 
-#[allow(unsafe_code)]
 impl I32SimdVec for I32VecAvx512 {
     type Descriptor = Avx512Descriptor;
 
     const LEN: usize = 16;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &[i32]) -> __m512i {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, mem: &[i32]) -> __m512i {
             _mm512_loadu_epi32(mem.first_chunk::<16>().unwrap())
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [i32]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &mut [i32], v: __m512i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512i, mem: &mut [i32]) {
             _mm512_storeu_epi32(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: i32) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(v: i32) -> __m512i {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: i32) -> __m512i {
             _mm512_set1_epi32(v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     fn_avx!(this: I32VecAvx512, fn as_f32() -> F32VecAvx512 {
@@ -1034,27 +957,21 @@ impl I32SimdVec for I32VecAvx512 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner<const AMOUNT_U: u32>(v: __m512i) -> __m512i {
+        #[arcane]
+        fn impl_<const AMOUNT_U: u32>(_: archmage::X64V4Token, v: __m512i) -> __m512i {
             _mm512_slli_epi32::<AMOUNT_U>(v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner::<AMOUNT_U>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_U>(token(), self.0), self.1)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner<const AMOUNT_U: u32>(v: __m512i) -> __m512i {
+        #[arcane]
+        fn impl_<const AMOUNT_U: u32>(_: archmage::X64V4Token, v: __m512i) -> __m512i {
             _mm512_srai_epi32::<AMOUNT_U>(v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner::<AMOUNT_U>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_U>(token(), self.0), self.1)
     }
 
     fn_avx!(this: I32VecAvx512, fn mul_wide_take_high(rhs: I32VecAvx512) -> I32VecAvx512 {
@@ -1065,17 +982,14 @@ impl I32SimdVec for I32VecAvx512 {
     });
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_u16(self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(v: __m512i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= I32VecAvx512::LEN);
             let tmp = _mm512_cvtepi32_epi16(v);
             _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), tmp);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(self.0, dest) }
+        impl_(token(), self.0, dest)
     }
 }
 
@@ -1194,7 +1108,6 @@ impl BitXorAssign<I32VecAvx512> for I32VecAvx512 {
 #[repr(transparent)]
 pub struct U32VecAvx512(__m512i, Avx512Descriptor);
 
-#[allow(unsafe_code)]
 impl U32SimdVec for U32VecAvx512 {
     type Descriptor = Avx512Descriptor;
 
@@ -1206,15 +1119,12 @@ impl U32SimdVec for U32VecAvx512 {
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner<const AMOUNT_U: u32>(v: __m512i) -> __m512i {
+        #[arcane]
+        fn impl_<const AMOUNT_U: u32>(_: archmage::X64V4Token, v: __m512i) -> __m512i {
             _mm512_srli_epi32::<AMOUNT_U>(v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner::<AMOUNT_U>(self.0) }, self.1)
+        Self(impl_::<AMOUNT_U>(token(), self.0), self.1)
     }
 }
 
@@ -1222,53 +1132,41 @@ impl U32SimdVec for U32VecAvx512 {
 #[repr(transparent)]
 pub struct U8VecAvx512(__m512i, Avx512Descriptor);
 
-#[allow(unsafe_code)]
 impl U8SimdVec for U8VecAvx512 {
     type Descriptor = Avx512Descriptor;
     const LEN: usize = 64;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &[u8]) -> __m512i {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, mem: &[u8]) -> __m512i {
             _mm512_loadu_si512(mem.first_chunk::<64>().unwrap())
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u8) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(v: u8) -> __m512i {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: u8) -> __m512i {
             _mm512_set1_epi8(v as i8)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u8]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &mut [u8], v: __m512i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512i, mem: &mut [u8]) {
             _mm512_storeu_si512(mem.first_chunk_mut::<64>().unwrap(), v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx512f,avx512bw")]
-        #[inline]
-        fn inner(a: __m512i, b: __m512i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512i, b: __m512i, dest: &mut [u8]) {
             assert!(dest.len() >= 2 * U8VecAvx512::LEN);
             let lo = _mm512_unpacklo_epi8(a, b);
             let hi = _mm512_unpackhi_epi8(a, b);
@@ -1280,16 +1178,13 @@ impl U8SimdVec for U8VecAvx512 {
             _mm512_storeu_si512(dest[..64].first_chunk_mut::<64>().unwrap(), out0);
             _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), out1);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx512f,avx512bw")]
-        #[inline]
-        fn inner(a: __m512i, b: __m512i, c: __m512i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512i, b: __m512i, c: __m512i, dest: &mut [u8]) {
             assert!(dest.len() >= 3 * U8VecAvx512::LEN);
 
             let mask_a0 = _mm512_broadcast_i32x4(_mm_setr_epi8(
@@ -1360,16 +1255,13 @@ impl U8SimdVec for U8VecAvx512 {
             _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), final1);
             _mm512_storeu_si512(dest[128..192].first_chunk_mut::<64>().unwrap(), final2);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
-        #[target_feature(enable = "avx512f,avx512bw")]
-        #[inline]
-        fn inner(a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [u8]) {
             assert!(dest.len() >= 4 * U8VecAvx512::LEN);
             let ab_lo = _mm512_unpacklo_epi8(a, b);
             let ab_hi = _mm512_unpackhi_epi8(a, b);
@@ -1402,8 +1294,7 @@ impl U8SimdVec for U8VecAvx512 {
             _mm512_storeu_si512(dest[128..192].first_chunk_mut::<64>().unwrap(), out2);
             _mm512_storeu_si512(dest[192..256].first_chunk_mut::<64>().unwrap(), out3);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
@@ -1411,53 +1302,41 @@ impl U8SimdVec for U8VecAvx512 {
 #[repr(transparent)]
 pub struct U16VecAvx512(__m512i, Avx512Descriptor);
 
-#[allow(unsafe_code)]
 impl U16SimdVec for U16VecAvx512 {
     type Descriptor = Avx512Descriptor;
     const LEN: usize = 32;
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &[u16]) -> __m512i {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, mem: &[u16]) -> __m512i {
             _mm512_loadu_si512(mem.first_chunk::<32>().unwrap())
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(mem) }, d)
+        Self(impl_(token(), mem), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn splat(d: Self::Descriptor, v: u16) -> Self {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(v: u16) -> __m512i {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: u16) -> __m512i {
             _mm512_set1_epi16(v as i16)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        Self(unsafe { inner(v) }, d)
+        Self(impl_(token(), v), d)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store(&self, mem: &mut [u16]) {
-        #[target_feature(enable = "avx512f")]
-        #[inline]
-        fn inner(mem: &mut [u16], v: __m512i) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, v: __m512i, mem: &mut [u16]) {
             _mm512_storeu_si512(mem.first_chunk_mut::<32>().unwrap(), v)
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f is available.
-        unsafe { inner(mem, self.0) }
+        impl_(token(), self.0, mem)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx512f,avx512bw")]
-        #[inline]
-        fn inner(a: __m512i, b: __m512i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512i, b: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= 2 * U16VecAvx512::LEN);
             let lo = _mm512_unpacklo_epi16(a, b);
             let hi = _mm512_unpackhi_epi16(a, b);
@@ -1469,16 +1348,13 @@ impl U16SimdVec for U16VecAvx512 {
             _mm512_storeu_si512(dest[..32].first_chunk_mut::<32>().unwrap(), out0);
             _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), out1);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(a.0, b.0, dest) }
+        impl_(token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx512f,avx512bw")]
-        #[inline]
-        fn inner(a: __m512i, b: __m512i, c: __m512i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512i, b: __m512i, c: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= 3 * U16VecAvx512::LEN);
 
             let mask_a0 = _mm512_broadcast_i32x4(_mm_setr_epi8(
@@ -1552,16 +1428,13 @@ impl U16SimdVec for U16VecAvx512 {
             _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), final1);
             _mm512_storeu_si512(dest[64..96].first_chunk_mut::<32>().unwrap(), final2);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(a.0, b.0, c.0, dest) }
+        impl_(token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
-        #[target_feature(enable = "avx512f,avx512bw")]
-        #[inline]
-        fn inner(a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [u16]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V4Token, a: __m512i, b: __m512i, c: __m512i, d: __m512i, dest: &mut [u16]) {
             assert!(dest.len() >= 4 * U16VecAvx512::LEN);
             let ab_lo = _mm512_unpacklo_epi16(a, b);
             let ab_hi = _mm512_unpackhi_epi16(a, b);
@@ -1595,8 +1468,7 @@ impl U16SimdVec for U16VecAvx512 {
             _mm512_storeu_si512(dest[64..96].first_chunk_mut::<32>().unwrap(), out2);
             _mm512_storeu_si512(dest[96..128].first_chunk_mut::<32>().unwrap(), out3);
         }
-        // SAFETY: Avx512Descriptor is only constructed when avx512f and avx512bw are available.
-        unsafe { inner(a.0, b.0, c.0, d.0, dest) }
+        impl_(token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
