@@ -581,8 +581,11 @@ impl F32SimdVec for F32VecAvx {
             let u16s = _mm_packus_epi32(lo, hi);
             // Pack 8 u16s to 8 u8s (use same vector twice, take lower half)
             let u8s = _mm_packus_epi16(u16s, u16s);
-            // Store lower 8 bytes
-            _mm_storel_epi64(dest.first_chunk_mut::<16>().unwrap(), u8s);
+            // Extract lower 8 bytes
+            let lo = _mm_cvtsi128_si32(u8s);
+            let hi = _mm_extract_epi32::<1>(u8s);
+            dest[..4].copy_from_slice(&lo.to_ne_bytes());
+            dest[4..8].copy_from_slice(&hi.to_ne_bytes());
         }
         impl_(token(), self.0, dest)
     }
