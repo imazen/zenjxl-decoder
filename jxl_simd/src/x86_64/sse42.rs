@@ -56,7 +56,11 @@ impl SimdDescriptor for Sse42Descriptor {
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
         #[arcane]
-        fn impl_<R>(_: archmage::X64V2Token, d: Sse42Descriptor, f: impl FnOnce(Sse42Descriptor) -> R) -> R {
+        fn impl_<R>(
+            _: archmage::X64V2Token,
+            d: Sse42Descriptor,
+            f: impl FnOnce(Sse42Descriptor) -> R,
+        ) -> R {
             f(d)
         }
         impl_(token(), self, f)
@@ -152,7 +156,14 @@ impl F32SimdVec for F32VecSse42 {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
         #[arcane]
-        fn impl_(_: archmage::X64V2Token, a: __m128, b: __m128, c: __m128, d: __m128, dest: &mut [f32]) {
+        fn impl_(
+            _: archmage::X64V2Token,
+            a: __m128,
+            b: __m128,
+            c: __m128,
+            d: __m128,
+            dest: &mut [f32],
+        ) {
             assert!(dest.len() >= 4 * F32VecSse42::LEN);
             let ab_lo = _mm_unpacklo_ps(a, b);
             let ab_hi = _mm_unpackhi_ps(a, b);
@@ -473,7 +484,12 @@ impl F32SimdVec for F32VecSse42 {
     #[inline(always)]
     fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
         #[arcane]
-        fn impl_(_: archmage::X64V2Token, d: Sse42Descriptor, data: &mut [[f32; 4]], stride: usize) {
+        fn impl_(
+            _: archmage::X64V2Token,
+            d: Sse42Descriptor,
+            data: &mut [[f32; 4]],
+            stride: usize,
+        ) {
             assert!(data.len() > stride * 3);
 
             let p0 = F32VecSse42::load_array(d, &data[0]).0;
@@ -876,7 +892,14 @@ impl U8SimdVec for U8VecSse42 {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
         #[arcane]
-        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, d: __m128i, dest: &mut [u8]) {
+        fn impl_(
+            _: archmage::X64V2Token,
+            a: __m128i,
+            b: __m128i,
+            c: __m128i,
+            d: __m128i,
+            dest: &mut [u8],
+        ) {
             assert!(dest.len() >= 4 * U8VecSse42::LEN);
             let ab_lo = _mm_unpacklo_epi8(a, b);
             let ab_hi = _mm_unpackhi_epi8(a, b);
@@ -992,7 +1015,14 @@ impl U16SimdVec for U16VecSse42 {
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
         #[arcane]
-        fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, d: __m128i, dest: &mut [u16]) {
+        fn impl_(
+            _: archmage::X64V2Token,
+            a: __m128i,
+            b: __m128i,
+            c: __m128i,
+            d: __m128i,
+            dest: &mut [u16],
+        ) {
             assert!(dest.len() >= 4 * U16VecSse42::LEN);
             let ab_lo = _mm_unpacklo_epi16(a, b);
             let ab_hi = _mm_unpackhi_epi16(a, b);

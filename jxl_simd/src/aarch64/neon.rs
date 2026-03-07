@@ -452,17 +452,12 @@ impl F32SimdVec for F32VecNeon {
         #[arcane]
         fn impl_(_: archmage::NeonToken, v: float32x4_t, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecNeon::LEN);
-            let f16_bits: uint16x4_t;
-            // Inline asm required: stdarch incorrectly requires fp16 target feature for vcvt_f16_f32
-            unsafe {
-                std::arch::asm!(
-                    "fcvtn {out:v}.4h, {inp:v}.4s",
-                    inp = in(vreg) v,
-                    out = out(vreg) f16_bits,
-                    options(pure, nomem, nostack),
-                );
+            // Scalar f16 conversion: stdarch incorrectly requires fp16 target feature for vcvt_f16_f32
+            let mut arr = [0f32; 4];
+            vst1q_f32(arr.as_mut_ptr(), v);
+            for i in 0..4 {
+                dest[i] = crate::f16::from_f32(arr[i]).to_bits();
             }
-            vst1_u16(dest.first_chunk_mut::<4>().unwrap(), f16_bits);
         }
         impl_(token(), self.0, dest)
     }
@@ -472,18 +467,12 @@ impl F32SimdVec for F32VecNeon {
         #[arcane]
         fn impl_(_: archmage::NeonToken, mem: &[u16]) -> float32x4_t {
             assert!(mem.len() >= F32VecNeon::LEN);
-            let result: float32x4_t;
-            // Inline asm required: stdarch incorrectly requires fp16 target feature for vcvt_f32_f16
-            unsafe {
-                let f16_bits = vld1_u16(mem.first_chunk::<4>().unwrap());
-                std::arch::asm!(
-                    "fcvtl {out:v}.4s, {inp:v}.4h",
-                    inp = in(vreg) f16_bits,
-                    out = out(vreg) result,
-                    options(pure, nomem, nostack),
-                );
+            // Scalar f16 conversion: stdarch incorrectly requires fp16 target feature for vcvt_f32_f16
+            let mut arr = [0f32; 4];
+            for i in 0..4 {
+                arr[i] = crate::f16::from_bits(mem[i]).to_f32();
             }
-            result
+            vld1q_f32(arr.as_ptr())
         }
         F32VecNeon(impl_(token(), mem), d)
     }
