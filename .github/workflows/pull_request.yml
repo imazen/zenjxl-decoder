@@ -231,6 +231,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # Never block the PR on benchmark failures
     permissions:
+      contents: read
       pull-requests: write
     steps:
     - name: Checkout the source
