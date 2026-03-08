@@ -116,17 +116,11 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
         self.add_stage_internal(Stage::Extend(extend))
     }
 
-    pub fn add_inplace_stage<S: RenderPipelineInPlaceStage + Send + Sync>(
-        self,
-        stage: S,
-    ) -> Self {
+    pub fn add_inplace_stage<S: RenderPipelineInPlaceStage + Send + Sync>(self, stage: S) -> Self {
         self.add_stage_internal(Stage::InPlace(Pipeline::box_inplace_stage(stage)))
     }
 
-    pub fn add_inout_stage<S: RenderPipelineInOutStage + Send + Sync>(
-        self,
-        stage: S,
-    ) -> Self {
+    pub fn add_inout_stage<S: RenderPipelineInOutStage + Send + Sync>(self, stage: S) -> Self {
         self.add_stage_internal(Stage::InOut(Pipeline::box_inout_stage(stage)))
     }
 

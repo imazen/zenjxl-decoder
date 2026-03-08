@@ -14,7 +14,9 @@ use crate::{
     entropy_coding::decode::{Histograms, SymbolReader, unpack_signed},
     error::{Error, Result},
     frame::color_correlation_map::ColorCorrelationParams,
-    util::{CeilLog2, MemoryTracker, NewWithCapacity, fast_cos, fast_erff_simd, tracing_wrappers::*},
+    util::{
+        CeilLog2, MemoryTracker, NewWithCapacity, fast_cos, fast_erff_simd, tracing_wrappers::*,
+    },
 };
 use jxl_simd::{F32SimdVec, ScalarDescriptor, SimdDescriptor, simd_function};
 const MAX_NUM_CONTROL_POINTS: u32 = 1 << 20;
