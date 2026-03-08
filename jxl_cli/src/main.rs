@@ -3,6 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#![forbid(unsafe_code)]
+
 use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use jxl::api::JxlDecoderOptions;
