@@ -45,6 +45,8 @@ jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", versio
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
+default = ["all-simd"]
+
 all-simd = ["jxl_simd/all-simd", "sse42", "avx", "avx512", "neon", "wasm128"]
 profiling = []
 sse42 = ["jxl_simd/sse42"]

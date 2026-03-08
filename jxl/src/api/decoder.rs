@@ -9,7 +9,7 @@ use super::{
 };
 #[cfg(test)]
 use crate::frame::Frame;
-use crate::{api::JxlFrameHeader, error::Result};
+use crate::{api::JxlFrameHeader, container::frame_index::FrameIndexBox, error::Result};
 use states::*;
 use std::marker::PhantomData;
 
@@ -60,6 +60,15 @@ impl<S: JxlState> JxlDecoder<S> {
     #[cfg(feature = "jpeg")]
     pub fn take_jpeg_reconstruction(&mut self) -> Option<Vec<u8>> {
         self.inner.take_jpeg_reconstruction()
+    }
+
+    /// Returns the parsed frame index box, if the file contained one.
+    ///
+    /// The frame index box (`jxli`) is an optional part of the JXL container
+    /// format that provides a seek table for animated files, listing keyframe
+    /// byte offsets, timestamps, and frame counts.
+    pub fn frame_index(&self) -> Option<&FrameIndexBox> {
+        self.inner.frame_index()
     }
 
     /// Rewinds a decoder to the start of the file, allowing past frames to be displayed again.
@@ -145,6 +154,13 @@ impl JxlDecoder<WithImageInfo> {
         Ok(self.map_inner_processing_result(inner_result))
     }
 
+    /// Draws all the pixels we have data for. This is useful for i.e. previewing LF frames.
+    ///
+    /// Note: see `process` for alignment requirements for the buffer data.
+    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer<'_>]) -> Result<()> {
+        self.inner.flush_pixels(buffers)
+    }
+
     pub fn has_more_frames(&self) -> bool {
         self.inner.has_more_frames()
     }
@@ -214,6 +230,7 @@ pub(crate) mod tests {
                 &std::fs::read("resources/test/green_queen_vardct_e3.jxl").unwrap(),
                 u.arbitrary::<u8>().unwrap() as usize + 1,
                 false,
+                false,
                 None,
             )
             .unwrap();
@@ -226,6 +243,7 @@ pub(crate) mod tests {
         mut input: &[u8],
         chunk_size: usize,
         use_simple_pipeline: bool,
+        do_flush: bool,
         callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<(), Error>>>,
     ) -> Result<(usize, Vec<Vec<Image<f32>>>), Error> {
         let options = JxlDecoderOptions::default();
@@ -238,7 +256,7 @@ pub(crate) mod tests {
         let mut chunk_input = &input[0..0];
 
         macro_rules! advance_decoder {
-            ($decoder: ident $(, $extra_arg: expr)?) => {
+            ($decoder: ident $(, $extra_arg: expr)? $(; $flush_arg: expr)?) => {
                 loop {
                     chunk_input =
                         &input[..(chunk_input.len().saturating_add(chunk_size)).min(input.len())];
@@ -248,6 +266,12 @@ pub(crate) mod tests {
                     match process_result.unwrap() {
                         ProcessingResult::Complete { result } => break result,
                         ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                            $(
+                                let mut fallback = fallback;
+                                if do_flush && !input.is_empty() {
+                                    fallback.flush_pixels($flush_arg)?;
+                                }
+                            )?
                             if input.is_empty() {
                                 panic!("Unexpected end of input");
                             }
@@ -293,9 +317,6 @@ pub(crate) mod tests {
         let mut frames = vec![];
 
         loop {
-            // Process until we have frame info
-            let mut decoder_with_frame_info = advance_decoder!(decoder_with_image_info);
-
             // First channel is interleaved.
             let mut buffers = vec![Image::new_with_value(
                 (buffer_width * num_channels, buffer_height),
@@ -325,7 +346,11 @@ pub(crate) mod tests {
                 })
                 .collect();
 
-            decoder_with_image_info = advance_decoder!(decoder_with_frame_info, &mut api_buffers);
+            // Process until we have frame info
+            let mut decoder_with_frame_info =
+                advance_decoder!(decoder_with_image_info; &mut api_buffers);
+            decoder_with_image_info =
+                advance_decoder!(decoder_with_frame_info, &mut api_buffers; &mut api_buffers);
 
             // All pixels should have been overwritten, so they should no longer be NaNs.
             for buf in buffers.iter() {
@@ -353,75 +378,107 @@ pub(crate) mod tests {
     }
 
     fn decode_test_file(path: &Path) -> Result<(), Error> {
-        decode(&std::fs::read(path)?, usize::MAX, false, None)?;
+        decode(&std::fs::read(path)?, usize::MAX, false, false, None)?;
         Ok(())
     }
 
     for_each_test_file!(decode_test_file);
 
     fn decode_test_file_chunks(path: &Path) -> Result<(), Error> {
-        decode(&std::fs::read(path)?, 1, false, None)?;
+        decode(&std::fs::read(path)?, 1, false, false, None)?;
         Ok(())
     }
 
     for_each_test_file!(decode_test_file_chunks);
 
-    fn compare_pipelines(path: &Path) -> Result<(), Error> {
-        let file = std::fs::read(path)?;
-        let simple_frames = decode(&file, usize::MAX, true, None)?.1;
-        let frames = decode(&file, usize::MAX, false, None)?.1;
-        assert_eq!(frames.len(), simple_frames.len());
-        for (fc, (f, sf)) in frames
-            .into_iter()
-            .zip(simple_frames.into_iter())
-            .enumerate()
-        {
+    fn compare_frames(
+        path: &Path,
+        fc: usize,
+        f: &[Image<f32>],
+        sf: &[Image<f32>],
+    ) -> Result<(), Error> {
+        assert_eq!(
+            f.len(),
+            sf.len(),
+            "Frame {fc} has different channels counts",
+        );
+        for (c, (b, sb)) in f.iter().zip(sf.iter()).enumerate() {
             assert_eq!(
-                f.len(),
-                sf.len(),
-                "Frame {fc} has different channels counts",
+                b.size(),
+                sb.size(),
+                "Channel {c} in frame {fc} has different sizes",
             );
-            for (c, (b, sb)) in f.into_iter().zip(sf.into_iter()).enumerate() {
-                assert_eq!(
-                    b.size(),
-                    sb.size(),
-                    "Channel {c} in frame {fc} has different sizes",
-                );
-                let sz = b.size();
-                if false {
-                    let f = std::fs::File::create(Path::new("/tmp/").join(format!(
-                        "{}_diff_chan{c}.pbm",
-                        path.as_os_str().to_string_lossy().replace("/", "_")
-                    )))?;
-                    use std::io::Write;
-                    let mut f = std::io::BufWriter::new(f);
-                    writeln!(f, "P1\n{} {}", sz.0, sz.1)?;
-                    for y in 0..sz.1 {
-                        for x in 0..sz.0 {
-                            if (b.row(y)[x] - sb.row(y)[x]).abs() > 1e-8 {
-                                write!(f, "1")?;
-                            } else {
-                                write!(f, "0")?;
-                            }
-                        }
-                    }
-                    drop(f);
-                }
+            let sz = b.size();
+            if false {
+                let f = std::fs::File::create(Path::new("/tmp/").join(format!(
+                    "{}_diff_chan{c}.pbm",
+                    path.as_os_str().to_string_lossy().replace("/", "_")
+                )))?;
+                use std::io::Write;
+                let mut f = std::io::BufWriter::new(f);
+                writeln!(f, "P1\n{} {}", sz.0, sz.1)?;
                 for y in 0..sz.1 {
                     for x in 0..sz.0 {
-                        assert_eq!(
-                            b.row(y)[x],
-                            sb.row(y)[x],
-                            "Pixels differ at position ({x}, {y}), channel {c}"
-                        );
+                        if (b.row(y)[x] - sb.row(y)[x]).abs() > 1e-8 {
+                            write!(f, "1")?;
+                        } else {
+                            write!(f, "0")?;
+                        }
                     }
+                }
+                drop(f);
+            }
+            for y in 0..sz.1 {
+                for x in 0..sz.0 {
+                    assert_eq!(
+                        b.row(y)[x],
+                        sb.row(y)[x],
+                        "Pixels differ at position ({x}, {y}), channel {c}"
+                    );
                 }
             }
         }
         Ok(())
     }
 
+    fn compare_pipelines(path: &Path) -> Result<(), Error> {
+        let file = std::fs::read(path)?;
+        let simple_frames = decode(&file, usize::MAX, true, false, None)?.1;
+        let frames = decode(&file, usize::MAX, false, false, None)?.1;
+        assert_eq!(frames.len(), simple_frames.len());
+        for (fc, (f, sf)) in frames
+            .into_iter()
+            .zip(simple_frames.into_iter())
+            .enumerate()
+        {
+            compare_frames(path, fc, &f, &sf)?;
+        }
+        Ok(())
+    }
+
     for_each_test_file!(compare_pipelines);
+
+    fn compare_incremental(path: &Path) -> Result<(), Error> {
+        let file = std::fs::read(path).unwrap();
+        // One-shot decode
+        let (_, one_shot_frames) = decode(&file, usize::MAX, false, false, None)?;
+        // Incremental decode with arbitrary flushes.
+        let (_, frames) = decode(&file, 123, false, true, None)?;
+
+        // Compare one_shot_frames and frames
+        assert_eq!(one_shot_frames.len(), frames.len());
+        for (fc, (f, sf)) in frames
+            .into_iter()
+            .zip(one_shot_frames.into_iter())
+            .enumerate()
+        {
+            compare_frames(path, fc, &f, &sf)?;
+        }
+
+        Ok(())
+    }
+
+    for_each_test_file!(compare_incremental);
 
     #[test]
     fn test_preview_size_none_for_regular_files() {
@@ -1291,7 +1348,7 @@ pub(crate) mod tests {
         // The test passes if it doesn't panic with "attempt to add with overflow"
         // It's OK if it returns an error or panics with "Unexpected end of input"
         let result = panic::catch_unwind(|| {
-            let _ = decode(data, 1024, false, None);
+            let _ = decode(data, 1024, false, false, None);
         });
 
         // If it panicked, make sure it wasn't an overflow panic
@@ -1307,6 +1364,110 @@ pub(crate) mod tests {
                 panic_msg
             );
         }
+    }
+
+    /// Helper to wrap a bare codestream in a JXL container with a jxli frame index box.
+    fn wrap_with_frame_index(
+        codestream: &[u8],
+        tnum: u32,
+        tden: u32,
+        entries: &[(u64, u64, u64)], // (OFF_delta, T, F)
+    ) -> Vec<u8> {
+        use crate::util::test::build_frame_index_content;
+
+        fn make_box(ty: &[u8; 4], content: &[u8]) -> Vec<u8> {
+            let len = (8 + content.len()) as u32;
+            let mut buf = Vec::new();
+            buf.extend(len.to_be_bytes());
+            buf.extend(ty);
+            buf.extend(content);
+            buf
+        }
+
+        let jxli_content = build_frame_index_content(tnum, tden, entries);
+
+        // JXL signature box
+        let sig = [
+            0x00, 0x00, 0x00, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a,
+        ];
+        // ftyp box
+        let ftyp = make_box(b"ftyp", b"jxl \x00\x00\x00\x00jxl ");
+        let jxli = make_box(b"jxli", &jxli_content);
+        let jxlc = make_box(b"jxlc", codestream);
+
+        let mut container = Vec::new();
+        container.extend(&sig);
+        container.extend(&ftyp);
+        container.extend(&jxli);
+        container.extend(&jxlc);
+        container
+    }
+
+    #[test]
+    fn test_frame_index_parsed_from_container() {
+        // Read a bare animation codestream and wrap it in a container with a jxli box.
+        let codestream =
+            std::fs::read("resources/test/conformance_test_images/animation_icos4d_5.jxl").unwrap();
+
+        // Create synthetic frame index entries (delta offsets).
+        // These are synthetic -- we don't know real frame offsets, but we can verify parsing.
+        let entries = vec![
+            (0u64, 100u64, 1u64), // Frame 0 at offset 0
+            (500, 100, 1),        // Frame 1 at offset 500
+            (600, 100, 1),        // Frame 2 at offset 1100
+        ];
+
+        let container = wrap_with_frame_index(&codestream, 1, 1000, &entries);
+
+        // Decode with a large chunk size so the jxli box is fully consumed.
+        let options = JxlDecoderOptions::default();
+        let mut dec = JxlDecoder::<states::Initialized>::new(options);
+        let mut input: &[u8] = &container;
+        let dec = loop {
+            match dec.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    if input.is_empty() {
+                        panic!("Unexpected end of input");
+                    }
+                    dec = fallback;
+                }
+            }
+        };
+
+        // Check that frame index was parsed.
+        let fi = dec.frame_index().expect("frame_index should be Some");
+        assert_eq!(fi.num_frames(), 3);
+        assert_eq!(fi.tnum, 1);
+        assert_eq!(fi.tden.get(), 1000);
+        // Verify absolute offsets (accumulated from deltas)
+        assert_eq!(fi.entries[0].codestream_offset, 0);
+        assert_eq!(fi.entries[1].codestream_offset, 500);
+        assert_eq!(fi.entries[2].codestream_offset, 1100);
+        assert_eq!(fi.entries[0].duration_ticks, 100);
+        assert_eq!(fi.entries[2].frame_count, 1);
+    }
+
+    #[test]
+    fn test_frame_index_none_for_bare_codestream() {
+        // A bare codestream has no container, so no frame index.
+        let data =
+            std::fs::read("resources/test/conformance_test_images/animation_icos4d_5.jxl").unwrap();
+        let options = JxlDecoderOptions::default();
+        let mut dec = JxlDecoder::<states::Initialized>::new(options);
+        let mut input: &[u8] = &data;
+        let dec = loop {
+            match dec.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    if input.is_empty() {
+                        panic!("Unexpected end of input");
+                    }
+                    dec = fallback;
+                }
+            }
+        };
+        assert!(dec.frame_index().is_none());
     }
 
     /// Regression test for Chromium ClusterFuzz issue 474401148.

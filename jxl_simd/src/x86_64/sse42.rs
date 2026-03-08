@@ -686,6 +686,20 @@ impl I32SimdVec for I32VecSse42 {
         }
         impl_(token(), self.0, dest)
     }
+
+    #[inline(always)]
+    fn store_u8(self, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::X64V2Token, v: __m128i, dest: &mut [u8]) {
+            assert!(dest.len() >= I32VecSse42::LEN);
+            let mut tmp = [0i32; 4];
+            _mm_storeu_si128(&mut tmp, v);
+            for i in 0..4 {
+                dest[i] = tmp[i] as u8;
+            }
+        }
+        impl_(token(), self.0, dest)
+    }
 }
 
 impl Add<I32VecSse42> for I32VecSse42 {

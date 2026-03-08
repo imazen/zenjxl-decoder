@@ -3,6 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use std::io::IoSliceMut;
+
+use crate::container::frame_index::FrameIndexBox;
 use crate::error::{Error, Result};
 
 use crate::api::{
@@ -17,6 +20,8 @@ enum ParseState {
     SkippableBox(u64),
     #[cfg(feature = "jpeg")]
     JbrdBox(u64),
+    /// Buffering a jxli box: (remaining bytes, accumulated content).
+    BufferingFrameIndex(u64, Vec<u8>),
 }
 
 enum CodestreamBoxType {
@@ -32,6 +37,8 @@ pub(super) struct BoxParser {
     box_type: CodestreamBoxType,
     #[cfg(feature = "jpeg")]
     jbrd_data: Option<Vec<u8>>,
+    /// Parsed frame index box, if present in the file.
+    pub(super) frame_index: Option<FrameIndexBox>,
 }
 
 impl BoxParser {
@@ -42,6 +49,7 @@ impl BoxParser {
             box_type: CodestreamBoxType::None,
             #[cfg(feature = "jpeg")]
             jbrd_data: None,
+            frame_index: None,
         }
     }
 
@@ -125,6 +133,31 @@ impl BoxParser {
                         self.state = ParseState::JbrdBox(remaining);
                     }
                 }
+                ParseState::BufferingFrameIndex(mut remaining, mut buf) => {
+                    let num = remaining.min(usize::MAX as u64) as usize;
+                    if !self.box_buffer.is_empty() {
+                        let take = num.min(self.box_buffer.len());
+                        buf.extend_from_slice(&self.box_buffer[..take]);
+                        self.box_buffer.consume(take);
+                        remaining -= take as u64;
+                    } else {
+                        let old_len = buf.len();
+                        buf.resize(old_len + num, 0);
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        if read == 0 {
+                            return Err(Error::OutOfBounds(num));
+                        }
+                        buf.truncate(old_len + read);
+                        remaining -= read as u64;
+                    }
+                    if remaining == 0 {
+                        // Parse the buffered frame index box.
+                        self.frame_index = Some(FrameIndexBox::parse(&buf)?);
+                        self.state = ParseState::BoxNeeded;
+                    } else {
+                        self.state = ParseState::BufferingFrameIndex(remaining, buf);
+                    }
+                }
                 ParseState::BoxNeeded => {
                     self.box_buffer.refill(|b| input.read(b), None)?;
                     let min_len = match &self.box_buffer[..] {
@@ -193,6 +226,20 @@ impl BoxParser {
                         #[cfg(feature = "jpeg")]
                         b"jbrd" => {
                             self.state = ParseState::JbrdBox(content_len);
+                        }
+                        b"jxli" => {
+                            if content_len == u64::MAX {
+                                return Err(Error::InvalidBox);
+                            }
+                            // Reasonable size limit for a frame index box (16 MB).
+                            if content_len > 16 * 1024 * 1024 {
+                                self.state = ParseState::SkippableBox(content_len);
+                            } else {
+                                self.state = ParseState::BufferingFrameIndex(
+                                    content_len,
+                                    Vec::with_capacity(content_len as usize),
+                                );
+                            }
                         }
                         _ => {
                             self.state = ParseState::SkippableBox(content_len);

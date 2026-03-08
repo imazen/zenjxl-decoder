@@ -679,6 +679,20 @@ impl I32SimdVec for I32VecNeon {
         }
         impl_(token(), self.0, dest)
     }
+
+    #[inline(always)]
+    fn store_u8(self, dest: &mut [u8]) {
+        #[arcane]
+        fn impl_(_: archmage::NeonToken, v: int32x4_t, dest: &mut [u8]) {
+            assert!(dest.len() >= I32VecNeon::LEN);
+            let mut tmp = [0i32; 4];
+            vst1q_s32(&mut tmp, v);
+            for i in 0..4 {
+                dest[i] = tmp[i] as u8;
+            }
+        }
+        impl_(token(), self.0, dest)
+    }
 }
 
 impl Add<I32VecNeon> for I32VecNeon {

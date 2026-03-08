@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::{JxlBasicInfo, JxlColorProfile, JxlDecoderOptions, JxlPixelFormat};
+use crate::container::frame_index::FrameIndexBox;
 use box_parser::BoxParser;
 use codestream_parser::CodestreamParser;
 
@@ -139,6 +140,11 @@ impl JxlDecoderInner {
     #[cfg(feature = "jpeg")]
     pub fn take_jpeg_reconstruction(&mut self) -> Option<Vec<u8>> {
         self.codestream_parser.jpeg_bytes.take()
+    }
+
+    /// Returns the parsed frame index box, if the file contained one.
+    pub fn frame_index(&self) -> Option<&FrameIndexBox> {
+        self.box_parser.frame_index.as_ref()
     }
 
     #[cfg(test)]

@@ -352,6 +352,10 @@ pub trait I32SimdVec:
     /// Stores the lower 16 bits of each i32 lane as u16 values.
     /// Requires `dest.len() >= Self::LEN` or it will panic.
     fn store_u16(self, dest: &mut [u16]);
+
+    /// Stores the lower 8 bits of each i32 lane as u8 values.
+    /// Requires `dest.len() >= Self::LEN` or it will panic.
+    fn store_u8(self, dest: &mut [u8]);
 }
 
 pub trait U32SimdVec: Sized + Copy + Debug + Send + Sync {

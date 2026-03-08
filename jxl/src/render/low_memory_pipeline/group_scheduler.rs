@@ -136,7 +136,8 @@ impl LowMemoryRenderPipeline {
     /// Returns an empty vec if not all channels for the group are ready yet.
     pub(crate) fn prepare_group(&mut self, g: usize) -> Result<Vec<RenderWorkItem>> {
         let buf = &mut self.input_buffers[g];
-        if buf.ready_channels != buf.data.len() {
+        assert!(buf.ready_channels <= self.shared.num_used_channels());
+        if buf.ready_channels != self.shared.num_used_channels() {
             return Ok(vec![]);
         }
         buf.ready_channels = 0;
@@ -150,53 +151,58 @@ impl LowMemoryRenderPipeline {
         }
         .clip(self.shared.input_size);
 
-        // Extract border data from the group's buffers.
-        for c in 0..self.shared.num_channels() {
-            let (bx, by) = self.border_size;
-            let (sx, sy) = self.input_buffers[g].data[c].as_ref().unwrap().byte_size();
-            let ChannelInfo {
-                ty,
-                downsample: (dx, dy),
-            } = self.shared.channel_info[0][c];
-            let ty = ty.unwrap();
-            let bx = bx >> dx;
-            let by = by >> dy;
-            let mut topbottom = if let Some(b) = self.input_buffers[g].topbottom[c].take() {
-                b
-            } else if let Some(b) = self.maybe_get_scratch_buffer(c, 1) {
-                b
-            } else {
-                let height = 4 * by;
-                let width = (1 << self.shared.log_group_size) * ty.size();
-                OwnedRawImage::new_zeroed_with_padding((width, height), (0, 0), (0, 0))?
-            };
-            let mut leftright = if let Some(b) = self.input_buffers[g].leftright[c].take() {
-                b
-            } else if let Some(b) = self.maybe_get_scratch_buffer(c, 2) {
-                b
-            } else {
-                let height = 1 << self.shared.log_group_size;
-                let width = 4 * bx * ty.size();
-                OwnedRawImage::new_zeroed_with_padding((width, height), (0, 0), (0, 0))?
-            };
-            let input = self.input_buffers[g].data[c].as_ref().unwrap();
-            if by != 0 {
-                for y in 0..(2 * by).min(sy) {
-                    topbottom.row_mut(y)[..sx].copy_from_slice(input.row(y));
-                    topbottom.row_mut(4 * by - 1 - y)[..sx].copy_from_slice(input.row(sy - y - 1));
+        {
+            for c in 0..self.shared.num_channels() {
+                if !self.shared.channel_is_used[c] {
+                    continue;
                 }
-            }
-            if bx != 0 {
-                let cs = (bx * 2 * ty.size()).min(sx);
-                for y in 0..sy {
-                    let row_out = leftright.row_mut(y);
-                    let row_in = input.row(y);
-                    row_out[..cs].copy_from_slice(&row_in[..cs]);
-                    row_out[4 * bx * ty.size() - cs..].copy_from_slice(&row_in[sx - cs..]);
+                let (bx, by) = self.border_size;
+                let (sx, sy) = self.input_buffers[g].data[c].as_ref().unwrap().byte_size();
+                let ChannelInfo {
+                    ty,
+                    downsample: (dx, dy),
+                } = self.shared.channel_info[0][c];
+                let ty = ty.unwrap();
+                let bx = bx >> dx;
+                let by = by >> dy;
+                let mut topbottom = if let Some(b) = self.input_buffers[g].topbottom[c].take() {
+                    b
+                } else if let Some(b) = self.maybe_get_scratch_buffer(c, 1) {
+                    b
+                } else {
+                    let height = 4 * by;
+                    let width = (1 << self.shared.log_group_size) * ty.size();
+                    OwnedRawImage::new_zeroed_with_padding((width, height), (0, 0), (0, 0))?
+                };
+                let mut leftright = if let Some(b) = self.input_buffers[g].leftright[c].take() {
+                    b
+                } else if let Some(b) = self.maybe_get_scratch_buffer(c, 2) {
+                    b
+                } else {
+                    let height = 1 << self.shared.log_group_size;
+                    let width = 4 * bx * ty.size();
+                    OwnedRawImage::new_zeroed_with_padding((width, height), (0, 0), (0, 0))?
+                };
+                let input = self.input_buffers[g].data[c].as_ref().unwrap();
+                if by != 0 {
+                    for y in 0..(2 * by).min(sy) {
+                        topbottom.row_mut(y)[..sx].copy_from_slice(input.row(y));
+                        topbottom.row_mut(4 * by - 1 - y)[..sx]
+                            .copy_from_slice(input.row(sy - y - 1));
+                    }
                 }
+                if bx != 0 {
+                    let cs = (bx * 2 * ty.size()).min(sx);
+                    for y in 0..sy {
+                        let row_out = leftright.row_mut(y);
+                        let row_in = input.row(y);
+                        row_out[..cs].copy_from_slice(&row_in[..cs]);
+                        row_out[4 * bx * ty.size() - cs..].copy_from_slice(&row_in[sx - cs..]);
+                    }
+                }
+                self.input_buffers[g].leftright[c] = Some(leftright);
+                self.input_buffers[g].topbottom[c] = Some(topbottom);
             }
-            self.input_buffers[g].leftright[c] = Some(leftright);
-            self.input_buffers[g].topbottom[c] = Some(topbottom);
         }
         self.input_buffers[g].is_ready = true;
 

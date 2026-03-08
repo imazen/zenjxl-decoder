@@ -669,6 +669,19 @@ impl I32SimdVec for I32VecWasm128 {
         dest[2] = lane2;
         dest[3] = lane3;
     }
+
+    #[inline(always)]
+    fn store_u8(self, dest: &mut [u8]) {
+        assert!(dest.len() >= Self::LEN);
+        let lane0 = i32x4_extract_lane::<0>(self.0) as u8;
+        let lane1 = i32x4_extract_lane::<1>(self.0) as u8;
+        let lane2 = i32x4_extract_lane::<2>(self.0) as u8;
+        let lane3 = i32x4_extract_lane::<3>(self.0) as u8;
+        dest[0] = lane0;
+        dest[1] = lane1;
+        dest[2] = lane2;
+        dest[3] = lane3;
+    }
 }
 
 impl Add<I32VecWasm128> for I32VecWasm128 {

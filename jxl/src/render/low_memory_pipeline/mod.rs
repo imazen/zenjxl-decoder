@@ -11,7 +11,7 @@ use row_buffers::RowBuffer;
 
 use crate::api::JxlOutputBuffer;
 use crate::error::Result;
-use crate::image::{Image, ImageDataType, OwnedRawImage, Rect};
+use crate::image::{DataTypeTag, Image, ImageDataType, OwnedRawImage, Rect};
 use crate::render::MAX_BORDER;
 use crate::render::buffer_splitter::{BufferSplitter, SaveStageBufferInfo};
 use crate::render::internal::Stage;
@@ -24,7 +24,7 @@ use super::internal::{RenderPipelineShared, RunInOutStage, RunInPlaceStage};
 pub(crate) mod group_scheduler;
 mod helpers;
 pub(crate) mod render_group;
-pub(super) mod row_buffers;
+pub(crate) mod row_buffers;
 mod run_stage;
 mod save;
 
@@ -160,8 +160,9 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         let mut initial_buffers = vec![];
         for chan in 0..nc {
             initial_buffers.push(RowBuffer::new(
-                shared.channel_info[0][chan].ty.unwrap(),
+                shared.channel_info[0][chan].ty.unwrap_or(DataTypeTag::U8),
                 next_border_and_cur_downsample[0][chan].0 as usize,
+                0,
                 0,
                 shared.chunk_size >> shared.channel_info[0][chan].downsample.0,
             )?);
@@ -176,6 +177,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                     stage.output_type().unwrap(),
                     *next_y_border as usize,
                     stage.shift().1 as usize,
+                    stage.shift().0 as usize,
                     shared.chunk_size >> *dsx,
                 )?);
             }
@@ -361,16 +363,19 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         buf: Image<T>,
         buffer_splitter: &mut BufferSplitter,
     ) -> Result<()> {
-        debug!(
-            "filling data for group {}, channel {}, using type {:?}",
-            group_id,
-            channel,
-            T::DATA_TYPE_ID,
-        );
-        self.input_buffers[group_id].set_buffer(channel, buf.into_raw());
-        self.shared.group_chan_complete[group_id][channel] = complete;
+        if self.shared.channel_is_used[channel] {
+            debug!(
+                "filling data for group {}, channel {}, using type {:?}",
+                group_id,
+                channel,
+                T::DATA_TYPE_ID,
+            );
+            self.input_buffers[group_id].set_buffer(channel, buf.into_raw());
+            self.shared.group_chan_complete[group_id][channel] = complete;
 
-        self.render_with_new_group(group_id, buffer_splitter)
+            self.render_with_new_group(group_id, buffer_splitter)?;
+        }
+        Ok(())
     }
 
     fn check_buffer_sizes(&self, buffers: &mut [Option<JxlOutputBuffer>]) -> Result<()> {
@@ -503,6 +508,10 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         stage: S,
     ) -> Box<dyn RunInPlaceStage<Self::Buffer> + Send + Sync> {
         Box::new(stage)
+    }
+
+    fn used_channel_mask(&self) -> &[bool] {
+        &self.shared.channel_is_used
     }
 }
 

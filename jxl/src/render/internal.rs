@@ -8,6 +8,7 @@ use std::fmt::Display;
 
 use crate::error::Result;
 use crate::image::{DataTypeTag, ImageDataType};
+use crate::render::StageSpecialCase;
 use crate::util::{MemoryTracker, ShiftRightCeil};
 
 use super::save::SaveStage;
@@ -77,6 +78,13 @@ impl<Buffer: 'static> Stage<Buffer> {
             _ => None,
         }
     }
+    pub(super) fn is_special_case(&self) -> Option<StageSpecialCase> {
+        match self {
+            Stage::InOut(s) => s.is_special_case(),
+            Stage::InPlace(s) => s.is_special_case(),
+            _ => None,
+        }
+    }
 }
 
 impl<Buffer> Display for Stage<Buffer> {
@@ -106,6 +114,7 @@ pub struct RenderPipelineShared<Buffer> {
     pub stages: Vec<Stage<Buffer>>,
     pub extend_stage_index: Option<usize>,
     pub memory_tracker: MemoryTracker,
+    pub channel_is_used: Vec<bool>,
 }
 
 impl<Buffer> RenderPipelineShared<Buffer> {
@@ -161,7 +170,11 @@ impl<Buffer> RenderPipelineShared<Buffer> {
     }
 
     pub fn num_channels(&self) -> usize {
-        self.channel_info[0].len()
+        self.channel_is_used.len()
+    }
+
+    pub fn num_used_channels(&self) -> usize {
+        self.channel_is_used.iter().filter(|x| **x).count()
     }
 }
 
@@ -174,6 +187,7 @@ pub trait InPlaceStage: Any + Display + Send + Sync {
     fn init_local_state(&self, thread_index: usize) -> Result<Option<Box<dyn Any + Send>>>;
     fn uses_channel(&self, c: usize) -> bool;
     fn ty(&self) -> DataTypeTag;
+    fn is_special_case(&self) -> Option<StageSpecialCase>;
 }
 
 pub trait RunInPlaceStage<Buffer: PipelineBuffer>: InPlaceStage + Send + Sync {
@@ -195,6 +209,9 @@ impl<T: RenderPipelineInPlaceStage + Send + Sync> InPlaceStage for T {
     fn ty(&self) -> DataTypeTag {
         T::Type::DATA_TYPE_ID
     }
+    fn is_special_case(&self) -> Option<StageSpecialCase> {
+        self.is_special_case()
+    }
 }
 
 pub trait InOutStage: Any + Display + Send + Sync {
@@ -204,6 +221,7 @@ pub trait InOutStage: Any + Display + Send + Sync {
     fn uses_channel(&self, c: usize) -> bool;
     fn input_type(&self) -> DataTypeTag;
     fn output_type(&self) -> DataTypeTag;
+    fn is_special_case(&self) -> Option<StageSpecialCase>;
 }
 
 impl<T: RenderPipelineInOutStage + Send + Sync> InOutStage for T {
@@ -224,6 +242,9 @@ impl<T: RenderPipelineInOutStage + Send + Sync> InOutStage for T {
     }
     fn output_type(&self) -> DataTypeTag {
         T::OutputT::DATA_TYPE_ID
+    }
+    fn is_special_case(&self) -> Option<StageSpecialCase> {
+        self.is_special_case()
     }
 }
 

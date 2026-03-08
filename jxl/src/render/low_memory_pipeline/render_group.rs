@@ -74,6 +74,9 @@ fn fill_initial_buffers(
     (x0, xsize): (usize, usize),
     (gx, gy): (usize, usize),
 ) {
+    if !view.shared.channel_is_used[c] {
+        return;
+    }
     let ChannelInfo {
         ty,
         downsample: (dx, dy),

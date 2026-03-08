@@ -14,8 +14,11 @@ use crate::error::{Error, Result};
 use crate::features::epf::SigmaSource;
 #[cfg(feature = "threads")]
 use crate::frame::decode::upsample_lf_group;
+use crate::frame::RenderUnit;
 use crate::headers::frame_header::Encoding;
+use crate::headers::frame_header::FrameType;
 use crate::headers::{Orientation, color_encoding::ColorSpace, extra_channels::ExtraChannel};
+use crate::image::Image;
 use crate::image::Rect;
 #[cfg(test)]
 use crate::render::SimpleRenderPipeline;
@@ -68,7 +71,7 @@ impl Frame {
         mut pipeline: RenderPipelineBuilder<P>,
         channels: &[usize],
         data_format: JxlDataFormat,
-    ) -> Result<RenderPipelineBuilder<P>> {
+    ) -> RenderPipelineBuilder<P> {
         use crate::render::stages::{
             ConvertF32ToF16Stage, ConvertF32ToU8Stage, ConvertF32ToU16Stage,
         };
@@ -77,24 +80,24 @@ impl Frame {
             JxlDataFormat::U8 { bit_depth } => {
                 for &channel in channels {
                     pipeline =
-                        pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth))?;
+                        pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
                 }
             }
             JxlDataFormat::U16 { bit_depth, .. } => {
                 for &channel in channels {
                     pipeline =
-                        pipeline.add_inout_stage(ConvertF32ToU16Stage::new(channel, bit_depth))?;
+                        pipeline.add_inout_stage(ConvertF32ToU16Stage::new(channel, bit_depth));
                 }
             }
             JxlDataFormat::F16 { .. } => {
                 for &channel in channels {
-                    pipeline = pipeline.add_inout_stage(ConvertF32ToF16Stage::new(channel))?;
+                    pipeline = pipeline.add_inout_stage(ConvertF32ToF16Stage::new(channel));
                 }
             }
             // F32 doesn't need conversion - the pipeline already uses f32
             JxlDataFormat::F32 { .. } => {}
         }
-        Ok(pipeline)
+        pipeline
     }
 
     /// Check if CMS will consume a black channel that the user requested in the output.
@@ -129,6 +132,7 @@ impl Frame {
         pixel_format: &JxlPixelFormat,
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
         do_flush: bool,
+        output_profile: &JxlColorProfile,
     ) -> Result<()> {
         if self.render_pipeline.is_none() {
             assert_eq!(groups.iter().map(|x| x.1.len()).sum::<usize>(), 0);
@@ -202,43 +206,44 @@ impl Frame {
 
         let frame_setup_dur = frame_start.elapsed();
 
-        // Render data from the lf global section, if we didn't do so already, before rendering HF.
-        if !self.lf_global_was_rendered {
-            self.lf_global_was_rendered = true;
-            let lf_global = self.lf_global.as_mut().unwrap();
-            let mut pass_to_pipeline = |chan, group, image| {
-                pipeline!(
-                    self,
-                    p,
-                    p.set_buffer_for_group(chan, group, true, image, &mut buffer_splitter)?
-                );
-                Ok(())
-            };
-            lf_global.modular_global.process_output(
-                &[0],
-                0,
-                &self.header,
-                &mut pass_to_pipeline,
-            )?;
-            for group in 0..self.header.num_lf_groups() {
-                lf_global.modular_global.process_output(
-                    &[1],
-                    group,
-                    &self.header,
-                    &mut pass_to_pipeline,
-                )?;
-            }
+        let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
+
+        modular_global.set_pipeline_used_channels(pipeline!(self, p, p.used_channel_mask()));
+
+        // STEP 1: if we are requesting a flush, and did not flush before, mark modular channels
+        // as having been decoded as 0.
+        if !self.was_flushed_once && do_flush {
+            self.was_flushed_once = true;
             self.groups_to_flush.extend(0..self.header.num_groups());
+            modular_global.zero_fill_empty_channels(
+                self.header.passes.num_passes as usize,
+                self.header.num_groups(),
+            )?;
         }
 
-        // TODO(veluca): keep track of groups that should be flushed, and groups that have had nothing rendered yet.
-
-        let lf_global_dur = frame_start.elapsed() - frame_setup_dur;
-
+        // STEP 2: ensure that groups that will be re-rendered are marked as such.
+        // VarDCT data to be rendered.
         for (g, _) in groups.iter() {
+            self.groups_to_flush.insert(*g);
             pipeline!(self, p, p.mark_group_to_rerender(*g));
         }
+        // Modular data to be re-rendered.
+        {
+            let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
+            for (group, passes) in groups.iter() {
+                for (pass, _) in passes.iter() {
+                    modular_global.mark_group_to_be_read(2 + *pass, *group);
+                }
+            }
+            let mut pass_to_pipeline = |_, group, _, _| {
+                self.groups_to_flush.insert(group);
+                pipeline!(self, p, p.mark_group_to_rerender(group));
+                Ok(())
+            };
+            modular_global.process_output(&self.header, true, &mut pass_to_pipeline)?;
+        }
 
+        // STEP 3: decode the groups, eagerly rendering VarDCT channels and noise.
         #[cfg(all(feature = "threads", not(test)))]
         let use_parallel = self.decoder_state.parallel && groups.len() > 1;
         #[cfg(all(feature = "threads", test))]
@@ -257,40 +262,105 @@ impl Frame {
             for (group, mut passes) in groups {
                 // Check for cancellation between groups
                 self.decoder_state.check_cancelled()?;
-                if !self.decode_hf_group(group, &mut passes, &mut buffer_splitter, do_flush)? {
-                    self.groups_to_flush.insert(group);
-                } else {
-                    self.groups_to_flush.remove(&group);
+                if self.decode_hf_group(group, &mut passes, &mut buffer_splitter, do_flush)? {
+                    self.changed_since_last_flush
+                        .insert((group, RenderUnit::VarDCT));
                 }
             }
         }
         let hf_dur = hf_start.elapsed();
 
+        // STEP 4: process all modular transforms that can now be processed,
+        // flushing buffers that will not be used again, if either we are forcing a render now
+        // or we are done with the file.
         let flush_start = std::time::Instant::now();
-        if do_flush {
+        if self.incomplete_groups == 0 || do_flush {
+            let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
+            let mut pass_to_pipeline = |chan, group, complete, image: Option<Image<i32>>| {
+                self.changed_since_last_flush
+                    .insert((group, RenderUnit::Modular(chan)));
+                pipeline!(
+                    self,
+                    p,
+                    p.set_buffer_for_group(
+                        chan,
+                        group,
+                        complete,
+                        image.unwrap(),
+                        &mut buffer_splitter
+                    )?
+                );
+                Ok(())
+            };
+            modular_global.process_output(&self.header, false, &mut pass_to_pipeline)?;
+
+            // STEP 5: re-render VarDCT/noise data in rendered groups for which it was
+            // not rendered, or re-send to pipeline modular channels that were not
+            // updated in those groups.
             for g in std::mem::take(&mut self.groups_to_flush) {
-                self.decode_hf_group(g, &mut [], &mut buffer_splitter, true)?;
+                if self
+                    .changed_since_last_flush
+                    .take(&(g, RenderUnit::VarDCT))
+                    .is_none()
+                {
+                    self.decode_hf_group(g, &mut [], &mut buffer_splitter, true)?;
+                }
+                let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
+                let mut pass_to_pipeline = |chan, group, complete, image| {
+                    pipeline!(
+                        self,
+                        p,
+                        p.set_buffer_for_group(chan, group, complete, image, &mut buffer_splitter)?
+                    );
+                    Ok(())
+                };
+                for c in modular_global.channel_range() {
+                    if self
+                        .changed_since_last_flush
+                        .take(&(g, RenderUnit::Modular(c)))
+                        .is_none()
+                    {
+                        modular_global.flush_output(g, c, &mut pass_to_pipeline)?;
+                    }
+                }
             }
         }
         let flush_dur = flush_start.elapsed();
+
+        let regions = buffer_splitter.into_changed_regions();
 
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
 
         if frame_timing {
             let total = frame_start.elapsed();
-            let teardown = total - frame_setup_dur - lf_global_dur - hf_dur - flush_dur;
+            let teardown = total - frame_setup_dur - hf_dur - flush_dur;
             eprintln!(
-                "[JXL_FRAME_TIMING] setup: {:.2}ms | lf_global: {:.2}ms | \
+                "[JXL_FRAME_TIMING] setup: {:.2}ms | \
                  hf_groups: {:.2}ms | flush: {:.2}ms | teardown: {:.2}ms | \
                  total: {:.2}ms",
                 frame_setup_dur.as_secs_f64() * 1000.0,
-                lf_global_dur.as_secs_f64() * 1000.0,
                 hf_dur.as_secs_f64() * 1000.0,
                 flush_dur.as_secs_f64() * 1000.0,
                 teardown.as_secs_f64() * 1000.0,
                 total.as_secs_f64() * 1000.0,
             );
+        }
+
+        if self.header.frame_type == FrameType::LFFrame && self.header.lf_level == 1 {
+            if do_flush && let Some(buffers) = api_buffers {
+                self.maybe_preview_lf_frame(
+                    pixel_format,
+                    buffers,
+                    Some(&regions[..]),
+                    output_profile,
+                )?;
+            } else if self.incomplete_groups == 0 {
+                // If we are not requesting another flush at the end of the LF frame, we
+                // probably have a partial render. Ensure we re-render the LF frame when
+                // decoding the actual frame.
+                self.decoder_state.lf_frame_was_rendered = false;
+            }
         }
 
         Ok(())
@@ -739,13 +809,14 @@ impl Frame {
                 groups_with_data.push(gw.group);
                 {
                     let lf_global = self.lf_global.as_mut().unwrap();
-                    let sections: SmallVec<[_; 4]> = gw.passes.iter().map(|x| x.0 + 2).collect();
+                    for (pass, _) in gw.passes.iter() {
+                        lf_global.modular_global.mark_group_to_be_read(2 + *pass, gw.group);
+                    }
                     lf_global.modular_global.process_output(
-                        &sections,
-                        gw.group,
                         &self.header,
-                        &mut |chan, group, image| {
-                            lmp_mut!().store_buffer_only(chan, group, true, image);
+                        false,
+                        &mut |chan, group, _complete, image: Option<Image<i32>>| {
+                            lmp_mut!().store_buffer_only(chan, group, true, image.unwrap());
                             if !groups_with_data.contains(&group) {
                                 groups_with_data.push(group);
                             }
@@ -1287,26 +1358,26 @@ impl Frame {
         if frame_header.encoding == Encoding::Modular {
             if decoder_state.file_header.image_metadata.xyb_encoded {
                 pipeline = pipeline
-                    .add_inout_stage(ConvertModularXYBToF32Stage::new(0, &lf_global.lf_quant))?
+                    .add_inout_stage(ConvertModularXYBToF32Stage::new(0, &lf_global.lf_quant))
             } else {
                 for i in 0..3 {
                     pipeline = pipeline
-                        .add_inout_stage(ConvertModularToF32Stage::new(i, metadata.bit_depth))?;
+                        .add_inout_stage(ConvertModularToF32Stage::new(i, metadata.bit_depth));
                 }
             }
         }
         for i in 3..num_channels {
             // Use each extra channel's own bit depth, not the image's metadata bit depth
             let ec_bit_depth = metadata.extra_channel_info[i - 3].bit_depth();
-            pipeline = pipeline.add_inout_stage(ConvertModularToF32Stage::new(i, ec_bit_depth))?;
+            pipeline = pipeline.add_inout_stage(ConvertModularToF32Stage::new(i, ec_bit_depth));
         }
 
         for c in 0..3 {
             if frame_header.hshift(c) != 0 {
-                pipeline = pipeline.add_inout_stage(HorizontalChromaUpsample::new(c))?;
+                pipeline = pipeline.add_inout_stage(HorizontalChromaUpsample::new(c));
             }
             if frame_header.vshift(c) != 0 {
-                pipeline = pipeline.add_inout_stage(VerticalChromaUpsample::new(c))?;
+                pipeline = pipeline.add_inout_stage(VerticalChromaUpsample::new(c));
             }
         }
 
@@ -1317,17 +1388,17 @@ impl Frame {
                     0,
                     filters.gab_x_weight1,
                     filters.gab_x_weight2,
-                ))?
+                ))
                 .add_inout_stage(GaborishStage::new(
                     1,
                     filters.gab_y_weight1,
                     filters.gab_y_weight2,
-                ))?
+                ))
                 .add_inout_stage(GaborishStage::new(
                     2,
                     filters.gab_b_weight1,
                     filters.gab_b_weight2,
-                ))?;
+                ));
         }
 
         let rf = &frame_header.restoration_filter;
@@ -1337,7 +1408,7 @@ impl Frame {
                 rf.epf_border_sad_mul,
                 rf.epf_channel_scale,
                 epf_sigma.clone().unwrap(),
-            ))?
+            ))
         }
         if rf.epf_iters >= 1 {
             pipeline = pipeline.add_inout_stage(Epf1Stage::new(
@@ -1345,7 +1416,7 @@ impl Frame {
                 rf.epf_border_sad_mul,
                 rf.epf_channel_scale,
                 epf_sigma.clone().unwrap(),
-            ))?
+            ))
         }
         if rf.epf_iters >= 2 {
             pipeline = pipeline.add_inout_stage(Epf2Stage::new(
@@ -1353,7 +1424,7 @@ impl Frame {
                 rf.epf_border_sad_mul,
                 rf.epf_channel_scale,
                 epf_sigma.clone().unwrap(),
-            ))?
+            ))
         }
 
         let late_ec_upsample = frame_header.upsampling > 1
@@ -1371,7 +1442,7 @@ impl Frame {
                         4 => pipeline.add_inout_stage(Upsample4x::new(transform_data, 3 + ec)),
                         8 => pipeline.add_inout_stage(Upsample8x::new(transform_data, 3 + ec)),
                         _ => unreachable!(),
-                    }?;
+                    };
                 }
             }
         }
@@ -1381,7 +1452,7 @@ impl Frame {
                 patches: lf_global.patches.clone().unwrap(),
                 extra_channels: metadata.extra_channel_info.clone(),
                 decoder_state: decoder_state.reference_frames.clone(),
-            })?
+            })
         }
 
         if frame_header.has_splines() {
@@ -1390,7 +1461,7 @@ impl Frame {
                 frame_header.size(),
                 &lf_global.color_correlation_params.unwrap_or_default(),
                 decoder_state.high_precision,
-            )?)?
+            )?)
         }
 
         if frame_header.upsampling > 1 {
@@ -1406,20 +1477,20 @@ impl Frame {
                     4 => pipeline.add_inout_stage(Upsample4x::new(transform_data, c)),
                     8 => pipeline.add_inout_stage(Upsample8x::new(transform_data, c)),
                     _ => unreachable!(),
-                }?;
+                };
             }
         }
 
         if frame_header.has_noise() {
             pipeline = pipeline
-                .add_inout_stage(ConvolveNoiseStage::new(num_channels))?
-                .add_inout_stage(ConvolveNoiseStage::new(num_channels + 1))?
-                .add_inout_stage(ConvolveNoiseStage::new(num_channels + 2))?
+                .add_inout_stage(ConvolveNoiseStage::new(num_channels))
+                .add_inout_stage(ConvolveNoiseStage::new(num_channels + 1))
+                .add_inout_stage(ConvolveNoiseStage::new(num_channels + 2))
                 .add_inplace_stage(AddNoiseStage::new(
                     *lf_global.noise.as_ref().unwrap(),
                     lf_global.color_correlation_params.unwrap_or_default(),
                     num_channels,
-                ))?;
+                ));
         }
 
         // Calculate the actual number of API-provided buffers based on pixel_format.
@@ -1445,7 +1516,7 @@ impl Frame {
                     JxlColorType::Grayscale,
                     JxlDataFormat::f32(),
                     false,
-                )?;
+                );
             }
         }
         if frame_header.can_be_referenced && frame_header.save_before_ct {
@@ -1457,7 +1528,7 @@ impl Frame {
                     JxlColorType::Grayscale,
                     JxlDataFormat::f32(),
                     false,
-                )?;
+                );
             }
         }
 
@@ -1520,9 +1591,9 @@ impl Frame {
         }
 
         if frame_header.do_ycbcr {
-            pipeline = pipeline.add_inplace_stage(YcbcrToRgbStage::new(0))?;
+            pipeline = pipeline.add_inplace_stage(YcbcrToRgbStage::new(0));
         } else if xyb_encoded && fuse_xyb_u8.is_none() {
-            pipeline = pipeline.add_inplace_stage(XybStage::new(0, output_color_info.clone()))?;
+            pipeline = pipeline.add_inplace_stage(XybStage::new(0, output_color_info.clone()));
         }
 
         // Insert tone mapping stage if desired_intensity_target differs from
@@ -1542,7 +1613,7 @@ impl Frame {
                         orig_intensity_target,
                         desired,
                         output_color_info.luminances,
-                    ))?;
+                    ));
                 }
                 TransferFunction::Hlg { .. } => {
                     pipeline = pipeline.add_inplace_stage(ToneMappingStage::hlg(
@@ -1550,7 +1621,7 @@ impl Frame {
                         orig_intensity_target,
                         desired,
                         output_color_info.luminances,
-                    ))?;
+                    ));
                 }
                 _ => {
                     // Tone mapping only applies to HDR transfer functions
@@ -1658,7 +1729,7 @@ impl Frame {
                     out_channels,
                     cms_black_channel,
                     max_pixels,
-                ))?;
+                ));
                 cms_used = true;
             }
         }
@@ -1674,7 +1745,7 @@ impl Frame {
         // We deferred XybStage earlier, so we need to add it now plus the separate TF stage.
         if fuse_xyb_u8.is_some() && cms_used {
             fuse_xyb_u8 = None;
-            pipeline = pipeline.add_inplace_stage(XybStage::new(0, output_color_info.clone()))?;
+            pipeline = pipeline.add_inplace_stage(XybStage::new(0, output_color_info.clone()));
         }
 
         // XYB output is linear, so apply transfer function:
@@ -1700,7 +1771,7 @@ impl Frame {
             }
             if fuse_srgb_to_u8_bit_depth.is_none() {
                 pipeline =
-                    pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()))?;
+                    pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()));
             }
         }
 
@@ -1720,15 +1791,15 @@ impl Frame {
                     #[cfg(feature = "cms")]
                     if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
                     {
-                        pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                        pipeline = pipeline.add_inplace_stage(cms_stage);
                     } else {
                         // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                     #[cfg(not(feature = "cms"))]
                     {
                         let _ = cms; // suppress unused warning when cms feature is off
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                 }
             }
@@ -1739,14 +1810,14 @@ impl Frame {
                 frame_header,
                 &decoder_state.file_header,
                 decoder_state.reference_frames.clone(),
-            )?)?;
+            )?);
             // TODO(veluca): we might not need to add an extend stage if the image size is
             // compatible with the frame size.
             pipeline = pipeline.add_extend_stage(ExtendToImageDimensionsStage::new(
                 frame_header,
                 &decoder_state.file_header,
                 decoder_state.reference_frames.clone(),
-            )?)?;
+            )?);
         }
 
         // For CMYK images that need deferred CMS, save reference in CMYK space (before CMS)
@@ -1762,7 +1833,7 @@ impl Frame {
                         JxlColorType::Grayscale,
                         JxlDataFormat::f32(),
                         false,
-                    )?;
+                    );
                 }
             }
 
@@ -1778,14 +1849,14 @@ impl Frame {
                     #[cfg(feature = "cms")]
                     if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
                     {
-                        pipeline = pipeline.add_inplace_stage(cms_stage)?;
+                        pipeline = pipeline.add_inplace_stage(cms_stage);
                     } else {
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                     #[cfg(not(feature = "cms"))]
                     {
                         let _ = cms;
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i))?;
+                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                 }
             }
@@ -1804,7 +1875,7 @@ impl Frame {
                     JxlColorType::Grayscale,
                     JxlDataFormat::f32(),
                     false,
-                )?;
+                );
             }
         }
 
@@ -1818,7 +1889,7 @@ impl Frame {
             {
                 if info.ec_type == ExtraChannel::SpotColor {
                     pipeline = pipeline
-                        .add_inplace_stage(SpotColorStage::new(i, info.spot_color.unwrap()))?;
+                        .add_inplace_stage(SpotColorStage::new(i, info.spot_color.unwrap()));
                 }
             }
         }
@@ -1885,7 +1956,7 @@ impl Frame {
                         0,
                         num_color_channels,
                         alpha_channel,
-                    ))?;
+                    ));
                 }
                 // Add conversion stages for non-float output formats.
                 // Full fusion: XYB+TF+U8 in one stage (XybToU8Stage)
@@ -1898,23 +1969,23 @@ impl Frame {
                         output_color_info.clone(),
                         bit_depth,
                         tf.clone(),
-                    ))?;
+                    ));
                     // Alpha channel still needs plain f32→u8 conversion (no TF/XYB)
                     for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
                         pipeline = pipeline
-                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth))?;
+                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
                     }
                 } else if let Some(bit_depth) = fuse_srgb_to_u8_bit_depth {
                     use crate::render::stages::{ConvertF32ToU8Stage, FromLinearSrgbToU8Stage};
                     pipeline =
-                        pipeline.add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth))?;
+                        pipeline.add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth));
                     // Alpha channel still needs plain f32→u8 conversion (no TF)
                     for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
                         pipeline = pipeline
-                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth))?;
+                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
                     }
                 } else {
-                    pipeline = Self::add_conversion_stages(pipeline, color_source_channels, *df)?;
+                    pipeline = Self::add_conversion_stages(pipeline, color_source_channels, *df);
                 }
                 pipeline = pipeline.add_save_stage(
                     color_source_channels,
@@ -1923,12 +1994,12 @@ impl Frame {
                     pixel_format.color_type,
                     *df,
                     fill_opaque_alpha,
-                )?;
+                );
             }
             for i in 0..frame_header.num_extra_channels as usize {
                 if let Some(df) = &pixel_format.extra_channel_format[i] {
                     // Add conversion stages for non-float output formats
-                    pipeline = Self::add_conversion_stages(pipeline, &[3 + i], *df)?;
+                    pipeline = Self::add_conversion_stages(pipeline, &[3 + i], *df);
                     pipeline = pipeline.add_save_stage(
                         &[3 + i],
                         metadata.orientation,
@@ -1936,7 +2007,7 @@ impl Frame {
                         JxlColorType::Grayscale,
                         *df,
                         false,
-                    )?;
+                    );
                 }
             }
         }
@@ -1993,7 +2064,7 @@ impl Frame {
             output_profile,
         )?;
         self.render_pipeline = Some(render_pipeline);
-        self.lf_global_was_rendered = false;
+        self.was_flushed_once = false;
         Ok(())
     }
 }
