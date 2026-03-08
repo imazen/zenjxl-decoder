@@ -8,77 +8,58 @@
 //! Run with: cargo bench -p zenjxl-decoder --bench tf_bench
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask};
 use std::hint::black_box;
 
 // ============================================================================
-// Approach 1: Current jxl-rs rational polynomial (SIMD)
+// Approach 1: Rational polynomial (scalar, auto-vectorized)
 // ============================================================================
 
 #[inline(always)]
-fn eval_rational_poly_simd<D: SimdDescriptor, const P: usize, const Q: usize>(
-    d: D,
-    x: D::F32Vec,
-    p: [f32; P],
-    q: [f32; Q],
-) -> D::F32Vec {
-    let mut yp = D::F32Vec::splat(d, p[P - 1]);
+fn eval_rational_poly<const P: usize, const Q: usize>(x: f32, p: [f32; P], q: [f32; Q]) -> f32 {
+    let mut yp = p[P - 1];
     for i in (0..P - 1).rev() {
-        yp = yp.mul_add(x, D::F32Vec::splat(d, p[i]));
+        yp = yp.mul_add(x, p[i]);
     }
-    let mut yq = D::F32Vec::splat(d, q[Q - 1]);
+    let mut yq = q[Q - 1];
     for i in (0..Q - 1).rev() {
-        yq = yq.mul_add(x, D::F32Vec::splat(d, q[i]));
+        yq = yq.mul_add(x, q[i]);
     }
     yp / yq
 }
 
-#[inline(always)]
-fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
-    #[allow(clippy::excessive_precision)]
-    const P: [f32; 5] = [
-        -5.135152395e-4,
-        5.287254571e-3,
-        3.903842876e-1,
-        1.474205315,
-        7.352629620e-1,
-    ];
-    #[allow(clippy::excessive_precision)]
-    const Q: [f32; 5] = [
-        1.004519624e-2,
-        3.036675394e-1,
-        1.340816930,
-        9.258482155e-1,
-        2.424867759e-2,
-    ];
-    for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
-        let x = D::F32Vec::load(d, vec);
+#[allow(clippy::excessive_precision)]
+const P_COEFFS: [f32; 5] = [
+    -5.135152395e-4,
+    5.287254571e-3,
+    3.903842876e-1,
+    1.474205315,
+    7.352629620e-1,
+];
+#[allow(clippy::excessive_precision)]
+const Q_COEFFS: [f32; 5] = [
+    1.004519624e-2,
+    3.036675394e-1,
+    1.340816930,
+    9.258482155e-1,
+    2.424867759e-2,
+];
+
+fn linear_to_srgb_f32(samples: &mut [f32]) {
+    for x in samples.iter_mut() {
         let a = x.abs();
-        D::F32Vec::splat(d, 0.0031308)
-            .gt(a)
-            .if_then_else_f32(
-                a * D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, a.sqrt(), P, Q),
-            )
-            .copysign(x)
-            .store(vec);
+        let srgb = if a < 0.0031308 {
+            a * 12.92
+        } else {
+            eval_rational_poly(a.sqrt(), P_COEFFS, Q_COEFFS)
+        };
+        *x = srgb.copysign(*x);
     }
 }
 
-// f32 to u8 conversion (current approach - separate stage)
-#[inline(always)]
-fn f32_to_u8_simd<D: SimdDescriptor>(d: D, input: &[f32], output: &mut [u8]) {
-    let zero = D::F32Vec::splat(d, 0.0);
-    let one = D::F32Vec::splat(d, 1.0);
-    let scale = D::F32Vec::splat(d, 255.0);
-    for (in_chunk, out_chunk) in input
-        .chunks_exact(D::F32Vec::LEN)
-        .zip(output.chunks_exact_mut(D::F32Vec::LEN))
-    {
-        let val = D::F32Vec::load(d, in_chunk);
-        let clamped = val.max(zero).min(one);
-        let scaled = clamped * scale;
-        scaled.round_store_u8(out_chunk);
+fn f32_to_u8(input: &[f32], output: &mut [u8]) {
+    for (inp, out) in input.iter().zip(output.iter_mut()) {
+        let clamped = inp.clamp(0.0, 1.0);
+        *out = (clamped * 255.0 + 0.5) as u8;
     }
 }
 
@@ -135,26 +116,6 @@ fn fast_srgb8_batch(input: &[f32], output: &mut [u8]) {
 // ============================================================================
 // Approach 3: LUT-4096 with interpolation (linear-srgb style)
 // ============================================================================
-
-// Generate the 4096-entry encode table at compile time
-#[allow(dead_code)]
-const fn generate_encode_table_4096() -> [f32; 4096] {
-    let mut table = [0.0f32; 4096];
-    let mut i = 0;
-    while i < 4096 {
-        let linear = i as f64 / 4095.0;
-        let srgb = if linear <= 0.0031308 {
-            linear * 12.92
-        } else {
-            // Use a manual pow approximation since powf is not const
-            // For the table, we'll compute at runtime instead
-            0.0 // placeholder
-        };
-        table[i] = srgb as f32;
-        i += 1;
-    }
-    table
-}
 
 // Runtime-initialized LUT for linear→sRGB f32
 fn make_encode_table_4096() -> Vec<f32> {
@@ -221,58 +182,20 @@ fn direct_lut_65k_batch(input: &[f32], output: &mut [u8], table: &[u8; 65536]) {
 }
 
 // ============================================================================
-// Approach 5: Fused rational polynomial + u8 (single SIMD pass)
+// Approach 5: Fused rational polynomial + u8 (single pass)
 // ============================================================================
 
-jxl_simd::simd_function!(
-    fused_linear_to_srgb_u8_dispatch,
-    d: D,
-    fn fused_linear_to_srgb_u8(input: &[f32], output: &mut [u8]) {
-        #[allow(clippy::excessive_precision)]
-        const P: [f32; 5] = [
-            -5.135152395e-4,
-            5.287254571e-3,
-            3.903842876e-1,
-            1.474205315,
-            7.352629620e-1,
-        ];
-        #[allow(clippy::excessive_precision)]
-        const Q: [f32; 5] = [
-            1.004519624e-2,
-            3.036675394e-1,
-            1.340816930,
-            9.258482155e-1,
-            2.424867759e-2,
-        ];
-
-        let zero = D::F32Vec::splat(d, 0.0);
-        let one = D::F32Vec::splat(d, 1.0);
-        let scale = D::F32Vec::splat(d, 255.0);
-        let threshold = D::F32Vec::splat(d, 0.0031308);
-        let linear_scale = D::F32Vec::splat(d, 12.92);
-
-        for (in_chunk, out_chunk) in input
-            .chunks_exact(D::F32Vec::LEN)
-            .zip(output.chunks_exact_mut(D::F32Vec::LEN))
-        {
-            let x = D::F32Vec::load(d, in_chunk);
-            // Clamp to [0, 1] first (skip sign handling for u8 output)
-            let a = x.max(zero).min(one);
-
-            // Apply sRGB TF
-            let srgb = threshold
-                .gt(a)
-                .if_then_else_f32(
-                    a * linear_scale,
-                    eval_rational_poly_simd(d, a.sqrt(), P, Q),
-                );
-
-            // Scale to [0, 255] and convert to u8
-            let scaled = srgb * scale;
-            scaled.round_store_u8(out_chunk);
-        }
+fn fused_linear_to_srgb_u8(input: &[f32], output: &mut [u8]) {
+    for (inp, out) in input.iter().zip(output.iter_mut()) {
+        let a = inp.clamp(0.0, 1.0);
+        let srgb = if a < 0.0031308 {
+            a * 12.92
+        } else {
+            eval_rational_poly(a.sqrt(), P_COEFFS, Q_COEFFS)
+        };
+        *out = (srgb * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
     }
-);
+}
 
 // ============================================================================
 // Approach 6: Scalar powf (reference/naive)
@@ -295,12 +218,9 @@ fn naive_linear_to_srgb_u8(input: &[f32], output: &mut [u8]) {
 // ============================================================================
 
 fn generate_test_data(n: usize) -> Vec<f32> {
-    // Generate representative linear RGB values
-    // Most pixel values in decoded images cluster in [0, 1] with some near-zero and near-one
     let mut data = Vec::with_capacity(n);
     for i in 0..n {
         let t = i as f32 / n as f32;
-        // Mix of linear ramp and gamma-adjusted distribution
         let v = if i % 3 == 0 {
             t * t // quadratic (more darks)
         } else if i % 3 == 1 {
@@ -361,62 +281,34 @@ fn bench_tf(c: &mut Criterion) {
         let mut reference = vec![0u8; size];
         naive_linear_to_srgb_u8(&input, &mut reference);
 
-        // 1. Current approach: rational poly SIMD (two stages)
-        // Note: The real pipeline applies TF in-place then reads back for u8 conversion.
-        // We benchmark both stages but pre-copy to avoid measuring memcpy overhead.
-        group.bench_function("rational_poly_simd_2stage", |b| {
+        // 1. Rational polynomial (two stages: TF then u8 conversion)
+        group.bench_function("rational_poly_2stage", |b| {
             let mut srgb_f32 = input.clone();
             b.iter(|| {
-                // In the real pipeline, the data is already in the buffer; we simulate
-                // by resetting each iteration since linear_to_srgb is in-place.
                 srgb_f32.copy_from_slice(&input);
-                #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-                if let Some(d) = jxl_simd::AvxDescriptor::new() {
-                    // Must use d.call() to get #[target_feature] context for proper codegen
-                    return d.call(|d| {
-                        linear_to_srgb_simd(d, &mut srgb_f32);
-                        f32_to_u8_simd(d, &srgb_f32, &mut output);
-                    });
-                }
-                let d = jxl_simd::ScalarDescriptor::new().unwrap();
-                linear_to_srgb_simd(d, &mut srgb_f32);
-                f32_to_u8_simd(d, &srgb_f32, &mut output);
+                linear_to_srgb_f32(&mut srgb_f32);
+                f32_to_u8(&srgb_f32, &mut output);
             });
         });
-
-        // 1b. Just the rational poly SIMD TF (no u8 conversion, no copy)
-        group.bench_function("rational_poly_simd_tf_only", |b| {
-            let mut srgb_f32 = input.clone();
-            linear_to_srgb_simd(jxl_simd::ScalarDescriptor::new().unwrap(), &mut srgb_f32);
-            // Already in sRGB, so re-applying TF is wrong for accuracy but fine for perf measurement
-            b.iter(|| {
-                // We need fresh linear data each time since TF is in-place
-                let src = black_box(&input);
-                srgb_f32.copy_from_slice(src);
-                #[cfg(all(target_arch = "x86_64", feature = "avx"))]
-                if let Some(d) = jxl_simd::AvxDescriptor::new() {
-                    // Must use d.call() to get #[target_feature] context for proper codegen
-                    return d.call(|d| {
-                        linear_to_srgb_simd(d, black_box(&mut srgb_f32));
-                    });
-                }
-                linear_to_srgb_simd(
-                    jxl_simd::ScalarDescriptor::new().unwrap(),
-                    black_box(&mut srgb_f32),
-                );
-            });
-        });
-
-        // Check accuracy of approach 1
+        // Check accuracy
         {
             let mut srgb_f32 = input.clone();
-            let d = jxl_simd::ScalarDescriptor::new().unwrap();
-            linear_to_srgb_simd(d, &mut srgb_f32);
-            f32_to_u8_simd(d, &srgb_f32, &mut output);
+            linear_to_srgb_f32(&mut srgb_f32);
+            f32_to_u8(&srgb_f32, &mut output);
             if size == 65536 {
-                check_accuracy("rational_poly_simd_2stage", &input, &output, &reference);
+                check_accuracy("rational_poly_2stage", &input, &output, &reference);
             }
         }
+
+        // 1b. Just the rational poly TF (no u8 conversion)
+        group.bench_function("rational_poly_tf_only", |b| {
+            let mut srgb_f32 = input.clone();
+            b.iter(|| {
+                let src = black_box(&input);
+                srgb_f32.copy_from_slice(src);
+                linear_to_srgb_f32(black_box(&mut srgb_f32));
+            });
+        });
 
         // 2. fast-srgb8 LUT (scalar)
         group.bench_function("fast_srgb8_lut104", |b| {
@@ -455,15 +347,15 @@ fn bench_tf(c: &mut Criterion) {
             check_accuracy("direct_lut_65k", &input, &output, &reference);
         }
 
-        // 5. Fused rational poly + u8 (single SIMD pass)
-        group.bench_function("fused_poly_u8_simd", |b| {
+        // 5. Fused rational poly + u8 (single pass)
+        group.bench_function("fused_poly_u8", |b| {
             b.iter(|| {
-                fused_linear_to_srgb_u8_dispatch(black_box(&input), &mut output);
+                fused_linear_to_srgb_u8(black_box(&input), &mut output);
             });
         });
         if size == 65536 {
-            fused_linear_to_srgb_u8_dispatch(&input, &mut output);
-            check_accuracy("fused_poly_u8_simd", &input, &output, &reference);
+            fused_linear_to_srgb_u8(&input, &mut output);
+            check_accuracy("fused_poly_u8", &input, &output, &reference);
         }
 
         // 6. Naive powf (reference)

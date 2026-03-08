@@ -1703,7 +1703,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "zenjxl-decoder-macros",
- "zenjxl-decoder-simd",
 ]
 
 [[package]]

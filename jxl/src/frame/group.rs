@@ -3,7 +3,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// The simd_function! macro generates dispatch wrappers that inherit all params.
 #![allow(clippy::too_many_arguments)]
 
 use num_traits::Float;
@@ -23,7 +22,6 @@ use crate::{
     image::{Image, ImageRect, Rect},
     util::{CeilLog2, MemoryTracker, ShiftRightCeil, SmallVec, TryVecExt, tracing_wrappers::*},
 };
-use jxl_simd::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, simd_function};
 
 const LF_BUFFER_SIZE: usize = 32 * 32;
 
@@ -85,61 +83,18 @@ fn predict_num_nonzeros(nzeros_map: &Image<u32>, bx: usize, by: usize) -> usize 
 }
 
 #[inline(always)]
-fn adjust_quant_bias<D: SimdDescriptor>(
-    d: D,
-    c: usize,
-    quant_i: D::I32Vec,
-    biases: &[f32; 4],
-) -> D::F32Vec {
-    let quant = quant_i.as_f32();
-    let adjusted = quant - D::F32Vec::splat(d, biases[3]) / quant;
-    D::I32Vec::splat(d, 2)
-        .gt(quant_i.abs())
-        .if_then_else_f32(quant_i.as_f32() * D::F32Vec::splat(d, biases[c]), adjusted)
+fn adjust_quant_bias(c: usize, quant_i: i32, biases: &[f32; 4]) -> f32 {
+    let quant = quant_i as f32;
+    if quant_i.abs() < 2 {
+        quant * biases[c]
+    } else {
+        quant - biases[3] / quant
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn dequant_lane<D: SimdDescriptor>(
-    d: D,
-    scaled_dequant_x: f32,
-    scaled_dequant_y: f32,
-    scaled_dequant_b: f32,
-    dequant_matrices: &[f32],
-    size: usize,
-    k: usize,
-    x_cc_mul: f32,
-    b_cc_mul: f32,
-    biases: &[f32; 4],
-    qblock: &[&[i32]; 3],
-    block: &mut [Vec<f32>; 3],
-) {
-    let x_mul =
-        D::F32Vec::load_from(d, dequant_matrices, k) * D::F32Vec::splat(d, scaled_dequant_x);
-    let y_mul =
-        D::F32Vec::load_from(d, dequant_matrices, size + k) * D::F32Vec::splat(d, scaled_dequant_y);
-    let b_mul = D::F32Vec::load_from(d, dequant_matrices, 2 * size + k)
-        * D::F32Vec::splat(d, scaled_dequant_b);
-
-    let quantized_x = D::I32Vec::load_from(d, qblock[0], k);
-    let quantized_y = D::I32Vec::load_from(d, qblock[1], k);
-    let quantized_b = D::I32Vec::load_from(d, qblock[2], k);
-
-    let dequant_x_cc = adjust_quant_bias(d, 0, quantized_x, biases) * x_mul;
-    let dequant_y = adjust_quant_bias(d, 1, quantized_y, biases) * y_mul;
-    let dequant_b_cc = adjust_quant_bias(d, 2, quantized_b, biases) * b_mul;
-
-    let dequant_x = D::F32Vec::splat(d, x_cc_mul).mul_add(dequant_y, dequant_x_cc);
-    let dequant_b = D::F32Vec::splat(d, b_cc_mul).mul_add(dequant_y, dequant_b_cc);
-    dequant_x.store_at(&mut block[0], k);
-    dequant_y.store_at(&mut block[1], k);
-    dequant_b.store_at(&mut block[2], k);
-}
-
-#[allow(clippy::too_many_arguments)]
-#[inline(always)]
-fn dequant_block<D: SimdDescriptor>(
-    d: D,
+fn dequant_block(
     hf_type: HfTransformType,
     inv_global_scale: f32,
     quant: u32,
@@ -155,13 +110,11 @@ fn dequant_block<D: SimdDescriptor>(
     block: &mut [Vec<f32>; 3],
 ) {
     let scaled_dequant_y = inv_global_scale / (quant as f32);
-
     let scaled_dequant_x = scaled_dequant_y * x_dm_multiplier;
     let scaled_dequant_b = scaled_dequant_y * b_dm_multiplier;
 
     let matrices = dequant_matrices.matrix(hf_type, 0);
 
-    assert!(BLOCK_SIZE.is_multiple_of(D::F32Vec::LEN));
     // Pre-loop assertions: prove buffer lengths so LLVM can eliminate bounds checks.
     let total = covered_blocks * BLOCK_SIZE;
     assert!(matrices.len() >= 2 * size + total);
@@ -169,21 +122,18 @@ fn dequant_block<D: SimdDescriptor>(
         assert!(qblock[c].len() >= total);
         assert!(block[c].len() >= total);
     }
-    for k in (0..covered_blocks * BLOCK_SIZE).step_by(D::F32Vec::LEN) {
-        dequant_lane(
-            d,
-            scaled_dequant_x,
-            scaled_dequant_y,
-            scaled_dequant_b,
-            matrices,
-            size,
-            k,
-            x_cc_mul,
-            b_cc_mul,
-            biases,
-            qblock,
-            block,
-        );
+    for k in 0..total {
+        let x_mul = matrices[k] * scaled_dequant_x;
+        let y_mul = matrices[size + k] * scaled_dequant_y;
+        let b_mul = matrices[2 * size + k] * scaled_dequant_b;
+
+        let dequant_x_cc = adjust_quant_bias(0, qblock[0][k], biases) * x_mul;
+        let dequant_y = adjust_quant_bias(1, qblock[1][k], biases) * y_mul;
+        let dequant_b_cc = adjust_quant_bias(2, qblock[2][k], biases) * b_mul;
+
+        block[0][k] = x_cc_mul.mul_add(dequant_y, dequant_x_cc);
+        block[1][k] = dequant_y;
+        block[2][k] = b_cc_mul.mul_add(dequant_y, dequant_b_cc);
     }
 }
 
@@ -227,8 +177,7 @@ fn scatter_rows_to_image(
 
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
-    d: D,
+fn dequant_and_transform_to_pixels(
     quant_biases: &[f32; 4],
     x_dm_multiplier: f32,
     b_dm_multiplier: f32,
@@ -254,8 +203,7 @@ fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
     dequant_matrices: &DequantMatrices,
 ) -> Result<(), Error> {
     crate::profile!(dequant_transform);
-    dequant_block::<D>(
-        d,
+    dequant_block(
         transform_type,
         inv_global_scale,
         raw_quant,
@@ -301,64 +249,6 @@ fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
     }
     Ok(())
 }
-
-simd_function!(
-    dequant_and_transform_to_pixels_dispatch,
-    d: D,
-    #[allow(clippy::too_many_arguments)]
-    pub fn dequant_and_transform_to_pixels_fwd(
-        quant_biases: &[f32; 4],
-        x_dm_multiplier: f32,
-        b_dm_multiplier: f32,
-        pixels: &mut [Image<f32>; 3],
-        scratch: &mut [f32],
-        inv_global_scale: f32,
-        transform_buffer: &mut [Vec<f32>; 3],
-        hshift: [usize; 3],
-        vshift: [usize; 3],
-        by: usize,
-        sby: [usize; 3],
-        bx: usize,
-        sbx: [usize; 3],
-        x_cc_mul: f32,
-        b_cc_mul: f32,
-        raw_quant: u32,
-        lf_rects: &Option<[ImageRect<f32>; 3]>,
-        transform_type: HfTransformType,
-        block_rect: Rect,
-        num_blocks: usize,
-        num_coeffs: usize,
-        qblock: &[&[i32]; 3],
-        dequant_matrices: &DequantMatrices,
-    ) -> Result<(), Error> {
-        dequant_and_transform_to_pixels(
-            d,
-            quant_biases,
-            x_dm_multiplier,
-            b_dm_multiplier,
-            pixels,
-            scratch,
-            inv_global_scale,
-            transform_buffer,
-            hshift,
-            vshift,
-            by,
-            sby,
-            bx,
-            sbx,
-            x_cc_mul,
-            b_cc_mul,
-            raw_quant,
-            lf_rects,
-            transform_type,
-            block_rect,
-            num_blocks,
-            num_coeffs,
-            qblock,
-            dequant_matrices,
-        )
-    }
-);
 
 struct PassInfo<'a, 'b> {
     histogram_index: usize,
@@ -702,7 +592,7 @@ pub fn decode_vardct_group(
                     &coeffs[2][coeffs_offset..],
                 ];
                 let dequant_matrices = &hf_global.dequant_matrices;
-                dequant_and_transform_to_pixels_dispatch(
+                dequant_and_transform_to_pixels(
                     quant_biases,
                     x_dm_multiplier,
                     b_dm_multiplier,

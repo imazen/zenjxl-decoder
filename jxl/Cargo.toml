@@ -21,7 +21,6 @@ num-traits = "0.2.14"
 array-init = "2.0.0"
 tracing = { version = "0.1.40", optional = true }
 jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", version = "=0.3.0" }
-jxl_simd = { package = "zenjxl-decoder-simd", path = "../jxl_simd", version = "=0.3.0" }
 moxcms = { version = "0.7", optional = true }
 rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
@@ -46,13 +45,13 @@ jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", versio
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
-all-simd = ["jxl_simd/all-simd", "sse42", "avx", "avx512", "neon", "wasm128"]
+all-simd = ["sse42", "avx", "avx512", "neon", "wasm128"]
 profiling = []
-sse42 = ["jxl_simd/sse42"]
-avx = ["jxl_simd/avx"]
-avx512 = ["jxl_simd/avx512"]
-neon = ["jxl_simd/neon"]
-wasm128 = ["jxl_simd/wasm128"]
+sse42 = []
+avx = []
+avx512 = ["archmage/avx512"]
+neon = []
+wasm128 = []
 cms = ["moxcms"]
 jpeg = ["dep:brotli"]
 allow-unsafe = []

@@ -3,8 +3,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use jxl_simd::{I32SimdVec, ScalarDescriptor, SimdDescriptor, shr, simd_function};
-
 use crate::{
     frame::modular::{
         ModularChannel,
@@ -15,107 +13,61 @@ use crate::{
 };
 
 #[inline(always)]
-fn rct_impl<D: SimdDescriptor, const OP: u32>(
-    _: D,
-    v0: D::I32Vec,
-    v1: D::I32Vec,
-    v2: D::I32Vec,
-) -> (D::I32Vec, D::I32Vec, D::I32Vec) {
+fn rct_row<const OP: u32>(r: &mut [i32], g: &mut [i32], b: &mut [i32]) {
     const { assert!(OP <= 6) };
-
-    match OP {
-        0 => (v0, v1, v2),
-        1 => (v0, v1, v2 + v0),
-        2 => (v0, v1 + v0, v2),
-        3 => (v0, v1 + v0, v2 + v0),
-        4 => {
-            let avg = shr!(v0 + v2, 1);
-            (v0, v1 + avg, v2)
-        }
-        5 => {
-            let v2 = v0 + v2;
-            let avg = shr!(v0 + v2, 1);
-            (v0, v1 + avg, v2)
-        }
-        6 => {
-            let (y, co, cg) = (v0, v1, v2);
-            let y = y - shr!(cg, 1);
-            let g = cg + y;
-            let y = y - shr!(co, 1);
-            let r = y + co;
-            (r, g, y)
-        }
-        _ => unreachable!(),
+    let len = r.len();
+    for i in 0..len {
+        let (v0, v1, v2) = (r[i], g[i], b[i]);
+        // All arithmetic must be wrapping to match SIMD semantics.
+        let (w0, w1, w2) = match OP {
+            0 => (v0, v1, v2),
+            1 => (v0, v1, v2.wrapping_add(v0)),
+            2 => (v0, v1.wrapping_add(v0), v2),
+            3 => (v0, v1.wrapping_add(v0), v2.wrapping_add(v0)),
+            4 => {
+                let avg = v0.wrapping_add(v2) >> 1;
+                (v0, v1.wrapping_add(avg), v2)
+            }
+            5 => {
+                let v2_new = v0.wrapping_add(v2);
+                let avg = v0.wrapping_add(v2_new) >> 1;
+                (v0, v1.wrapping_add(avg), v2_new)
+            }
+            6 => {
+                let (y, co, cg) = (v0, v1, v2);
+                let y = y.wrapping_sub(cg >> 1);
+                let green = cg.wrapping_add(y);
+                let y = y.wrapping_sub(co >> 1);
+                let red = y.wrapping_add(co);
+                (red, green, y)
+            }
+            _ => unreachable!(),
+        };
+        r[i] = w0;
+        g[i] = w1;
+        b[i] = w2;
     }
 }
 
 #[inline(always)]
-fn rct_row_impl<D: SimdDescriptor, const OP: u32>(d: D, rgb: [&mut [i32]; 3]) -> [&mut [i32]; 3] {
-    const { assert!(OP <= 6) };
-
-    let [mut it_row_r, mut it_row_g, mut it_row_b] =
-        rgb.map(|x| x.chunks_exact_mut(D::I32Vec::LEN));
-    let it = (&mut it_row_r).zip(&mut it_row_g).zip(&mut it_row_b);
-
-    for ((r, g), b) in it {
-        let v0 = D::I32Vec::load(d, r);
-        let v1 = D::I32Vec::load(d, g);
-        let v2 = D::I32Vec::load(d, b);
-        let (w0, w1, w2) = rct_impl::<D, OP>(d, v0, v1, v2);
-        w0.store(r);
-        w1.store(g);
-        w2.store(b);
-    }
-
-    [
-        it_row_r.into_remainder(),
-        it_row_g.into_remainder(),
-        it_row_b.into_remainder(),
-    ]
-}
-
-#[inline(always)]
-fn rct_loop_impl<D: SimdDescriptor, const OP: u32>(
-    d: D,
-    r: &mut Image<i32>,
-    g: &mut Image<i32>,
-    b: &mut Image<i32>,
-) {
-    const { assert!(OP <= 6) };
-
+fn rct_loop_impl<const OP: u32>(r: &mut Image<i32>, g: &mut Image<i32>, b: &mut Image<i32>) {
     let h = r.size().1;
-
-    for pos_y in 0..h {
-        let mut rgb = [&mut *r, &mut *g, &mut *b].map(|x| x.row_mut(pos_y));
-
-        rgb = rct_row_impl::<D, OP>(d, rgb);
-        if D::I32Vec::LEN > 8 {
-            rgb = rct_row_impl::<_, OP>(d.maybe_downgrade_256bit(), rgb);
-        }
-        if D::I32Vec::LEN > 4 {
-            rgb = rct_row_impl::<_, OP>(d.maybe_downgrade_128bit(), rgb);
-        }
-        if D::I32Vec::LEN > 1 {
-            rct_row_impl::<_, OP>(ScalarDescriptor::new().unwrap(), rgb);
-        }
+    for y in 0..h {
+        rct_row::<OP>(r.row_mut(y), g.row_mut(y), b.row_mut(y));
     }
 }
 
-simd_function!(
-    rct_loop,
-    d: D,
-    fn rct_loop_fwd(r: &mut Image<i32>, g: &mut Image<i32>, b: &mut Image<i32>, op: RctOp) {
-        match op {
-            RctOp::Noop => {},
-            RctOp::AddFirstToThird => rct_loop_impl::<D, 1>(d, r, g, b),
-            RctOp::AddFirstToSecond => rct_loop_impl::<D, 2>(d, r, g, b),
-            RctOp::AddFirstToSecondAndThird => rct_loop_impl::<D, 3>(d, r, g, b),
-            RctOp::AddAvgToSecond => rct_loop_impl::<D, 4>(d, r, g, b),
-            RctOp::AddFirstToThirdAndAvgToSecond => rct_loop_impl::<D, 5>(d, r, g, b),
-            RctOp::YCoCg => rct_loop_impl::<D, 6>(d, r, g, b),
-        }
+fn rct_loop(r: &mut Image<i32>, g: &mut Image<i32>, b: &mut Image<i32>, op: RctOp) {
+    match op {
+        RctOp::Noop => {}
+        RctOp::AddFirstToThird => rct_loop_impl::<1>(r, g, b),
+        RctOp::AddFirstToSecond => rct_loop_impl::<2>(r, g, b),
+        RctOp::AddFirstToSecondAndThird => rct_loop_impl::<3>(r, g, b),
+        RctOp::AddAvgToSecond => rct_loop_impl::<4>(r, g, b),
+        RctOp::AddFirstToThirdAndAvgToSecond => rct_loop_impl::<5>(r, g, b),
+        RctOp::YCoCg => rct_loop_impl::<6>(r, g, b),
     }
-);
+}
 
 // Applies a RCT in-place to the given buffers.
 #[instrument(level = "debug", skip(buffers), ret)]
