@@ -5,204 +5,31 @@
 
 use std::ops::Range;
 
-use jxl_simd::{F32SimdVec, SimdDescriptor, U8SimdVec, U16SimdVec, simd_function};
-
 use crate::{
     api::{Endianness, JxlDataFormat, JxlOutputBuffer},
     render::low_memory_pipeline::row_buffers::RowBuffer,
 };
 
-macro_rules! define_run_interleaved {
-    ($fn_name:ident, $ty:ty, $vec_trait:ident, $store_fn:ident, $cnt:expr, $($arg:ident),+) => {
-        #[inline(always)]
-        fn $fn_name<D: SimdDescriptor>(
-            d: D,
-            $($arg: &[$ty]),+,
-            out: &mut [$ty],
-        ) -> usize {
-            let len = D::$vec_trait::LEN;
-            let mut n = 0;
-            let limit = [$($arg.len()),+][0];
+/// Generic interleave: N planar channels into packed output.
+/// Returns the number of pixels processed.
+fn interleave_channels<T: Copy>(inputs: &[&[T]], output: &mut [T]) -> usize {
+    let n = inputs.len();
+    if n < 2 || n > 4 {
+        return 0;
+    }
+    let pixel_count = inputs[0].len();
+    for input in inputs.iter() {
+        assert!(input.len() >= pixel_count);
+    }
+    assert!(output.len() >= pixel_count * n);
 
-            {
-                let out_chunks = out[..limit * $cnt].chunks_exact_mut(len * $cnt);
-                $(let mut $arg = $arg.chunks_exact(len);)+
-                for out_chunk in out_chunks {
-                    $(let $arg = D::$vec_trait::load(d, $arg.next().unwrap());)+
-                    D::$vec_trait::$store_fn($($arg),+, out_chunk);
-                    n += len;
-                }
-            }
-
-            let d256 = d.maybe_downgrade_256bit();
-            let len256 = <D::Descriptor256 as SimdDescriptor>::$vec_trait::LEN;
-            if len256 < len {
-                let out_chunks = out[n * $cnt..limit * $cnt].chunks_exact_mut(len256 * $cnt);
-                $(let mut $arg = $arg[n..limit].chunks_exact(len256);)+
-                for out_chunk in out_chunks {
-                    $(let $arg = <D::Descriptor256 as SimdDescriptor>::$vec_trait::load(d256, $arg.next().unwrap());)+
-                    <D::Descriptor256 as SimdDescriptor>::$vec_trait::$store_fn($($arg),+, out_chunk);
-                    n += len256;
-                }
-            }
-
-            let d128 = d.maybe_downgrade_128bit();
-            let len128 = <D::Descriptor128 as SimdDescriptor>::$vec_trait::LEN;
-            if len128 < len {
-                let out_chunks = out[n * $cnt..limit * $cnt].chunks_exact_mut(len128 * $cnt);
-                $(let mut $arg = $arg[n..limit].chunks_exact(len128);)+
-                for out_chunk in out_chunks {
-                    $(let $arg = <D::Descriptor128 as SimdDescriptor>::$vec_trait::load(d128, $arg.next().unwrap());)+
-                    <D::Descriptor128 as SimdDescriptor>::$vec_trait::$store_fn($($arg),+, out_chunk);
-                    n += len128;
-                }
-            }
-
-            n
+    for i in 0..pixel_count {
+        for (c, input) in inputs.iter().enumerate() {
+            output[i * n + c] = input[i];
         }
-    };
+    }
+    pixel_count
 }
-
-define_run_interleaved!(
-    run_interleaved_2_f32,
-    f32,
-    F32Vec,
-    store_interleaved_2,
-    2,
-    a,
-    b
-);
-define_run_interleaved!(
-    run_interleaved_3_f32,
-    f32,
-    F32Vec,
-    store_interleaved_3,
-    3,
-    a,
-    b,
-    c
-);
-define_run_interleaved!(
-    run_interleaved_4_f32,
-    f32,
-    F32Vec,
-    store_interleaved_4,
-    4,
-    a,
-    b,
-    c,
-    e
-);
-
-simd_function!(
-    store_interleaved_f32,
-    d: D,
-    fn store_interleaved_impl_f32(
-        inputs: &[&[f32]],
-        output: &mut [f32]
-    ) -> usize {
-        match inputs.len() {
-            2 => run_interleaved_2_f32(d, inputs[0], inputs[1], output),
-            3 => run_interleaved_3_f32(d, inputs[0], inputs[1], inputs[2], output),
-            4 => run_interleaved_4_f32(d, inputs[0], inputs[1], inputs[2], inputs[3], output),
-            _ => 0,
-        }
-    }
-);
-
-define_run_interleaved!(
-    run_interleaved_2_u8,
-    u8,
-    U8Vec,
-    store_interleaved_2,
-    2,
-    a,
-    b
-);
-define_run_interleaved!(
-    run_interleaved_3_u8,
-    u8,
-    U8Vec,
-    store_interleaved_3,
-    3,
-    a,
-    b,
-    c
-);
-define_run_interleaved!(
-    run_interleaved_4_u8,
-    u8,
-    U8Vec,
-    store_interleaved_4,
-    4,
-    a,
-    b,
-    c,
-    e
-);
-
-simd_function!(
-    store_interleaved_u8,
-    d: D,
-    fn store_interleaved_impl_u8(
-        inputs: &[&[u8]],
-        output: &mut [u8]
-    ) -> usize {
-        match inputs.len() {
-            2 => run_interleaved_2_u8(d, inputs[0], inputs[1], output),
-            3 => run_interleaved_3_u8(d, inputs[0], inputs[1], inputs[2], output),
-            4 => run_interleaved_4_u8(d, inputs[0], inputs[1], inputs[2], inputs[3], output),
-            _ => 0,
-        }
-    }
-);
-
-define_run_interleaved!(
-    run_interleaved_2_u16,
-    u16,
-    U16Vec,
-    store_interleaved_2,
-    2,
-    a,
-    b
-);
-define_run_interleaved!(
-    run_interleaved_3_u16,
-    u16,
-    U16Vec,
-    store_interleaved_3,
-    3,
-    a,
-    b,
-    c
-);
-define_run_interleaved!(
-    run_interleaved_4_u16,
-    u16,
-    U16Vec,
-    store_interleaved_4,
-    4,
-    a,
-    b,
-    c,
-    e
-);
-
-simd_function!(
-    store_interleaved_u16,
-    d: D,
-    fn store_interleaved_impl_u16(
-        inputs: &[&[u16]],
-        output: &mut [u16]
-    ) -> usize {
-        match inputs.len() {
-            2 => run_interleaved_2_u16(d, inputs[0], inputs[1], output),
-            3 => run_interleaved_3_u16(d, inputs[0], inputs[1], inputs[2], output),
-            4 => run_interleaved_4_u16(d, inputs[0], inputs[1], inputs[2], inputs[3], output),
-            _ => 0,
-        }
-    }
-);
 
 pub(super) fn store(
     input_buf: &[&RowBuffer],
@@ -241,7 +68,7 @@ pub(super) fn store(
             for (i, buf) in input_buf.iter().enumerate() {
                 slices[i] = &buf.get_row::<u8>(input_y)[start_u8..end_u8];
             }
-            store_interleaved_u8(&slices[..channels], output_buf)
+            interleave_channels(&slices[..channels], output_buf)
         }
         (channels, 2, true) if (2..=4).contains(&channels) => {
             if let Ok(output_u16) = bytemuck::try_cast_slice_mut::<u8, u16>(output_buf) {
@@ -251,7 +78,7 @@ pub(super) fn store(
                 for (i, buf) in input_buf.iter().enumerate() {
                     slices[i] = &buf.get_row::<u16>(input_y)[start_u16..end_u16];
                 }
-                store_interleaved_u16(&slices[..channels], output_u16)
+                interleave_channels(&slices[..channels], output_u16)
             } else {
                 0
             }
@@ -264,7 +91,7 @@ pub(super) fn store(
                 for (i, buf) in input_buf.iter().enumerate() {
                     slices[i] = &buf.get_row::<f32>(input_y)[start_f32..end_f32];
                 }
-                store_interleaved_f32(&slices[..channels], output_f32)
+                interleave_channels(&slices[..channels], output_f32)
             } else {
                 0
             }
