@@ -3,6 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use archmage::prelude::*;
+
 use crate::api::{
     JxlColorEncoding, JxlPrimaries, JxlTransferFunction, JxlWhitePoint, adapt_to_xyz_d50,
     primaries_to_xyz, primaries_to_xyz_d50,
@@ -11,8 +13,7 @@ use crate::error::Result;
 use crate::headers::{FileHeader, OpsinInverseMatrix};
 use crate::render::stages::from_linear;
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
-use crate::util::{Matrix3x3, eval_rational_poly_simd, inv_3x3_matrix, mul_3x3_matrix};
-use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask, simd_function};
+use crate::util::{Matrix3x3, eval_rational_poly, inv_3x3_matrix, mul_3x3_matrix};
 
 const SRGB_LUMINANCES: [f32; 3] = [0.2126, 0.7152, 0.0722];
 
@@ -170,65 +171,51 @@ impl std::fmt::Display for XybStage {
     }
 }
 
-simd_function!(
-    xyb_process_dispatch,
-    d: D,
-    fn xyb_process(
-        opsin: &OpsinInverseMatrix,
-        intensity_target: f32,
-        xsize: usize,
-        row_x: &mut [f32],
-        row_y: &mut [f32],
-        row_b: &mut [f32],
-    ) {
-        let OpsinInverseMatrix {
-            inverse_matrix: mat,
-            opsin_biases: bias,
-            ..
-        } = opsin;
-        // TODO(veluca): consider computing the cbrt in advance.
-        let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
-        let intensity_scale = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale));
-        let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale);
+#[autoversion]
+fn xyb_process(
+    _token: SimdToken,
+    mat: [f32; 9],
+    bias_cbrt: [f32; 3],
+    intensity_scale: f32,
+    scaled_bias: [f32; 3],
+    xsize: usize,
+    row_x: &mut [f32],
+    row_y: &mut [f32],
+    row_b: &mut [f32],
+) {
+    for i in 0..xsize {
+        let x = row_x[i];
+        let y = row_y[i];
+        let b = row_b[i];
 
-        // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
-        assert!(row_x.len() >= xsize);
-        assert!(row_y.len() >= xsize);
-        assert!(row_b.len() >= xsize);
+        // Mix and apply bias
+        let l = y + x - bias_cbrt[0];
+        let m = y - x - bias_cbrt[1];
+        let s = b - bias_cbrt[2];
 
-        for idx in (0..xsize).step_by(D::F32Vec::LEN) {
-            let x = D::F32Vec::load_from(d, row_x, idx);
-            let y = D::F32Vec::load_from(d, row_y, idx);
-            let b = D::F32Vec::load_from(d, row_b, idx);
+        // Apply biased inverse gamma and scale (1.0 corresponds to `intensity_target` nits)
+        let l = (l * l).mul_add(l * intensity_scale, scaled_bias[0]);
+        let m = (m * m).mul_add(m * intensity_scale, scaled_bias[1]);
+        let s = (s * s).mul_add(s * intensity_scale, scaled_bias[2]);
 
-            // Mix and apply bias
-            let l = y + x - bias_cbrt[0];
-            let m = y - x - bias_cbrt[1];
-            let s = b - bias_cbrt[2];
-
-            // Apply biased inverse gamma and scale (1.0 corresponds to `intensity_target` nits)
-            let l2 = l * l;
-            let m2 = m * m;
-            let s2 = s * s;
-            let scaled_l = l * intensity_scale;
-            let scaled_m = m * intensity_scale;
-            let scaled_s = s * intensity_scale;
-            let l = l2.mul_add(scaled_l, scaled_bias[0]);
-            let m = m2.mul_add(scaled_m, scaled_bias[1]);
-            let s = s2.mul_add(scaled_s, scaled_bias[2]);
-
-            // Apply opsin inverse matrix (linear LMS to linear sRGB)
-            let r = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
-            let g = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
-            let b = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
-            r.store_at(row_x, idx);
-            g.store_at(row_y, idx);
-            b.store_at(row_b, idx);
-        }
+        // Apply opsin inverse matrix (linear LMS to linear sRGB)
+        row_x[i] = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
+        row_y[i] = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
+        row_b[i] = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
     }
-);
+}
+
+fn xyb_process_prepare(opsin: &OpsinInverseMatrix, intensity_target: f32) -> ([f32; 9], [f32; 3], f32, [f32; 3]) {
+    let bias = opsin.opsin_biases;
+    let bias_cbrt = [bias[0].cbrt(), bias[1].cbrt(), bias[2].cbrt()];
+    let intensity_scale = 255.0 / intensity_target;
+    let scaled_bias = [
+        bias[0] * intensity_scale,
+        bias[1] * intensity_scale,
+        bias[2] * intensity_scale,
+    ];
+    (opsin.inverse_matrix, bias_cbrt, intensity_scale, scaled_bias)
+}
 
 impl RenderPipelineInPlaceStage for XybStage {
     type Type = f32;
@@ -251,14 +238,9 @@ impl RenderPipelineInPlaceStage for XybStage {
             );
         };
 
-        xyb_process_dispatch(
-            &self.output_color_info.opsin,
-            self.output_color_info.intensity_target,
-            xsize,
-            row_x,
-            row_y,
-            row_b,
-        );
+        let (mat, bias_cbrt, intensity_scale, scaled_bias) =
+            xyb_process_prepare(&self.output_color_info.opsin, self.output_color_info.intensity_target);
+        xyb_process(mat, bias_cbrt, intensity_scale, scaled_bias, xsize, row_x, row_y, row_b);
     }
 }
 
@@ -303,198 +285,113 @@ impl std::fmt::Display for XybToU8Stage {
     }
 }
 
-/// Common XYB inverse that produces linear RGB values for three channels.
-/// Returns (r_lin, g_lin, b_lin) SIMD vectors.
-#[allow(clippy::too_many_arguments)]
+/// XYB inverse, returning linear RGB for a single pixel.
 #[inline(always)]
-fn xyb_inverse<D: jxl_simd::SimdDescriptor>(
-    _d: D,
-    x: D::F32Vec,
-    y: D::F32Vec,
-    b: D::F32Vec,
-    bias_cbrt: &[D::F32Vec; 3],
-    intensity_scale: D::F32Vec,
-    scaled_bias: &[D::F32Vec; 3],
-    mat: &[D::F32Vec; 9],
-) -> (D::F32Vec, D::F32Vec, D::F32Vec) {
+fn xyb_inverse_pixel(
+    x: f32, y: f32, b: f32,
+    mat: &[f32; 9],
+    bias_cbrt: &[f32; 3],
+    intensity_scale: f32,
+    scaled_bias: &[f32; 3],
+) -> (f32, f32, f32) {
     let l = y + x - bias_cbrt[0];
     let m = y - x - bias_cbrt[1];
     let s = b - bias_cbrt[2];
-
-    let l2 = l * l;
-    let m2 = m * m;
-    let s2 = s * s;
-    let scaled_l = l * intensity_scale;
-    let scaled_m = m * intensity_scale;
-    let scaled_s = s * intensity_scale;
-    let l = l2.mul_add(scaled_l, scaled_bias[0]);
-    let m = m2.mul_add(scaled_m, scaled_bias[1]);
-    let s = s2.mul_add(scaled_s, scaled_bias[2]);
-
-    let r_lin = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
-    let g_lin = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
-    let b_lin = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
-    (r_lin, g_lin, b_lin)
+    let l = (l * l).mul_add(l * intensity_scale, scaled_bias[0]);
+    let m = (m * m).mul_add(m * intensity_scale, scaled_bias[1]);
+    let s = (s * s).mul_add(s * intensity_scale, scaled_bias[2]);
+    let r = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
+    let g = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
+    let b = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
+    (r, g, b)
 }
 
-simd_function!(
-    xyb_to_srgb_u8_dispatch,
-    d: D,
-    fn xyb_to_srgb_u8_process(
-        opsin: &OpsinInverseMatrix,
-        intensity_target: f32,
-        max_val: f32,
-        xsize: usize,
-        input_rows: &Channels<f32>,
-        output_rows: &mut ChannelsMut<u8>,
-    ) {
-        let OpsinInverseMatrix {
-            inverse_matrix: mat,
-            opsin_biases: bias,
-            ..
-        } = opsin;
+#[allow(clippy::excessive_precision)]
+const SRGB_P: [f32; 5] = [
+    -5.135152395e-4,
+    5.287254571e-3,
+    3.903842876e-1,
+    1.474205315,
+    7.352629620e-1,
+];
+#[allow(clippy::excessive_precision)]
+const SRGB_Q: [f32; 5] = [
+    1.004519624e-2,
+    3.036675394e-1,
+    1.340816930,
+    9.258482155e-1,
+    2.424867759e-2,
+];
 
-        let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
-        let intensity_scale_f = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale_f));
-        let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale_f);
+#[inline(always)]
+fn srgb_to_u8_sample(linear: f32, max_val: f32) -> u8 {
+    let a = linear.clamp(0.0, 1.0);
+    let srgb = if a <= 0.0031308 {
+        a * 12.92
+    } else {
+        eval_rational_poly(a.sqrt(), SRGB_P, SRGB_Q)
+    };
+    (srgb * max_val).round() as u8
+}
 
-        #[allow(clippy::excessive_precision)]
-        const P: [f32; 5] = [
-            -5.135152395e-4,
-            5.287254571e-3,
-            3.903842876e-1,
-            1.474205315,
-            7.352629620e-1,
-        ];
-        #[allow(clippy::excessive_precision)]
-        const Q: [f32; 5] = [
-            1.004519624e-2,
-            3.036675394e-1,
-            1.340816930,
-            9.258482155e-1,
-            2.424867759e-2,
-        ];
-        let zero = D::F32Vec::splat(d, 0.0);
-        let one = D::F32Vec::splat(d, 1.0);
-        let scale = D::F32Vec::splat(d, max_val);
-        let threshold = D::F32Vec::splat(d, 0.0031308);
-        let linear_scale = D::F32Vec::splat(d, 12.92);
-
-        let in_x = input_rows[0][0];
-        let in_y = input_rows[1][0];
-        let in_b = input_rows[2][0];
-        let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
-
-        let end = xsize.next_multiple_of(D::F32Vec::LEN);
-        // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
-        assert!(in_x.len() >= end);
-        assert!(in_y.len() >= end);
-        assert!(in_b.len() >= end);
-        assert!(out_r[0].len() >= end);
-        assert!(out_g[0].len() >= end);
-        assert!(out_b[0].len() >= end);
-
-        for idx in (0..end).step_by(D::F32Vec::LEN) {
-            let x = D::F32Vec::load_from(d, in_x, idx);
-            let y = D::F32Vec::load_from(d, in_y, idx);
-            let b = D::F32Vec::load_from(d, in_b, idx);
-
-            let (r_lin, g_lin, b_lin) = xyb_inverse(
-                d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
-            );
-
-            // sRGB TF + u8 quantize
-            let r_c = r_lin.max(zero).min(one);
-            let r_srgb = threshold.gt(r_c).if_then_else_f32(
-                r_c * linear_scale,
-                eval_rational_poly_simd(d, r_c.sqrt(), P, Q),
-            );
-            (r_srgb * scale).round_store_u8(&mut out_r[0][idx..]);
-
-            let g_c = g_lin.max(zero).min(one);
-            let g_srgb = threshold.gt(g_c).if_then_else_f32(
-                g_c * linear_scale,
-                eval_rational_poly_simd(d, g_c.sqrt(), P, Q),
-            );
-            (g_srgb * scale).round_store_u8(&mut out_g[0][idx..]);
-
-            let b_c = b_lin.max(zero).min(one);
-            let b_srgb = threshold.gt(b_c).if_then_else_f32(
-                b_c * linear_scale,
-                eval_rational_poly_simd(d, b_c.sqrt(), P, Q),
-            );
-            (b_srgb * scale).round_store_u8(&mut out_b[0][idx..]);
-        }
+#[autoversion]
+fn xyb_to_srgb_u8_inner(
+    _token: SimdToken,
+    in_x: &[f32],
+    in_y: &[f32],
+    in_b: &[f32],
+    out_r: &mut [u8],
+    out_g: &mut [u8],
+    out_b: &mut [u8],
+    mat: [f32; 9],
+    bias_cbrt: [f32; 3],
+    intensity_scale: f32,
+    scaled_bias: [f32; 3],
+    max_val: f32,
+    xsize: usize,
+) {
+    for i in 0..xsize {
+        let (r_lin, g_lin, b_lin) = xyb_inverse_pixel(
+            in_x[i], in_y[i], in_b[i],
+            &mat, &bias_cbrt, intensity_scale, &scaled_bias,
+        );
+        out_r[i] = srgb_to_u8_sample(r_lin, max_val);
+        out_g[i] = srgb_to_u8_sample(g_lin, max_val);
+        out_b[i] = srgb_to_u8_sample(b_lin, max_val);
     }
-);
+}
 
-simd_function!(
-    xyb_to_gamma_u8_dispatch,
-    d: D,
-    fn xyb_to_gamma_u8_process(
-        opsin: &OpsinInverseMatrix,
-        gamma_params: &[f32; 3],
-        xsize: usize,
-        input_rows: &Channels<f32>,
-        output_rows: &mut ChannelsMut<u8>,
-    ) {
-        let [intensity_target, gamma, max_val] = *gamma_params;
-        let OpsinInverseMatrix {
-            inverse_matrix: mat,
-            opsin_biases: bias,
-            ..
-        } = opsin;
-
-        let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
-        let intensity_scale_f = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale_f));
-        let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale_f);
-
-        let zero = D::F32Vec::splat(d, 0.0);
-        let scale = D::F32Vec::splat(d, max_val);
-        let gamma_vec = D::F32Vec::splat(d, gamma);
-
-        let in_x = input_rows[0][0];
-        let in_y = input_rows[1][0];
-        let in_b = input_rows[2][0];
-        let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
-
-        let end = xsize.next_multiple_of(D::F32Vec::LEN);
-        // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
-        assert!(in_x.len() >= end);
-        assert!(in_y.len() >= end);
-        assert!(in_b.len() >= end);
-        assert!(out_r[0].len() >= end);
-        assert!(out_g[0].len() >= end);
-        assert!(out_b[0].len() >= end);
-
-        for idx in (0..end).step_by(D::F32Vec::LEN) {
-            let x = D::F32Vec::load_from(d, in_x, idx);
-            let y = D::F32Vec::load_from(d, in_y, idx);
-            let b = D::F32Vec::load_from(d, in_b, idx);
-
-            let (r_lin, g_lin, b_lin) = xyb_inverse(
-                d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
-            );
-
-            // Gamma TF + u8 quantize: powf(abs(x), gamma) * copysign(1, x)
-            let r_abs = r_lin.abs().max(zero);
-            let r_tf = crate::util::fast_powf_simd(d, r_abs, gamma_vec).copysign(r_lin);
-            (r_tf * scale).round_store_u8(&mut out_r[0][idx..]);
-
-            let g_abs = g_lin.abs().max(zero);
-            let g_tf = crate::util::fast_powf_simd(d, g_abs, gamma_vec).copysign(g_lin);
-            (g_tf * scale).round_store_u8(&mut out_g[0][idx..]);
-
-            let b_abs = b_lin.abs().max(zero);
-            let b_tf = crate::util::fast_powf_simd(d, b_abs, gamma_vec).copysign(b_lin);
-            (b_tf * scale).round_store_u8(&mut out_b[0][idx..]);
-        }
+#[autoversion]
+fn xyb_to_gamma_u8_inner(
+    _token: SimdToken,
+    in_x: &[f32],
+    in_y: &[f32],
+    in_b: &[f32],
+    out_r: &mut [u8],
+    out_g: &mut [u8],
+    out_b: &mut [u8],
+    mat: [f32; 9],
+    bias_cbrt: [f32; 3],
+    intensity_scale: f32,
+    scaled_bias: [f32; 3],
+    gamma: f32,
+    max_val: f32,
+    xsize: usize,
+) {
+    for i in 0..xsize {
+        let (r_lin, g_lin, b_lin) = xyb_inverse_pixel(
+            in_x[i], in_y[i], in_b[i],
+            &mat, &bias_cbrt, intensity_scale, &scaled_bias,
+        );
+        // Gamma TF + u8 quantize: powf(abs(x), gamma) * copysign(1, x)
+        let r_tf = crate::util::fast_powf(r_lin.abs(), gamma).copysign(r_lin);
+        let g_tf = crate::util::fast_powf(g_lin.abs(), gamma).copysign(g_lin);
+        let b_tf = crate::util::fast_powf(b_lin.abs(), gamma).copysign(b_lin);
+        out_r[i] = (r_tf * max_val).round().clamp(0.0, max_val) as u8;
+        out_g[i] = (g_tf * max_val).round().clamp(0.0, max_val) as u8;
+        out_b[i] = (b_tf * max_val).round().clamp(0.0, max_val) as u8;
     }
-);
+}
 
 impl RenderPipelineInOutStage for XybToU8Stage {
     type InputT = f32;
@@ -515,24 +412,29 @@ impl RenderPipelineInOutStage for XybToU8Stage {
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let max_val = ((1u32 << self.bit_depth) - 1) as f32;
+        let (mat, bias_cbrt, intensity_scale, scaled_bias) =
+            xyb_process_prepare(&self.output_color_info.opsin, self.output_color_info.intensity_target);
+
+        let in_x = input_rows[0][0];
+        let in_y = input_rows[1][0];
+        let in_b = input_rows[2][0];
+        let (out_r, out_g, out_b) = output_rows.split_first_3_mut();
+
         match self.tf {
             super::from_linear::TransferFunction::Srgb => {
-                xyb_to_srgb_u8_dispatch(
-                    &self.output_color_info.opsin,
-                    self.output_color_info.intensity_target,
-                    max_val,
-                    xsize,
-                    input_rows,
-                    output_rows,
+                xyb_to_srgb_u8_inner(
+                    in_x, in_y, in_b,
+                    out_r[0], out_g[0], out_b[0],
+                    mat, bias_cbrt, intensity_scale, scaled_bias,
+                    max_val, xsize,
                 );
             }
             super::from_linear::TransferFunction::Gamma(gamma) => {
-                xyb_to_gamma_u8_dispatch(
-                    &self.output_color_info.opsin,
-                    &[self.output_color_info.intensity_target, gamma, max_val],
-                    xsize,
-                    input_rows,
-                    output_rows,
+                xyb_to_gamma_u8_inner(
+                    in_x, in_y, in_b,
+                    out_r[0], out_g[0], out_b[0],
+                    mat, bias_cbrt, intensity_scale, scaled_bias,
+                    gamma, max_val, xsize,
                 );
             }
             _ => unreachable!("XybToU8Stage only supports Srgb and Gamma TFs"),
@@ -546,12 +448,9 @@ mod test {
 
     use super::*;
     use crate::error::Result;
-    use crate::headers::encodings::Empty;
     use crate::image::Image;
     use crate::render::test::make_and_run_simple_pipeline;
-    use crate::util::round_up_size_to_cache_line;
     use crate::util::test::assert_all_almost_abs_eq;
-    use jxl_simd::{ScalarDescriptor, SimdDescriptor, test_all_instruction_sets};
 
     #[test]
     fn consistency() -> Result<()> {
@@ -587,67 +486,6 @@ mod test {
 
         Ok(())
     }
-
-    fn xyb_process_scalar_equivalent<D: SimdDescriptor>(d: D) {
-        let opsin = OpsinInverseMatrix::default(&Empty {});
-        arbtest::arbtest(|u| {
-            let xsize = u.arbitrary_len::<usize>()?;
-            let intensity_target = u.arbitrary::<u8>()? as f32 * 2.0 + 1.0;
-            let mut row_x = vec![0.0; round_up_size_to_cache_line::<f32>(xsize)];
-            let mut row_y = vec![0.0; round_up_size_to_cache_line::<f32>(xsize)];
-            let mut row_b = vec![0.0; round_up_size_to_cache_line::<f32>(xsize)];
-
-            for i in 0..xsize {
-                row_x[i] = u.arbitrary::<i16>()? as f32 * (0.07 / i16::MAX as f32);
-                row_y[i] = u.arbitrary::<u16>()? as f32 * (1.0 / u16::MAX as f32);
-                row_b[i] = u.arbitrary::<u16>()? as f32 * (1.0 / u16::MAX as f32);
-            }
-
-            let mut scalar_x = row_x.clone();
-            let mut scalar_y = row_y.clone();
-            let mut scalar_b = row_b.clone();
-
-            xyb_process(
-                d,
-                &opsin,
-                intensity_target,
-                xsize,
-                &mut row_x,
-                &mut row_y,
-                &mut row_b,
-            );
-
-            xyb_process(
-                ScalarDescriptor::new().unwrap(),
-                &opsin,
-                intensity_target,
-                xsize,
-                &mut scalar_x,
-                &mut scalar_y,
-                &mut scalar_b,
-            );
-
-            for i in 0..xsize {
-                for (simd, scalar) in [
-                    (row_x[i], scalar_x[i]),
-                    (row_y[i], scalar_y[i]),
-                    (row_b[i], scalar_b[i]),
-                ] {
-                    let abs = (simd - scalar).abs();
-                    let max = simd.abs().max(scalar.abs());
-                    let rel = abs / max;
-                    assert!(
-                        abs < 1e-3 || rel < 1e-3,
-                        "simd {simd}, scalar {scalar}, abs {abs:?} rel {rel:?}",
-                    );
-                }
-            }
-
-            Ok(())
-        });
-    }
-
-    test_all_instruction_sets!(xyb_process_scalar_equivalent);
 
     #[test]
     fn fused_xyb_srgb_u8_consistency() -> Result<()> {
