@@ -43,6 +43,7 @@ sse42 = ["jxl/sse42"]
 avx = ["jxl/avx"]
 avx512 = ["jxl/avx512"]
 neon = ["jxl/neon"]
+allow-unsafe = ["jxl/allow-unsafe"]
 
 [lints]
 workspace = true
