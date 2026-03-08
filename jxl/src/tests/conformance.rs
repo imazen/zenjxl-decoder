@@ -979,16 +979,16 @@ mod tests {
         if let Some(icc) = result.output_profile.try_as_icc() {
             eprintln!("    Generated ICC size: {} bytes", icc.len());
             // Compare with original.icc if available
-            if let Some(orig_icc_path) = test.original_icc() {
-                if let Ok(orig_icc) = std::fs::read(&orig_icc_path) {
-                    if icc.as_ref() == &orig_icc {
-                        eprintln!("    Generated ICC matches original.icc exactly");
-                    } else {
-                        eprintln!(
-                            "    Generated ICC differs from original.icc ({} bytes)",
-                            orig_icc.len()
-                        );
-                    }
+            if let Some(orig_icc_path) = test.original_icc()
+                && let Ok(orig_icc) = std::fs::read(&orig_icc_path)
+            {
+                if icc.as_ref() == &orig_icc {
+                    eprintln!("    Generated ICC matches original.icc exactly");
+                } else {
+                    eprintln!(
+                        "    Generated ICC differs from original.icc ({} bytes)",
+                        orig_icc.len()
+                    );
                 }
             }
         }
