@@ -8,7 +8,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     ops::Range,
-    sync::{Mutex, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use crate::transforms::transform_map::*;
@@ -614,6 +617,15 @@ impl FullModularImage {
             self.buffer_info[*b].buffer_grid[group].set_status(BUFFER_STATUS_FINAL_RENDER);
             dry_run.insert((*b, group));
         }
+    }
+
+    /// Transfer items from `ready_buffers_dry_run` to `ready_buffers` without
+    /// running transforms.  Used by the parallel decode path which calls
+    /// `mark_group_to_be_read` (populates dry_run set) followed by
+    /// `process_output(false)` (asserts dry_run set is empty).
+    pub fn drain_dry_run_to_ready(&mut self) {
+        let dry = std::mem::take(&mut *self.ready_buffers_dry_run.lock().unwrap());
+        self.ready_buffers.extend(dry);
     }
 
     #[allow(clippy::type_complexity)]

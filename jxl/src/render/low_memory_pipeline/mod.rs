@@ -524,6 +524,11 @@ impl LowMemoryRenderPipeline {
             .group_size_for_channel(channel, crate::image::DataTypeTag::F32)
     }
 
+    /// Returns true if a buffer has already been stored for this channel/group.
+    pub(crate) fn has_buffer(&self, channel: usize, group_id: usize) -> bool {
+        self.input_buffers[group_id].has_buffer(channel)
+    }
+
     /// Stores a buffer for a group/channel without triggering rendering.
     pub(crate) fn store_buffer_only<T: ImageDataType>(
         &mut self,

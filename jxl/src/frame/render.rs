@@ -12,9 +12,9 @@ use crate::api::JxlOutputBuffer;
 use crate::bit_reader::BitReader;
 use crate::error::{Error, Result};
 use crate::features::epf::SigmaSource;
+use crate::frame::RenderUnit;
 #[cfg(feature = "threads")]
 use crate::frame::decode::upsample_lf_group;
-use crate::frame::RenderUnit;
 use crate::headers::frame_header::Encoding;
 use crate::headers::frame_header::FrameType;
 use crate::headers::{Orientation, color_encoding::ColorSpace, extra_channels::ExtraChannel};
@@ -221,6 +221,16 @@ impl Frame {
             )?;
         }
 
+        // Determine parallel vs sequential before STEP 2 — the modular marking
+        // strategy differs: parallel marks per-group, sequential marks all up-front.
+        #[cfg(all(feature = "threads", not(test)))]
+        let use_parallel = self.decoder_state.parallel && groups.len() > 1;
+        #[cfg(all(feature = "threads", test))]
+        let use_parallel =
+            self.decoder_state.parallel && groups.len() > 1 && !self.use_simple_pipeline;
+        #[cfg(not(feature = "threads"))]
+        let use_parallel = false;
+
         // STEP 2: ensure that groups that will be re-rendered are marked as such.
         // VarDCT data to be rendered.
         for (g, _) in groups.iter() {
@@ -228,7 +238,11 @@ impl Frame {
             pipeline!(self, p, p.mark_group_to_rerender(*g));
         }
         // Modular data to be re-rendered.
-        {
+        // In parallel mode, modular marking is deferred to per-group processing
+        // inside decode_groups_parallel: mark_group_to_be_read sets buffer
+        // statuses to FINAL_RENDER, which would break per-group dependency
+        // checks if done for all groups up-front.
+        if !use_parallel {
             let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
             for (group, passes) in groups.iter() {
                 for (pass, _) in passes.iter() {
@@ -244,13 +258,6 @@ impl Frame {
         }
 
         // STEP 3: decode the groups, eagerly rendering VarDCT channels and noise.
-        #[cfg(all(feature = "threads", not(test)))]
-        let use_parallel = self.decoder_state.parallel && groups.len() > 1;
-        #[cfg(all(feature = "threads", test))]
-        let use_parallel =
-            self.decoder_state.parallel && groups.len() > 1 && !self.use_simple_pipeline;
-        #[cfg(not(feature = "threads"))]
-        let use_parallel = false;
 
         let hf_start = std::time::Instant::now();
         if use_parallel {
@@ -810,13 +817,23 @@ impl Frame {
                 {
                     let lf_global = self.lf_global.as_mut().unwrap();
                     for (pass, _) in gw.passes.iter() {
-                        lf_global.modular_global.mark_group_to_be_read(2 + *pass, gw.group);
+                        lf_global
+                            .modular_global
+                            .mark_group_to_be_read(2 + *pass, gw.group);
                     }
+                    // Transfer items from ready_buffers_dry_run to
+                    // ready_buffers (mark_group_to_be_read populates the dry_run
+                    // set; process_output(false) asserts it is empty).
+                    lf_global.modular_global.drain_dry_run_to_ready();
                     lf_global.modular_global.process_output(
                         &self.header,
                         false,
                         &mut |chan, group, _complete, image: Option<Image<i32>>| {
-                            lmp_mut!().store_buffer_only(chan, group, true, image.unwrap());
+                            // Cascading transforms may re-produce output for
+                            // groups already processed.  Skip duplicates.
+                            if !lmp_mut!().has_buffer(chan, group) {
+                                lmp_mut!().store_buffer_only(chan, group, true, image.unwrap());
+                            }
                             if !groups_with_data.contains(&group) {
                                 groups_with_data.push(group);
                             }
@@ -1770,8 +1787,7 @@ impl Frame {
                 fuse_srgb_to_u8_bit_depth = Some(bit_depth);
             }
             if fuse_srgb_to_u8_bit_depth.is_none() {
-                pipeline =
-                    pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()));
+                pipeline = pipeline.add_inplace_stage(FromLinearStage::new(0, output_tf.clone()));
             }
         }
 
@@ -1972,17 +1988,16 @@ impl Frame {
                     ));
                     // Alpha channel still needs plain f32→u8 conversion (no TF/XYB)
                     for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
-                        pipeline = pipeline
-                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
+                        pipeline =
+                            pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
                     }
                 } else if let Some(bit_depth) = fuse_srgb_to_u8_bit_depth {
                     use crate::render::stages::{ConvertF32ToU8Stage, FromLinearSrgbToU8Stage};
-                    pipeline =
-                        pipeline.add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth));
+                    pipeline = pipeline.add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth));
                     // Alpha channel still needs plain f32→u8 conversion (no TF)
                     for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
-                        pipeline = pipeline
-                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
+                        pipeline =
+                            pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
                     }
                 } else {
                     pipeline = Self::add_conversion_stages(pipeline, color_source_channels, *df);

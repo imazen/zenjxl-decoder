@@ -37,6 +37,10 @@ pub(super) struct InputBuffer {
 }
 
 impl InputBuffer {
+    pub(super) fn has_buffer(&self, chan: usize) -> bool {
+        self.data[chan].is_some()
+    }
+
     pub(super) fn set_buffer(&mut self, chan: usize, buf: OwnedRawImage) {
         assert!(self.data[chan].is_none());
         self.data[chan] = Some(buf);
