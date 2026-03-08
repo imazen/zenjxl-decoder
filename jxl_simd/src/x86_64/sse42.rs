@@ -14,17 +14,17 @@ use std::ops::{
     Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
-fn token() -> archmage::X64V2Token {
-    archmage::X64V2Token::summon().unwrap()
-}
-
 #[derive(Clone, Copy, Debug)]
-pub struct Sse42Descriptor(());
+pub struct Sse42Descriptor(archmage::X64V2Token);
 
 impl Sse42Descriptor {
     #[inline]
-    pub fn from_token(_token: archmage::X64V2Token) -> Self {
-        Self(())
+    pub fn from_token(token: archmage::X64V2Token) -> Self {
+        Self(token)
+    }
+    #[inline(always)]
+    pub fn token(&self) -> archmage::X64V2Token {
+        self.0
     }
 }
 
@@ -56,6 +56,7 @@ impl SimdDescriptor for Sse42Descriptor {
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
         #[arcane]
+        #[inline(always)]
         fn impl_<R>(
             _: archmage::X64V2Token,
             d: Sse42Descriptor,
@@ -63,7 +64,7 @@ impl SimdDescriptor for Sse42Descriptor {
         ) -> R {
             f(d)
         }
-        impl_(token(), self, f)
+        impl_(self.token(), self, f)
     }
 }
 
@@ -76,7 +77,7 @@ macro_rules! fn_sse42 {
             #[arcane]
             #[inline(always)]
             fn impl_(_t: archmage::X64V2Token, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
-            impl_(token(), self, $($arg),*)
+            impl_(self.1.token(), self, $($arg),*)
         }
     };
 }
@@ -87,11 +88,9 @@ macro_rules! fn_sse42 {
 pub struct Bf16Table8Sse42(__m128i);
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct F32VecSse42(__m128, Sse42Descriptor);
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct MaskSse42(__m128, Sse42Descriptor);
 
 impl F32SimdVec for F32VecSse42 {
@@ -102,24 +101,27 @@ impl F32SimdVec for F32VecSse42 {
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, mem: &[f32]) -> __m128 {
             _mm_loadu_ps(mem.first_chunk::<4>().unwrap())
         }
-        Self(impl_(token(), mem), d)
+        Self(impl_(d.token(), mem), d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [f32]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128, mem: &mut [f32]) {
             _mm_storeu_ps(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        impl_(token(), self.0, mem)
+        impl_(self.1.token(), self.0, mem)
     }
 
     #[inline(always)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, a: __m128, b: __m128, dest: &mut [f32]) {
             assert!(dest.len() >= 2 * F32VecSse42::LEN);
             let lo = _mm_unpacklo_ps(a, b);
@@ -127,12 +129,13 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[..4].first_chunk_mut::<4>().unwrap(), lo);
             _mm_storeu_ps(dest[4..8].first_chunk_mut::<4>().unwrap(), hi);
         }
-        impl_(token(), a.0, b.0, dest)
+        impl_(a.1.token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, a: __m128, b: __m128, c: __m128, dest: &mut [f32]) {
             assert!(dest.len() >= 3 * F32VecSse42::LEN);
             let p_ab_lo = _mm_unpacklo_ps(a, b);
@@ -150,12 +153,13 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[4..8].first_chunk_mut::<4>().unwrap(), out1);
             _mm_storeu_ps(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
         }
-        impl_(token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(
             _: archmage::X64V2Token,
             a: __m128,
@@ -180,7 +184,7 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
             _mm_storeu_ps(dest[12..16].first_chunk_mut::<4>().unwrap(), out3);
         }
-        impl_(token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
@@ -196,6 +200,7 @@ impl F32SimdVec for F32VecSse42 {
         dest: &mut [f32],
     ) {
         #[arcane]
+        #[inline(always)]
         fn impl_(
             _: archmage::X64V2Token,
             a: __m128,
@@ -236,12 +241,13 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[24..28].first_chunk_mut::<4>().unwrap(), abcd_3);
             _mm_storeu_ps(dest[28..32].first_chunk_mut::<4>().unwrap(), efgh_3);
         }
-        impl_(token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
     }
 
     #[inline(always)]
     fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, src: &[f32]) -> (__m128, __m128) {
             assert!(src.len() >= 2 * F32VecSse42::LEN);
             let in0 = _mm_loadu_ps(src[..4].first_chunk::<4>().unwrap());
@@ -250,13 +256,14 @@ impl F32SimdVec for F32VecSse42 {
             let b = _mm_shuffle_ps::<0xDD>(in0, in1);
             (a, b)
         }
-        let (a, b) = impl_(token(), src);
+        let (a, b) = impl_(d.token(), src);
         (Self(a, d), Self(b, d))
     }
 
     #[inline(always)]
     fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, src: &[f32]) -> (__m128, __m128, __m128) {
             assert!(src.len() >= 3 * F32VecSse42::LEN);
             let in0 = _mm_loadu_ps(src[..4].first_chunk::<4>().unwrap());
@@ -277,13 +284,14 @@ impl F32SimdVec for F32VecSse42 {
 
             (a, b, c)
         }
-        let (a, b, c) = impl_(token(), src);
+        let (a, b, c) = impl_(d.token(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
     #[inline(always)]
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, src: &[f32]) -> (__m128, __m128, __m128, __m128) {
             assert!(src.len() >= 4 * F32VecSse42::LEN);
             let in0 = _mm_loadu_ps(src[..4].first_chunk::<4>().unwrap());
@@ -303,7 +311,7 @@ impl F32SimdVec for F32VecSse42 {
 
             (a, b, c, dv)
         }
-        let (a, b, c, dv) = impl_(token(), src);
+        let (a, b, c, dv) = impl_(d.token(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -318,19 +326,21 @@ impl F32SimdVec for F32VecSse42 {
     #[inline(always)]
     fn splat(d: Self::Descriptor, v: f32) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: f32) -> __m128 {
             _mm_set1_ps(v)
         }
-        Self(impl_(token(), v), d)
+        Self(impl_(d.token(), v), d)
     }
 
     #[inline(always)]
     fn zero(d: Self::Descriptor) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token) -> __m128 {
             _mm_setzero_ps()
         }
-        Self(impl_(token()), d)
+        Self(impl_(d.token()), d)
     }
 
     fn_sse42!(this: F32VecSse42, fn abs() -> F32VecSse42 {
@@ -393,6 +403,7 @@ impl F32SimdVec for F32VecSse42 {
     #[inline(always)]
     fn prepare_table_bf16_8(_d: Sse42Descriptor, table: &[f32; 8]) -> Bf16Table8Sse42 {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, table: &[f32; 8]) -> __m128i {
             let table_lo = _mm_loadu_ps(table[..4].first_chunk::<4>().unwrap());
             let table_hi = _mm_loadu_ps(table[4..8].first_chunk::<4>().unwrap());
@@ -405,7 +416,7 @@ impl F32SimdVec for F32VecSse42 {
             let bf16_hi = _mm_shuffle_epi8(table_hi_i32, bf16_extract);
             _mm_unpacklo_epi64(bf16_lo, bf16_hi)
         }
-        Bf16Table8Sse42(impl_(token(), table))
+        Bf16Table8Sse42(impl_(_d.token(), table))
     }
 
     #[inline(always)]
@@ -415,6 +426,7 @@ impl F32SimdVec for F32VecSse42 {
         indices: I32VecSse42,
     ) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, bf16_table: __m128i, indices: __m128i) -> __m128 {
             let shl17 = _mm_slli_epi32::<17>(indices);
             let shl25 = _mm_slli_epi32::<25>(indices);
@@ -423,12 +435,13 @@ impl F32SimdVec for F32VecSse42 {
             let result = _mm_shuffle_epi8(bf16_table, shuffle_mask);
             _mm_castsi128_ps(result)
         }
-        F32VecSse42(impl_(token(), table.0, indices.0), d)
+        F32VecSse42(impl_(d.token(), table.0, indices.0), d)
     }
 
     #[inline(always)]
     fn round_store_u8(self, dest: &mut [u8]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecSse42::LEN);
             let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
@@ -438,12 +451,13 @@ impl F32SimdVec for F32VecSse42 {
             let val = _mm_cvtsi128_si32(u8s);
             dest[..4].copy_from_slice(&val.to_ne_bytes());
         }
-        impl_(token(), self.0, dest)
+        impl_(self.1.token(), self.0, dest)
     }
 
     #[inline(always)]
     fn round_store_u16(self, dest: &mut [u16]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecSse42::LEN);
             let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
@@ -454,7 +468,7 @@ impl F32SimdVec for F32VecSse42 {
             dest[2] = _mm_extract_epi16::<2>(u16s) as u16;
             dest[3] = _mm_extract_epi16::<3>(u16s) as u16;
         }
-        impl_(token(), self.0, dest)
+        impl_(self.1.token(), self.0, dest)
     }
 
     impl_f32_array_interface!();
@@ -484,6 +498,7 @@ impl F32SimdVec for F32VecSse42 {
     #[inline(always)]
     fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
         #[arcane]
+        #[inline(always)]
         fn impl_(
             _: archmage::X64V2Token,
             d: Sse42Descriptor,
@@ -512,7 +527,7 @@ impl F32SimdVec for F32VecSse42 {
             F32VecSse42(r2, d).store_array(&mut data[2 * stride]);
             F32VecSse42(r3, d).store_array(&mut data[3 * stride]);
         }
-        impl_(token(), d, data, stride)
+        impl_(d.token(), d, data, stride)
     }
 }
 
@@ -569,7 +584,6 @@ impl DivAssign<F32VecSse42> for F32VecSse42 {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct I32VecSse42(__m128i, Sse42Descriptor);
 
 impl I32SimdVec for I32VecSse42 {
@@ -580,28 +594,31 @@ impl I32SimdVec for I32VecSse42 {
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, mem: &[i32]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<4>().unwrap())
         }
-        Self(impl_(token(), mem), d)
+        Self(impl_(d.token(), mem), d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [i32]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [i32]) {
             _mm_storeu_si128(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        impl_(token(), self.0, mem)
+        impl_(self.1.token(), self.0, mem)
     }
 
     #[inline(always)]
     fn splat(d: Self::Descriptor, v: i32) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: i32) -> __m128i {
             _mm_set1_epi32(v)
         }
-        Self(impl_(token(), v), d)
+        Self(impl_(d.token(), v), d)
     }
 
     fn_sse42!(this: I32VecSse42, fn as_f32() -> F32VecSse42 {
@@ -650,19 +667,21 @@ impl I32SimdVec for I32VecSse42 {
     #[inline(always)]
     fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_slli_epi32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
     }
 
     #[inline(always)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_srai_epi32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
     }
 
     fn_sse42!(this: I32VecSse42, fn mul_wide_take_high(rhs: I32VecSse42) -> I32VecSse42 {
@@ -676,6 +695,7 @@ impl I32SimdVec for I32VecSse42 {
     #[inline(always)]
     fn store_u16(self, dest: &mut [u16]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= I32VecSse42::LEN);
             let mut tmp = [0i32; 4];
@@ -684,12 +704,13 @@ impl I32SimdVec for I32VecSse42 {
                 dest[i] = tmp[i] as u16;
             }
         }
-        impl_(token(), self.0, dest)
+        impl_(self.1.token(), self.0, dest)
     }
 
     #[inline(always)]
     fn store_u8(self, dest: &mut [u8]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128i, dest: &mut [u8]) {
             assert!(dest.len() >= I32VecSse42::LEN);
             let mut tmp = [0i32; 4];
@@ -698,7 +719,7 @@ impl I32SimdVec for I32VecSse42 {
                 dest[i] = tmp[i] as u8;
             }
         }
-        impl_(token(), self.0, dest)
+        impl_(self.1.token(), self.0, dest)
     }
 }
 
@@ -788,7 +809,6 @@ impl BitXorAssign<I32VecSse42> for I32VecSse42 {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U32VecSse42(__m128i, Sse42Descriptor);
 
 impl U32SimdVec for U32VecSse42 {
@@ -804,15 +824,15 @@ impl U32SimdVec for U32VecSse42 {
     #[inline(always)]
     fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_srli_epi32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U8VecSse42(__m128i, Sse42Descriptor);
 
 impl U8SimdVec for U8VecSse42 {
@@ -822,33 +842,37 @@ impl U8SimdVec for U8VecSse42 {
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, mem: &[u8]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<16>().unwrap())
         }
-        Self(impl_(token(), mem), d)
+        Self(impl_(d.token(), mem), d)
     }
 
     #[inline(always)]
     fn splat(d: Self::Descriptor, v: u8) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: u8) -> __m128i {
             _mm_set1_epi8(v as i8)
         }
-        Self(impl_(token(), v), d)
+        Self(impl_(d.token(), v), d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [u8]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [u8]) {
             _mm_storeu_si128(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        impl_(token(), self.0, mem)
+        impl_(self.1.token(), self.0, mem)
     }
 
     #[inline(always)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, dest: &mut [u8]) {
             assert!(dest.len() >= 2 * U8VecSse42::LEN);
             let lo = _mm_unpacklo_epi8(a, b);
@@ -856,12 +880,13 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[..16].first_chunk_mut::<16>().unwrap(), lo);
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), hi);
         }
-        impl_(token(), a.0, b.0, dest)
+        impl_(a.1.token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, dest: &mut [u8]) {
             assert!(dest.len() >= 3 * U8VecSse42::LEN);
 
@@ -900,12 +925,13 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
-        impl_(token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(
             _: archmage::X64V2Token,
             a: __m128i,
@@ -930,12 +956,11 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm_storeu_si128(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
-        impl_(token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U16VecSse42(__m128i, Sse42Descriptor);
 
 impl U16SimdVec for U16VecSse42 {
@@ -945,33 +970,37 @@ impl U16SimdVec for U16VecSse42 {
     #[inline(always)]
     fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, mem: &[u16]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<8>().unwrap())
         }
-        Self(impl_(token(), mem), d)
+        Self(impl_(d.token(), mem), d)
     }
 
     #[inline(always)]
     fn splat(d: Self::Descriptor, v: u16) -> Self {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: u16) -> __m128i {
             _mm_set1_epi16(v as i16)
         }
-        Self(impl_(token(), v), d)
+        Self(impl_(d.token(), v), d)
     }
 
     #[inline(always)]
     fn store(&self, mem: &mut [u16]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [u16]) {
             _mm_storeu_si128(mem.first_chunk_mut::<8>().unwrap(), v)
         }
-        impl_(token(), self.0, mem)
+        impl_(self.1.token(), self.0, mem)
     }
 
     #[inline(always)]
     fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= 2 * U16VecSse42::LEN);
             let lo = _mm_unpacklo_epi16(a, b);
@@ -979,12 +1008,13 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[..8].first_chunk_mut::<8>().unwrap(), lo);
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), hi);
         }
-        impl_(token(), a.0, b.0, dest)
+        impl_(a.1.token(), a.0, b.0, dest)
     }
 
     #[inline(always)]
     fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(_: archmage::X64V2Token, a: __m128i, b: __m128i, c: __m128i, dest: &mut [u16]) {
             assert!(dest.len() >= 3 * U16VecSse42::LEN);
 
@@ -1023,12 +1053,13 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
         }
-        impl_(token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
     fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
         #[arcane]
+        #[inline(always)]
         fn impl_(
             _: archmage::X64V2Token,
             a: __m128i,
@@ -1053,7 +1084,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
             _mm_storeu_si128(dest[24..32].first_chunk_mut::<8>().unwrap(), out3);
         }
-        impl_(token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
