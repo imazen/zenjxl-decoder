@@ -3,8 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use archmage::prelude::*;
+
 use crate::render::RenderPipelineInPlaceStage;
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 
 /// Unpremultiply color channels by alpha.
 /// This divides RGB values by the alpha channel value.
@@ -44,35 +45,25 @@ impl UnpremultiplyAlphaStage {
     }
 }
 
-// SIMD unpremultiply: color = color / alpha (with alpha=0 -> color=0)
-simd_function!(
-    unpremultiply_rows_simd_dispatch,
-    d: D,
-    fn unpremultiply_rows_simd(color_rows: &mut [&mut [f32]], alpha_row: &[f32], xsize: usize) {
-        let zero = D::F32Vec::splat(d, 0.0);
-        let epsilon = D::F32Vec::splat(d, 1e-10); // Small value to detect near-zero alpha
-
-        for color_row in color_rows.iter_mut() {
-            let iter_color = color_row.chunks_exact_mut(D::F32Vec::LEN);
-            let iter_alpha = alpha_row.chunks_exact(D::F32Vec::LEN);
-            for (color_chunk, alpha_chunk) in iter_color.zip(iter_alpha).take(xsize.div_ceil(D::F32Vec::LEN)) {
-                let color_vec = D::F32Vec::load(d, color_chunk);
-                let alpha_vec = D::F32Vec::load(d, alpha_chunk);
-
-                // Compute color / alpha, but use 0 where alpha is very small
-                // This avoids division by zero and matches expected behavior
-                let alpha_safe = alpha_vec.max(epsilon);
-                let unpremul = color_vec / alpha_safe;
-
-                // Zero out result where alpha was near-zero
-                // if_then_else_f32(if_true, if_false): returns if_true where mask is true
-                let result = alpha_vec.gt(epsilon).if_then_else_f32(unpremul, zero);
-
-                result.store(color_chunk);
+#[autoversion]
+fn unpremultiply_rows(
+    _token: SimdToken,
+    color_rows: &mut [&mut [f32]],
+    alpha_row: &[f32],
+    xsize: usize,
+) {
+    const EPSILON: f32 = 1e-10;
+    for color_row in color_rows.iter_mut() {
+        for x in 0..xsize {
+            let alpha = alpha_row[x];
+            if alpha > EPSILON {
+                color_row[x] /= alpha;
+            } else {
+                color_row[x] = 0.0;
             }
         }
     }
-);
+}
 
 impl RenderPipelineInPlaceStage for UnpremultiplyAlphaStage {
     type Type = f32;
@@ -100,7 +91,7 @@ impl RenderPipelineInPlaceStage for UnpremultiplyAlphaStage {
         let (color_rows, alpha_row) = row.split_at_mut(num_channels - 1);
         let alpha_row = &alpha_row[0][..];
 
-        unpremultiply_rows_simd_dispatch(color_rows, alpha_row, xsize);
+        unpremultiply_rows(color_rows, alpha_row, xsize);
     }
 }
 

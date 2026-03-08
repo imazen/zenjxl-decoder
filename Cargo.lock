@@ -1680,6 +1680,7 @@ dependencies = [
  "aligned-vec",
  "almost-enough",
  "arbtest",
+ "archmage",
  "array-init",
  "atomic_refcell",
  "brotli",
