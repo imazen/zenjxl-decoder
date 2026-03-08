@@ -3,16 +3,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use archmage::prelude::*;
+
 use crate::{
     BLOCK_DIM, MIN_SIGMA,
     features::epf::SigmaSource,
     render::{
         Channels, ChannelsMut, RenderPipelineInOutStage,
-        stages::epf::common::{get_sigma, prepare_sad_mul_storage},
+        stages::epf::common::{get_sigma_scalar, prepare_sad_mul_storage},
     },
 };
-
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 
 /// 3x3 plus-shaped kernel with 1 SAD per pixel. So this makes this filter a 3x3 filter.
 pub struct Epf2Stage {
@@ -50,103 +50,85 @@ impl Epf2Stage {
     }
 }
 
-simd_function!(
-epf2_process_row_chunk_dispatch,
-d: D,
-fn epf2_process_row_chunk(
-    stage: &Epf2Stage,
-    pos: (usize, usize),
+#[autoversion]
+fn epf2_process(
+    _token: SimdToken,
+    xpos: usize,
+    ypos: usize,
     xsize: usize,
-    input_rows: &Channels<f32>,
-    output_rows: &mut ChannelsMut<f32>,
+    sigma_scale: f32,
+    border_sad_mul: f32,
+    channel_scale: [f32; 3],
+    row_sigma: &[f32],
+    sigma_constant: f32,
+    sigma_is_constant: bool,
+    // Input: 3 channels × 3 rows each (BORDER=1), center row is index 1
+    ix0: &[f32], ix1: &[f32], ix2: &[f32],
+    iy0: &[f32], iy1: &[f32], iy2: &[f32],
+    ib0: &[f32], ib1: &[f32], ib2: &[f32],
+    // Output: 3 channels × 1 row each
+    ox: &mut [f32],
+    oy: &mut [f32],
+    ob: &mut [f32],
 ) {
-    let (xpos, ypos) = pos;
-    assert_eq!(input_rows.len(), 3, "Expected 3 channels, got {}", input_rows.len());
-    let (input_x, input_y, input_b) = (&input_rows[0], &input_rows[1], &input_rows[2]);
-    let (output_x, output_y, output_b) = output_rows.split_first_3_mut();
-
-    // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
-    // EPF2 has BORDER=1, so 3 input rows per channel (indices 0-2).
-    // Max column access: row[2 + x] where x goes up to xsize - VEC_LEN,
-    // and load reads VEC_LEN elements. So min row len = 2 + xsize.
-    let min_in_len = 2 + xsize;
-    let min_out_len = xsize;
-    for ch in [input_x, input_y, input_b] {
-        assert!(ch.len() >= 3);
-        for row in ch.iter().take(3) {
-            assert!(row.len() >= min_in_len);
-        }
-    }
-    assert!(output_x[0].len() >= min_out_len);
-    assert!(output_y[0].len() >= min_out_len);
-    assert!(output_b[0].len() >= min_out_len);
-
-    let row_sigma = stage.sigma.row(ypos / BLOCK_DIM);
-
-    const { assert!(D::F32Vec::LEN <= 16) };
-
-    let sm = stage.sigma_scale * 1.65;
-    let bsm = sm * stage.border_sad_mul;
+    let sm = sigma_scale * 1.65;
+    let bsm = sm * border_sad_mul;
     let sad_mul_storage = prepare_sad_mul_storage(xpos, ypos, sm, bsm);
 
-    for x in (0..xsize).step_by(D::F32Vec::LEN) {
-        let sigma = get_sigma(d, x + xpos, row_sigma);
-        let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
+    for x in 0..xsize {
+        let abs_x = x + xpos;
+        let sigma = if sigma_is_constant {
+            sigma_constant
+        } else {
+            row_sigma[abs_x / BLOCK_DIM]
+        };
 
-        let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
-        if sigma_mask.all() {
-            D::F32Vec::load_from(d, input_x[1], 1 + x).store_at(output_x[0], x);
-            D::F32Vec::load_from(d, input_y[1], 1 + x).store_at(output_y[0], x);
-            D::F32Vec::load_from(d, input_b[1], 1 + x).store_at(output_b[0], x);
+        // Fast path: skip filtering if sigma is too small
+        if sigma < MIN_SIGMA {
+            ox[x] = ix1[1 + x];
+            oy[x] = iy1[1 + x];
+            ob[x] = ib1[1 + x];
             continue;
         }
 
+        let sad_mul = sad_mul_storage[x % 8];
         let inv_sigma = sigma * sad_mul;
 
-        let x_cc = D::F32Vec::load_from(d, input_x[1], 1 + x);
-        let y_cc = D::F32Vec::load_from(d, input_y[1], 1 + x);
-        let b_cc = D::F32Vec::load_from(d, input_b[1], 1 + x);
+        let x_cc = ix1[1 + x];
+        let y_cc = iy1[1 + x];
+        let b_cc = ib1[1 + x];
 
-        let mut w_acc = D::F32Vec::splat(d, 1.0);
+        let mut w_acc = 1.0f32;
         let mut x_acc = x_cc;
         let mut y_acc = y_cc;
         let mut b_acc = b_cc;
 
-        for (y_off, x_off) in [(0, 1), (1, 0), (1, 2), (2, 1)] {
-            let (cx, cy, cb) = (
-                D::F32Vec::load_from(d, input_x[y_off as usize], x_off + x),
-                D::F32Vec::load_from(d, input_y[y_off as usize], x_off + x),
-                D::F32Vec::load_from(d, input_b[y_off as usize], x_off + x),
-            );
+        // Plus-shaped 4-neighbor kernel: (row, col) offsets into input
+        for (y_off, x_off) in [(0usize, 1usize), (1, 0), (1, 2), (2, 1)] {
+            let cx = [ix0, ix1, ix2][y_off][x_off + x];
+            let cy = [iy0, iy1, iy2][y_off][x_off + x];
+            let cb = [ib0, ib1, ib2][y_off][x_off + x];
+
             let sad = (cx - x_cc).abs().mul_add(
-                D::F32Vec::splat(d, stage.channel_scale[0]),
+                channel_scale[0],
                 (cy - y_cc).abs().mul_add(
-                    D::F32Vec::splat(d, stage.channel_scale[1]),
-                    (cb - b_cc).abs() * D::F32Vec::splat(d, stage.channel_scale[2]),
+                    channel_scale[1],
+                    (cb - b_cc).abs() * channel_scale[2],
                 ),
             );
-            let weight = sad
-                .mul_add(inv_sigma, D::F32Vec::splat(d, 1.0))
-                .max(D::F32Vec::splat(d, 0.0));
+            let weight = sad.mul_add(inv_sigma, 1.0).max(0.0);
             w_acc += weight;
             x_acc = weight.mul_add(cx, x_acc);
             y_acc = weight.mul_add(cy, y_acc);
             b_acc = weight.mul_add(cb, b_acc);
         }
 
-        let inv_w = D::F32Vec::splat(d, 1.0) / w_acc;
-
-        x_acc *= inv_w;
-        y_acc *= inv_w;
-        b_acc *= inv_w;
-        x_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_x[1], 1 + x), x_acc);
-        y_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_y[1], 1 + x), y_acc);
-        b_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_b[1], 1 + x), b_acc);
-        x_acc.store_at(output_x[0], x);
-        y_acc.store_at(output_y[0], x);
-        b_acc.store_at(output_b[0], x);
+        let inv_w = 1.0 / w_acc;
+        ox[x] = x_acc * inv_w;
+        oy[x] = y_acc * inv_w;
+        ob[x] = b_acc * inv_w;
     }
-});
+}
 
 impl RenderPipelineInOutStage for Epf2Stage {
     type InputT = f32;
@@ -166,6 +148,23 @@ impl RenderPipelineInOutStage for Epf2Stage {
         output_rows: &mut ChannelsMut<f32>,
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
-        epf2_process_row_chunk_dispatch(self, (xpos, ypos), xsize, input_rows, output_rows);
+        let row_sigma_data = self.sigma.row(ypos / BLOCK_DIM);
+        let (row_sigma, sigma_constant, sigma_is_constant) = match row_sigma_data {
+            crate::render::stages::epf::common::SigmaRow::Constant(c) => (&[] as &[f32], c, true),
+            crate::render::stages::epf::common::SigmaRow::Variable(row) => (row, 0.0, false),
+        };
+
+        let (input_x, input_y, input_b) = (&input_rows[0], &input_rows[1], &input_rows[2]);
+        let (output_x, output_y, output_b) = output_rows.split_first_3_mut();
+
+        epf2_process(
+            xpos, ypos, xsize,
+            self.sigma_scale, self.border_sad_mul, self.channel_scale,
+            row_sigma, sigma_constant, sigma_is_constant,
+            input_x[0], input_x[1], input_x[2],
+            input_y[0], input_y[1], input_y[2],
+            input_b[0], input_b[1], input_b[2],
+            output_x[0], output_y[0], output_b[0],
+        );
     }
 }
