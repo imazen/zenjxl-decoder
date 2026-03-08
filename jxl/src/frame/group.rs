@@ -5,6 +5,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
+use archmage::prelude::*;
 use num_traits::Float;
 
 use crate::transforms::{transform::*, transform_map::*};
@@ -85,11 +86,12 @@ fn predict_num_nonzeros(nzeros_map: &Image<u32>, bx: usize, by: usize) -> usize 
 #[inline(always)]
 fn adjust_quant_bias(c: usize, quant_i: i32, biases: &[f32; 4]) -> f32 {
     let quant = quant_i as f32;
-    if quant_i.abs() < 2 {
-        quant * biases[c]
-    } else {
-        quant - biases[3] / quant
-    }
+    // Compute both paths; select branchlessly for better auto-vectorization.
+    // Division by zero when quant==0 yields ±inf, which is fine since we select
+    // the `small` path in that case (abs(0) < 2).
+    let small = quant * biases[c];
+    let adjusted = quant - biases[3] / quant;
+    if quant_i.unsigned_abs() < 2 { small } else { adjusted }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -175,9 +177,10 @@ fn scatter_rows_to_image(
     }
 }
 
+#[autoversion]
 #[allow(clippy::too_many_arguments)]
-#[inline(always)]
 fn dequant_and_transform_to_pixels(
+    _token: SimdToken,
     quant_biases: &[f32; 4],
     x_dm_multiplier: f32,
     b_dm_multiplier: f32,

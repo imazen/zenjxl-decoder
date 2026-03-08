@@ -365,7 +365,7 @@ fn afv_transform_to_pixels(afv_kind: usize, coefficients: &[f32], pixels: &mut [
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn transform_to_pixels_impl(
     transform_type: HfTransformType,
     lf: &mut [f32],
