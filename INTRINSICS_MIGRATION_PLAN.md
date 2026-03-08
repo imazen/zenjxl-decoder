@@ -2,7 +2,7 @@
 
 ## Goal
 
-Remove the `jxl_simd` crate entirely. Replace all SIMD dispatch with `archmage` macros (`#[autoversion]`, `incant!`) and `magetypes` vector types (`f32x8<T>`, `i32x8<T>`, etc.).
+Remove the `jxl_simd` crate entirely. Replace all SIMD dispatch with `archmage` macros (`#[autoversion]`, `incant!`) and `magetypes` vector types (`f32x8<T>`, `i32x8<T>`, etc.). Use existing ecosystem crates (`linear-srgb`, `garb`, `zenpixels-convert`) instead of reimplementing SIMD kernels.
 
 ## Current State
 
@@ -11,6 +11,18 @@ Remove the `jxl_simd` crate entirely. Replace all SIMD dispatch with `archmage` 
 - **42 unique SIMD methods** used across the codebase
 - **~20 dispatch points** via `simd_function!` macro
 - jxl_simd already uses archmage internally for its AVX/AVX512/NEON backends
+
+## Available Ecosystem Crates
+
+These crates are authored by the same team, use archmage, and are `#![forbid(unsafe_code)]`:
+
+| Crate | Version | Provides | Replaces |
+|-------|---------|----------|----------|
+| **archmage** | 0.9.3 | Token dispatch, `#[autoversion]`, `incant!`, safe intrinsics | jxl_simd dispatch macros |
+| **magetypes** | 0.9.3 | f32x8, i32x8, etc. with operators, transcendentals | jxl_simd F32SimdVec/I32SimdVec traits |
+| **linear-srgb** | 0.6.2 | sRGB/PQ/HLG/BT.709 transfer functions, rational poly, LUT tables | `color/tf.rs`, `util/rational_poly.rs`, `stages/from_linear.rs`, `stages/to_linear.rs` |
+| **garb** | 0.2.0 | RGBA↔BGRA swizzle, RGB↔RGBA expand/strip, channel interleaving | `render/simd_utils.rs` interleave/deinterleave |
+| **zenpixels-convert** | 0.1.0 | Format negotiation, depth conversion, alpha handling | `stages/convert.rs` depth/format logic |
 
 ## Target Architectures
 
@@ -22,11 +34,26 @@ Remove the `jxl_simd` crate entirely. Replace all SIMD dispatch with `archmage` 
 | WASM SIMD128 | `Wasm128Token` | 128-bit | Compile-time only |
 | Scalar fallback | `ScalarToken` | 1 lane | Always available |
 
-Note: We drop SSE4.2 (`X64V2Token`) as a separate backend. AVX2 is baseline x86 now, and the scalar fallback covers older CPUs. Simplifies from 6 backends to 5.
+We drop SSE4.2 (`X64V2Token`) as a separate backend. AVX2 is baseline x86 now, and the scalar fallback covers older CPUs. Simplifies from 6 backends to 5.
 
 ## API Gap Analysis
 
-### Available in magetypes (no work needed)
+### Covered by ecosystem crates (no jxl code needed)
+
+| jxl_simd usage | Crate | API |
+|---|---|---|
+| `eval_rational_poly_simd()` for sRGB TF | **linear-srgb** | `x8::srgb_to_linear_v3()`, `x8::linear_to_srgb_v3()` (token-gated `#[rite]`, inlines into caller) |
+| PQ transfer function | **linear-srgb** | `tf::pq_to_linear()`, `tf::linear_to_pq()` (requires `transfer` feature) |
+| HLG transfer function | **linear-srgb** | `tf::hlg_to_linear()`, `tf::linear_to_hlg()` |
+| BT.709 transfer function | **linear-srgb** | `tf::bt709_to_linear()`, `tf::linear_to_bt709()` |
+| `store_interleaved_2/3/4` for output | **garb** | `rgb_to_rgba()`, `rgba_to_bgra_inplace()`, strided variants |
+| `fast_log2f`, `fast_pow2f` | **magetypes** | `f32x8::log2_lowp()`, `f32x8::exp2_lowp()` (~1% error, same as current) |
+| `log2_midp`, `exp2_midp` | **magetypes** | `f32x8::log2_midp()`, `f32x8::exp2_midp()` (~3 ULP) |
+| Rational polynomial evaluation | **linear-srgb** | Internal, or reuse pattern from magetypes transcendentals |
+| u8↔f32 LUT-based sRGB | **linear-srgb** | `srgb_u8_to_linear()`, `linear_to_srgb_u8()` (const LUT, zero math) |
+
+### Available in magetypes (no wrapper needed)
+
 - `splat`, `load`, `store`, `from_slice`, `from_array`, `to_array`
 - Arithmetic: `+`, `-`, `*`, `/`, `mul_add`, `mul_sub`
 - Comparisons: `simd_gt`, `simd_lt`, `simd_ge`, `simd_le`, `simd_eq`
@@ -35,85 +62,86 @@ Note: We drop SSE4.2 (`X64V2Token`) as a separate backend. AVX2 is baseline x86 
 - `bitcast_f32_to_i32`, `bitcast_i32_to_f32`, `convert_f32_to_i32`, `convert_i32_to_f32`
 - `interleave_lo`, `interleave_hi`, `interleave_4ch`, `deinterleave_4ch`
 - `from_u8`, `to_u8` (f32x4/f32x8 to/from u8)
-- Transcendentals: `log2_midp`, `exp2_midp`, `pow_midp`, `cbrt_midp`
 - Shift operations: `shl_const::<N>()`, `shr_arithmetic_const::<N>()`
 - Bitwise: `&`, `|`, `^`, `!`
 - Reductions: `reduce_add`, `reduce_min`, `reduce_max`
 
-### Needs thin wrappers in jxl (build in a `simd_compat` module)
+### Needs thin inline helpers (in jxl, not a separate module)
 
-| jxl_simd method | Replacement strategy |
+These are trivial one-liners, not worth a dedicated module:
+
+| jxl_simd method | Inline replacement |
 |---|---|
 | `neg_mul_add(a, b)` = `-(self*a) + b` | `b - self * a` or `(-self).mul_add(a, b)` |
 | `copysign(sign_source)` | Bitwise: `(self & !SIGN_BIT) \| (sign & SIGN_BIT)` |
-| `andnot(other)` | `!self & other` (bitwise NOT then AND) |
+| `andnot(other)` | `!self & other` |
 | `lt_zero()` / `eq_zero()` | `self.simd_lt(zero)` / `self.simd_eq(zero)` |
 | `maskz_i32(mask)` | `blend(mask, self, zero)` |
-| `shl!(val, N)` / `shr!(val, N)` | `val.shl_const::<N>()` / `val.shr_arithmetic_const::<N>()` |
-| `load_deinterleaved_2/3(slice)` | Manual: load contiguous then shuffle, or scalar loop |
-| `store_interleaved_2/3(a, b, out)` | Manual: `interleave` + store, or scalar loop |
-| `round_store_u8(dest)` | `self.round().clamp(0, 255).to_u8()` + store |
+| `round_store_u8(dest)` | `self.clamp(0, 255).to_u8()` + store |
 | `round_store_u16(dest)` | `self.round().clamp(0, 65535)` + convert + store |
-| `load_f16_bits` / `store_f16_bits` | Use `half` crate or manual bit manipulation |
-| `mul_wide_take_high(scalar)` | `((self as i64) * (scalar as i64)) >> 32` via widen+shift |
-| `prepare_table_bf16_8` / `table_lookup_bf16_8` | Keep as arch-specific helper or use `vpermps`/equivalent |
+| `load_f16_bits` / `store_f16_bits` | Bit manipulation (shift + mask), or `half` crate |
+| `mul_wide_take_high(scalar)` | Widen to i64, multiply, shift right 32 |
+| `prepare_table_bf16_8` / `table_lookup_bf16_8` | `vpermps` / equivalent via `incant!` |
 
 ### Dispatch pattern replacement
 
 **Current** (`simd_function!` macro):
 ```rust
 simd_function!(
-    my_dispatch,
+    gaborish_dispatch,
     d: D,
-    fn my_function(args...) { /* uses D::F32Vec */ }
+    fn gaborish_process(stage: &GaborishStage, xsize: usize, ...) {
+        let w0 = D::F32Vec::splat(d, stage.weight0);
+        // ... vectorized loop using D::F32Vec
+    }
 );
-// Called as: my_dispatch(args...);
+// Called as: gaborish_dispatch(stage, xsize, ...);
 ```
 
 **New** (`#[autoversion]` for auto-vectorized code):
 ```rust
 #[autoversion]
-fn my_function(_token: SimdToken, args...) {
-    // Write scalar-style loop, compiler auto-vectorizes
-    for i in 0..n {
-        out[i] = a[i] * b[i] + c[i];
+fn gaborish_process(_token: SimdToken, stage: &GaborishStage, xsize: usize, ...) {
+    // Scalar-style loop — LLVM auto-vectorizes per target feature level
+    for x in 0..xsize {
+        let sum = center[x+1] * w0
+            + (top[x+1] + left[x+1] + bottom[x+1] + right[x+1]) * w1
+            + (top[x] + top[x+2] + bottom[x] + bottom[x+2]) * w2;
+        out[x] = sum;
     }
 }
 ```
 
-**New** (`incant!` for hand-tuned intrinsics):
+**New** (`incant!` for hand-tuned code):
 ```rust
-// Define per-architecture variants
 #[rite]
-fn my_function_v3(_token: X64V3Token, args...) { /* AVX2 intrinsics */ }
+fn epf0_v3(_token: X64V3Token, ...) { /* AVX2 with masking */ }
 #[rite]
-fn my_function_neon(_token: NeonToken, args...) { /* NEON intrinsics */ }
-fn my_function_scalar(_token: ScalarToken, args...) { /* scalar fallback */ }
+fn epf0_neon(_token: NeonToken, ...) { /* NEON variant */ }
+fn epf0_scalar(_token: ScalarToken, ...) { /* scalar fallback */ }
 
-// Dispatch at call site
-incant!(my_function(args), [v3, neon, wasm128, scalar]);
+// At call site:
+incant!(epf0(args), [v3, neon, wasm128, scalar]);
 ```
 
 ## Migration Phases
 
-### Phase 1: Create simd_compat bridge module (in jxl crate)
+### Phase 1: Add ecosystem deps, migrate transfer functions (5 files)
 
-Add `jxl/src/simd_compat.rs` that provides thin wrapper functions for operations magetypes lacks natively. This module uses `archmage` and `magetypes` directly.
+Add `linear-srgb`, `garb`, `magetypes`, and `archmage` as direct deps of the `jxl` crate.
 
-Implement:
-- `neg_mul_add(a, b, c)` -> `c - a * b`
-- `copysign(value, sign)` -> bitwise
-- `round_store_u8(f32_vec, dest)` -> clamp + convert + store
-- `round_store_u16(f32_vec, dest)` -> clamp + convert + store
-- `load_deinterleaved_2/3/4` -> loads + shuffles
-- `store_interleaved_2/3/4` -> shuffles + stores
-- `load_f16_bits` / `store_f16_bits` -> half-float bit manipulation
-- `mul_wide_take_high` -> widen + shift
-- `prepare_table_bf16_8` / `table_lookup_bf16_8` -> permute instructions
+**Replace entirely with linear-srgb calls:**
+1. `util/rational_poly.rs` — delete, use linear-srgb's rational poly or magetypes transcendentals
+2. `util/fast_math.rs` — replace `fast_log2f`/`fast_pow2f` with `f32x8::log2_lowp()`/`f32x8::exp2_lowp()` from magetypes
+3. `color/tf.rs` — replace with `linear_srgb::tf::*` functions (sRGB, PQ, HLG, BT.709)
+4. `render/stages/from_linear.rs` — use `linear_srgb::tokens::x8::linear_to_srgb_v3()` etc.
+5. `render/stages/to_linear.rs` — use `linear_srgb::tokens::x8::srgb_to_linear_v3()` etc.
 
-### Phase 2: Migrate simple stages (6 files)
+**Validation**: Conformance tests must still pass — linear-srgb uses the same rational polynomial coefficients as libjxl.
 
-Start with stages that only use basic F32SimdVec operations (load, store, arithmetic, FMA). These can use `#[autoversion]` directly — the compiler will auto-vectorize them.
+### Phase 2: Migrate simple stages with `#[autoversion]` (6 files)
+
+Stages that only use basic F32SimdVec operations (load, store, arithmetic, FMA). Write plain scalar loops and let LLVM auto-vectorize.
 
 **Files** (simplest first):
 1. `render/stages/gaborish.rs` — 3x3 convolution, only load/store/arithmetic/FMA
@@ -123,142 +151,126 @@ Start with stages that only use basic F32SimdVec operations (load, store, arithm
 5. `render/stages/chroma_upsample.rs` — bilinear upsampling
 6. `render/stages/upsample.rs` — general upsampling
 
-**Pattern**: Replace `simd_function!` with `#[autoversion]`, remove `D::F32Vec` type parameter, use plain `f32` scalar loops. The compiler auto-vectorizes.
+**Validation**: `test_stage_consistency` + concurrency tests after each file.
 
-**Validation**: Run `test_stage_consistency` tests + concurrency tests after each file.
+### Phase 3: Migrate masking-heavy stages (6 files)
 
-### Phase 3: Migrate arithmetic-heavy stages (8 files)
-
-Stages that use comparisons, masking, and transfer functions. Need `blend()` for conditional selects.
+Stages that use comparisons, conditional selects, and copysign. Use `#[autoversion]` where LLVM handles ternary patterns well, `incant!` for complex masking.
 
 **Files**:
 1. `render/stages/xyb.rs` — XYB to RGB, uses gt/if_then_else/copysign
 2. `render/stages/convert.rs` — type conversion, uses round_store_u8/u16
-3. `render/stages/from_linear.rs` — linear to sRGB, uses rational_poly + masking
-4. `render/stages/to_linear.rs` — sRGB to linear, uses rational_poly + masking
-5. `render/stages/noise.rs` — noise synthesis, uses masking
-6. `render/stages/epf/common.rs` — EPF shared code
-7. `render/stages/epf/epf0.rs` — EPF step 0
-8. `render/stages/epf/epf1.rs` — EPF step 1
-9. `render/stages/epf/epf2.rs` — EPF step 2
+3. `render/stages/noise.rs` — noise synthesis, uses masking
+4. `render/stages/epf/common.rs` — EPF shared code
+5. `render/stages/epf/epf0.rs` — EPF step 0
+6. `render/stages/epf/epf1.rs` + `epf2.rs` — EPF steps 1-2
 
-**Pattern**: Use `incant!` with magetypes for comparison-heavy code. Define `_v3`, `_neon`, `_wasm128`, `_scalar` variants. Or use `#[autoversion]` where LLVM handles masking well.
+### Phase 4: Migrate transforms (14 files)
 
-### Phase 4: Migrate math utilities (3 files)
+The IDCT transforms are the performance-critical core. They use only load/store/arithmetic/FMA on f32, making them ideal `#[autoversion]` candidates.
 
-These are leaf functions called by the stages.
+**Files**: `transforms/idct{2,4,8,16,32}.rs`, `transforms/idct2d.rs`, `transforms/idct_large.rs`, `transforms/reinterpreting_dct{2,4,8,16,32}.rs`, `transforms/reinterpreting_dct2d.rs`, `transforms/transform.rs`
 
-1. `util/fast_math.rs` — fast_pow2f, fast_log2f (bitcast-heavy)
-2. `util/rational_poly.rs` — polynomial evaluation (FMA chains)
-3. `color/tf.rs` — transfer function evaluation
+**Pattern**: LLVM is excellent at auto-vectorizing FMA-heavy DSP loops. Verify with `cargo asm`.
 
-**Pattern**: `#[autoversion]` for polynomial chains. Bitcast operations need magetypes `bitcast_f32_to_i32` / `bitcast_i32_to_f32`.
+**Risk**: 2D transpose operations use architecture-specific shuffles. May need `incant!` variants for the transpose kernel only.
 
-### Phase 5: Migrate transforms (14 files)
-
-The IDCT transforms are the performance-critical core. These use only load/store/arithmetic/FMA on f32, making them good `#[autoversion]` candidates.
-
-**Files**:
-1. `transforms/idct2.rs`
-2. `transforms/idct4.rs`
-3. `transforms/idct8.rs`
-4. `transforms/idct16.rs`
-5. `transforms/idct32.rs`
-6. `transforms/idct2d.rs`
-7. `transforms/idct_large.rs`
-8. `transforms/reinterpreting_dct2.rs`
-9. `transforms/reinterpreting_dct4.rs`
-10. `transforms/reinterpreting_dct8.rs`
-11. `transforms/reinterpreting_dct16.rs`
-12. `transforms/reinterpreting_dct32.rs`
-13. `transforms/reinterpreting_dct2d.rs`
-14. `transforms/transform.rs` (dispatch)
-
-**Pattern**: These work on rows of f32 with known stride. `#[autoversion]` should produce excellent code — LLVM is very good at auto-vectorizing FMA-heavy DSP loops. Test with `cargo asm` to verify.
-
-**Risk**: The 2D transpose operations currently use architecture-specific shuffles. May need `incant!` variants for the transpose kernel.
-
-### Phase 6: Migrate modular/group operations (3 files)
+### Phase 5: Migrate modular/group operations (3 files)
 
 1. `frame/group.rs` — dequantization (I32SimdVec)
 2. `frame/modular/transforms/rct.rs` — reversible color transform (I32SimdVec)
 3. `frame/modular/transforms/squeeze.rs` — modular squeeze (I32SimdVec, U32SimdVec)
 
-**Pattern**: These use integer SIMD. `#[autoversion]` for the scalar loops, or `i32x8<T>` / `u32x8<T>` from magetypes.
+**Pattern**: `#[autoversion]` for the integer scalar loops. magetypes `i32x8<T>` / `u32x8<T>` if explicit SIMD needed.
 
-### Phase 7: Migrate save/output (1 file)
+### Phase 6: Migrate save/output + interleave utils (2 files)
 
 1. `render/low_memory_pipeline/save/identity.rs` — U8SimdVec, U16SimdVec, interleaving
+2. `render/simd_utils.rs` — interleave/deinterleave dispatch helpers
 
-**Pattern**: Uses `round_store_u8`, `round_store_u16`, `store_interleaved_2/3/4`. Use the `simd_compat` helpers from Phase 1.
+**Pattern**: Use `garb` for channel swizzling where it fits. For custom interleave patterns (2-channel, 3-channel f32), use magetypes `interleave_lo`/`interleave_hi` or `#[autoversion]` scalar loops.
 
-### Phase 8: Migrate dispatch infrastructure
+### Phase 7: Remove jxl_simd
 
-1. `render/simd_utils.rs` — interleave/deinterleave dispatch helpers
-2. Replace `simd_function!` macro usage everywhere
-3. Replace `test_all_instruction_sets!` with per-token test helpers
-4. Replace `bench_all_instruction_sets!` with per-token benchmark helpers
-
-### Phase 9: Remove jxl_simd
-
-1. Remove `jxl_simd` from workspace members
+1. Remove `jxl_simd` from workspace members in root `Cargo.toml`
 2. Remove `jxl_simd` dependency from `jxl/Cargo.toml`
-3. Remove `jxl_simd/` directory
-4. Remove feature forwarding (`sse42`, `avx`, `avx512`, `neon`, `wasm128`)
-5. Add direct `archmage` + `magetypes` deps to `jxl/Cargo.toml`
-6. Update CI to test with `--features avx` → direct feature names
+3. Delete `jxl_simd/` directory
+4. Remove feature forwarding (`sse42`, `avx`, `avx512`, `neon`, `wasm128`) — replace with archmage feature names
+5. Update CI workflows
+6. Replace `test_all_instruction_sets!` with per-token test helpers or `#[autoversion]` tests
+7. Replace `bench_all_instruction_sets!` similarly
 
 ## Key Decisions
 
 ### `#[autoversion]` vs `incant!`
 
-- **`#[autoversion]`**: Best for regular loop bodies. LLVM auto-vectorizes scalar code compiled with `target_feature(enable="avx2,fma")`. Zero manual intrinsics. Works for ~70% of our code (IDCT, convolutions, FMA chains, simple arithmetic).
+- **`#[autoversion]`**: Best for regular loop bodies. LLVM auto-vectorizes scalar code compiled with appropriate `target_feature`. Zero manual intrinsics. Works for ~80% of our code (IDCT, convolutions, FMA chains, simple arithmetic, basic masking).
 
-- **`incant!`**: Required when auto-vectorization fails or produces suboptimal code. Needed for: transpose kernels, table lookups, complex masking patterns, interleave/deinterleave, bf16 table lookups.
+- **`incant!`**: Required when auto-vectorization fails or produces suboptimal code. Needed for: transpose kernels, table lookups, bf16 table lookups.
 
 **Default to `#[autoversion]`**. Only drop to `incant!` when benchmarks show it matters.
 
 ### Width-generic code
 
-jxl_simd's `SimdDescriptor` trait made code generic over SIMD width. magetypes' `SimdTypes` trait does the same thing — `T::F32` maps to the right-width f32 vector for token `T`.
-
-For `#[autoversion]` code, width doesn't matter — just write scalar loops.
+For `#[autoversion]` code, width doesn't matter — just write scalar loops. The compiler picks the best vector width per target.
 
 For `incant!` code, write the function generic over `T: SimdTypes` and monomorphize per token.
 
 ### Scalar fallback
 
-archmage's `ScalarToken` + magetypes' scalar types provide a complete fallback path. `#[autoversion]` generates a `_scalar` variant automatically. `incant!` requires an explicit `_scalar` function.
+`#[autoversion]` generates a `_scalar` variant automatically. `incant!` requires an explicit `_scalar` function. Both use archmage's `ScalarToken`.
+
+### Transfer functions
+
+Don't reimplement. `linear-srgb` provides SIMD-accelerated, `#![forbid(unsafe_code)]`, token-gated `#[rite]` functions that inline directly into our pipeline stages. Same rational polynomial approach as libjxl, verified to the same precision.
 
 ## Benchmarking Strategy
 
-1. Before each phase, run the full decode benchmark suite and save results
+1. Before each phase, run full decode benchmarks, save results under `benchmarks/`
 2. After each phase, re-run and compare
 3. Key images: `bike_web_q85.jxl` (multi-group VarDCT), `city_4k_q75.jxl` (large), `3x3_srgb_lossless.jxl` (modular)
 4. If any regression >5%, investigate with `cargo asm` before proceeding
-5. Commit benchmark results under `benchmarks/`
+5. Commit benchmark results with git hash + command used
 
 ## Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| `#[autoversion]` produces slower code than hand-written intrinsics | Medium | Medium | Benchmark each phase, fall back to `incant!` |
+| `#[autoversion]` slower than hand-written intrinsics | Medium | Medium | Benchmark each phase, fall back to `incant!` |
 | Transpose kernel can't auto-vectorize | High | Low | Keep as `incant!` with per-arch variants |
-| bf16 table lookup has no magetypes equivalent | High | Low | Implement via raw intrinsics in `incant!` variant |
-| Build times increase (more monomorphization) | Low | Low | `#[autoversion]` may actually reduce binary size vs 6 separate backends |
-| Semantic differences in rounding/precision | Low | High | Conformance tests catch this immediately |
+| bf16 table lookup has no magetypes equivalent | High | Low | Implement via `incant!` with arch intrinsics |
+| linear-srgb precision differs from current impl | Low | High | Conformance tests catch immediately |
+| Build times increase | Low | Low | Fewer backends (5 vs 6) may offset monomorphization cost |
 
-## File Count Summary
+## Dependency Changes
 
-| Phase | Files | Complexity |
-|-------|-------|-----------|
-| 1. simd_compat bridge | 1 new | Medium |
-| 2. Simple stages | 6 | Low |
-| 3. Complex stages | 9 | Medium |
-| 4. Math utilities | 3 | Medium |
-| 5. Transforms | 14 | Medium-High |
-| 6. Modular/group | 3 | Medium |
-| 7. Save/output | 1 | Medium |
-| 8. Dispatch infra | 2 | Low |
-| 9. Remove jxl_simd | cleanup | Low |
-| **Total** | **38 + 1 new** | |
+### Added to `jxl/Cargo.toml`
+```toml
+archmage = { version = "0.9", features = ["macros"] }
+magetypes = "0.9"
+linear-srgb = { version = "0.6", features = ["transfer"] }
+garb = "0.2"
+```
+
+### Removed from `jxl/Cargo.toml`
+```toml
+jxl_simd = { package = "zenjxl-decoder-simd", path = "../jxl_simd", version = "=0.3.0" }
+```
+
+### Removed from workspace
+```toml
+# members: remove "jxl_simd"
+```
+
+## Phase Summary
+
+| Phase | Files | What | Key crate |
+|-------|-------|------|-----------|
+| 1. Transfer functions | 5 | Delete reimplementations, use linear-srgb | linear-srgb, magetypes |
+| 2. Simple stages | 6 | `#[autoversion]` scalar loops | archmage |
+| 3. Masking stages | 6 | `#[autoversion]` or `incant!` | archmage, magetypes |
+| 4. Transforms | 14 | `#[autoversion]` FMA loops | archmage |
+| 5. Modular/group | 3 | `#[autoversion]` integer loops | archmage, magetypes |
+| 6. Save/output | 2 | garb + magetypes interleave | garb, magetypes |
+| 7. Remove jxl_simd | cleanup | Delete crate, update CI | — |
+| **Total** | **36 modified, jxl_simd deleted** | | |
