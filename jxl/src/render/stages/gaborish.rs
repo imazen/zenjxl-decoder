@@ -3,8 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use archmage::prelude::*;
+
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage};
-use jxl_simd::{F32SimdVec, simd_function};
 
 /// Apply Gabor-like filter to a channel.
 #[derive(Debug)]
@@ -33,59 +34,35 @@ impl std::fmt::Display for GaborishStage {
     }
 }
 
-simd_function!(
-    gaborish_process_dispatch,
-    d: D,
-    fn gaborish_process(
-        stage: &GaborishStage,
-        xsize: usize,
-        input_rows: &Channels<f32>,
-        output_rows: &mut ChannelsMut<f32>,
-    ) {
-        let row_out = &mut output_rows[0][0];
+#[autoversion]
+fn gaborish_process(
+    _token: SimdToken,
+    w0: f32,
+    w1: f32,
+    w2: f32,
+    xsize: usize,
+    row_top: &[f32],
+    row_center: &[f32],
+    row_bottom: &[f32],
+    row_out: &mut [f32],
+) {
+    for x in 0..xsize {
+        let p00 = row_top[x];
+        let p01 = row_top[x + 1];
+        let p02 = row_top[x + 2];
+        let p10 = row_center[x];
+        let p11 = row_center[x + 1];
+        let p12 = row_center[x + 2];
+        let p20 = row_bottom[x];
+        let p21 = row_bottom[x + 1];
+        let p22 = row_bottom[x + 2];
 
-        let w0 = D::F32Vec::splat(d, stage.weight0);
-        let w1 = D::F32Vec::splat(d, stage.weight1);
-        let w2 = D::F32Vec::splat(d, stage.weight2);
-
-        let [row_top, row_center, row_bottom] = input_rows[0] else {
-            unreachable!();
-        };
-
-        // These asserts help the compiler skip checks in the loop.
-        assert_eq!(row_top.len(), row_center.len());
-        assert_eq!(row_top.len(), row_bottom.len());
-
-        let num_vec = xsize.div_ceil(D::F32Vec::LEN);
-
-        let len = D::F32Vec::LEN;
-        let window_len = len + 2;
-
-        for (((top, center), bottom), out) in row_top
-            .windows(window_len)
-            .step_by(len)
-            .zip(row_center.windows(window_len).step_by(len))
-            .zip(row_bottom.windows(window_len).step_by(len))
-            .zip(row_out.chunks_exact_mut(D::F32Vec::LEN))
-            .take(num_vec)
-        {
-            let p00 = D::F32Vec::load(d, top);
-            let p01 = D::F32Vec::load(d, &top[1..]);
-            let p02 = D::F32Vec::load(d, &top[2..]);
-            let p10 = D::F32Vec::load(d, center);
-            let p11 = D::F32Vec::load(d, &center[1..]);
-            let p12 = D::F32Vec::load(d, &center[2..]);
-            let p20 = D::F32Vec::load(d, bottom);
-            let p21 = D::F32Vec::load(d, &bottom[1..]);
-            let p22 = D::F32Vec::load(d, &bottom[2..]);
-
-            let sum = p11 * w0;
-            let sum = w1.mul_add(p01 + p10 + p21 + p12, sum);
-            let sum = w2.mul_add(p00 + p02 + p20 + p22, sum);
-            sum.store(out);
-        }
+        let sum = p11 * w0
+            + (p01 + p10 + p21 + p12) * w1
+            + (p00 + p02 + p20 + p22) * w2;
+        row_out[x] = sum;
     }
-);
+}
 
 impl RenderPipelineInOutStage for GaborishStage {
     type InputT = f32;
@@ -105,7 +82,20 @@ impl RenderPipelineInOutStage for GaborishStage {
         output_rows: &mut ChannelsMut<f32>,
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
-        gaborish_process_dispatch(self, xsize, input_rows, output_rows);
+        let row_out = &mut output_rows[0][0];
+        let [row_top, row_center, row_bottom] = input_rows[0] else {
+            unreachable!();
+        };
+        gaborish_process(
+            self.weight0,
+            self.weight1,
+            self.weight2,
+            xsize,
+            row_top,
+            row_center,
+            row_bottom,
+            row_out,
+        );
     }
 }
 
