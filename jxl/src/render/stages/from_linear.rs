@@ -6,8 +6,6 @@
 use crate::color::tf;
 use crate::headers::color_encoding::CustomTransferFunction;
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
-use crate::util::eval_rational_poly_simd;
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 
 /// Apply transfer function to display-referred linear color samples.
 #[derive(Debug)]
@@ -54,9 +52,6 @@ impl std::fmt::Display for FromLinearStage {
     }
 }
 
-simd_function!(
-from_linear_process_dispatch,
-d: D,
 fn from_linear_process(tf: &TransferFunction, xsize: usize, row: &mut [&mut [f32]]) {
     let [row_r, row_g, row_b] = row else {
         panic!(
@@ -68,17 +63,17 @@ fn from_linear_process(tf: &TransferFunction, xsize: usize, row: &mut [&mut [f32
     match *tf {
         TransferFunction::Bt709 => {
             for row in row {
-                tf::linear_to_bt709_simd(d, &mut row[..xsize.next_multiple_of(D::F32Vec::LEN)]);
+                tf::linear_to_bt709(&mut row[..xsize]);
             }
         }
         TransferFunction::Srgb => {
             for row in row {
-                tf::linear_to_srgb_simd(d, &mut row[..xsize.next_multiple_of(D::F32Vec::LEN)]);
+                tf::linear_to_srgb(&mut row[..xsize]);
             }
         }
         TransferFunction::Pq { intensity_target } => {
             for row in row {
-                tf::linear_to_pq_simd(d, intensity_target, xsize, row);
+                tf::linear_to_pq(intensity_target, &mut row[..xsize]);
             }
         }
         TransferFunction::Hlg {
@@ -98,18 +93,11 @@ fn from_linear_process(tf: &TransferFunction, xsize: usize, row: &mut [&mut [f32
         }
         TransferFunction::Gamma(g) => {
             for row in row {
-                for values in row[..xsize.next_multiple_of(D::F32Vec::LEN)]
-                    .chunks_exact_mut(D::F32Vec::LEN)
-                {
-                    let v = D::F32Vec::load(d, values);
-                    crate::util::fast_powf_simd(d, v.abs(), D::F32Vec::splat(d, g))
-                        .copysign(v)
-                        .store(values);
-                }
+                tf::apply_gamma(&mut row[..xsize], g);
             }
         }
     }
-});
+}
 
 impl RenderPipelineInPlaceStage for FromLinearStage {
     type Type = f32;
@@ -125,7 +113,7 @@ impl RenderPipelineInPlaceStage for FromLinearStage {
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
-        from_linear_process_dispatch(&self.tf, xsize, row)
+        from_linear_process(&self.tf, xsize, row)
     }
 }
 
@@ -250,71 +238,16 @@ impl RenderPipelineInOutStage for FromLinearSrgbToU8Stage {
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let max_val = ((1u32 << self.bit_depth) - 1) as f32;
-        fused_srgb_to_u8_channel_dispatch(max_val, xsize, input_rows, output_rows);
-    }
-}
-
-simd_function!(
-    fused_srgb_to_u8_channel_dispatch,
-    d: D,
-    fn fused_srgb_to_u8_channel(
-        max_val: f32,
-        xsize: usize,
-        input_rows: &Channels<f32>,
-        output_rows: &mut ChannelsMut<u8>,
-    ) {
-        #[allow(clippy::excessive_precision)]
-        const P: [f32; 5] = [
-            -5.135152395e-4,
-            5.287254571e-3,
-            3.903842876e-1,
-            1.474205315,
-            7.352629620e-1,
-        ];
-        #[allow(clippy::excessive_precision)]
-        const Q: [f32; 5] = [
-            1.004519624e-2,
-            3.036675394e-1,
-            1.340816930,
-            9.258482155e-1,
-            2.424867759e-2,
-        ];
-
         assert_eq!(input_rows.len(), 3);
         assert_eq!(output_rows.len(), 3);
-
-        let zero = D::F32Vec::splat(d, 0.0);
-        let one = D::F32Vec::splat(d, 1.0);
-        let scale = D::F32Vec::splat(d, max_val);
-        let threshold = D::F32Vec::splat(d, 0.0031308);
-        let linear_scale = D::F32Vec::splat(d, 12.92);
-
-        let end = xsize.next_multiple_of(D::F32Vec::LEN);
 
         for c in 0..3 {
             let input = input_rows[c][0];
             let output = &mut output_rows[c][0];
-
-            for (in_chunk, out_chunk) in input[..end]
-                .chunks_exact(D::F32Vec::LEN)
-                .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
-            {
-                let v = D::F32Vec::load(d, in_chunk);
-                // Clamp to [0, 1]
-                let a = v.max(zero).min(one);
-                // Apply sRGB transfer function
-                let srgb = threshold
-                    .gt(a)
-                    .if_then_else_f32(
-                        a * linear_scale,
-                        eval_rational_poly_simd(d, a.sqrt(), P, Q),
-                    );
-                // Scale and convert to u8
-                (srgb * scale).round_store_u8(out_chunk);
-            }
+            tf::linear_to_srgb_u8(input, output, max_val, xsize);
         }
     }
-);
+}
 
 #[cfg(test)]
 mod test {

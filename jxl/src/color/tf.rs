@@ -3,13 +3,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::util::{eval_rational_poly, eval_rational_poly_simd};
-use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask};
+use archmage::prelude::*;
 
-/// Converts the linear samples with the sRGB transfer curve (SIMD version).
+use crate::util::eval_rational_poly;
+
+/// Converts the linear samples with the sRGB transfer curve.
 // Max error ~5e-7
-#[inline(always)]
-pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
+#[autoversion]
+pub fn linear_to_srgb(_token: SimdToken, samples: &mut [f32]) {
     #[allow(clippy::excessive_precision)]
     const P: [f32; 5] = [
         -5.135152395e-4,
@@ -28,25 +29,23 @@ pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
         2.424867759e-2,
     ];
 
-    for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
-        let x = D::F32Vec::load(d, vec);
+    let len = samples.len();
+    for i in 0..len {
+        let x = samples[i];
         // Sign-extended sRGB: apply full curve to abs(x), then restore sign.
-        // This matches libjxl's TF_SRGB::EncodedFromDisplay behavior for
-        // out-of-gamut negative values.
         let a = x.abs();
-        D::F32Vec::splat(d, 0.0031308)
-            .gt(a)
-            .if_then_else_f32(
-                a * D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, a.sqrt(), P, Q),
-            )
-            .copysign(x)
-            .store(vec);
+        let v = if a <= 0.0031308 {
+            a * 12.92
+        } else {
+            eval_rational_poly(a.sqrt(), P, Q)
+        };
+        samples[i] = v.copysign(x);
     }
 }
 
 /// Converts samples in sRGB transfer curve to linear. Inverse of `linear_to_srgb`.
-pub fn srgb_to_linear(samples: &mut [f32]) {
+#[autoversion]
+pub fn srgb_to_linear(_token: SimdToken, samples: &mut [f32]) {
     #[allow(clippy::excessive_precision)]
     const P: [f32; 5] = [
         2.200248328e-4,
@@ -65,7 +64,9 @@ pub fn srgb_to_linear(samples: &mut [f32]) {
         6.521209011e-3,
     ];
 
-    for x in samples {
+    let len = samples.len();
+    for i in 0..len {
+        let x = samples[i];
         // Sign-extended sRGB inverse: apply to abs, then restore sign.
         let a = x.abs();
         let v = if a <= 0.04045 {
@@ -73,50 +74,15 @@ pub fn srgb_to_linear(samples: &mut [f32]) {
         } else {
             eval_rational_poly(a, P, Q)
         };
-        *x = v.copysign(*x);
+        samples[i] = v.copysign(x);
     }
 }
 
-#[inline(always)]
-pub fn srgb_to_linear_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
-    #[allow(clippy::excessive_precision)]
-    const P: [f32; 5] = [
-        2.200248328e-4,
-        1.043637593e-2,
-        1.624820318e-1,
-        7.961564959e-1,
-        8.210152774e-1,
-    ];
-
-    #[allow(clippy::excessive_precision)]
-    const Q: [f32; 5] = [
-        2.631846970e-1,
-        1.076976492,
-        4.987528350e-1,
-        -5.512498495e-2,
-        6.521209011e-3,
-    ];
-
-    for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
-        let x = D::F32Vec::load(d, vec);
-        // Sign-extended sRGB inverse: apply to abs, then restore sign.
-        let a = x.abs();
-        D::F32Vec::splat(d, 0.04045)
-            .gt(a)
-            .if_then_else_f32(
-                a / D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, a, P, Q),
-            )
-            .copysign(x)
-            .store(vec);
-    }
-}
-
-/// Converts the linear samples with the BT.709 transfer curve (SIMD version).
+/// Converts the linear samples with the BT.709 transfer curve.
 // Rational polynomial approximation of 1.099 * x^0.45 - 0.099 on sqrt(x).
 // Max error ~3e-7
-#[inline(always)]
-pub fn linear_to_bt709_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
+#[autoversion]
+pub fn linear_to_bt709(_token: SimdToken, samples: &mut [f32]) {
     // Coefficients for rational polynomial P(y)/Q(y) where y = sqrt(x)
     // Approximates 1.099 * y^0.9 - 0.099 on [sqrt(0.018), 1]
     #[allow(clippy::excessive_precision)]
@@ -137,55 +103,32 @@ pub fn linear_to_bt709_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
         3.269049823284149e-1,
     ];
 
-    for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
-        let x = D::F32Vec::load(d, vec);
+    let len = samples.len();
+    for i in 0..len {
+        let x = samples[i];
         // Per ICC parametric curve type 3: linear segment for all values below
         // threshold, including negatives. Gamma branch only for x >= 0.018.
-        D::F32Vec::splat(d, 0.018)
-            .gt(x)
-            .if_then_else_f32(
-                x * D::F32Vec::splat(d, 4.5),
-                eval_rational_poly_simd(d, x.sqrt(), P, Q),
-            )
-            .store(vec);
-    }
-}
-
-/// Converts samples in BT.709 transfer curve to linear. Inverse of `linear_to_bt709_simd`.
-pub fn bt709_to_linear(samples: &mut [f32]) {
-    for s in samples {
-        // Per ICC parametric curve type 3: linear segment for all values below
-        // threshold, including negatives. Gamma branch only for s >= 0.081.
-        *s = if *s <= 0.081 {
-            *s / 4.5
+        samples[i] = if x <= 0.018 {
+            x * 4.5
         } else {
-            crate::util::fast_powf(s.mul_add(1.0 / 1.099, 0.099 / 1.099), 1.0 / 0.45)
+            eval_rational_poly(x.sqrt(), P, Q)
         };
     }
 }
 
-/// Converts samples in BT.709 transfer curve to linear (SIMD version).
-#[inline(always)]
-pub fn bt709_to_linear_simd<D: SimdDescriptor>(d: D, xsize: usize, samples: &mut [f32]) {
-    let threshold = D::F32Vec::splat(d, 0.081);
-    let inv_4_5 = D::F32Vec::splat(d, 1.0 / 4.5);
-    let scale = D::F32Vec::splat(d, 1.0 / 1.099);
-    let offset = D::F32Vec::splat(d, 0.099 / 1.099);
-    let exp = D::F32Vec::splat(d, 1.0 / 0.45);
-
-    for vec in samples
-        .chunks_exact_mut(D::F32Vec::LEN)
-        .take(xsize.div_ceil(D::F32Vec::LEN))
-    {
-        let x = D::F32Vec::load(d, vec);
+/// Converts samples in BT.709 transfer curve to linear. Inverse of `linear_to_bt709`.
+#[autoversion]
+pub fn bt709_to_linear(_token: SimdToken, samples: &mut [f32]) {
+    let len = samples.len();
+    for i in 0..len {
+        let s = samples[i];
         // Per ICC parametric curve type 3: linear segment for all values below
-        // threshold, including negatives. Gamma branch only for x >= 0.081.
-        let linear_part = x * inv_4_5;
-        let gamma_part = crate::util::fast_powf_simd(d, x.mul_add(scale, offset), exp);
-        threshold
-            .gt(x)
-            .if_then_else_f32(linear_part, gamma_part)
-            .store(vec);
+        // threshold, including negatives. Gamma branch only for s >= 0.081.
+        samples[i] = if s <= 0.081 {
+            s / 4.5
+        } else {
+            crate::util::fast_powf(s.mul_add(1.0 / 1.099, 0.099 / 1.099), 1.0 / 0.45)
+        };
     }
 }
 
@@ -269,10 +212,13 @@ const PQ_INV_EOTF_Q_SMALL: [f32; 5] =
 ///
 /// This version uses approximate curve using rational polynomial.
 // Max error: ~7e-7 at intensity_target = 10000
-pub fn linear_to_pq(intensity_target: f32, samples: &mut [f32]) {
+#[autoversion]
+pub fn linear_to_pq(_token: SimdToken, intensity_target: f32, samples: &mut [f32]) {
     let y_mult = intensity_target * 10000f32.recip();
 
-    for s in samples {
+    let len = samples.len();
+    for i in 0..len {
+        let s = samples[i];
         let a = s.abs();
         let a_scaled = a * y_mult;
         let a_1_4 = a_scaled.sqrt().sqrt();
@@ -283,36 +229,7 @@ pub fn linear_to_pq(intensity_target: f32, samples: &mut [f32]) {
             eval_rational_poly(a_1_4, PQ_INV_EOTF_P, PQ_INV_EOTF_Q)
         };
 
-        *s = y.copysign(*s);
-    }
-}
-
-/// Converts linear sample to PQ signal using PQ inverse EOTF (SIMD version).
-#[inline(always)]
-pub fn linear_to_pq_simd<D: SimdDescriptor>(
-    d: D,
-    intensity_target: f32,
-    xsize: usize,
-    samples: &mut [f32],
-) {
-    let y_mult = D::F32Vec::splat(d, intensity_target * 10000f32.recip());
-    let threshold = D::F32Vec::splat(d, 1e-4);
-
-    for vec in samples
-        .chunks_exact_mut(D::F32Vec::LEN)
-        .take(xsize.div_ceil(D::F32Vec::LEN))
-    {
-        let s = D::F32Vec::load(d, vec);
-        let a = s.abs();
-        let a_scaled = a * y_mult;
-        let a_1_4 = a_scaled.sqrt().sqrt();
-
-        // Use small polynomial for a < 1e-4, regular polynomial otherwise
-        let y_small = eval_rational_poly_simd(d, a_1_4, PQ_INV_EOTF_P_SMALL, PQ_INV_EOTF_Q_SMALL);
-        let y_large = eval_rational_poly_simd(d, a_1_4, PQ_INV_EOTF_P, PQ_INV_EOTF_Q);
-        let y = threshold.gt(a).if_then_else_f32(y_small, y_large);
-
-        y.copysign(s).store(vec);
+        samples[i] = y.copysign(s);
     }
 }
 
@@ -321,38 +238,18 @@ pub fn linear_to_pq_simd<D: SimdDescriptor>(
 ///
 /// This version uses approximate curve using rational polynomial.
 // Max error: ~3e-6 at intensity_target = 10000
-pub fn pq_to_linear(intensity_target: f32, samples: &mut [f32]) {
+#[autoversion]
+pub fn pq_to_linear(_token: SimdToken, intensity_target: f32, samples: &mut [f32]) {
     let y_mult = 10000.0 / intensity_target;
 
-    for s in samples {
+    let len = samples.len();
+    for i in 0..len {
+        let s = samples[i];
         let a = s.abs();
         // a + a * a
         let x = a.mul_add(a, a);
         let y = eval_rational_poly(x, PQ_EOTF_P, PQ_EOTF_Q);
-        *s = (y * y_mult).copysign(*s);
-    }
-}
-
-/// Converts PQ signal to linear sample using PQ EOTF (SIMD version).
-#[inline(always)]
-pub fn pq_to_linear_simd<D: SimdDescriptor>(
-    d: D,
-    intensity_target: f32,
-    xsize: usize,
-    samples: &mut [f32],
-) {
-    let y_mult = D::F32Vec::splat(d, 10000.0 / intensity_target);
-
-    for vec in samples
-        .chunks_exact_mut(D::F32Vec::LEN)
-        .take(xsize.div_ceil(D::F32Vec::LEN))
-    {
-        let s = D::F32Vec::load(d, vec);
-        let a = s.abs();
-        // a + a * a
-        let x = a.mul_add(a, a);
-        let y = eval_rational_poly_simd(d, x, PQ_EOTF_P, PQ_EOTF_Q);
-        (y * y_mult).copysign(s).store(vec);
+        samples[i] = (y * y_mult).copysign(s);
     }
 }
 
@@ -457,7 +354,6 @@ pub fn scene_to_hlg_precise(samples: &mut [f32]) {
         let y = if a <= 1.0 / 12.0 {
             (3.0 * a).sqrt()
         } else {
-            // TODO(tirr-c): maybe use mul_add?
             HLG_A * (12.0 * a - HLG_B).ln() + HLG_C
         };
         *s = (y as f32).copysign(*s);
@@ -489,7 +385,6 @@ pub fn scene_to_hlg(samples: &mut [f32]) {
         let y = if a <= 1.0 / 12.0 {
             (3.0 * a).sqrt()
         } else {
-            // TODO(tirr-c): maybe use mul_add?
             let log = crate::util::fast_log2f(12.0 * a - HLG_B as f32);
             // log2 x = ln x / ln 2, therefore ln x = (ln 2)(log2 x)
             (HLG_A * std::f64::consts::LN_2) as f32 * log + HLG_C as f32
@@ -510,17 +405,58 @@ pub fn hlg_to_scene(samples: &mut [f32]) {
         } else {
             const POW: f32 = (std::f64::consts::LOG2_E / HLG_A) as f32;
             const ADD: f32 = (HLG_B / 12.0) as f32;
-            // TODO(OneDeuxTriSeiGo): replace raw constant with the below equation
-            // when std::f64::exp() can is available as a const fn.
-            //
-            // Equation: ((-HLG_B / HLG_A).exp() / 12.0)
-            // Constant: 0.003_639_807_079_052_639
             const MUL: f32 = 0.003_639_807;
 
-            // TODO(OneDeuxTriSeiGo): maybe use mul_add?
             crate::util::fast_pow2f(a * POW) * MUL + ADD
         };
         *s = y.copysign(*s);
+    }
+}
+
+/// Apply gamma (power function) to samples, preserving sign.
+#[autoversion]
+pub fn apply_gamma(_token: SimdToken, samples: &mut [f32], gamma: f32) {
+    let len = samples.len();
+    for i in 0..len {
+        let v = samples[i];
+        samples[i] = crate::util::fast_powf(v.abs(), gamma).copysign(v);
+    }
+}
+
+/// Fused sRGB transfer function + scale + round to u8.
+#[autoversion]
+pub fn linear_to_srgb_u8(
+    _token: SimdToken,
+    input: &[f32],
+    output: &mut [u8],
+    max_val: f32,
+    xsize: usize,
+) {
+    #[allow(clippy::excessive_precision)]
+    const P: [f32; 5] = [
+        -5.135152395e-4,
+        5.287254571e-3,
+        3.903842876e-1,
+        1.474205315,
+        7.352629620e-1,
+    ];
+    #[allow(clippy::excessive_precision)]
+    const Q: [f32; 5] = [
+        1.004519624e-2,
+        3.036675394e-1,
+        1.340816930,
+        9.258482155e-1,
+        2.424867759e-2,
+    ];
+
+    for x in 0..xsize {
+        let v = input[x].clamp(0.0, 1.0);
+        let srgb = if v <= 0.0031308 {
+            v * 12.92
+        } else {
+            eval_rational_poly(v.sqrt(), P, Q)
+        };
+        output[x] = (srgb * max_val).round() as u8;
     }
 }
 
@@ -581,7 +517,7 @@ mod test {
             let samples = arb_samples(u)?;
             let mut output = samples.clone();
 
-            linear_to_srgb_simd(jxl_simd::ScalarDescriptor::new().unwrap(), &mut output);
+            linear_to_srgb(&mut output);
             srgb_to_linear(&mut output);
             assert_all_almost_abs_eq(&output, &samples, 2e-6);
             Ok(())
@@ -594,7 +530,7 @@ mod test {
             let samples = arb_samples(u)?;
             let mut output = samples.clone();
 
-            linear_to_bt709_simd(jxl_simd::ScalarDescriptor::new().unwrap(), &mut output);
+            linear_to_bt709(&mut output);
             bt709_to_linear(&mut output);
             assert_all_almost_abs_eq(&output, &samples, 5e-6);
             Ok(())
@@ -602,27 +538,27 @@ mod test {
     }
 
     #[test]
-    fn linear_to_srgb_simd_arb() {
+    fn linear_to_srgb_arb() {
         arbtest::arbtest(|u| {
             let mut samples = arb_samples(u)?;
-            let mut simd = samples.clone();
+            let mut autoversioned = samples.clone();
 
             linear_to_srgb_naive(&mut samples);
-            linear_to_srgb_simd(jxl_simd::ScalarDescriptor::new().unwrap(), &mut simd);
-            assert_all_almost_abs_eq(&samples, &simd, 1e-6);
+            linear_to_srgb(&mut autoversioned);
+            assert_all_almost_abs_eq(&samples, &autoversioned, 1e-6);
             Ok(())
         });
     }
 
     #[test]
-    fn linear_to_bt709_simd_arb() {
+    fn linear_to_bt709_arb() {
         arbtest::arbtest(|u| {
             let mut samples = arb_samples(u)?;
-            let mut simd = samples.clone();
+            let mut autoversioned = samples.clone();
 
             linear_to_bt709_naive(&mut samples);
-            linear_to_bt709_simd(jxl_simd::ScalarDescriptor::new().unwrap(), &mut simd);
-            assert_all_almost_abs_eq(&samples, &simd, 1e-6);
+            linear_to_bt709(&mut autoversioned);
+            assert_all_almost_abs_eq(&samples, &autoversioned, 1e-6);
             Ok(())
         });
     }
@@ -657,55 +593,22 @@ mod test {
     }
 
     #[test]
-    fn bt709_to_linear_simd_arb() {
+    fn bt709_to_linear_arb() {
         arbtest::arbtest(|u| {
-            let mut samples = arb_samples(u)?;
-            let mut simd = samples.clone();
-            let xsize = samples.len();
+            let samples = arb_samples(u)?;
+            let mut scalar = samples.clone();
+            let mut autoversioned = samples.clone();
 
-            bt709_to_linear(&mut samples);
-            bt709_to_linear_simd(jxl_simd::ScalarDescriptor::new().unwrap(), xsize, &mut simd);
-            assert_all_almost_abs_eq(&samples, &simd, 1e-5);
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn pq_to_linear_simd_arb() {
-        arbtest::arbtest(|u| {
-            let intensity_target = u.int_in_range(9900..=10100)? as f32;
-            let mut samples = arb_samples(u)?;
-            let mut simd = samples.clone();
-            let xsize = samples.len();
-
-            pq_to_linear(intensity_target, &mut samples);
-            pq_to_linear_simd(
-                jxl_simd::ScalarDescriptor::new().unwrap(),
-                intensity_target,
-                xsize,
-                &mut simd,
-            );
-            assert_all_almost_abs_eq(&samples, &simd, 2e-5);
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn linear_to_pq_simd_arb() {
-        arbtest::arbtest(|u| {
-            let intensity_target = u.int_in_range(9900..=10100)? as f32;
-            let mut samples = arb_samples(u)?;
-            let mut simd = samples.clone();
-            let xsize = samples.len();
-
-            linear_to_pq(intensity_target, &mut samples);
-            linear_to_pq_simd(
-                jxl_simd::ScalarDescriptor::new().unwrap(),
-                intensity_target,
-                xsize,
-                &mut simd,
-            );
-            assert_all_almost_abs_eq(&samples, &simd, 2e-5);
+            // Compare against naive implementation
+            for s in &mut scalar {
+                *s = if *s <= 0.081 {
+                    *s / 4.5
+                } else {
+                    s.mul_add(1.0 / 1.099, 0.099 / 1.099).powf(1.0 / 0.45)
+                };
+            }
+            bt709_to_linear(&mut autoversioned);
+            assert_all_almost_abs_eq(&scalar, &autoversioned, 1e-5);
             Ok(())
         });
     }
