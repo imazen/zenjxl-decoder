@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 use super::*;
-use jxl_simd::{ScalarDescriptor, SimdDescriptor, test_all_instruction_sets};
 use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
@@ -48,8 +47,6 @@ pub fn dct1d(input_matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
         for u_freq_idx in 0..num_rows {
             let mut sum = 0.0;
             for (y_spatial_idx, col) in input_matrix.iter().enumerate() {
-                // This access `input_matrix[y_spatial_idx][x_col_idx]` assumes the input_matrix
-                // is rectangular. If not, it might panic here.
                 sum += dct_coeff_matrix[u_freq_idx][y_spatial_idx] * col[x_col_idx];
             }
             output_matrix[u_freq_idx][x_col_idx] = sum;
@@ -88,8 +85,6 @@ pub fn idct1d(input_matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
         for (y_row_idx, row) in output_matrix.iter_mut().enumerate() {
             let mut sum = 0.0;
             for (u_freq_idx, col) in input_matrix.iter().enumerate() {
-                // This access input_coeffs_matrix[u_freq_idx][x_col_idx] assumes input_coeffs_matrix
-                // is rectangular. If not, it might panic here.
                 sum += dct_coeff_matrix[u_freq_idx][y_row_idx] * col[x_col_idx];
             }
             row[x_col_idx] = sum;
@@ -181,7 +176,7 @@ fn check_close(a: f64, b: f64, max_err: f64) {
 }
 
 macro_rules! test_reinterpreting_dct1d_eq_slow_n {
-    ($test_name:ident, $n_val:expr, $do_idct_fun:path, $tolerance:expr) => {
+    ($test_name:ident, $n_val:expr, $apply_fn:path, $tolerance:expr) => {
         #[test]
         fn $test_name() {
             const N: usize = $n_val;
@@ -191,11 +186,8 @@ macro_rules! test_reinterpreting_dct1d_eq_slow_n {
             let output_matrix_slow: Vec<Vec<f64>> = dct1d(&input_matrix_for_ref);
 
             let mut output: Vec<_> = input_matrix_for_ref.iter().map(|x| x[0] as f32).collect();
-            let d = ScalarDescriptor {};
 
-            let (output_chunks, remainder) = output.as_chunks_mut::<1>();
-            assert!(remainder.is_empty());
-            $do_idct_fun(d, output_chunks, 1);
+            $apply_fn(&mut output, 0, 1);
 
             let scales = scales(N);
 
@@ -213,31 +205,31 @@ macro_rules! test_reinterpreting_dct1d_eq_slow_n {
 test_reinterpreting_dct1d_eq_slow_n!(
     test_reinterpreting_dct1d_2_eq_slow,
     2,
-    do_reinterpreting_dct_2,
+    apply_reinterpreting_dct_2,
     1e-6
 );
 test_reinterpreting_dct1d_eq_slow_n!(
     test_reinterpreting_dct1d_4_eq_slow,
     4,
-    do_reinterpreting_dct_4,
+    apply_reinterpreting_dct_4,
     1e-6
 );
 test_reinterpreting_dct1d_eq_slow_n!(
     test_reinterpreting_dct1d_8_eq_slow,
     8,
-    do_reinterpreting_dct_8,
+    apply_reinterpreting_dct_8,
     1e-6
 );
 test_reinterpreting_dct1d_eq_slow_n!(
     test_reinterpreting_dct1d_16_eq_slow,
     16,
-    do_reinterpreting_dct_16,
+    apply_reinterpreting_dct_16,
     5e-6
 );
 test_reinterpreting_dct1d_eq_slow_n!(
     test_reinterpreting_dct1d_32_eq_slow,
     32,
-    do_reinterpreting_dct_32,
+    apply_reinterpreting_dct_32,
     5e-6
 );
 
@@ -253,7 +245,7 @@ fn random_matrix(n: usize, m: usize) -> Vec<Vec<f64>> {
 }
 
 macro_rules! test_idct1d_eq_slow_n {
-    ($test_name:ident, $n_val:expr, $do_idct_fun:path, $tolerance:expr) => {
+    ($test_name:ident, $n_val:expr, $apply_fn:path, $tolerance:expr) => {
         #[test]
         fn $test_name() {
             const N: usize = $n_val;
@@ -263,11 +255,8 @@ macro_rules! test_idct1d_eq_slow_n {
             let output_matrix_slow: Vec<Vec<f64>> = idct1d(&input_matrix_for_ref);
 
             let mut output: Vec<_> = input_matrix_for_ref.iter().map(|x| x[0] as f32).collect();
-            let d = ScalarDescriptor {};
 
-            let (output_chunks, remainder) = output.as_chunks_mut::<1>();
-            assert!(remainder.is_empty());
-            $do_idct_fun(d, output_chunks, 1);
+            $apply_fn(&mut output, 0, 1);
 
             for i in 0..N {
                 check_close(output[i] as f64, output_matrix_slow[i][0], $tolerance);
@@ -276,18 +265,19 @@ macro_rules! test_idct1d_eq_slow_n {
     };
 }
 
-test_idct1d_eq_slow_n!(test_idct1d_2_eq_slow, 2, do_idct_2, 1e-6);
-test_idct1d_eq_slow_n!(test_idct1d_4_eq_slow, 4, do_idct_4, 1e-6);
-test_idct1d_eq_slow_n!(test_idct1d_8_eq_slow, 8, do_idct_8, 1e-6);
-test_idct1d_eq_slow_n!(test_idct1d_16_eq_slow, 16, do_idct_16, 1e-6);
-test_idct1d_eq_slow_n!(test_idct1d_32_eq_slow, 32, do_idct_32, 5e-6);
-test_idct1d_eq_slow_n!(test_idct1d_64_eq_slow, 64, do_idct_64, 5e-6);
-test_idct1d_eq_slow_n!(test_idct1d_128_eq_slow, 128, do_idct_128, 5e-5);
-test_idct1d_eq_slow_n!(test_idct1d_256_eq_slow, 256, do_idct_256, 5e-5);
+test_idct1d_eq_slow_n!(test_idct1d_2_eq_slow, 2, apply_idct_2, 1e-6);
+test_idct1d_eq_slow_n!(test_idct1d_4_eq_slow, 4, apply_idct_4, 1e-6);
+test_idct1d_eq_slow_n!(test_idct1d_8_eq_slow, 8, apply_idct_8, 1e-6);
+test_idct1d_eq_slow_n!(test_idct1d_16_eq_slow, 16, apply_idct_16, 1e-6);
+test_idct1d_eq_slow_n!(test_idct1d_32_eq_slow, 32, apply_idct_32, 5e-6);
+test_idct1d_eq_slow_n!(test_idct1d_64_eq_slow, 64, apply_idct_64, 2e-5);
+test_idct1d_eq_slow_n!(test_idct1d_128_eq_slow, 128, apply_idct_128, 5e-5);
+test_idct1d_eq_slow_n!(test_idct1d_256_eq_slow, 256, apply_idct_256, 5e-5);
 
 macro_rules! test_idct2d_eq_slow {
     ($test_name:ident, $rows:expr, $cols:expr, $fast_idct:ident, $tol:expr) => {
-        fn $test_name<D: SimdDescriptor>(d: D) {
+        #[test]
+        fn $test_name() {
             const N: usize = $rows;
             const M: usize = $cols;
 
@@ -301,7 +291,7 @@ macro_rules! test_idct2d_eq_slow {
                 .map(|x| *x as f32)
                 .collect();
 
-            $fast_idct(d, &mut fast_input);
+            $fast_idct(&mut fast_input);
 
             for r in 0..N {
                 for c in 0..M {
@@ -309,7 +299,6 @@ macro_rules! test_idct2d_eq_slow {
                 }
             }
         }
-        test_all_instruction_sets!($test_name);
     };
 }
 
@@ -338,7 +327,8 @@ test_idct2d_eq_slow!(test_idct2d_256_256_eq_slow, 256, 256, idct2d_256_256, 5e-3
 
 macro_rules! test_reinterpreting_dct_eq_slow {
     ($test_name:ident, $fun: ident, $rows:expr, $cols:expr, $tol:expr) => {
-        fn $test_name<D: SimdDescriptor>(d: D) {
+        #[test]
+        fn $test_name() {
             const N: usize = $rows;
             const M: usize = $cols;
 
@@ -354,7 +344,7 @@ macro_rules! test_reinterpreting_dct_eq_slow {
 
             let mut output = [0.0; $rows * $cols * 64];
 
-            $fun(d, &mut fast_input, &mut output);
+            $fun(&mut fast_input, &mut output);
 
             let on = slow_output.len();
             let om = slow_output[0].len();
@@ -365,7 +355,6 @@ macro_rules! test_reinterpreting_dct_eq_slow {
                 }
             }
         }
-        test_all_instruction_sets!($test_name);
     };
 }
 

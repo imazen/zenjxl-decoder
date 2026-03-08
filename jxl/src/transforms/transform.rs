@@ -7,7 +7,6 @@
 #![allow(clippy::approx_constant)]
 
 use super::{transform_map::HfTransformType, *};
-use jxl_simd::SimdDescriptor;
 
 fn idct2_top_block(s: usize, block_in: &[f32], block_out: &mut [f32]) {
     let num_2x2 = s / 2;
@@ -301,12 +300,7 @@ fn avfidct4x4(coeffs: &[f32], pixels: &mut [f32]) {
 }
 
 #[inline(always)]
-fn afv_transform_to_pixels<D: SimdDescriptor>(
-    d: D,
-    afv_kind: usize,
-    coefficients: &[f32],
-    pixels: &mut [f32],
-) {
+fn afv_transform_to_pixels(afv_kind: usize, coefficients: &[f32], pixels: &mut [f32]) {
     let afv_x = afv_kind & 1;
     let afv_y = afv_kind / 2;
     let block00 = coefficients[0];
@@ -347,7 +341,7 @@ fn afv_transform_to_pixels<D: SimdDescriptor>(
             };
         }
     }
-    idct2d_4_4(d, &mut block[0..16]);
+    idct2d_4_4(&mut block[0..16]);
     for iy in 0..4 {
         for ix in 0..4 {
             pixels[(iy + afv_y * 4) * 8 + (1 - afv_x) * 4 + ix] = block[iy * 4 + ix];
@@ -363,7 +357,7 @@ fn afv_transform_to_pixels<D: SimdDescriptor>(
             };
         }
     }
-    idct2d_4_8(d, &mut block);
+    idct2d_4_8(&mut block);
     for iy in 0..4 {
         for ix in 0..8 {
             pixels[(iy + (1 - afv_y) * 4) * 8 + ix] = block[iy * 8 + ix];
@@ -372,158 +366,103 @@ fn afv_transform_to_pixels<D: SimdDescriptor>(
 }
 
 #[inline]
-pub fn transform_to_pixels_impl<D: SimdDescriptor>(
-    d: D,
+pub fn transform_to_pixels_impl(
     transform_type: HfTransformType,
     lf: &mut [f32],
     transform_buffer: &mut [f32],
 ) {
     match transform_type {
-        HfTransformType::DCT => d.call(
-            #[inline(always)]
-            |_| {
-                transform_buffer[0] = lf[0];
-                idct2d_8_8(d, &mut transform_buffer[0..64]);
-            },
-        ),
-        HfTransformType::DCT16X16 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_2_2(d, &mut lf[..4], transform_buffer);
-                idct2d_16_16(d, &mut transform_buffer[0..256]);
-            },
-        ),
-        HfTransformType::DCT32X32 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_4_4(d, &mut lf[..16], transform_buffer);
-                idct2d_32_32(d, &mut transform_buffer[0..1024]);
-            },
-        ),
-        HfTransformType::DCT16X8 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_2_1(d, &mut lf[..2], transform_buffer);
-                idct2d_16_8(d, &mut transform_buffer[0..128]);
-            },
-        ),
-        HfTransformType::DCT8X16 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_1_2(d, &mut lf[..2], transform_buffer);
-                idct2d_8_16(d, &mut transform_buffer[0..128]);
-            },
-        ),
-        HfTransformType::DCT32X8 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_4_1(d, &mut lf[..4], transform_buffer);
-                idct2d_32_8(d, &mut transform_buffer[0..256]);
-            },
-        ),
-        HfTransformType::DCT8X32 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_1_4(d, &mut lf[..4], transform_buffer);
-                idct2d_8_32(d, &mut transform_buffer[0..256]);
-            },
-        ),
-        HfTransformType::DCT32X16 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_4_2(d, &mut lf[..8], transform_buffer);
-                idct2d_32_16(d, &mut transform_buffer[0..512]);
-            },
-        ),
-        HfTransformType::DCT16X32 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_2_4(d, &mut lf[..8], transform_buffer);
-                idct2d_16_32(d, &mut transform_buffer[0..512]);
-            },
-        ),
-        HfTransformType::DCT64X64 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_8_8(d, &mut lf[..64], transform_buffer);
-                idct2d_64_64(d, &mut transform_buffer[0..4096]);
-            },
-        ),
-        HfTransformType::DCT64X32 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_8_4(d, &mut lf[..32], transform_buffer);
-                idct2d_64_32(d, &mut transform_buffer[0..2048]);
-            },
-        ),
-        HfTransformType::DCT32X64 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_4_8(d, &mut lf[..32], transform_buffer);
-                idct2d_32_64(d, &mut transform_buffer[0..2048]);
-            },
-        ),
-        HfTransformType::DCT128X128 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_16_16(d, &mut lf[..256], transform_buffer);
-                idct2d_128_128(d, &mut transform_buffer[0..16384]);
-            },
-        ),
-        HfTransformType::DCT128X64 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_16_8(d, &mut lf[..128], transform_buffer);
-                idct2d_128_64(d, &mut transform_buffer[0..8192]);
-            },
-        ),
-        HfTransformType::DCT64X128 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_8_16(d, &mut lf[..128], transform_buffer);
-                idct2d_64_128(d, &mut transform_buffer[0..8192]);
-            },
-        ),
-        HfTransformType::DCT256X256 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_32_32(d, &mut lf[..1024], transform_buffer);
-                idct2d_256_256(d, &mut transform_buffer[0..65536]);
-            },
-        ),
-        HfTransformType::DCT256X128 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_32_16(d, &mut lf[..512], transform_buffer);
-                idct2d_256_128(d, &mut transform_buffer[0..32768]);
-            },
-        ),
-        HfTransformType::DCT128X256 => d.call(
-            #[inline(always)]
-            |_| {
-                reinterpreting_dct2d_16_32(d, &mut lf[..512], transform_buffer);
-                idct2d_128_256(d, &mut transform_buffer[0..32768]);
-            },
-        ),
+        HfTransformType::DCT => {
+            transform_buffer[0] = lf[0];
+            idct2d_8_8(&mut transform_buffer[0..64]);
+        }
+        HfTransformType::DCT16X16 => {
+            reinterpreting_dct2d_2_2(&mut lf[..4], transform_buffer);
+            idct2d_16_16(&mut transform_buffer[0..256]);
+        }
+        HfTransformType::DCT32X32 => {
+            reinterpreting_dct2d_4_4(&mut lf[..16], transform_buffer);
+            idct2d_32_32(&mut transform_buffer[0..1024]);
+        }
+        HfTransformType::DCT16X8 => {
+            reinterpreting_dct2d_2_1(&mut lf[..2], transform_buffer);
+            idct2d_16_8(&mut transform_buffer[0..128]);
+        }
+        HfTransformType::DCT8X16 => {
+            reinterpreting_dct2d_1_2(&mut lf[..2], transform_buffer);
+            idct2d_8_16(&mut transform_buffer[0..128]);
+        }
+        HfTransformType::DCT32X8 => {
+            reinterpreting_dct2d_4_1(&mut lf[..4], transform_buffer);
+            idct2d_32_8(&mut transform_buffer[0..256]);
+        }
+        HfTransformType::DCT8X32 => {
+            reinterpreting_dct2d_1_4(&mut lf[..4], transform_buffer);
+            idct2d_8_32(&mut transform_buffer[0..256]);
+        }
+        HfTransformType::DCT32X16 => {
+            reinterpreting_dct2d_4_2(&mut lf[..8], transform_buffer);
+            idct2d_32_16(&mut transform_buffer[0..512]);
+        }
+        HfTransformType::DCT16X32 => {
+            reinterpreting_dct2d_2_4(&mut lf[..8], transform_buffer);
+            idct2d_16_32(&mut transform_buffer[0..512]);
+        }
+        HfTransformType::DCT64X64 => {
+            reinterpreting_dct2d_8_8(&mut lf[..64], transform_buffer);
+            idct2d_64_64(&mut transform_buffer[0..4096]);
+        }
+        HfTransformType::DCT64X32 => {
+            reinterpreting_dct2d_8_4(&mut lf[..32], transform_buffer);
+            idct2d_64_32(&mut transform_buffer[0..2048]);
+        }
+        HfTransformType::DCT32X64 => {
+            reinterpreting_dct2d_4_8(&mut lf[..32], transform_buffer);
+            idct2d_32_64(&mut transform_buffer[0..2048]);
+        }
+        HfTransformType::DCT128X128 => {
+            reinterpreting_dct2d_16_16(&mut lf[..256], transform_buffer);
+            idct2d_128_128(&mut transform_buffer[0..16384]);
+        }
+        HfTransformType::DCT128X64 => {
+            reinterpreting_dct2d_16_8(&mut lf[..128], transform_buffer);
+            idct2d_128_64(&mut transform_buffer[0..8192]);
+        }
+        HfTransformType::DCT64X128 => {
+            reinterpreting_dct2d_8_16(&mut lf[..128], transform_buffer);
+            idct2d_64_128(&mut transform_buffer[0..8192]);
+        }
+        HfTransformType::DCT256X256 => {
+            reinterpreting_dct2d_32_32(&mut lf[..1024], transform_buffer);
+            idct2d_256_256(&mut transform_buffer[0..65536]);
+        }
+        HfTransformType::DCT256X128 => {
+            reinterpreting_dct2d_32_16(&mut lf[..512], transform_buffer);
+            idct2d_256_128(&mut transform_buffer[0..32768]);
+        }
+        HfTransformType::DCT128X256 => {
+            reinterpreting_dct2d_16_32(&mut lf[..512], transform_buffer);
+            idct2d_128_256(&mut transform_buffer[0..32768]);
+        }
         HfTransformType::AFV0 => {
             transform_buffer[0] = lf[0];
             let block: Vec<f32> = transform_buffer[0..64].to_vec();
-            afv_transform_to_pixels::<D>(d, 0, &block, &mut transform_buffer[0..64]);
+            afv_transform_to_pixels(0, &block, &mut transform_buffer[0..64]);
         }
         HfTransformType::AFV1 => {
             transform_buffer[0] = lf[0];
             let block: Vec<f32> = transform_buffer[0..64].to_vec();
-            afv_transform_to_pixels::<D>(d, 1, &block, &mut transform_buffer[0..64]);
+            afv_transform_to_pixels(1, &block, &mut transform_buffer[0..64]);
         }
         HfTransformType::AFV2 => {
             transform_buffer[0] = lf[0];
             let block: Vec<f32> = transform_buffer[0..64].to_vec();
-            afv_transform_to_pixels::<D>(d, 2, &block, &mut transform_buffer[0..64]);
+            afv_transform_to_pixels(2, &block, &mut transform_buffer[0..64]);
         }
         HfTransformType::AFV3 => {
             transform_buffer[0] = lf[0];
             let block: Vec<f32> = transform_buffer[0..64].to_vec();
-            afv_transform_to_pixels::<D>(d, 3, &block, &mut transform_buffer[0..64]);
+            afv_transform_to_pixels(3, &block, &mut transform_buffer[0..64]);
         }
         HfTransformType::IDENTITY => {
             transform_buffer[0] = lf[0];
@@ -599,7 +538,7 @@ pub fn transform_to_pixels_impl<D: SimdDescriptor>(
                             block[iy * 4 + ix] = coefficients[(y + iy * 2) * 8 + x + ix * 2];
                         }
                     }
-                    idct2d_4_4(d, &mut block);
+                    idct2d_4_4(&mut block);
                     for iy in 0..4 {
                         for ix in 0..4 {
                             transform_buffer[(y * 4 + iy) * 8 + x * 4 + ix] = block[iy * 4 + ix];
@@ -625,7 +564,7 @@ pub fn transform_to_pixels_impl<D: SimdDescriptor>(
                         }
                     }
                 }
-                idct2d_8_4(d, &mut block);
+                idct2d_8_4(&mut block);
                 for iy in 0..8 {
                     for ix in 0..4 {
                         transform_buffer[iy * 8 + x * 4 + ix] = block[iy * 4 + ix];
@@ -650,7 +589,7 @@ pub fn transform_to_pixels_impl<D: SimdDescriptor>(
                         }
                     }
                 }
-                idct2d_4_8(d, &mut block);
+                idct2d_4_8(&mut block);
                 for iy in 0..4 {
                     for ix in 0..8 {
                         transform_buffer[(y * 4 + iy) * 8 + ix] = block[iy * 8 + ix];

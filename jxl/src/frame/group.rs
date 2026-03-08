@@ -283,7 +283,7 @@ fn dequant_and_transform_to_pixels<D: SimdDescriptor>(
                 lf.copy_from_slice(&rect.row(y)[0..xs]);
             }
         }
-        transform_to_pixels_impl(d, transform_type, lf, &mut transform_buffer[c]);
+        transform_to_pixels_impl(transform_type, lf, &mut transform_buffer[c]);
         let downsampled_rect = Rect {
             origin: (
                 block_rect.origin.0 >> hshift[c],

@@ -10,10 +10,7 @@
 
 use std::f32::consts::SQRT_2;
 
-use jxl_simd::F32SimdVec;
-use jxl_simd::SimdDescriptor;
-
-use super::idct_32;
+use super::apply_idct_32;
 
 const WC_WEIGHTS_64: [f32; 32] = [
     0.500150636020651,
@@ -248,39 +245,24 @@ const WC_WEIGHTS_256: [f32; 128] = [
     81.48784219222516,
 ];
 
-#[inline(always)]
-fn idct_impl_inner<D: SimdDescriptor>(d: D, data: &mut [D::F32Vec], scratch: &mut [D::F32Vec]) {
+/// Recursive 1D IDCT on a contiguous buffer.
+/// `data` must have exactly n elements where n is 32, 64, 128, or 256.
+/// `scratch` must have at least n elements.
+fn idct_recursive(data: &mut [f32], scratch: &mut [f32]) {
     let n = data.len();
-    assert!(scratch.len() >= n);
+    debug_assert!(scratch.len() >= n);
 
     if n == 32 {
-        d.call(
-            #[inline(always)]
-            |_| {
-                (
-                    data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                    data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
-                    data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23],
-                    data[24], data[25], data[26], data[27], data[28], data[29], data[30], data[31],
-                ) = idct_32(
-                    d, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                    data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
-                    data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23],
-                    data[24], data[25], data[26], data[27], data[28], data[29], data[30], data[31],
-                )
-            },
-        );
+        apply_idct_32(data, 0, 1);
         return;
     }
 
-    let wc_weights = match n {
+    let weights = match n {
         64 => &WC_WEIGHTS_64[..],
         128 => &WC_WEIGHTS_128[..],
         256 => &WC_WEIGHTS_256[..],
         _ => unreachable!("invalid large-dct size: {n}"),
     };
-
-    assert_eq!(wc_weights.len(), n / 2);
 
     let (first_half, second_half) = scratch[..n].split_at_mut(n / 2);
     for i in 0..n / 2 {
@@ -288,241 +270,105 @@ fn idct_impl_inner<D: SimdDescriptor>(d: D, data: &mut [D::F32Vec], scratch: &mu
         second_half[i] = data[2 * i + 1];
     }
 
-    d.call(
-        #[inline(always)]
-        |_| idct_impl_inner(d, first_half, data),
-    );
+    idct_recursive(first_half, &mut data[..n / 2]);
 
     for i in (1..n / 2).rev() {
         second_half[i] += second_half[i - 1];
     }
-    second_half[0] *= D::F32Vec::splat(d, SQRT_2);
+    second_half[0] *= SQRT_2;
 
-    d.call(
-        #[inline(always)]
-        |_| idct_impl_inner(d, second_half, data),
-    );
+    idct_recursive(second_half, &mut data[..n / 2]);
 
     for i in 0..n / 2 {
-        let mul = D::F32Vec::splat(d, wc_weights[i]);
-        data[i] = second_half[i].mul_add(mul, first_half[i]);
-        data[n - i - 1] = second_half[i].neg_mul_add(mul, first_half[i]);
+        data[i] = second_half[i].mul_add(weights[i], first_half[i]);
+        data[n - i - 1] = (-second_half[i]).mul_add(weights[i], first_half[i]);
     }
 }
 
-#[inline(always)]
-fn do_idct<D: SimdDescriptor>(
-    d: D,
-    data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray],
-    stride: usize,
-    storage: &mut [D::F32Vec],
-    scratch: &mut [D::F32Vec],
-) {
-    let n = storage.len();
-    assert!((n - 1) * stride < data.len());
-    for i in 0..n {
-        storage[i] = D::F32Vec::load_array(d, &data[i * stride]);
-    }
-    d.call(
-        #[inline(always)]
-        |d| idct_impl_inner(d, storage, scratch),
-    );
-    for i in 0..n {
-        storage[i].store_array(&mut data[i * stride]);
-    }
-}
+/// Generic 2D IDCT implementation for large sizes (64, 128, 256).
+/// For tall matrices (rows > cols), input is in C×R (transposed) layout per JPEG XL convention.
+fn idct2d_large_impl(data: &mut [f32], rows: usize, cols: usize) {
+    let n = rows.max(cols);
+    let mut col_buf = vec![0.0f32; n];
+    let mut scratch = vec![0.0f32; n];
 
-#[inline(always)]
-fn do_idct_rowblock<D: SimdDescriptor>(
-    d: D,
-    data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray],
-    storage: &mut [D::F32Vec],
-    scratch: &mut [D::F32Vec],
-) {
-    let n = storage.len();
-    assert!(n.is_multiple_of(D::F32Vec::LEN));
-    assert!(data.len() >= n);
-
-    let row_stride = n / D::F32Vec::LEN;
-    for i in 0..n {
-        storage[i] = D::F32Vec::load_array(
-            d,
-            &data[row_stride * (i % D::F32Vec::LEN) + (i / D::F32Vec::LEN)],
-        );
-    }
-    d.call(
-        #[inline(always)]
-        |d| idct_impl_inner(d, storage, scratch),
-    );
-    for i in 0..n {
-        storage[i].store_array(&mut data[row_stride * (i % D::F32Vec::LEN) + (i / D::F32Vec::LEN)]);
-    }
-}
-
-#[inline(always)]
-fn do_idct_trh<D: SimdDescriptor>(
-    d: D,
-    data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray],
-    storage: &mut [D::F32Vec],
-    scratch: &mut [D::F32Vec],
-) {
-    let n = storage.len();
-    assert!(n.is_multiple_of(D::F32Vec::LEN));
-    assert!(data.len() >= n);
-
-    let row_stride = n / (2 * D::F32Vec::LEN);
-    for i in 0..n / 2 {
-        storage[i] = D::F32Vec::load_array(d, &data[row_stride * 2 * i]);
-        storage[i + n / 2] = D::F32Vec::load_array(d, &data[row_stride * (2 * i + 1)]);
-    }
-    d.call(
-        #[inline(always)]
-        |d| idct_impl_inner(d, storage, scratch),
-    );
-    for i in 0..n {
-        storage[i].store_array(&mut data[row_stride * i]);
-    }
-}
-
-#[inline(always)]
-fn idct2d_square<D: SimdDescriptor>(
-    d: D,
-    data: &mut [f32],
-    n: usize,
-    storage: &mut [D::F32Vec],
-    scratch: &mut [D::F32Vec],
-) {
-    let data = D::F32Vec::make_array_slice_mut(data);
-    let chunks = n / D::F32Vec::LEN;
-    // Step 1: do column-DCTs on the first K columns.
-    for i in 0..chunks {
-        d.call(
-            #[inline(always)]
-            |_| do_idct(d, &mut data[i..], chunks, &mut storage[..n], scratch),
-        );
-    }
-    // Step 2: do column-DCTs on groups of K columns, transposing KxK blocks and
-    // swapping them in their final place as we do so.
-    for i in 0..chunks {
-        D::F32Vec::transpose_square(d, &mut data[i * n + i..], chunks);
-        for j in i + 1..chunks {
-            D::F32Vec::transpose_square(d, &mut data[j * n + i..], chunks);
-            D::F32Vec::transpose_square(d, &mut data[i * n + j..], chunks);
-            for k in 0..D::F32Vec::LEN {
-                data.swap(i * n + j + k * chunks, j * n + i + k * chunks);
+    if rows > cols {
+        // Tall: input is stored as cols×rows (transposed).
+        // Step 1: cols-point column IDCTs on cols×rows layout (stride = rows)
+        for c in 0..rows {
+            for r in 0..cols {
+                col_buf[r] = data[r * rows + c];
+            }
+            idct_recursive(&mut col_buf[..cols], &mut scratch[..cols]);
+            for r in 0..cols {
+                data[r * rows + c] = col_buf[r];
             }
         }
-        d.call(
-            #[inline(always)]
-            |_| do_idct(d, &mut data[i..], chunks, &mut storage[..n], scratch),
-        );
-    }
-}
-
-#[inline(always)]
-fn idct2d_wide<D: SimdDescriptor>(
-    d: D,
-    data: &mut [f32],
-    c: usize,
-    r: usize,
-    storage: &mut [D::F32Vec],
-    scratch: &mut [D::F32Vec],
-) {
-    assert!(r < c);
-    let data = D::F32Vec::make_array_slice_mut(data);
-    let column_chunks = c / D::F32Vec::LEN;
-    let row_chunks = r / D::F32Vec::LEN;
-    // Step 1: do rowblock-DCTs on the first K rows, transposing KxK blocks first.
-    for i in 0..row_chunks {
-        for j in 0..column_chunks {
-            D::F32Vec::transpose_square(d, &mut data[i * c + j..], column_chunks);
+        // Step 2: Transpose cols×rows → rows×cols
+        let mut tmp = vec![0.0f32; rows * cols];
+        for i in 0..cols {
+            for j in 0..rows {
+                tmp[j * cols + i] = data[i * rows + j];
+            }
         }
-        d.call(
-            #[inline(always)]
-            |_| do_idct_rowblock(d, &mut data[i * c..], &mut storage[..c], scratch),
-        );
-    }
-    // Step 2: do column-DCTs on groups of K columns, transposing KxK blocks back.
-    for i in 0..column_chunks {
-        for j in 0..row_chunks {
-            D::F32Vec::transpose_square(d, &mut data[j * c + i..], column_chunks);
+        data[..rows * cols].copy_from_slice(&tmp);
+        // Step 3: rows-point column IDCTs on rows×cols layout (stride = cols)
+        for c in 0..cols {
+            for r in 0..rows {
+                col_buf[r] = data[r * cols + c];
+            }
+            idct_recursive(&mut col_buf[..rows], &mut scratch[..rows]);
+            for r in 0..rows {
+                data[r * cols + c] = col_buf[r];
+            }
         }
-        d.call(
-            #[inline(always)]
-            |_| do_idct(d, &mut data[i..], column_chunks, &mut storage[..r], scratch),
-        );
-    }
-}
-
-#[inline(always)]
-fn idct2d_thin<D: SimdDescriptor>(
-    d: D,
-    data: &mut [f32],
-    c: usize,
-    r: usize,
-    storage: &mut [D::F32Vec],
-    scratch: &mut [D::F32Vec],
-) {
-    assert!(r > c);
-    let data = D::F32Vec::make_array_slice_mut(data);
-    let column_chunks = c / D::F32Vec::LEN;
-    let row_chunks = r / D::F32Vec::LEN;
-    // Note: input is transposed, so in the beginning it has ROWS *columns* and COLS *rows*.
-    // Step 1: do column-DCTs on columns.
-    for i in 0..row_chunks {
-        d.call(
-            #[inline(always)]
-            |_| do_idct(d, &mut data[i..], row_chunks, &mut storage[..c], scratch),
-        );
-    }
-    // Step 2: Incrementally transpose each square sub-block of the matrix, then do a column-IDCT which also completes the transpose.
-    for i in 0..column_chunks {
-        let tr_block = |data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray], i, j, l| {
-            D::F32Vec::transpose_square(d, &mut data[i * r + j + l * column_chunks..], row_chunks)
-        };
-
-        (0..2).for_each(|l| tr_block(data, i, i, l));
-        for j in i + 1..column_chunks {
-            (0..2).for_each(|l| tr_block(data, i, j, l));
-            (0..2).for_each(|l| tr_block(data, j, i, l));
-            for l in 0..2 {
-                for k in 0..D::F32Vec::LEN {
-                    data.swap(
-                        i * r + j + k * row_chunks + l * column_chunks,
-                        j * r + i + k * row_chunks + l * column_chunks,
-                    );
+    } else {
+        // Square or wide: input is in rows×cols layout.
+        // Step 1: rows-point column IDCTs (stride = cols)
+        for c in 0..cols {
+            for r in 0..rows {
+                col_buf[r] = data[r * cols + c];
+            }
+            idct_recursive(&mut col_buf[..rows], &mut scratch[..rows]);
+            for r in 0..rows {
+                data[r * cols + c] = col_buf[r];
+            }
+        }
+        // Step 2: Transpose rows×cols → cols×rows
+        let mut tmp = vec![0.0f32; rows * cols];
+        for i in 0..rows {
+            for j in 0..cols {
+                tmp[j * rows + i] = data[i * cols + j];
+            }
+        }
+        data[..rows * cols].copy_from_slice(&tmp);
+        // Step 3: cols-point column IDCTs on cols×rows layout (stride = rows)
+        for c in 0..rows {
+            for r in 0..cols {
+                col_buf[r] = data[r * rows + c];
+            }
+            idct_recursive(&mut col_buf[..cols], &mut scratch[..cols]);
+            for r in 0..cols {
+                data[r * rows + c] = col_buf[r];
+            }
+        }
+        // Step 4: For wide, transpose back to rows×cols
+        if rows != cols {
+            for i in 0..cols {
+                for j in 0..rows {
+                    tmp[j * cols + i] = data[i * rows + j];
                 }
             }
+            data[..rows * cols].copy_from_slice(&tmp);
         }
-        d.call(
-            #[inline(always)]
-            |_| do_idct_trh(d, &mut data[i..], &mut storage[..r], scratch),
-        );
     }
 }
 
 macro_rules! make_idct2d {
-    ($name: ident, $h: literal, $w: literal) => {
-        pub fn $name<D: SimdDescriptor>(d: D, data: &mut [f32]) {
-            const L: usize = if $w < $h { $h } else { $w };
-            let mut storage = [D::F32Vec::zero(d); L];
-            let mut scratch = [D::F32Vec::zero(d); L];
-            if $w == $h {
-                return d.call(
-                    #[inline(always)]
-                    |_| idct2d_square(d, data, $w, &mut storage, &mut scratch),
-                );
-            }
-            if $w > $h {
-                return d.call(
-                    #[inline(always)]
-                    |_| idct2d_wide(d, data, $w, $h, &mut storage, &mut scratch),
-                );
-            }
-            return d.call(
-                #[inline(always)]
-                |_| idct2d_thin(d, data, $w, $h, &mut storage, &mut scratch),
-            );
+    ($name:ident, $h:literal, $w:literal) => {
+        pub fn $name(data: &mut [f32]) {
+            assert_eq!(data.len(), $h * $w);
+            idct2d_large_impl(data, $h, $w);
         }
     };
 }
@@ -538,52 +384,40 @@ make_idct2d!(idct2d_256_128, 256, 128);
 make_idct2d!(idct2d_256_256, 256, 256);
 
 #[cfg(test)]
-#[inline(always)]
-pub fn do_idct_64<D: SimdDescriptor>(
-    d: D,
-    data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray],
-    stride: usize,
-) {
-    let mut storage = [D::F32Vec::zero(d); 64];
-    let mut scratch = [D::F32Vec::zero(d); 64];
-    d.call(
-        #[inline(always)]
-        |_| {
-            do_idct(d, data, stride, &mut storage, &mut scratch);
-        },
-    );
+pub fn apply_idct_64(data: &mut [f32], col: usize, stride: usize) {
+    let mut buf = [0.0f32; 64];
+    let mut scratch = [0.0f32; 64];
+    for i in 0..64 {
+        buf[i] = data[col + i * stride];
+    }
+    idct_recursive(&mut buf, &mut scratch);
+    for i in 0..64 {
+        data[col + i * stride] = buf[i];
+    }
 }
 
 #[cfg(test)]
-#[inline(always)]
-pub fn do_idct_128<D: SimdDescriptor>(
-    d: D,
-    data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray],
-    stride: usize,
-) {
-    let mut storage = [D::F32Vec::zero(d); 128];
-    let mut scratch = [D::F32Vec::zero(d); 128];
-    d.call(
-        #[inline(always)]
-        |_| {
-            do_idct(d, data, stride, &mut storage, &mut scratch);
-        },
-    );
+pub fn apply_idct_128(data: &mut [f32], col: usize, stride: usize) {
+    let mut buf = [0.0f32; 128];
+    let mut scratch = [0.0f32; 128];
+    for i in 0..128 {
+        buf[i] = data[col + i * stride];
+    }
+    idct_recursive(&mut buf, &mut scratch);
+    for i in 0..128 {
+        data[col + i * stride] = buf[i];
+    }
 }
 
 #[cfg(test)]
-#[inline(always)]
-pub fn do_idct_256<D: SimdDescriptor>(
-    d: D,
-    data: &mut [<D::F32Vec as F32SimdVec>::UnderlyingArray],
-    stride: usize,
-) {
-    let mut storage = [D::F32Vec::zero(d); 256];
-    let mut scratch = [D::F32Vec::zero(d); 256];
-    d.call(
-        #[inline(always)]
-        |_| {
-            do_idct(d, data, stride, &mut storage, &mut scratch);
-        },
-    );
+pub fn apply_idct_256(data: &mut [f32], col: usize, stride: usize) {
+    let mut buf = [0.0f32; 256];
+    let mut scratch = [0.0f32; 256];
+    for i in 0..256 {
+        buf[i] = data[col + i * stride];
+    }
+    idct_recursive(&mut buf, &mut scratch);
+    for i in 0..256 {
+        data[col + i * stride] = buf[i];
+    }
 }
