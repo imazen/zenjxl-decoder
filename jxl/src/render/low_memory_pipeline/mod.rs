@@ -746,10 +746,15 @@ impl LowMemoryRenderPipeline {
             .map(|buf| extract_borders(buf, shared, border_size, skip_border_copy))
             .collect::<Result<Vec<_>>>()?;
 
-        // Phase 2 (serial): emit work items in group index order.
-        // Sets is_ready for each extracted group BEFORE reading neighbors,
-        // so that the 3×3 readiness mask reflects serial ordering and
-        // work items from different groups never overlap.
+        // Phase 2 (serial): mark all extracted groups ready, then emit work items.
+        // Setting is_ready for ALL groups before emitting gives every group a
+        // full readiness mask — all neighbors are ready. This produces correct
+        // EPF output in a single pass, avoiding the need for a final re-render.
+        for (g, did_extract) in extracted.iter().enumerate() {
+            if *did_extract {
+                self.input_buffers[g].is_ready = true;
+            }
+        }
         let mut items = Vec::new();
         let mut group_has_items = Vec::new();
         for (g, did_extract) in extracted.iter().enumerate() {
@@ -815,7 +820,13 @@ impl LowMemoryRenderPipeline {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // Phase 3 (serial): emit work items in group index order.
+        // Phase 3 (serial): mark all extracted groups ready, then emit work items.
+        // Full readiness before emission gives correct EPF in one pass.
+        for (g, did_extract) in extracted.iter().enumerate() {
+            if *did_extract {
+                self.input_buffers[g].is_ready = true;
+            }
+        }
         let mut items = Vec::new();
         let mut group_has_items = Vec::new();
         for (g, did_extract) in extracted.iter().enumerate() {

@@ -233,8 +233,10 @@ impl Frame {
         }
 
         // Preserve modular buffers when a final re-render may be needed.
-        // The re-render re-sends all data to the pipeline, so modular buffers
-        // must survive process_output (clone instead of consume).
+        // Sequential always re-renders; parallel re-renders only for incremental
+        // (cross-batch boundaries have partial readiness). One-shot parallel
+        // gets full readiness from the first pass, but we can't predict
+        // one-shot vs incremental here, so preserve speculatively.
         if self.header.num_groups() > 1
             && pipeline!(self, p, p.needs_border_rendering())
         {
@@ -274,6 +276,12 @@ impl Frame {
             #[cfg(feature = "threads")]
             {
                 self.decode_groups_parallel(groups, &mut buffer_splitter, do_flush)?;
+                // Track incremental parallel decode: if groups remain incomplete
+                // after this batch, a final re-render will be needed to correct
+                // cross-batch border readiness.
+                if self.incomplete_groups > 0 {
+                    self.was_flushed_once = true;
+                }
             }
         } else {
             for (group, mut passes) in groups {
@@ -296,13 +304,16 @@ impl Frame {
         // bugs with border-dependent stages (EPF, Gaborish). Only process when all groups
         // are complete (one-shot final render) or in sequential mode.
         if self.incomplete_groups == 0 || (do_flush && !use_parallel) {
-            // When all groups are complete and border rendering is active,
-            // do a final re-render with full readiness masks. During decode,
-            // groups were rendered with progressive readiness (only previously-
-            // processed neighbors ready). The final re-render stores all data
-            // in store-only mode, extracts borders for all groups, then renders
-            // with all neighbors ready — producing correct EPF output.
+            // Final re-render with full readiness masks. Needed when groups were
+            // rendered with partial readiness:
+            // - Sequential: always (groups processed one at a time)
+            // - Parallel incremental: yes (cross-batch boundaries have partial readiness)
+            // - Parallel one-shot: NO (all groups in one batch, full readiness from
+            //   prepare_groups_parallel marking all groups ready before emission)
+            // was_flushed_once distinguishes: set in STEP 1 (sequential) or after
+            // decode_groups_parallel with incomplete groups (parallel incremental).
             let is_final_rerender = self.incomplete_groups == 0
+                && self.was_flushed_once
                 && self.header.num_groups() > 1
                 && pipeline!(self, p, p.needs_border_rendering())
                 && (self.header.encoding != Encoding::VarDCT
