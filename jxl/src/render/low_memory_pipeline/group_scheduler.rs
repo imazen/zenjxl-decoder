@@ -331,6 +331,10 @@ impl LowMemoryRenderPipeline {
                 if self.input_buffers[g].num_completed_groups_3x3 != 9 {
                     continue;
                 }
+                // Reset is_ready: once borders are recycled, this group must
+                // not appear "ready" in any neighbor's readiness mask, or
+                // rendering would try to read the recycled (None) buffers.
+                self.input_buffers[g].is_ready = false;
                 for c in 0..self.input_buffers[g].data.len() {
                     if let Some(b) = std::mem::take(&mut self.input_buffers[g].topbottom[c]) {
                         self.store_scratch_buffer(c, 1, b);
@@ -347,6 +351,7 @@ impl LowMemoryRenderPipeline {
     /// groups. Used after adaptive batching completes to free deferred borders.
     pub(crate) fn recycle_all_borders(&mut self) {
         for buf in &mut self.input_buffers {
+            buf.is_ready = false;
             for c in 0..buf.data.len() {
                 if let Some(b) = std::mem::take(&mut buf.topbottom[c]) {
                     self.scratch_channel_buffers[c * 3 + 1].push(b);

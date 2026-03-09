@@ -364,6 +364,13 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         buffer_splitter: &mut BufferSplitter,
     ) -> Result<()> {
         if self.shared.channel_is_used[channel] {
+            // Cascading transforms (squeeze, palette) may re-produce output
+            // for a channel/group already stored but not yet rendered (waiting
+            // for other channels). Skip the duplicate — the first buffer is
+            // valid and ready_channels is already incremented.
+            if self.input_buffers[group_id].has_buffer(channel) {
+                return Ok(());
+            }
             debug!(
                 "filling data for group {}, channel {}, using type {:?}",
                 group_id,
