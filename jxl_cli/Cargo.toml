@@ -35,7 +35,8 @@ vergen-gitcl = { version = "9.1.0", features = ["rustc"] }
 tracing-subscriber = ["dep:tracing-subscriber", "jxl/tracing"]
 exr = ["dep:exr"]
 profiling = ["jxl/profiling"]
-default = ["exr", "all-simd", "threads"]
+default = ["exr", "all-simd", "threads", "allow-unsafe"]
+allow-unsafe = ["jxl/allow-unsafe"]
 threads = ["jxl/threads", "dep:rayon"]
 
 all-simd = ["jxl/all-simd"]

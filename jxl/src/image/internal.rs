@@ -269,7 +269,7 @@ impl<const S: usize> DistinctRowsIndexes for [usize; S] {
     fn cast_rows<'a, T: crate::image::ImageDataType>(
         rows: Self::Output<'a>,
     ) -> Self::CastOutput<'a, T> {
-        rows.map(|row| bytemuck::cast_slice_mut(row))
+        rows.map(|row| crate::image::typed::cast_row_mut(row))
     }
 }
 

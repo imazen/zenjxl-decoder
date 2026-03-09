@@ -13,6 +13,55 @@ use crate::{
 
 use super::{ImageDataType, OwnedRawImage, RawImageRect, RawImageRectMut, Rect};
 
+/// Cast a `&[u8]` row to `&[T]`.
+///
+/// With `allow-unsafe`, uses a direct pointer cast (zero overhead). The caller
+/// must uphold the alignment/size invariants established at construction time.
+/// Without `allow-unsafe`, delegates to `bytemuck::cast_slice` which validates
+/// alignment and size on every call.
+#[cfg(feature = "allow-unsafe")]
+#[inline(always)]
+pub(super) fn cast_row<T: ImageDataType>(row: &[u8]) -> &[T] {
+    let new_len = row.len() / std::mem::size_of::<T>();
+    debug_assert!(row.len() % std::mem::size_of::<T>() == 0);
+    debug_assert!((row.as_ptr() as usize) % std::mem::align_of::<T>() == 0);
+    #[allow(unsafe_code)]
+    // SAFETY: Alignment and size invariants verified at Image/ImageRect construction
+    // (from_raw asserts data.is_aligned(T::DATA_TYPE_ID.size())).
+    // The underlying buffer is cache-line aligned (64 bytes ≥ align_of::<T>()),
+    // bytes_per_row = width * sizeof(T), bytes_between_rows is a multiple of
+    // CACHE_LINE_BYTE_SIZE.
+    unsafe {
+        std::slice::from_raw_parts(row.as_ptr().cast::<T>(), new_len)
+    }
+}
+
+#[cfg(not(feature = "allow-unsafe"))]
+#[inline(always)]
+pub(super) fn cast_row<T: ImageDataType>(row: &[u8]) -> &[T] {
+    bytemuck::cast_slice(row)
+}
+
+/// Cast a `&mut [u8]` row to `&mut [T]`. See [`cast_row`] for safety rationale.
+#[cfg(feature = "allow-unsafe")]
+#[inline(always)]
+pub(super) fn cast_row_mut<T: ImageDataType>(row: &mut [u8]) -> &mut [T] {
+    let new_len = row.len() / std::mem::size_of::<T>();
+    debug_assert!(row.len() % std::mem::size_of::<T>() == 0);
+    debug_assert!((row.as_ptr() as usize) % std::mem::align_of::<T>() == 0);
+    #[allow(unsafe_code)]
+    // SAFETY: Same invariants as cast_row, plus exclusive (&mut) access.
+    unsafe {
+        std::slice::from_raw_parts_mut(row.as_mut_ptr().cast::<T>(), new_len)
+    }
+}
+
+#[cfg(not(feature = "allow-unsafe"))]
+#[inline(always)]
+pub(super) fn cast_row_mut<T: ImageDataType>(row: &mut [u8]) -> &mut [T] {
+    bytemuck::cast_slice_mut(row)
+}
+
 #[repr(transparent)]
 pub struct Image<T: ImageDataType> {
     // Safety invariant: self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) is true.
@@ -188,12 +237,12 @@ impl<T: ImageDataType> Image<T> {
 
     #[inline(always)]
     pub fn row(&self, row: usize) -> &[T] {
-        bytemuck::cast_slice(self.raw.row(row))
+        cast_row(self.raw.row(row))
     }
 
     #[inline(always)]
     pub fn row_mut(&mut self, row: usize) -> &mut [T] {
-        bytemuck::cast_slice_mut(self.raw.row_mut(row))
+        cast_row_mut(self.raw.row_mut(row))
     }
 
     /// Note: this is quadratic in the number of rows. Indexing *ignores any padding rows*, i.e.
@@ -233,8 +282,8 @@ impl<'a, T: ImageDataType> ImageRect<'a, T> {
     #[inline(always)]
     pub fn row(&self, row: usize) -> &'a [T] {
         // RawImageRect::row() returns &'a [u8] (the lifetime of the underlying storage),
-        // and bytemuck::cast_slice preserves that lifetime.
-        bytemuck::cast_slice(self.raw.row(row))
+        // and cast_row preserves that lifetime.
+        cast_row(self.raw.row(row))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
@@ -278,7 +327,7 @@ impl<'a, T: ImageDataType> ImageRectMut<'a, T> {
 
     #[inline(always)]
     pub fn row(&mut self, row: usize) -> &mut [T] {
-        bytemuck::cast_slice_mut(self.raw.row(row))
+        cast_row_mut(self.raw.row(row))
     }
 
     pub fn as_rect(&'a self) -> ImageRect<'a, T> {
