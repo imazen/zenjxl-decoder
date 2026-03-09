@@ -215,6 +215,11 @@ impl Frame {
         if !self.was_flushed_once && do_flush {
             self.was_flushed_once = true;
             self.groups_to_flush.extend(0..self.header.num_groups());
+            // Preserve modular buffers during intermediate flushes so they
+            // can be re-sent during the final re-render when all groups are
+            // complete. Without this, flush_output would consume buffers,
+            // making them unavailable for the re-render.
+            modular_global.set_preserve_buffers(true);
             modular_global.zero_fill_empty_channels(
                 self.header.passes.num_passes as usize,
                 self.header.num_groups(),
@@ -282,6 +287,29 @@ impl Frame {
         // or we are done with the file.
         let flush_start = std::time::Instant::now();
         if self.incomplete_groups == 0 || do_flush {
+            // When all groups are complete after incremental flushing, do a
+            // final re-render of every group with full readiness masks. During
+            // incremental decode, groups were rendered with partial readiness
+            // (only previously-decoded neighbors ready). The final re-render
+            // processes all groups sequentially with readiness building up
+            // monotonically and border recycling disabled, producing the same
+            // pixel values as the one-shot parallel path.
+            let is_final_rerender = self.incomplete_groups == 0
+                && self.was_flushed_once
+                && self.header.num_groups() > 1
+                && pipeline!(self, p, p.needs_border_rendering())
+                && (self.header.encoding != Encoding::VarDCT
+                    || self.hf_coefficients.is_some());
+            if is_final_rerender {
+                self.groups_to_flush.extend(0..self.header.num_groups());
+                self.changed_since_last_flush.clear();
+                pipeline!(self, p, p.prepare_final_rerender());
+                // Keep preserve_buffers=true during the re-render so modular
+                // buffers are cloned (not consumed). This ensures flush_output
+                // can produce data for all groups. Buffers are freed when the
+                // frame is dropped.
+            }
+
             let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
             let mut pass_to_pipeline = |chan, group, complete, image: Option<Image<i32>>| {
                 self.changed_since_last_flush
@@ -304,7 +332,8 @@ impl Frame {
             // STEP 5: re-render VarDCT/noise data in rendered groups for which it was
             // not rendered, or re-send to pipeline modular channels that were not
             // updated in those groups.
-            for g in std::mem::take(&mut self.groups_to_flush) {
+            let step5_groups: std::collections::BTreeSet<usize> = std::mem::take(&mut self.groups_to_flush);
+            for g in step5_groups {
                 if self
                     .changed_since_last_flush
                     .take(&(g, RenderUnit::VarDCT))
@@ -330,6 +359,15 @@ impl Frame {
                         modular_global.flush_output(g, c, &mut pass_to_pipeline)?;
                     }
                 }
+            }
+
+            if is_final_rerender {
+                pipeline!(
+                    self,
+                    p,
+                    p.render_all_groups_full_readiness(&mut buffer_splitter)?
+                );
+                pipeline!(self, p, p.finish_final_rerender());
             }
         }
         let flush_dur = flush_start.elapsed();
@@ -474,11 +512,16 @@ impl Frame {
         let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
         let mut num_needs_pixels = 0usize;
         for (group, passes) in groups {
+            let was_complete =
+                self.last_rendered_pass[group].is_some_and(|p| p >= last_pass_in_file);
             if let Some((p, _)) = passes.last() {
                 self.last_rendered_pass[group] = Some(*p);
             }
             let pass_to_render = self.last_rendered_pass[group];
             let complete = pass_to_render.is_some_and(|p| p >= last_pass_in_file);
+            if complete && !was_complete {
+                self.incomplete_groups = self.incomplete_groups.checked_sub(1).unwrap();
+            }
             let do_render = if complete {
                 true
             } else if do_flush {
@@ -704,6 +747,7 @@ impl Frame {
             let phase3a_start = std::time::Instant::now();
             let mut groups_stored: Vec<(usize, bool, bool)> =
                 Vec::with_capacity(batch_end - batch_start);
+            let mut modular_channels_output: Vec<(usize, usize)> = Vec::new();
             for gw in &mut work[batch_start..batch_end] {
                 self.decoder_state.check_cancelled()?;
 
@@ -838,6 +882,7 @@ impl Frame {
                         if !lmp_mut!().has_buffer(chan, group) {
                             lmp_mut!().store_buffer_only(chan, group, true, image.unwrap());
                         }
+                        modular_channels_output.push((group, chan));
                         // Track cross-group output from cascading transforms.
                         if !groups_stored.iter().any(|(g, _, _)| *g == group) {
                             groups_stored.push((group, true, false));
@@ -859,10 +904,11 @@ impl Frame {
             // For VarDCT images, store_and_prepare_groups_parallel combines
             // pending pixel storage with border extraction in a single parallel
             // pass, eliminating the sequential pixel store bottleneck.
-            // In unbatched mode, skip border extraction — the rendering phase reads
-            // border pixels directly from neighbors' center data (which stays alive
-            // through Phase 3b). This eliminates the topbottom/leftright double-copy.
-            let skip_border_copy = !is_batched;
+            // Always extract borders — even in unbatched mode, incremental decode
+            // calls decode_groups_parallel multiple times. Border data must survive
+            // center data recycling so later batches' rendering can read neighbors'
+            // topbottom/leftright buffers.
+            let skip_border_copy = false;
             let (all_items, group_has_items) = if is_vardct && !pending_stores.is_empty() {
                 lmp_mut!()
                     .store_and_prepare_groups_parallel(&mut pending_stores, skip_border_copy)?
@@ -1229,9 +1275,18 @@ impl Frame {
                 }
                 if ri.do_render {
                     self.groups_to_flush.remove(&ri.group);
+                    // Track what was rendered so STEP 5 doesn't redundantly re-render.
+                    if is_vardct {
+                        self.changed_since_last_flush
+                            .insert((ri.group, RenderUnit::VarDCT));
+                    }
                 } else {
                     self.groups_to_flush.insert(ri.group);
                 }
+            }
+            for &(group, chan) in &modular_channels_output {
+                self.changed_since_last_flush
+                    .insert((group, RenderUnit::Modular(chan)));
             }
             phase3c_dur += phase3c_start.elapsed();
         } // end batch loop

@@ -118,6 +118,13 @@ pub struct LowMemoryRenderPipeline {
     // could be reused to store group data for that channel.
     // Indexed by [3*channel] = center, [3*channel+1] = topbottom, [3*channel+2] = leftright.
     scratch_channel_buffers: Vec<Vec<OwnedRawImage>>,
+    // When true, render_with_new_group skips border recycling (only recycles center data).
+    // Used during the final re-render pass to keep all groups' is_ready=true so that
+    // sequential processing produces the same readiness masks as the parallel path.
+    skip_border_recycling: bool,
+    // When true, set_buffer_for_group stores data but skips rendering.
+    // Used during the final re-render to fill all groups before the two-pass render.
+    store_only: bool,
 }
 
 impl RenderPipeline for LowMemoryRenderPipeline {
@@ -343,6 +350,8 @@ impl RenderPipeline for LowMemoryRenderPipeline {
             opaque_alpha_buffers,
             sorted_buffer_indices,
             scratch_channel_buffers: (0..nc * 3).map(|_| vec![]).collect(),
+            skip_border_recycling: false,
+            store_only: false,
         })
     }
 
@@ -380,7 +389,9 @@ impl RenderPipeline for LowMemoryRenderPipeline {
             self.input_buffers[group_id].set_buffer(channel, buf.into_raw());
             self.shared.group_chan_complete[group_id][channel] = complete;
 
-            self.render_with_new_group(group_id, buffer_splitter)?;
+            if !self.store_only {
+                self.render_with_new_group(group_id, buffer_splitter)?;
+            }
         }
         Ok(())
     }
@@ -519,6 +530,113 @@ impl RenderPipeline for LowMemoryRenderPipeline {
 
     fn used_channel_mask(&self) -> &[bool] {
         &self.shared.channel_is_used
+    }
+
+    fn needs_border_rendering(&self) -> bool {
+        self.border_size != (0, 0)
+    }
+
+    fn prepare_final_rerender(&mut self) {
+        let num_groups = self.input_buffers.len();
+        for g in 0..num_groups {
+            self.input_buffers[g].is_ready = false;
+            self.input_buffers[g].num_completed_groups_3x3 = 0;
+            self.input_buffers[g].ready_channels = 0;
+            // Recycle all existing buffers so fresh data is stored.
+            for c in 0..self.input_buffers[g].data.len() {
+                if let Some(b) = std::mem::take(&mut self.input_buffers[g].data[c]) {
+                    self.store_scratch_buffer(c, 0, b);
+                }
+                if let Some(b) = std::mem::take(&mut self.input_buffers[g].topbottom[c]) {
+                    self.store_scratch_buffer(c, 1, b);
+                }
+                if let Some(b) = std::mem::take(&mut self.input_buffers[g].leftright[c]) {
+                    self.store_scratch_buffer(c, 2, b);
+                }
+            }
+        }
+        // Store-only mode: set_buffer_for_group stores data without rendering.
+        self.store_only = true;
+        self.skip_border_recycling = true;
+    }
+
+    fn render_all_groups_full_readiness(
+        &mut self,
+        buffer_splitter: &mut BufferSplitter,
+    ) -> Result<()> {
+        let num_groups = self.shared.group_count.0 * self.shared.group_count.1;
+
+        // Pass 1: Extract borders for ALL groups, setting is_ready=true.
+        // This mirrors the parallel path's extract_borders phase — all groups
+        // become ready before any readiness masks are computed.
+        for g in 0..num_groups {
+            let _ = self.prepare_group(g)?;
+            // Work items are discarded — they reflect partial readiness since
+            // later groups aren't ready yet. We recompute with full readiness
+            // in Pass 2.
+        }
+
+        // Pass 2: All groups now have is_ready=true and borders extracted.
+        // Compute work items with full readiness masks and render.
+        for g in 0..num_groups {
+            let items = self.emit_work_items(g)?;
+            if items.is_empty() {
+                continue;
+            }
+
+            let (origin, size) = if let Some(e) = self.shared.extend_stage_index {
+                let Stage::Extend(e) = &self.shared.stages[e] else {
+                    unreachable!("extend stage is not an extend stage");
+                };
+                (e.frame_origin, e.image_size)
+            } else {
+                ((0, 0), self.shared.input_size)
+            };
+
+            {
+                let view = PipelineReadView {
+                    shared: &self.shared,
+                    input_buffers: &self.input_buffers,
+                    stage_input_buffer_index: &self.stage_input_buffer_index,
+                    downsampling_for_stage: &self.downsampling_for_stage,
+                    stage_output_border_pixels: &self.stage_output_border_pixels,
+                    input_border_pixels: &self.input_border_pixels,
+                    border_size: self.border_size,
+                    opaque_alpha_buffers: &self.opaque_alpha_buffers,
+                    sorted_buffer_indices: &self.sorted_buffer_indices,
+                };
+                let ctx = &mut self.render_ctx;
+                let save_buffer_info = &self.save_buffer_info;
+
+                for item in &items {
+                    let mut local_buffers = buffer_splitter.get_local_buffers(
+                        save_buffer_info,
+                        item.image_area,
+                        false,
+                        view.shared.input_size,
+                        size,
+                        origin,
+                    );
+                    render_group::render(
+                        ctx,
+                        &view,
+                        (item.gx, item.gy),
+                        item.image_area,
+                        &mut local_buffers,
+                    )?;
+                }
+            }
+
+            self.recycle_group_buffers(g, false);
+        }
+
+        Ok(())
+    }
+
+    fn finish_final_rerender(&mut self) {
+        self.store_only = false;
+        self.skip_border_recycling = false;
+        self.recycle_all_borders();
     }
 }
 

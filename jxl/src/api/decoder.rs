@@ -392,7 +392,7 @@ pub(crate) mod tests {
     for_each_test_file!(decode_test_file_chunks);
 
     fn compare_frames(
-        path: &Path,
+        _path: &Path,
         fc: usize,
         f: &[Image<f32>],
         sf: &[Image<f32>],
@@ -409,25 +409,6 @@ pub(crate) mod tests {
                 "Channel {c} in frame {fc} has different sizes",
             );
             let sz = b.size();
-            if false {
-                let f = std::fs::File::create(Path::new("/tmp/").join(format!(
-                    "{}_diff_chan{c}.pbm",
-                    path.as_os_str().to_string_lossy().replace("/", "_")
-                )))?;
-                use std::io::Write;
-                let mut f = std::io::BufWriter::new(f);
-                writeln!(f, "P1\n{} {}", sz.0, sz.1)?;
-                for y in 0..sz.1 {
-                    for x in 0..sz.0 {
-                        if (b.row(y)[x] - sb.row(y)[x]).abs() > 1e-8 {
-                            write!(f, "1")?;
-                        } else {
-                            write!(f, "0")?;
-                        }
-                    }
-                }
-                drop(f);
-            }
             for y in 0..sz.1 {
                 for x in 0..sz.0 {
                     assert_eq!(

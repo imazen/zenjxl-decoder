@@ -155,4 +155,25 @@ pub(crate) trait RenderPipeline: Sized {
     ) -> Box<dyn RunInPlaceStage<Self::Buffer> + Send + Sync>;
 
     fn used_channel_mask(&self) -> &[bool];
+
+    /// Returns true if the pipeline uses border data for rendering (EPF, etc.).
+    /// When false, readiness masks don't affect output, so no re-render is needed.
+    fn needs_border_rendering(&self) -> bool;
+
+    /// Prepares for the final re-render of all groups after incremental decode
+    /// completes. Enables store-only mode and recycles existing buffers so
+    /// fresh data can be stored without triggering rendering.
+    fn prepare_final_rerender(&mut self);
+
+    /// Renders all groups with full readiness masks, matching the one-shot
+    /// parallel path. Pass 1 extracts borders for all groups (setting
+    /// is_ready=true), then Pass 2 computes work items with all-true
+    /// readiness and renders.
+    fn render_all_groups_full_readiness(
+        &mut self,
+        buffer_splitter: &mut BufferSplitter,
+    ) -> Result<()>;
+
+    /// Restores normal state after the final re-render.
+    fn finish_final_rerender(&mut self);
 }

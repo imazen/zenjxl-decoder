@@ -31,9 +31,9 @@ pub(super) struct InputBuffer {
     // Storage for top/bottom borders. Includes corners.
     pub(super) topbottom: Vec<Option<OwnedRawImage>>,
     // Number of ready channels in the current pass.
-    ready_channels: usize,
+    pub(super) ready_channels: usize,
     pub(super) is_ready: bool,
-    num_completed_groups_3x3: usize,
+    pub(super) num_completed_groups_3x3: usize,
 }
 
 impl InputBuffer {
@@ -127,7 +127,7 @@ impl LowMemoryRenderPipeline {
         self.scratch_channel_buffers[channel * 3 + kind].pop()
     }
 
-    fn store_scratch_buffer(&mut self, channel: usize, kind: usize, image: OwnedRawImage) {
+    pub(super) fn store_scratch_buffer(&mut self, channel: usize, kind: usize, image: OwnedRawImage) {
         self.scratch_channel_buffers[channel * 3 + kind].push(image)
     }
 
@@ -504,7 +504,7 @@ impl LowMemoryRenderPipeline {
             }
         }
 
-        self.recycle_group_buffers(g, true);
+        self.recycle_group_buffers(g, !self.skip_border_recycling);
 
         Ok(())
     }
@@ -545,6 +545,9 @@ pub(super) fn extract_borders(
 
     // Extract border data from the group's buffers.
     for c in 0..shared.num_channels() {
+        if !shared.channel_is_used[c] {
+            continue;
+        }
         let (bx, by) = border_size;
         let (sx, sy) = buf.data[c].as_ref().unwrap().byte_size();
         let ChannelInfo {

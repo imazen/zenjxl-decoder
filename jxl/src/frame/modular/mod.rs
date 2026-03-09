@@ -368,11 +368,19 @@ pub struct FullModularImage {
     ready_buffers: BTreeSet<(usize, usize)>,
     // Whether each channel is used or not by the render pipeline.
     pipeline_used_channels: Vec<bool>,
+    /// When true, flush_output clones buffers instead of consuming them.
+    /// Used during incremental decode to preserve data for the final re-render.
+    preserve_buffers: bool,
 }
 
 impl FullModularImage {
     pub fn can_do_partial_render(&self) -> bool {
         self.can_do_partial_render
+    }
+
+    /// When true, flush_output clones buffers instead of consuming them.
+    pub fn set_preserve_buffers(&mut self, preserve: bool) {
+        self.preserve_buffers = preserve;
     }
 
     pub fn set_pipeline_used_channels(&mut self, used: &[bool]) {
@@ -438,6 +446,7 @@ impl FullModularImage {
                 ready_buffers_dry_run: Mutex::new(BTreeSet::new()),
                 ready_buffers: BTreeSet::new(),
                 pipeline_used_channels: vec![],
+                preserve_buffers: false,
             });
         }
 
@@ -608,6 +617,7 @@ impl FullModularImage {
             ready_buffers_dry_run: Mutex::new(ready_buffers),
             ready_buffers: BTreeSet::new(),
             pipeline_used_channels: vec![],
+            preserve_buffers: false,
         })
     }
 
@@ -684,9 +694,11 @@ impl FullModularImage {
         if let Some(chan) = self.buffer_info[buf].info.output_channel_idx {
             let is_final =
                 self.buffer_info[buf].buffer_grid[grid].get_status() == BUFFER_STATUS_FINAL_RENDER;
-            let all_final = self.buffers_for_channels.iter().all(|x| {
-                self.buffer_info[*x].buffer_grid[grid].get_status() == BUFFER_STATUS_FINAL_RENDER
-            });
+            let all_final = !self.preserve_buffers
+                && self.buffers_for_channels.iter().all(|x| {
+                    self.buffer_info[*x].buffer_grid[grid].get_status()
+                        == BUFFER_STATUS_FINAL_RENDER
+                });
             let channels: SmallVec<[usize; 3]> = if chan == 0 && self.modular_color_channels == 1 {
                 (0..3).filter(|x| self.pipeline_used_channels[*x]).collect()
             } else {

@@ -221,4 +221,24 @@ impl RenderPipeline for SimpleRenderPipeline {
     fn used_channel_mask(&self) -> &[bool] {
         &self.shared.channel_is_used
     }
+
+    fn needs_border_rendering(&self) -> bool {
+        false
+    }
+
+    fn prepare_final_rerender(&mut self) {
+        // No-op for simple pipeline (no group-based rendering).
+    }
+
+    fn render_all_groups_full_readiness(
+        &mut self,
+        _buffer_splitter: &mut BufferSplitter,
+    ) -> Result<()> {
+        // No-op for simple pipeline.
+        Ok(())
+    }
+
+    fn finish_final_rerender(&mut self) {
+        // No-op for simple pipeline.
+    }
 }
