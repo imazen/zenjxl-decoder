@@ -210,24 +210,7 @@ impl Frame {
 
         modular_global.set_pipeline_used_channels(pipeline!(self, p, p.used_channel_mask()));
 
-        // STEP 1: if we are requesting a flush, and did not flush before, mark modular channels
-        // as having been decoded as 0.
-        if !self.was_flushed_once && do_flush {
-            self.was_flushed_once = true;
-            self.groups_to_flush.extend(0..self.header.num_groups());
-            // Preserve modular buffers during intermediate flushes so they
-            // can be re-sent during the final re-render when all groups are
-            // complete. Without this, flush_output would consume buffers,
-            // making them unavailable for the re-render.
-            modular_global.set_preserve_buffers(true);
-            modular_global.zero_fill_empty_channels(
-                self.header.passes.num_passes as usize,
-                self.header.num_groups(),
-            )?;
-        }
-
-        // Determine parallel vs sequential before STEP 2 — the modular marking
-        // strategy differs: parallel marks per-group, sequential marks all up-front.
+        // Determine parallel vs sequential early — affects flush strategy.
         #[cfg(all(feature = "threads", not(test)))]
         let use_parallel = self.decoder_state.parallel && groups.len() > 1;
         #[cfg(all(feature = "threads", test))]
@@ -235,6 +218,28 @@ impl Frame {
             self.decoder_state.parallel && groups.len() > 1 && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
+
+        // STEP 1: if we are requesting a flush, and did not flush before, mark modular channels
+        // as having been decoded as 0.
+        // Skip for parallel path — no intermediate flush rendering, so zero-fill is unnecessary.
+        // The final render (incomplete_groups==0) gets correct data from actual decoding.
+        if !self.was_flushed_once && do_flush && !use_parallel {
+            self.was_flushed_once = true;
+            self.groups_to_flush.extend(0..self.header.num_groups());
+            modular_global.zero_fill_empty_channels(
+                self.header.passes.num_passes as usize,
+                self.header.num_groups(),
+            )?;
+        }
+
+        // Preserve modular buffers when a final re-render may be needed.
+        // The re-render re-sends all data to the pipeline, so modular buffers
+        // must survive process_output (clone instead of consume).
+        if self.header.num_groups() > 1
+            && pipeline!(self, p, p.needs_border_rendering())
+        {
+            modular_global.set_preserve_buffers(true);
+        }
 
         // STEP 2: ensure that groups that will be re-rendered are marked as such.
         // VarDCT data to be rendered.
@@ -286,16 +291,18 @@ impl Frame {
         // flushing buffers that will not be used again, if either we are forcing a render now
         // or we are done with the file.
         let flush_start = std::time::Instant::now();
-        if self.incomplete_groups == 0 || do_flush {
-            // When all groups are complete after incremental flushing, do a
-            // final re-render of every group with full readiness masks. During
-            // incremental decode, groups were rendered with partial readiness
-            // (only previously-decoded neighbors ready). The final re-render
-            // processes all groups sequentially with readiness building up
-            // monotonically and border recycling disabled, producing the same
-            // pixel values as the one-shot parallel path.
+        // Skip intermediate flush for parallel path — the parallel decode already renders
+        // each batch correctly. Intermediate STEP 4+5 re-rendering causes partial-readiness
+        // bugs with border-dependent stages (EPF, Gaborish). Only process when all groups
+        // are complete (one-shot final render) or in sequential mode.
+        if self.incomplete_groups == 0 || (do_flush && !use_parallel) {
+            // When all groups are complete and border rendering is active,
+            // do a final re-render with full readiness masks. During decode,
+            // groups were rendered with progressive readiness (only previously-
+            // processed neighbors ready). The final re-render stores all data
+            // in store-only mode, extracts borders for all groups, then renders
+            // with all neighbors ready — producing correct EPF output.
             let is_final_rerender = self.incomplete_groups == 0
-                && self.was_flushed_once
                 && self.header.num_groups() > 1
                 && pipeline!(self, p, p.needs_border_rendering())
                 && (self.header.encoding != Encoding::VarDCT
@@ -304,10 +311,6 @@ impl Frame {
                 self.groups_to_flush.extend(0..self.header.num_groups());
                 self.changed_since_last_flush.clear();
                 pipeline!(self, p, p.prepare_final_rerender());
-                // Keep preserve_buffers=true during the re-render so modular
-                // buffers are cloned (not consumed). This ensures flush_output
-                // can produce data for all groups. Buffers are freed when the
-                // frame is dropped.
             }
 
             let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
