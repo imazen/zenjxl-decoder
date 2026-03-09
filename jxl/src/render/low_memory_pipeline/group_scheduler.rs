@@ -23,6 +23,87 @@ pub(crate) struct RenderWorkItem {
     pub(crate) image_area: Rect,
 }
 
+/// Pure computation of renderable work items for a single group.
+/// All `is_ready` flags must be set before calling. No mutation needed.
+pub(super) fn compute_work_items(
+    g: usize,
+    is_ready: &[bool],
+    shared: &RenderPipelineShared<RowBuffer>,
+    border_size: (usize, usize),
+) -> Result<Vec<RenderWorkItem>> {
+    let (gx, gy) = shared.group_position(g);
+    let gsz = 1 << shared.log_group_size;
+    let group_rect = Rect {
+        size: (gsz, gsz),
+        origin: (gsz * gx, gsz * gy),
+    }
+    .clip(shared.input_size);
+
+    let gxm1 = gx.saturating_sub(1);
+    let gym1 = gy.saturating_sub(1);
+    let gxp1 = (gx + 1).min(shared.group_count.0 - 1);
+    let gyp1 = (gy + 1).min(shared.group_count.1 - 1);
+    let gw = shared.group_count.0;
+    let mut ready_mask = [
+        is_ready[gym1 * gw + gxm1],
+        is_ready[gym1 * gw + gx],
+        is_ready[gym1 * gw + gxp1],
+        is_ready[gy * gw + gxm1],
+        is_ready[gy * gw + gx],
+        is_ready[gy * gw + gxp1],
+        is_ready[gyp1 * gw + gxm1],
+        is_ready[gyp1 * gw + gx],
+        is_ready[gyp1 * gw + gxp1],
+    ];
+    ready_mask[0] &= ready_mask[1];
+    ready_mask[0] &= ready_mask[3];
+    ready_mask[2] &= ready_mask[1];
+    ready_mask[2] &= ready_mask[5];
+    ready_mask[6] &= ready_mask[3];
+    ready_mask[6] &= ready_mask[7];
+    ready_mask[8] &= ready_mask[5];
+    ready_mask[8] &= ready_mask[7];
+
+    let group_count = shared.group_count;
+    let mut items = Vec::new();
+    foreach_ready_rect(ready_mask, |xrange, yrange| {
+        let y0 = match (gy == 0, yrange.start) {
+            (true, 0) => group_rect.origin.1,
+            (false, 0) => group_rect.origin.1 - border_size.1,
+            (_, 1) => group_rect.origin.1 + border_size.1,
+            _ => group_rect.end().1 - border_size.1,
+        };
+        let x0 = match (gx == 0, xrange.start) {
+            (true, 0) => group_rect.origin.0,
+            (false, 0) => group_rect.origin.0 - border_size.0,
+            (_, 1) => group_rect.origin.0 + border_size.0,
+            _ => group_rect.end().0 - border_size.0,
+        };
+        let y1 = match (gy + 1 == group_count.1, yrange.end) {
+            (true, 3) => group_rect.end().1,
+            (false, 3) => group_rect.end().1 + border_size.1,
+            (_, 2) => group_rect.end().1 - border_size.1,
+            _ => group_rect.origin.1 + border_size.1,
+        };
+        let x1 = match (gx + 1 == group_count.0, xrange.end) {
+            (true, 3) => group_rect.end().0,
+            (false, 3) => group_rect.end().0 + border_size.0,
+            (_, 2) => group_rect.end().0 - border_size.0,
+            _ => group_rect.origin.0 + border_size.0,
+        };
+        items.push(RenderWorkItem {
+            gx,
+            gy,
+            image_area: Rect {
+                origin: (x0, y0),
+                size: (x1 - x0, y1 - y0),
+            },
+        });
+        Ok(())
+    })?;
+    Ok(items)
+}
+
 pub(super) struct InputBuffer {
     // One buffer per channel.
     pub(super) data: Vec<Option<OwnedRawImage>>,
