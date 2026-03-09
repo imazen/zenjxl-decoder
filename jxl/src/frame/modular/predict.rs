@@ -149,8 +149,9 @@ impl PredictionData {
         xsize: usize,
         ysize: usize,
     ) -> Self {
+        let row_y = rect.row(y);
         let left = if x > 0 {
-            rect.row(y)[x - 1]
+            row_y[x - 1]
         } else if let Some(l) = rect_left {
             l.row(y)[xsize - 1]
         } else if y > 0 {
@@ -160,16 +161,66 @@ impl PredictionData {
         } else {
             0
         };
-        let top = if y > 0 {
-            rect.row(y - 1)[x]
+        let leftleft = if x > 1 {
+            row_y[x - 2]
+        } else if let Some(l) = rect_left {
+            l.row(y)[xsize + x - 2]
+        } else {
+            left
+        };
+        Self::from_hoisted_neighbors(
+            left,
+            leftleft,
+            if y > 0 { Some(rect.row(y - 1)) } else { None },
+            if y > 1 { Some(rect.row(y - 2)) } else { None },
+            rect.size().0,
+            rect_left,
+            rect_top,
+            rect_top_left,
+            rect_right,
+            rect_top_right,
+            x,
+            y,
+            xsize,
+            ysize,
+        )
+    }
+
+    /// Like [`get_with_neighbors`], but takes pre-fetched values and row slices
+    /// instead of an `&Image<i32>`. This avoids per-pixel `Image::row()`
+    /// overhead when called in a tight loop.
+    ///
+    /// - `left`, `leftleft`: tracked as running variables by the caller
+    /// - `row_prev`, `row_prev2`: pre-fetched (copied) once per y-iteration
+    /// - Neighbor image refs: only accessed at grid boundaries (~1% of pixels)
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    pub fn from_hoisted_neighbors(
+        left: i32,
+        leftleft: i32,
+        row_prev: Option<&[i32]>,
+        row_prev2: Option<&[i32]>,
+        rect_width: usize,
+        rect_left: Option<&Image<i32>>,
+        rect_top: Option<&Image<i32>>,
+        rect_top_left: Option<&Image<i32>>,
+        rect_right: Option<&Image<i32>>,
+        rect_top_right: Option<&Image<i32>>,
+        x: usize,
+        y: usize,
+        xsize: usize,
+        ysize: usize,
+    ) -> Self {
+        let top = if let Some(rp) = row_prev {
+            rp[x]
         } else if let Some(t) = rect_top {
             t.row(ysize - 1)[x]
         } else {
             left
         };
         let topleft = if x > 0 {
-            if y > 0 {
-                rect.row(y - 1)[x - 1]
+            if let Some(rp) = row_prev {
+                rp[x - 1]
             } else if let Some(t) = rect_top {
                 t.row(ysize - 1)[x - 1]
             } else {
@@ -186,9 +237,9 @@ impl PredictionData {
         } else {
             left
         };
-        let topright = if x + 1 < rect.size().0 {
-            if y > 0 {
-                rect.row(y - 1)[x + 1]
+        let topright = if x + 1 < rect_width {
+            if let Some(rp) = row_prev {
+                rp[x + 1]
             } else if let Some(t) = rect_top {
                 t.row(ysize - 1)[x + 1]
             } else {
@@ -205,23 +256,16 @@ impl PredictionData {
         } else {
             top
         };
-        let leftleft = if x > 1 {
-            rect.row(y)[x - 2]
-        } else if let Some(l) = rect_left {
-            l.row(y)[xsize + x - 2]
-        } else {
-            left
-        };
-        let toptop = if y > 1 {
-            rect.row(y - 2)[x]
+        let toptop = if let Some(rp2) = row_prev2 {
+            rp2[x]
         } else if let Some(t) = rect_top {
             t.row(ysize + y - 2)[x]
         } else {
             top
         };
-        let toprightright = if x + 2 < rect.size().0 {
-            if y > 0 {
-                rect.row(y - 1)[x + 2]
+        let toprightright = if x + 2 < rect_width {
+            if let Some(rp) = row_prev {
+                rp[x + 2]
             } else if let Some(t) = rect_top {
                 t.row(ysize - 1)[x + 2]
             } else {
@@ -229,12 +273,12 @@ impl PredictionData {
             }
         } else if y > 0 {
             if let Some(r) = rect_right {
-                r.row(y - 1)[x + 2 - rect.size().0]
+                r.row(y - 1)[x + 2 - rect_width]
             } else {
                 topright
             }
         } else if let Some(tr) = rect_top_right {
-            tr.row(ysize - 1)[x + 2 - rect.size().0]
+            tr.row(ysize - 1)[x + 2 - rect_width]
         } else {
             topright
         };

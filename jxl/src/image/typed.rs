@@ -23,8 +23,8 @@ use super::{ImageDataType, OwnedRawImage, RawImageRect, RawImageRectMut, Rect};
 #[inline(always)]
 pub(super) fn cast_row<T: ImageDataType>(row: &[u8]) -> &[T] {
     let new_len = row.len() / std::mem::size_of::<T>();
-    debug_assert!(row.len() % std::mem::size_of::<T>() == 0);
-    debug_assert!((row.as_ptr() as usize) % std::mem::align_of::<T>() == 0);
+    debug_assert!(row.len().is_multiple_of(std::mem::size_of::<T>()));
+    debug_assert!((row.as_ptr() as usize).is_multiple_of(std::mem::align_of::<T>()));
     #[allow(unsafe_code)]
     // SAFETY: Alignment and size invariants verified at Image/ImageRect construction
     // (from_raw asserts data.is_aligned(T::DATA_TYPE_ID.size())).
@@ -47,8 +47,8 @@ pub(super) fn cast_row<T: ImageDataType>(row: &[u8]) -> &[T] {
 #[inline(always)]
 pub(super) fn cast_row_mut<T: ImageDataType>(row: &mut [u8]) -> &mut [T] {
     let new_len = row.len() / std::mem::size_of::<T>();
-    debug_assert!(row.len() % std::mem::size_of::<T>() == 0);
-    debug_assert!((row.as_ptr() as usize) % std::mem::align_of::<T>() == 0);
+    debug_assert!(row.len().is_multiple_of(std::mem::size_of::<T>()));
+    debug_assert!((row.as_ptr() as usize).is_multiple_of(std::mem::align_of::<T>()));
     #[allow(unsafe_code)]
     // SAFETY: Same invariants as cast_row, plus exclusive (&mut) access.
     unsafe {
