@@ -580,7 +580,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         // Compute work items with full readiness masks and render.
         let is_ready: Vec<bool> = self.input_buffers.iter().map(|b| b.is_ready).collect();
         for g in 0..num_groups {
-            let items = group_scheduler::compute_work_items(g, &is_ready, &self.shared, self.border_size)?;
+            let items = group_scheduler::compute_work_items(g, &is_ready, &self.shared, self.border_size, true)?;
             if items.is_empty() {
                 continue;
             }
@@ -757,6 +757,7 @@ impl LowMemoryRenderPipeline {
             }
         }
         let is_ready: Vec<bool> = self.input_buffers.iter().map(|b| b.is_ready).collect();
+        let full_readiness = is_ready.iter().all(|&r| r);
         let extracted_groups: Vec<usize> = extracted
             .iter()
             .enumerate()
@@ -764,19 +765,33 @@ impl LowMemoryRenderPipeline {
             .collect();
         let shared = &self.shared;
         let bs = self.border_size;
-        let results: Vec<(usize, Vec<group_scheduler::RenderWorkItem>)> = extracted_groups
-            .par_iter()
-            .map(|&g| {
-                let items = group_scheduler::compute_work_items(g, &is_ready, shared, bs)?;
-                Ok((g, items))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        // With full readiness, work item computation is trivial arithmetic
+        // (one item per group). Sequential is faster than rayon dispatch overhead.
         let mut items = Vec::with_capacity(extracted_groups.len());
         let mut group_has_items = Vec::with_capacity(extracted_groups.len());
-        for (g, group_items) in results {
-            let has = !group_items.is_empty();
-            items.extend(group_items);
-            group_has_items.push((g, has));
+        if full_readiness {
+            for &g in &extracted_groups {
+                let group_items =
+                    group_scheduler::compute_work_items(g, &is_ready, shared, bs, true)?;
+                let has = !group_items.is_empty();
+                items.extend(group_items);
+                group_has_items.push((g, has));
+            }
+        } else {
+            let results: Vec<(usize, Vec<group_scheduler::RenderWorkItem>)> = extracted_groups
+                .par_iter()
+                .map(|&g| {
+                    let items = group_scheduler::compute_work_items(
+                        g, &is_ready, shared, bs, false,
+                    )?;
+                    Ok((g, items))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            for (g, group_items) in results {
+                let has = !group_items.is_empty();
+                items.extend(group_items);
+                group_has_items.push((g, has));
+            }
         }
         Ok((items, group_has_items))
     }
@@ -839,6 +854,7 @@ impl LowMemoryRenderPipeline {
             }
         }
         let is_ready: Vec<bool> = self.input_buffers.iter().map(|b| b.is_ready).collect();
+        let full_readiness = is_ready.iter().all(|&r| r);
         let extracted_groups: Vec<usize> = extracted
             .iter()
             .enumerate()
@@ -846,19 +862,31 @@ impl LowMemoryRenderPipeline {
             .collect();
         let shared = &self.shared;
         let bs = self.border_size;
-        let results: Vec<(usize, Vec<group_scheduler::RenderWorkItem>)> = extracted_groups
-            .par_iter()
-            .map(|&g| {
-                let items = group_scheduler::compute_work_items(g, &is_ready, shared, bs)?;
-                Ok((g, items))
-            })
-            .collect::<Result<Vec<_>>>()?;
         let mut items = Vec::with_capacity(extracted_groups.len());
         let mut group_has_items = Vec::with_capacity(extracted_groups.len());
-        for (g, group_items) in results {
-            let has = !group_items.is_empty();
-            items.extend(group_items);
-            group_has_items.push((g, has));
+        if full_readiness {
+            for &g in &extracted_groups {
+                let group_items =
+                    group_scheduler::compute_work_items(g, &is_ready, shared, bs, true)?;
+                let has = !group_items.is_empty();
+                items.extend(group_items);
+                group_has_items.push((g, has));
+            }
+        } else {
+            let results: Vec<(usize, Vec<group_scheduler::RenderWorkItem>)> = extracted_groups
+                .par_iter()
+                .map(|&g| {
+                    let items = group_scheduler::compute_work_items(
+                        g, &is_ready, shared, bs, false,
+                    )?;
+                    Ok((g, items))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            for (g, group_items) in results {
+                let has = !group_items.is_empty();
+                items.extend(group_items);
+                group_has_items.push((g, has));
+            }
         }
         Ok((items, group_has_items))
     }
