@@ -599,13 +599,12 @@ impl Frame {
 
         // Adaptive batching: for large group counts, process in mini-batches
         // running the full Phase 2→3a→3b→3c pipeline per batch. This allows
-        // pixel buffer recycling between batches. Larger batches amortize
-        // barrier overhead better but use more peak memory. num_threads*16
-        // balances barrier cost vs memory: ~20% faster than num_threads*4
-        // on 4K images.
-        // Small group counts use the unbatched path (no overhead).
-        let decode_batch_size = if num_needs_pixels > num_threads * 8 {
-            num_threads * 16
+        // pixel buffer recycling between batches but each batch incurs a
+        // barrier cycle. Each barrier costs ~1ms+ from thread synchronization,
+        // so we avoid batching unless group count is very high (8K+ images).
+        // At 4T/384 groups, 6 batches caused 40% overhead vs unbatched.
+        let decode_batch_size = if num_needs_pixels > num_threads * 256 {
+            num_threads * 64
         } else {
             num_groups // fully unbatched
         };
@@ -929,16 +928,17 @@ impl Frame {
             } else {
                 lmp_mut!().prepare_groups_parallel(skip_border_copy)?
             };
-            let has_items_set: std::collections::HashSet<usize> = group_has_items
-                .iter()
-                .filter(|(_, has)| *has)
-                .map(|(g, _)| *g)
-                .collect();
+            let mut has_items_vec = vec![false; lmp_ref!().num_groups()];
+            for &(g, has) in &group_has_items {
+                if has {
+                    has_items_vec[g] = true;
+                }
+            }
 
             // Build render_infos from store tracking + prepare results.
             let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(groups_stored.len());
             for &(group, do_render, is_main) in &groups_stored {
-                let has_items = has_items_set.contains(&group);
+                let has_items = has_items_vec[group];
                 if is_main || has_items {
                     render_infos.push(GroupRenderInfo {
                         group,
