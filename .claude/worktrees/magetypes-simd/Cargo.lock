@@ -138,9 +138,9 @@ dependencies = [
 
 [[package]]
 name = "archmage"
-version = "0.9.4"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8890833f60d40334c52df791e924456e3688eb54579973df1bcb6137fd40b59b"
+checksum = "c06fce4ba08fb97a48343135a4a3a1306a402137650ce7f2e2d377af19135b6f"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -148,9 +148,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.4"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "320a3958b3befe63e12cc761781da61013529f6d1697bcae0061c447ae2486fc"
+checksum = "1313d66c52ca713bb53065953e1ecaa9bf69cb8f4e190aa08232ac5790a66dc1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -871,6 +871,15 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
+name = "magetypes"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06ba39f70cdfbbaea85cf5d82bfe84c83c8c00f0cc80243bee241c6a5227c3dd"
+dependencies = [
+ "archmage",
+]
 
 [[package]]
 name = "matchers"
@@ -1680,6 +1689,7 @@ dependencies = [
  "aligned-vec",
  "almost-enough",
  "arbtest",
+ "archmage",
  "array-init",
  "atomic_refcell",
  "brotli",
@@ -1687,6 +1697,7 @@ dependencies = [
  "byteorder",
  "criterion 0.5.1",
  "enough",
+ "magetypes",
  "moxcms",
  "num-derive",
  "num-traits",
@@ -1741,6 +1752,7 @@ version = "0.3.0"
 dependencies = [
  "arbtest",
  "archmage",
+ "magetypes",
  "paste",
 ]
 

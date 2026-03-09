@@ -12,7 +12,7 @@ rust-version = "1.89"
 license = "BSD-3-Clause"
 
 [dependencies]
-archmage = "0.9"
+archmage = "0.9.4"
 paste = "1"
 
 [dev-dependencies]
