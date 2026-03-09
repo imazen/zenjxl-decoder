@@ -1,0 +1,18 @@
+commit: 290997e (vnext)
+date: 2026-03-08
+command: bash /tmp/bench_decoders.sh (5 reps, 2 warmup)
+upstream: jxl-rs 7374aa3 (single-threaded only)
+platform: WSL2 Linux 6.6.87.2, 32 vCPUs
+rust: 1.93+ nightly
+profile: release (lto=thin, codegen-units=1, opt-level=3)
+
+Changes vs upstream jxl-rs:
+- archmage SIMD abstraction layer (replaces jxl_simd module)
+- #[inline(always)] on all arcane wrapper functions
+- Token caching in SIMD descriptors (eliminates summon() overhead)
+- Parallel decode via rayon (upstream is single-threaded)
+
+Summary:
+- Lossy VarDCT: 1.12x faster than upstream (avg 36.9 vs 32.9 MP/s, 1T)
+- Modular: 0.87x of upstream (avg 8.2 vs 9.5 MP/s, 1T)
+- MT scaling: ~1.0x on 32 cores (contention-limited, needs investigation)
