@@ -47,11 +47,6 @@ impl InputBuffer {
         self.ready_channels += 1;
     }
 
-    /// Returns true if all channels have been stored (ready for prepare).
-    pub(super) fn is_all_channels_ready(&self) -> bool {
-        self.ready_channels == self.data.len()
-    }
-
     pub(super) fn new(num_channels: usize) -> Self {
         let b = || (0..num_channels).map(|_| None).collect();
         Self {
@@ -535,7 +530,9 @@ pub(super) fn extract_borders(
     border_size: (usize, usize),
     skip_copy: bool,
 ) -> Result<bool> {
-    if !buf.is_all_channels_ready() {
+    // Use num_used_channels() — only channels with channel_is_used=true
+    // receive data from process_output. Matching prepare_group's check.
+    if buf.ready_channels != shared.num_used_channels() {
         return Ok(false);
     }
     buf.ready_channels = 0;

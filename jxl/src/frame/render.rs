@@ -402,7 +402,7 @@ impl Frame {
         use crate::render::buffer_splitter;
         use crate::render::low_memory_pipeline::render_group;
 
-        use crate::util::{SmallVec, Xorshift128Plus};
+        use crate::util::Xorshift128Plus;
         use rayon::prelude::*;
 
         // Helper macros to get &mut / & LowMemoryRenderPipeline from the pipeline field.
@@ -810,10 +810,7 @@ impl Frame {
                     lmp_mut!().store_buffer_only(num_channels + 2, gw.group, gw.complete, buf2);
                 }
 
-                // Track all groups that receive data from process_output.
-                // Squeeze and other transforms can output to groups other than gw.group.
-                let mut groups_with_data: SmallVec<[usize; 8]> = SmallVec::new();
-                groups_with_data.push(gw.group);
+                // Mark modular groups for reading (but don't process yet).
                 {
                     let lf_global = self.lf_global.as_mut().unwrap();
                     for (pass, _) in gw.passes.iter() {
@@ -821,32 +818,33 @@ impl Frame {
                             .modular_global
                             .mark_group_to_be_read(2 + *pass, gw.group);
                     }
-                    // Transfer items from ready_buffers_dry_run to
-                    // ready_buffers (mark_group_to_be_read populates the dry_run
-                    // set; process_output(false) asserts it is empty).
-                    lf_global.modular_global.drain_dry_run_to_ready();
-                    lf_global.modular_global.process_output(
-                        &self.header,
-                        false,
-                        &mut |chan, group, _complete, image: Option<Image<i32>>| {
-                            // Cascading transforms may re-produce output for
-                            // groups already processed.  Skip duplicates.
-                            if !lmp_mut!().has_buffer(chan, group) {
-                                lmp_mut!().store_buffer_only(chan, group, true, image.unwrap());
-                            }
-                            if !groups_with_data.contains(&group) {
-                                groups_with_data.push(group);
-                            }
-                            Ok(())
-                        },
-                    )?;
                 }
 
-                // Record which groups received data for render_info tracking.
                 groups_stored.push((gw.group, gw.do_render, true));
-                for &g in groups_with_data.iter().skip(1) {
-                    groups_stored.push((g, true, false));
-                }
+            }
+
+            // Process modular transforms globally after marking ALL groups.
+            // This matches the sequential path's STEP 2 + STEP 4 pattern:
+            // cascading transforms (squeeze, palette) have neighbor
+            // dependencies that require all groups to be marked before
+            // process_output can resolve them correctly.
+            {
+                let lf_global = self.lf_global.as_mut().unwrap();
+                lf_global.modular_global.drain_dry_run_to_ready();
+                lf_global.modular_global.process_output(
+                    &self.header,
+                    false,
+                    &mut |chan, group, _complete, image: Option<Image<i32>>| {
+                        if !lmp_mut!().has_buffer(chan, group) {
+                            lmp_mut!().store_buffer_only(chan, group, true, image.unwrap());
+                        }
+                        // Track cross-group output from cascading transforms.
+                        if !groups_stored.iter().any(|(g, _, _)| *g == group) {
+                            groups_stored.push((group, true, false));
+                        }
+                        Ok(())
+                    },
+                )?;
             }
 
             phase3a_store_dur += phase3a_start.elapsed();

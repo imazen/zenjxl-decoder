@@ -670,7 +670,6 @@ impl LowMemoryRenderPipeline {
         use rayon::prelude::*;
 
         // Phase 1 (serial): set group_chan_complete for pending stores.
-        // This must happen before extract_borders, which checks is_all_channels_ready().
         // group_chan_complete is only read later in recycle_group_buffers (Phase 3c).
         for (g, store) in pending_stores.iter().enumerate() {
             if let Some((_, complete)) = store {
