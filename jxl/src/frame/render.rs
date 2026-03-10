@@ -917,11 +917,13 @@ impl Frame {
             // For VarDCT images, store_and_prepare_groups_parallel combines
             // pending pixel storage with border extraction in a single parallel
             // pass, eliminating the sequential pixel store bottleneck.
-            // Always extract borders — even in unbatched mode, incremental decode
-            // calls decode_groups_parallel multiple times. Border data must survive
-            // center data recycling so later batches' rendering can read neighbors'
-            // topbottom/leftright buffers.
-            let skip_border_copy = false;
+            // In one-shot unbatched mode, all groups' center data stays alive
+            // through Phase 3b, so rendering can read border pixels directly
+            // from neighbors' center buffers. Skip the topbottom/leftright copy.
+            // In batched or incremental mode, center data is recycled between
+            // batches/calls, so borders must be extracted into separate buffers.
+            let is_one_shot = num_groups == self.header.num_groups() as usize;
+            let skip_border_copy = !is_batched && is_one_shot;
             let (all_items, group_has_items) = if is_vardct && !pending_stores.is_empty() {
                 lmp_mut!()
                     .store_and_prepare_groups_parallel(&mut pending_stores, skip_border_copy)?
