@@ -393,7 +393,7 @@ impl Frame {
 
         if frame_timing {
             let total = frame_start.elapsed();
-            let teardown = total - frame_setup_dur - hf_dur - flush_dur;
+            let teardown = total.saturating_sub(frame_setup_dur + hf_dur + flush_dur);
             eprintln!(
                 "[JXL_FRAME_TIMING] setup: {:.2}ms | \
                  hf_groups: {:.2}ms | flush: {:.2}ms | teardown: {:.2}ms | \

@@ -209,7 +209,7 @@ impl CodestreamParser {
                     break 'process;
                 }
 
-                let lf_groups_dur = t0.elapsed() - lf_global_dur;
+                let lf_groups_dur = t0.elapsed().saturating_sub(lf_global_dur);
 
                 let mut decode_hf_dur = std::time::Duration::ZERO;
                 let mut pipeline_dur = std::time::Duration::ZERO;
