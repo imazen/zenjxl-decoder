@@ -923,7 +923,11 @@ impl Frame {
             // In batched or incremental mode, center data is recycled between
             // batches/calls, so borders must be extracted into separate buffers.
             let is_one_shot = num_groups == self.header.num_groups() as usize;
-            let skip_border_copy = !is_batched && is_one_shot;
+            // Only skip border copy in true one-shot decode (not incremental).
+            // In incremental decode, was_flushed_once is true from a prior call,
+            // and the final re-render needs border buffers to correct cross-batch
+            // boundary pixels.
+            let skip_border_copy = !is_batched && is_one_shot && !self.was_flushed_once;
             let (all_items, group_has_items) = if is_vardct && !pending_stores.is_empty() {
                 lmp_mut!()
                     .store_and_prepare_groups_parallel(&mut pending_stores, skip_border_copy)?
