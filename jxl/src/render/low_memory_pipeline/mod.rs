@@ -733,24 +733,63 @@ impl LowMemoryRenderPipeline {
         skip_border_copy: bool,
     ) -> Result<(Vec<group_scheduler::RenderWorkItem>, Vec<(usize, bool)>)> {
         use group_scheduler::extract_borders;
-        use rayon::prelude::*;
 
-        // Phase 1 (parallel): extract borders for all ready groups.
-        // Split borrow: immutable access to shared config, mutable access to input_buffers.
-        // par_iter_mut().map().collect() preserves index order.
         let shared = &self.shared;
         let border_size = self.border_size;
+
+        if skip_border_copy {
+            // Fast path: no border data to copy. Just check ready_channels
+            // and mark is_ready sequentially — each check is ~10ns, so rayon
+            // dispatch overhead would dominate for hundreds of groups.
+            let num_used = shared.num_used_channels();
+            let mut extracted_groups = Vec::with_capacity(self.input_buffers.len());
+            for (g, buf) in self.input_buffers.iter_mut().enumerate() {
+                if buf.ready_channels == num_used {
+                    buf.ready_channels = 0;
+                    buf.is_ready = true;
+                    extracted_groups.push(g);
+                }
+            }
+            let bs = self.border_size;
+            let mut items = Vec::with_capacity(extracted_groups.len());
+            let mut group_has_items = Vec::with_capacity(extracted_groups.len());
+            // Full readiness is common in one-shot mode.
+            let full_readiness = self.input_buffers.iter().all(|b| b.is_ready);
+            if full_readiness {
+                for &g in &extracted_groups {
+                    let empty_ready = []; // unused with full_readiness=true
+                    let group_items = group_scheduler::compute_work_items(
+                        g, &empty_ready, shared, bs, true,
+                    )?;
+                    let has = !group_items.is_empty();
+                    items.extend(group_items);
+                    group_has_items.push((g, has));
+                }
+            } else {
+                let is_ready: Vec<bool> =
+                    self.input_buffers.iter().map(|b| b.is_ready).collect();
+                for &g in &extracted_groups {
+                    let group_items = group_scheduler::compute_work_items(
+                        g, &is_ready, shared, bs, false,
+                    )?;
+                    let has = !group_items.is_empty();
+                    items.extend(group_items);
+                    group_has_items.push((g, has));
+                }
+            }
+            return Ok((items, group_has_items));
+        }
+
+        // Slow path: actual border extraction requires per-group mutable access
+        // to copy pixel data into topbottom/leftright buffers. Parallelize with rayon.
+        use rayon::prelude::*;
 
         let extracted: Vec<bool> = self
             .input_buffers
             .par_iter_mut()
-            .map(|buf| extract_borders(buf, shared, border_size, skip_border_copy))
+            .map(|buf| extract_borders(buf, shared, border_size, false))
             .collect::<Result<Vec<_>>>()?;
 
-        // Phase 2: mark all extracted groups ready, then emit work items in parallel.
-        // Setting is_ready for ALL groups first gives every group a full readiness
-        // mask. With full readiness, work item computation is independent per group,
-        // so we can parallelize emission via the pure compute_work_items function.
         for (g, did_extract) in extracted.iter().enumerate() {
             if *did_extract {
                 self.input_buffers[g].is_ready = true;
@@ -765,8 +804,6 @@ impl LowMemoryRenderPipeline {
             .collect();
         let shared = &self.shared;
         let bs = self.border_size;
-        // With full readiness, work item computation is trivial arithmetic
-        // (one item per group). Sequential is faster than rayon dispatch overhead.
         let mut items = Vec::with_capacity(extracted_groups.len());
         let mut group_has_items = Vec::with_capacity(extracted_groups.len());
         if full_readiness {
@@ -801,26 +838,21 @@ impl LowMemoryRenderPipeline {
         self.input_buffers.len()
     }
 
-    /// Stores pending pixel data and prepares groups in a single parallel pass.
+    /// Stores pending pixel data and prepares groups in a single pass.
     ///
     /// `pending_stores` is indexed by group_id. Each entry is `Some((pixels, complete))`
     /// for groups that have VarDCT pixel data to store from Phase 2, or `None` for groups
     /// that were stored in the sequential Phase 3a-store (LF upsample, noise, modular).
     ///
-    /// Phase 1 (serial): Sets `group_chan_complete` for groups with pending stores.
-    /// Phase 2 (parallel): Stores pending pixels + extracts borders.
-    /// Phase 3 (serial): Emits work items in group index order.
+    /// When `skip_border_copy` is true, runs sequentially (pixel store is just pointer
+    /// moves, no data copy). Otherwise parallelizes pixel store + border extraction.
     #[allow(clippy::type_complexity)]
     pub(crate) fn store_and_prepare_groups_parallel(
         &mut self,
         pending_stores: &mut [Option<([OwnedRawImage; 3], bool)>],
         skip_border_copy: bool,
     ) -> Result<(Vec<group_scheduler::RenderWorkItem>, Vec<(usize, bool)>)> {
-        use group_scheduler::extract_borders;
-        use rayon::prelude::*;
-
-        // Phase 1 (serial): set group_chan_complete for pending stores.
-        // group_chan_complete is only read later in recycle_group_buffers (Phase 3c).
+        // Set group_chan_complete for pending stores.
         for (g, store) in pending_stores.iter().enumerate() {
             if let Some((_, complete)) = store {
                 for c in 0..self.shared.group_chan_complete[g].len() {
@@ -832,7 +864,62 @@ impl LowMemoryRenderPipeline {
         let shared = &self.shared;
         let border_size = self.border_size;
 
-        // Phase 2 (parallel): store pending pixels + extract borders.
+        if skip_border_copy {
+            // Fast path: store pixels + check readiness sequentially.
+            // Pixel store is just moving OwnedRawImage pointers (~100 bytes each).
+            // Border check is comparing ready_channels to num_used_channels().
+            let num_used = shared.num_used_channels();
+            let mut extracted_groups = Vec::with_capacity(self.input_buffers.len());
+            for (g, (buf, store)) in self
+                .input_buffers
+                .iter_mut()
+                .zip(pending_stores.iter_mut())
+                .enumerate()
+            {
+                if let Some((pixels, _complete)) = store.take() {
+                    for (c, img) in pixels.into_iter().enumerate() {
+                        buf.set_buffer(c, img);
+                    }
+                }
+                if buf.ready_channels == num_used {
+                    buf.ready_channels = 0;
+                    buf.is_ready = true;
+                    extracted_groups.push(g);
+                }
+            }
+            let bs = self.border_size;
+            let mut items = Vec::with_capacity(extracted_groups.len());
+            let mut group_has_items = Vec::with_capacity(extracted_groups.len());
+            let full_readiness = self.input_buffers.iter().all(|b| b.is_ready);
+            if full_readiness {
+                for &g in &extracted_groups {
+                    let empty_ready = [];
+                    let group_items = group_scheduler::compute_work_items(
+                        g, &empty_ready, shared, bs, true,
+                    )?;
+                    let has = !group_items.is_empty();
+                    items.extend(group_items);
+                    group_has_items.push((g, has));
+                }
+            } else {
+                let is_ready: Vec<bool> =
+                    self.input_buffers.iter().map(|b| b.is_ready).collect();
+                for &g in &extracted_groups {
+                    let group_items = group_scheduler::compute_work_items(
+                        g, &is_ready, shared, bs, false,
+                    )?;
+                    let has = !group_items.is_empty();
+                    items.extend(group_items);
+                    group_has_items.push((g, has));
+                }
+            }
+            return Ok((items, group_has_items));
+        }
+
+        // Slow path: actual border extraction needs parallel mutable access.
+        use group_scheduler::extract_borders;
+        use rayon::prelude::*;
+
         let extracted: Vec<bool> = self
             .input_buffers
             .par_iter_mut()
@@ -843,11 +930,10 @@ impl LowMemoryRenderPipeline {
                         buf.set_buffer(c, img);
                     }
                 }
-                extract_borders(buf, shared, border_size, skip_border_copy)
+                extract_borders(buf, shared, border_size, false)
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // Phase 3: mark all extracted groups ready, then emit work items in parallel.
         for (g, did_extract) in extracted.iter().enumerate() {
             if *did_extract {
                 self.input_buffers[g].is_ready = true;
