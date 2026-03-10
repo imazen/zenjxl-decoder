@@ -1142,16 +1142,15 @@ impl Frame {
                     drop(slot_grids);
 
                     // Process all tiles in parallel with direct fragment writes.
-                    let first_error: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
-                    item_fragments.par_iter_mut().enumerate().for_each_init(
-                        || factory.create(1).ok(),
-                        |ctx_opt, (item_idx, slot_bufs)| {
-                            if first_error.lock().unwrap().is_some() {
-                                return;
-                            }
-                            let result = (|| -> Result<()> {
+                    item_fragments
+                        .par_iter_mut()
+                        .enumerate()
+                        .try_for_each_init(
+                            || factory.create(1).ok(),
+                            |ctx_opt, (item_idx, slot_bufs)| -> Result<()> {
                                 stop.check()?;
-                                let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                let ctx =
+                                    ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
                                 let item = &all_items[item_idx];
                                 // Create rect sub-views from fragments.
                                 // Fragments cover the full band; rect() narrows
@@ -1182,97 +1181,65 @@ impl Frame {
                                     &mut local_bufs,
                                 )?;
                                 Ok(())
-                            })();
-                            if let Err(e) = result {
-                                let mut err = first_error.lock().unwrap();
-                                if err.is_none() {
-                                    *err = Some(e);
-                                }
-                            }
-                        },
-                    );
+                            },
+                        )?;
 
                     drop(item_fragments);
-
-                    if let Some(e) = first_error.into_inner().unwrap() {
-                        return Err(e);
-                    }
                 } else {
                     // Fallback: two-phase render (owned buffers + copy-back).
                     // Used when band splitting isn't possible (single gy band
                     // or overlapping row ranges).
-                    let first_error: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
-                    let render_outputs: Vec<Option<Vec<buffer_splitter::OwnedLocalBuffer>>> =
+                    let render_outputs: Vec<Vec<buffer_splitter::OwnedLocalBuffer>> =
                         all_items
                             .par_iter()
                             .enumerate()
                             .map_init(
                                 || factory.create(1).ok(),
-                                |ctx_opt, (idx, item)| {
-                                    if first_error.lock().unwrap().is_some() {
-                                        return None;
+                                |ctx_opt, (idx, item)| -> Result<Vec<buffer_splitter::OwnedLocalBuffer>> {
+                                    stop.check()?;
+                                    let ctx = ctx_opt
+                                        .as_mut()
+                                        .ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                    let layouts = &all_layouts[idx];
+                                    let mut owned: Vec<buffer_splitter::OwnedLocalBuffer> =
+                                        layouts
+                                            .iter()
+                                            .map(|&(slot, bpr, nr, cr)| {
+                                                buffer_splitter::OwnedLocalBuffer {
+                                                    data: vec![0u8; bpr * nr],
+                                                    bytes_per_row: bpr,
+                                                    num_rows: nr,
+                                                    channel_rect: cr,
+                                                    buffer_index: slot,
+                                                }
+                                            })
+                                            .collect();
+                                    let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> =
+                                        (0..num_buffer_slots).map(|_| None).collect();
+                                    for olb in owned.iter_mut() {
+                                        local_bufs[olb.buffer_index] =
+                                            Some(JxlOutputBuffer::new(
+                                                &mut olb.data,
+                                                olb.num_rows,
+                                                olb.bytes_per_row,
+                                            ));
                                     }
-                                    let result =
-                                        (|| -> Result<Vec<buffer_splitter::OwnedLocalBuffer>> {
-                                            stop.check()?;
-                                            let ctx = ctx_opt
-                                                .as_mut()
-                                                .ok_or(Error::ImageOutOfMemory(0, 0))?;
-                                            let layouts = &all_layouts[idx];
-                                            let mut owned: Vec<buffer_splitter::OwnedLocalBuffer> =
-                                                layouts
-                                                    .iter()
-                                                    .map(|&(slot, bpr, nr, cr)| {
-                                                        buffer_splitter::OwnedLocalBuffer {
-                                                            data: vec![0u8; bpr * nr],
-                                                            bytes_per_row: bpr,
-                                                            num_rows: nr,
-                                                            channel_rect: cr,
-                                                            buffer_index: slot,
-                                                        }
-                                                    })
-                                                    .collect();
-                                            let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> =
-                                                (0..num_buffer_slots).map(|_| None).collect();
-                                            for olb in owned.iter_mut() {
-                                                local_bufs[olb.buffer_index] =
-                                                    Some(JxlOutputBuffer::new(
-                                                        &mut olb.data,
-                                                        olb.num_rows,
-                                                        olb.bytes_per_row,
-                                                    ));
-                                            }
-                                            render_group::render(
-                                                ctx,
-                                                &view,
-                                                (item.gx, item.gy),
-                                                item.image_area,
-                                                &mut local_bufs,
-                                            )?;
-                                            drop(local_bufs);
-                                            Ok(owned)
-                                        })();
-                                    match result {
-                                        Ok(owned) => Some(owned),
-                                        Err(e) => {
-                                            let mut err = first_error.lock().unwrap();
-                                            if err.is_none() {
-                                                *err = Some(e);
-                                            }
-                                            None
-                                        }
-                                    }
+                                    render_group::render(
+                                        ctx,
+                                        &view,
+                                        (item.gx, item.gy),
+                                        item.image_area,
+                                        &mut local_bufs,
+                                    )?;
+                                    drop(local_bufs);
+                                    Ok(owned)
                                 },
                             )
-                            .collect();
-
-                    if let Some(e) = first_error.into_inner().unwrap() {
-                        return Err(e);
-                    }
+                            .collect::<Result<Vec<_>>>()?;
 
                     // Sequential copy-back (no band split available).
                     let output = buffer_splitter.get_full_buffers();
-                    for owned in render_outputs.iter().flatten() {
+                    for owned in &render_outputs {
                         buffer_splitter::copy_back_local_buffers(owned, output);
                     }
                 }
@@ -2105,7 +2072,7 @@ impl Frame {
         input_profile: &JxlColorProfile,
         output_profile: &JxlColorProfile,
     ) -> Result<()> {
-        let lf_global = self.lf_global.as_mut().unwrap();
+        let lf_global = self.lf_global.as_ref().unwrap();
         let epf_sigma = if self.header.restoration_filter.epf_iters > 0 {
             Some(SigmaSource::new(&self.header, lf_global, &self.hf_meta)?)
         } else {
@@ -2150,5 +2117,27 @@ impl Frame {
         self.render_pipeline = Some(render_pipeline);
         self.was_flushed_once = false;
         Ok(())
+    }
+
+    /// Run `prepare_render_pipeline` and `finalize_lf` together, overlapping
+    /// the pipeline build with adaptive LF smoothing via `std::thread::scope`.
+    ///
+    /// Both operations access disjoint fields of `Frame`:
+    /// - Pipeline: reads header/lf_global/hf_meta/decoder_state, writes render_pipeline
+    /// - finalize_lf: reads header/lf_global, writes lf_image
+    ///
+    /// The pipeline build captures `cms: &dyn JxlCms` which is not `Sync`,
+    /// so it must stay on the main thread. `finalize_lf` (which doesn't need
+    /// `cms`) runs on a scoped OS thread.
+    #[cfg(feature = "threads")]
+    pub fn prepare_pipeline_and_finalize_lf(
+        &mut self,
+        pixel_format: &JxlPixelFormat,
+        cms: Option<&dyn JxlCms>,
+        input_profile: &JxlColorProfile,
+        output_profile: &JxlColorProfile,
+    ) -> Result<()> {
+        self.prepare_render_pipeline(pixel_format, cms, input_profile, output_profile)?;
+        self.finalize_lf()
     }
 }

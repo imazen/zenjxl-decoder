@@ -289,9 +289,9 @@ impl Frame {
 
     pub fn finalize_lf(&mut self) -> Result<()> {
         if self.header.should_do_adaptive_lf_smoothing() {
-            let lf_global = self.lf_global.as_mut().unwrap();
+            let lf_global = self.lf_global.as_ref().unwrap();
             let lf_quant = &lf_global.lf_quant;
-            let inv_quant_lf = lf_global.quant_params.as_mut().unwrap().inv_quant_lf();
+            let inv_quant_lf = lf_global.quant_params.as_ref().unwrap().inv_quant_lf();
             adaptive_lf_smoothing(
                 [
                     inv_quant_lf * lf_quant.quant_factors[0],

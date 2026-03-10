@@ -62,12 +62,33 @@ pub fn adaptive_lf_smoothing(
     if parallel && ysize > 4 {
         use rayon::prelude::*;
 
-        // Parallel smoothing: each row produces owned output, copied back sequentially.
-        // Rows 1..ysize-1 are independent (each reads y-1, y, y+1 from lf_image).
-        let interior_rows = ysize - 2;
-        let row_results: Vec<[Vec<f32>; 3]> = (1..ysize - 1)
-            .into_par_iter()
-            .map(|y| {
+        // Zero-allocation parallel smoothing: write directly into pre-allocated
+        // smoothed images via all_rows_mut(). Each parallel task writes to its
+        // own disjoint output row — no per-row Vec allocation or copy-back.
+        let [s0, s1, s2] = &mut smoothed;
+        let mut rows0 = s0.all_rows_mut();
+        let mut rows1 = s1.all_rows_mut();
+        let mut rows2 = s2.all_rows_mut();
+
+        // Split into (border_top, interior, border_bottom) so the interior
+        // rows can be processed in parallel without borrowing the border rows.
+        // Border rows were already copied above, so we just need the interior.
+        let (_, interior0) = rows0.split_at_mut(1);
+        let (interior0, _) = interior0.split_at_mut(ysize - 2);
+        let (_, interior1) = rows1.split_at_mut(1);
+        let (interior1, _) = interior1.split_at_mut(ysize - 2);
+        let (_, interior2) = rows2.split_at_mut(1);
+        let (interior2, _) = interior2.split_at_mut(ysize - 2);
+
+        // Zip the three channels' interior rows together for parallel iteration.
+        // Each tuple element is &mut &mut [f32], which we iterate over.
+        interior0
+            .par_iter_mut()
+            .zip(interior1.par_iter_mut())
+            .zip(interior2.par_iter_mut())
+            .enumerate()
+            .for_each(|(i, ((out0, out1), out2))| {
+                let y = i + 1; // rows 1..ysize-1
                 let rows_in: [(&[f32], &[f32], &[f32]); 3] = core::array::from_fn(|c| {
                     (
                         lf_image[c].row(y - 1),
@@ -76,13 +97,13 @@ pub fn adaptive_lf_smoothing(
                     )
                 });
 
-                let mut out: [Vec<f32>; 3] = core::array::from_fn(|c| {
-                    let mut v = vec![0.0f32; xsize];
-                    // Copy border columns.
-                    v[0] = rows_in[c].1[0];
-                    v[xsize - 1] = rows_in[c].1[xsize - 1];
-                    v
-                });
+                // Copy border columns.
+                out0[0] = rows_in[0].1[0];
+                out0[xsize - 1] = rows_in[0].1[xsize - 1];
+                out1[0] = rows_in[1].1[0];
+                out1[xsize - 1] = rows_in[1].1[xsize - 1];
+                out2[0] = rows_in[2].1[0];
+                out2[xsize - 1] = rows_in[2].1[xsize - 1];
 
                 #[allow(clippy::needless_range_loop)] // x indexes 6+ parallel arrays
                 for x in 1..xsize - 1 {
@@ -112,22 +133,11 @@ pub fn adaptive_lf_smoothing(
                         rows_in[2].2,
                     );
                     let factor = (3.0 - 4.0 * gap).max(0.0);
-                    out[0][x] = (sm_x - mc_x) * factor + mc_x;
-                    out[1][x] = (sm_y - mc_y) * factor + mc_y;
-                    out[2][x] = (sm_b - mc_b) * factor + mc_b;
+                    out0[x] = (sm_x - mc_x) * factor + mc_x;
+                    out1[x] = (sm_y - mc_y) * factor + mc_y;
+                    out2[x] = (sm_b - mc_b) * factor + mc_b;
                 }
-                out
-            })
-            .collect();
-
-        // Sequential copy-back: write parallel results into smoothed images.
-        let _ = interior_rows;
-        for (i, row_data) in row_results.into_iter().enumerate() {
-            let y = i + 1; // rows 1..ysize-1
-            for c in 0..3 {
-                smoothed[c].row_mut(y).copy_from_slice(&row_data[c]);
-            }
-        }
+            });
     } else {
         smooth_serial(lf_factors, lf_image, &mut smoothed, xsize, ysize);
     }

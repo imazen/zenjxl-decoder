@@ -231,21 +231,57 @@ impl CodestreamParser {
                 };
                 if hf_newly_done && frame.render_pipeline_not_ready() {
                     let t = std::time::Instant::now();
-                    frame.prepare_render_pipeline(
-                        self.pixel_format.as_ref().unwrap(),
-                        decode_options.cms.as_deref(),
-                        self.embedded_color_profile.as_ref().expect(
-                            "embedded_color_profile should be set before pipeline preparation",
-                        ),
-                        self.output_color_profile.as_ref().expect(
-                            "output_color_profile should be set before pipeline preparation",
-                        ),
-                    )?;
-                    pipeline_dur = t.elapsed();
 
-                    let t = std::time::Instant::now();
-                    frame.finalize_lf()?;
-                    finalize_lf_dur = t.elapsed();
+                    #[cfg(feature = "threads")]
+                    if frame.decoder_state.parallel {
+                        frame.prepare_pipeline_and_finalize_lf(
+                            self.pixel_format.as_ref().unwrap(),
+                            decode_options.cms.as_deref(),
+                            self.embedded_color_profile.as_ref().expect(
+                                "embedded_color_profile should be set before pipeline preparation",
+                            ),
+                            self.output_color_profile.as_ref().expect(
+                                "output_color_profile should be set before pipeline preparation",
+                            ),
+                        )?;
+                        pipeline_dur = t.elapsed();
+                        finalize_lf_dur = std::time::Duration::ZERO;
+                    } else {
+                        frame.prepare_render_pipeline(
+                            self.pixel_format.as_ref().unwrap(),
+                            decode_options.cms.as_deref(),
+                            self.embedded_color_profile.as_ref().expect(
+                                "embedded_color_profile should be set before pipeline preparation",
+                            ),
+                            self.output_color_profile.as_ref().expect(
+                                "output_color_profile should be set before pipeline preparation",
+                            ),
+                        )?;
+                        pipeline_dur = t.elapsed();
+
+                        let t = std::time::Instant::now();
+                        frame.finalize_lf()?;
+                        finalize_lf_dur = t.elapsed();
+                    }
+
+                    #[cfg(not(feature = "threads"))]
+                    {
+                        frame.prepare_render_pipeline(
+                            self.pixel_format.as_ref().unwrap(),
+                            decode_options.cms.as_deref(),
+                            self.embedded_color_profile.as_ref().expect(
+                                "embedded_color_profile should be set before pipeline preparation",
+                            ),
+                            self.output_color_profile.as_ref().expect(
+                                "output_color_profile should be set before pipeline preparation",
+                            ),
+                        )?;
+                        pipeline_dur = t.elapsed();
+
+                        let t = std::time::Instant::now();
+                        frame.finalize_lf()?;
+                        finalize_lf_dur = t.elapsed();
+                    }
                 }
                 if !self.section_state.hf_global_done {
                     break 'process;

@@ -256,6 +256,49 @@ impl<T: ImageDataType> Image<T> {
         let rows = self.raw.data.distinct_rows_mut(rows);
         I::cast_rows(rows)
     }
+
+    /// Returns mutable slices for all rows. Each slice has exactly `width`
+    /// elements where width = self.size().0. Rows are disjoint within the
+    /// underlying buffer (separated by cache-line-aligned stride).
+    pub fn all_rows_mut(&mut self) -> Vec<&mut [T]> {
+        let (bytes_per_row, num_rows, bytes_between_rows) = self.raw.data.dimensions();
+        if num_rows == 0 {
+            return Vec::new();
+        }
+        let data = self.raw.data.data_slice_mut();
+        // Use a recursive split pattern that the borrow checker can track.
+        // split_rows_recursive handles the "remaining slice" ownership chain.
+        let mut result = Vec::with_capacity(num_rows);
+        split_rows_into(data, bytes_per_row, bytes_between_rows, num_rows, &mut result);
+        result
+    }
+}
+
+/// Splits a byte slice into per-row mutable `&mut [T]` slices.
+/// Each row is `bytes_per_row` bytes wide, rows are `bytes_between_rows` apart,
+/// and the total spans `num_rows` rows.
+///
+/// Uses a `while let` loop with `Option<&mut [u8]>` to satisfy the borrow
+/// checker: `take()` moves ownership out, `split_at_mut` produces two disjoint
+/// halves, and we re-insert the remainder for the next iteration.
+fn split_rows_into<'a, T: ImageDataType>(
+    data: &'a mut [u8],
+    bytes_per_row: usize,
+    bytes_between_rows: usize,
+    num_rows: usize,
+    out: &mut Vec<&'a mut [T]>,
+) {
+    let mut remaining: Option<&'a mut [u8]> = Some(data);
+    for i in 0..num_rows {
+        let data = remaining.take().unwrap();
+        if i < num_rows - 1 {
+            let (head, tail) = data.split_at_mut(bytes_between_rows);
+            out.push(cast_row_mut(&mut head[..bytes_per_row]));
+            remaining = Some(tail);
+        } else {
+            out.push(cast_row_mut(&mut data[..bytes_per_row]));
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
