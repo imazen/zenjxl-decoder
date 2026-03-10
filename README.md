@@ -154,6 +154,10 @@ Bug fixes reported to [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs):
 | [#660](https://github.com/libjxl/jxl-rs/pull/660) | PR | Open | Conformance test infrastructure |
 | [#602](https://github.com/libjxl/jxl-rs/pull/602) | PR | Closed | Integer overflow handling (ICC part merged as #607; rest declined) |
 
+## Sister project
+
+[jxl-encoder](https://github.com/imazen/jxl-encoder) — a multithreaded JPEG XL encoder in Rust, also by Imazen.
+
 ## License
 
 BSD-3-Clause. See [LICENSE](LICENSE).
