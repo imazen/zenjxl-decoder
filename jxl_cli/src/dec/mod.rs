@@ -233,13 +233,24 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
 
         let section_start = Instant::now();
 
-        let mut outputs = vec![OwnedRawImage::new((
+        // Use uninit allocation — the decoder fully populates every pixel.
+        // With allow-unsafe, this avoids page-faulting ~75MB of output memory
+        // upfront (saves ~40ms for 4K images).
+        let mut outputs = vec![OwnedRawImage::new_uninit((
             byte_size.0 * samples_per_pixel,
             byte_size.1,
         ))?];
 
         for _ in 0..extra_channels {
-            outputs.push(OwnedRawImage::new(byte_size)?);
+            outputs.push(OwnedRawImage::new_uninit(byte_size)?);
+        }
+
+        // Pre-fault output pages in parallel to avoid page fault contention
+        // during rendering. Spreads ~18K page faults across rayon threads
+        // instead of hitting them under lock during the hot render loop.
+        #[cfg(feature = "threads")]
+        for output in &mut outputs {
+            output.prefault_parallel();
         }
 
         let mut partial_renders = vec![];

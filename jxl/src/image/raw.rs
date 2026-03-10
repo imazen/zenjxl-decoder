@@ -141,6 +141,22 @@ impl OwnedRawImage {
         self.padding
     }
 
+    /// Pre-fault all virtual memory pages by touching one byte per page in parallel.
+    /// This avoids page fault contention during rendering by spreading fault handling
+    /// across rayon worker threads before the hot rendering loop begins.
+    #[cfg(feature = "threads")]
+    pub fn prefault_parallel(&mut self) {
+        use rayon::prelude::*;
+        const PAGE_SIZE: usize = 4096;
+        let data = self.data.data_slice_mut();
+        if data.is_empty() {
+            return;
+        }
+        data.par_chunks_mut(PAGE_SIZE).for_each(|chunk| {
+            chunk[0] = 0;
+        });
+    }
+
     /// Sets memory tracking on this image so that `tracked_bytes` are released
     /// back to `tracker` when this image is dropped.
     pub(super) fn set_tracker(&mut self, tracker: MemoryTracker, bytes: u64) {
