@@ -463,7 +463,9 @@ pub fn png_has_linear_gamma(path: &Path) -> std::io::Result<bool> {
 /// Returns (width, height, channels, pixels) where pixels is RGB/RGBA/Gray u8 data.
 pub fn load_png(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> {
     let file = std::fs::File::open(path)?;
-    let decoder = png::Decoder::new(file);
+    let mut decoder = png::Decoder::new(file);
+    // Expand indexed/palette PNGs to RGB/RGBA automatically
+    decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,

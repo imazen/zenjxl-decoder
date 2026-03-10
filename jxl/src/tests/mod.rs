@@ -13,6 +13,7 @@ pub mod conformance;
 pub mod coverage_boost;
 pub mod decode_api;
 pub mod entropy;
+pub mod feature_corpus;
 pub mod feature_tests;
 pub mod hdr;
 #[cfg(feature = "jpeg")]
