@@ -1,5 +1,13 @@
 # Plan: Eliminate jxl_simd, Switch to archmage + magetypes
 
+> **SUPERSEDED (2026-03-10):** Phase 1 of this plan (making jxl_simd safe) was completed
+> via a different approach — jxl_simd was rewritten internally to use archmage intrinsics
+> and magetypes vector types, with `#[arcane]` proc macros for dispatch. The crate is now
+> `#![forbid(unsafe_code)]` with zero unsafe anywhere. The remaining phases (eliminating
+> jxl_simd entirely and replacing it with direct archmage/magetypes/linear-srgb/garb usage
+> in the jxl crate) have not been started. The plan below may still be useful as a roadmap
+> for that future work, but the API mappings and phase structure should be re-evaluated.
+
 ## Goal
 
 Remove the `jxl_simd` crate entirely. Replace all SIMD dispatch with `archmage` macros (`#[autoversion]`, `incant!`) and `magetypes` vector types (`f32x8<T>`, `i32x8<T>`, etc.). Use existing ecosystem crates (`linear-srgb`, `garb`, `zenpixels-convert`) instead of reimplementing SIMD kernels.
