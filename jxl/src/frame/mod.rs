@@ -262,6 +262,11 @@ impl Frame {
         &self.header
     }
 
+    /// Returns true if the render pipeline has not been prepared yet.
+    pub fn render_pipeline_not_ready(&self) -> bool {
+        self.render_pipeline.is_none()
+    }
+
     pub fn total_bytes_in_toc(&self) -> usize {
         self.toc.entries.iter().map(|x| *x as usize).sum()
     }

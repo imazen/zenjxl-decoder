@@ -222,7 +222,7 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
     let setup_dur = start.elapsed() - header_dur;
 
     let mut total_section_dur = Duration::ZERO;
-    let mut total_buf_alloc_dur = Duration::ZERO;
+    let total_buf_alloc_dur = Duration::ZERO;
 
     'frame: loop {
         let image_size = info.size;

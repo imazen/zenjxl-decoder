@@ -802,6 +802,344 @@ impl Frame {
         Ok(())
     }
 
+    /// Overlap LF group decode with HF global parsing using rayon::join.
+    ///
+    /// decode_hf_global depends only on lf_global (the LF Global section), NOT on
+    /// LF group data. So it can run concurrently with LF group decoding, saving
+    /// ~6ms at 16T by hiding HF global parse latency behind the LF group barrier.
+    #[cfg(feature = "threads")]
+    pub fn decode_lf_and_hf_global_parallel(
+        &mut self,
+        lf_sections: Vec<(usize, Vec<u8>)>,
+        hf_data: Vec<u8>,
+    ) -> Result<()> {
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        assert_eq!(self.header.encoding, Encoding::VarDCT);
+
+        // Destructure self to get disjoint borrows of individual fields.
+        let Self {
+            header,
+            lf_global,
+            hf_global,
+            hf_coefficients,
+            lf_image,
+            quant_lf,
+            hf_meta,
+            decoder_state,
+            ..
+        } = self;
+
+        let lf_global_ref = lf_global.as_ref().unwrap();
+        let image_metadata = &decoder_state.file_header.image_metadata;
+        let tree = &lf_global_ref.tree;
+        let color_correlation = lf_global_ref.color_correlation_params.as_ref().unwrap();
+        let quant_params = lf_global_ref.quant_params.as_ref().unwrap();
+        let lf_quant = &lf_global_ref.lf_quant;
+        let bctx = lf_global_ref.block_context_map.as_ref().unwrap();
+        let modular = &lf_global_ref.modular_global;
+        let stop: &dyn enough::Stop = &*decoder_state.stop;
+        let has_lf_frame = header.has_lf_frame();
+        let used_hf_types = AtomicU32::new(0);
+
+        struct LfGroupOutput {
+            group: usize,
+            lf_local: Option<[Image<f32>; 3]>,
+            quant_lf_local: Option<Image<u8>>,
+            ytox_local: Image<i8>,
+            ytob_local: Image<i8>,
+            transform_local: Image<u8>,
+            raw_quant_local: Image<i32>,
+            epf_local: Image<u8>,
+        }
+
+        struct HfGlobalOutput {
+            hf_state: HfGlobalState,
+            coefficients: Option<[Vec<Vec<i32>>; 3]>,
+        }
+
+        let phase_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+        let join_start = std::time::Instant::now();
+
+        // Run LF group decode and HF global parse in parallel.
+        let (lf_result, hf_result) = rayon::join(
+            || -> Result<(Vec<LfGroupOutput>, std::time::Duration)> {
+                let par_start = std::time::Instant::now();
+                let results: Vec<LfGroupOutput> = lf_sections
+                    .into_par_iter()
+                    .map(|(group, data)| -> Result<LfGroupOutput> {
+                        stop.check()?;
+                        let mut br = BitReader::new(&data);
+                        let r = header.lf_group_rect(group);
+
+                        let (lf_local, quant_lf_local) = if !has_lf_frame {
+                            let extra_precision = br.read(2)?;
+                            let mul = 1.0 / (1 << extra_precision) as f32;
+                            let stream_id = ModularStreamId::VarDCTLF(group).get_id(header);
+                            let shrink_rect = |size: (usize, usize), c| {
+                                (size.0 >> header.hshift(c), size.1 >> header.vshift(c))
+                            };
+                            let mut buffers = [
+                                super::modular::ModularChannel::new(
+                                    shrink_rect(r.size, 1),
+                                    image_metadata.bit_depth,
+                                )?,
+                                super::modular::ModularChannel::new(
+                                    shrink_rect(r.size, 0),
+                                    image_metadata.bit_depth,
+                                )?,
+                                super::modular::ModularChannel::new(
+                                    shrink_rect(r.size, 2),
+                                    image_metadata.bit_depth,
+                                )?,
+                            ];
+                            super::modular::decode::decode_modular_subbitstream(
+                                buffers.iter_mut().collect(),
+                                stream_id,
+                                None,
+                                tree,
+                                &mut br,
+                            )?;
+
+                            let lf_sizes: [(usize, usize); 3] = if header.is444() {
+                                [r.size; 3]
+                            } else {
+                                core::array::from_fn(|c| shrink_rect(r.size, c))
+                            };
+                            let mut lf_images: [Image<f32>; 3] = [
+                                Image::new(lf_sizes[0])?,
+                                Image::new(lf_sizes[1])?,
+                                Image::new(lf_sizes[2])?,
+                            ];
+                            let mut quant_lf_img = Image::<u8>::new(r.size)?;
+
+                            let full_rect = |sz: (usize, usize)| Rect {
+                                origin: (0, 0),
+                                size: sz,
+                            };
+                            let [ref mut lf0, ref mut lf1, ref mut lf2] = lf_images;
+                            let lf_rects = [
+                                lf0.get_rect_mut(full_rect(lf_sizes[0])),
+                                lf1.get_rect_mut(full_rect(lf_sizes[1])),
+                                lf2.get_rect_mut(full_rect(lf_sizes[2])),
+                            ];
+                            let quant_lf_rect = quant_lf_img.get_rect_mut(full_rect(r.size));
+                            super::modular::dequant_lf(
+                                r,
+                                lf_rects,
+                                quant_lf_rect,
+                                [&buffers[0].data, &buffers[1].data, &buffers[2].data],
+                                color_correlation,
+                                quant_params,
+                                lf_quant,
+                                mul,
+                                header,
+                                bctx,
+                            )?;
+                            (Some(lf_images), Some(quant_lf_img))
+                        } else {
+                            (None, None)
+                        };
+
+                        modular.read_stream(
+                            ModularStreamId::ModularLF(group),
+                            header,
+                            tree,
+                            &mut br,
+                        )?;
+
+                        let cr = Rect {
+                            origin: (r.origin.0 >> 3, r.origin.1 >> 3),
+                            size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
+                        };
+                        let mut ytox_local = Image::<i8>::new(cr.size)?;
+                        let mut ytob_local = Image::<i8>::new(cr.size)?;
+                        let mut transform_local = Image::<u8>::new_with_value(
+                            r.size,
+                            HfTransformType::INVALID_TRANSFORM,
+                        )?;
+                        let mut raw_quant_local = Image::<i32>::new(r.size)?;
+                        let mut epf_local = Image::<u8>::new(r.size)?;
+                        let full_cr = Rect {
+                            origin: (0, 0),
+                            size: cr.size,
+                        };
+                        let full_r = Rect {
+                            origin: (0, 0),
+                            size: r.size,
+                        };
+                        let used = decode_hf_metadata_into_rects(
+                            group,
+                            header,
+                            image_metadata,
+                            tree,
+                            r,
+                            cr,
+                            ytox_local.get_rect_mut(full_cr),
+                            ytob_local.get_rect_mut(full_cr),
+                            transform_local.get_rect_mut(full_r),
+                            raw_quant_local.get_rect_mut(full_r),
+                            epf_local.get_rect_mut(full_r),
+                            &mut br,
+                        )?;
+                        used_hf_types.fetch_or(used, Ordering::Relaxed);
+
+                        Ok(LfGroupOutput {
+                            group,
+                            lf_local,
+                            quant_lf_local,
+                            ytox_local,
+                            ytob_local,
+                            transform_local,
+                            raw_quant_local,
+                            epf_local,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((results, par_start.elapsed()))
+            },
+            || -> Result<(HfGlobalOutput, std::time::Duration)> {
+                let hf_start = std::time::Instant::now();
+                decoder_state.check_cancelled()?;
+                let mut br = BitReader::new(&hf_data);
+                let dequant_matrices = DequantMatrices::decode(header, lf_global_ref, &mut br)?;
+                let num_histo_bits = header.num_groups().ceil_log2();
+                let num_histograms: u32 = br.read(num_histo_bits)? as u32 + 1;
+                let num_ac = bctx.num_ac_contexts();
+                let mut passes: Vec<PassState> = vec![];
+                for _ in 0..header.passes.num_passes as usize {
+                    let used_orders = match br.read(2)? {
+                        0 => 0x5f,
+                        1 => 0x13,
+                        2 => 0,
+                        _ => br.read(coeff_order::NUM_ORDERS)?,
+                    } as u32;
+                    let coeff_orders = decode_coeff_orders(used_orders, &mut br)?;
+                    assert_eq!(coeff_orders.len(), 3 * coeff_order::NUM_ORDERS);
+                    let num_contexts = num_histograms as usize * num_ac;
+                    let mut histograms = Histograms::decode(num_contexts, &mut br, true)?;
+                    let padding = ZERO_DENSITY_CONTEXT_LIMIT - ZERO_DENSITY_CONTEXT_COUNT;
+                    histograms.resize(num_contexts + padding);
+                    passes.push(PassState {
+                        coeff_orders,
+                        histograms,
+                    });
+                }
+                let coefficients = if passes.len() <= 1
+                    && !(modular.can_do_partial_render() && header.num_extra_channels > 0)
+                {
+                    None
+                } else {
+                    let coeffs_per_group = GROUP_DIM * GROUP_DIM;
+                    let num_groups = header.num_groups();
+                    let tracker = &decoder_state.memory_tracker;
+                    tracker.try_allocate(
+                        (coeffs_per_group * num_groups * 3 * std::mem::size_of::<i32>()) as u64,
+                    )?;
+                    let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+                    for ch in &mut channels {
+                        ch.reserve_exact(num_groups);
+                        for _ in 0..num_groups {
+                            ch.push(vec![0i32; coeffs_per_group]);
+                        }
+                    }
+                    Some(channels)
+                };
+                Ok((
+                    HfGlobalOutput {
+                        hf_state: HfGlobalState {
+                            num_histograms,
+                            passes,
+                            dequant_matrices,
+                        },
+                        coefficients,
+                    },
+                    hf_start.elapsed(),
+                ))
+            },
+        );
+
+        let (lf_outputs, lf_par_dur) = lf_result?;
+        let (hf_output, hf_dur) = hf_result?;
+        let join_dur = join_start.elapsed();
+
+        // Sequential copy-back for LF group results.
+        let copyback_start = std::time::Instant::now();
+        let lf_image = lf_image.as_mut().unwrap();
+        let hf_meta = hf_meta.as_mut().unwrap();
+
+        fn copy_image_to_rect<T: crate::image::ImageDataType + Copy>(
+            src: &Image<T>,
+            dst: &mut Image<T>,
+            dst_rect: Rect,
+        ) {
+            let src_size = src.size();
+            debug_assert_eq!(src_size, dst_rect.size);
+            for y in 0..src_size.1 {
+                let src_row = src.row(y);
+                let dst_row = dst.row_mut(dst_rect.origin.1 + y);
+                dst_row[dst_rect.origin.0..dst_rect.origin.0 + src_size.0]
+                    .copy_from_slice(&src_row[..src_size.0]);
+            }
+        }
+
+        for output in lf_outputs {
+            let r = header.lf_group_rect(output.group);
+            let cr = Rect {
+                origin: (r.origin.0 >> 3, r.origin.1 >> 3),
+                size: (r.size.0.div_ceil(8), r.size.1.div_ceil(8)),
+            };
+            if let Some(lf_local) = &output.lf_local {
+                if header.is444() {
+                    for c in 0..3 {
+                        copy_image_to_rect(&lf_local[c], &mut lf_image[c], r);
+                    }
+                } else {
+                    for c in 0..3 {
+                        let shifted_rect = Rect {
+                            origin: (
+                                r.origin.0 >> header.hshift(c),
+                                r.origin.1 >> header.vshift(c),
+                            ),
+                            size: (r.size.0 >> header.hshift(c), r.size.1 >> header.vshift(c)),
+                        };
+                        copy_image_to_rect(&lf_local[c], &mut lf_image[c], shifted_rect);
+                    }
+                }
+            }
+            if let Some(ref quant_lf_local) = output.quant_lf_local {
+                copy_image_to_rect(quant_lf_local, quant_lf, r);
+            }
+            copy_image_to_rect(&output.ytox_local, &mut hf_meta.ytox_map, cr);
+            copy_image_to_rect(&output.ytob_local, &mut hf_meta.ytob_map, cr);
+            copy_image_to_rect(&output.transform_local, &mut hf_meta.transform_map, r);
+            copy_image_to_rect(&output.raw_quant_local, &mut hf_meta.raw_quant_map, r);
+            copy_image_to_rect(&output.epf_local, &mut hf_meta.epf_map, r);
+        }
+        hf_meta.used_hf_types |= used_hf_types.load(Ordering::Relaxed);
+        let copyback_dur = copyback_start.elapsed();
+
+        // Apply HF global results.
+        *hf_global = Some(hf_output.hf_state);
+        *hf_coefficients = hf_output.coefficients;
+
+        if phase_timing {
+            eprintln!(
+                "[JXL_LF_HF_OVERLAP] lf_par: {:.2}ms | hf_parse: {:.2}ms | \
+                 join_wall: {:.2}ms | copyback: {:.2}ms | \
+                 saved: {:.2}ms",
+                lf_par_dur.as_secs_f64() * 1000.0,
+                hf_dur.as_secs_f64() * 1000.0,
+                join_dur.as_secs_f64() * 1000.0,
+                copyback_dur.as_secs_f64() * 1000.0,
+                (lf_par_dur + hf_dur - join_dur).as_secs_f64() * 1000.0,
+            );
+        }
+
+        Ok(())
+    }
+
     pub fn render_noise_for_group(
         &mut self,
         group: usize,

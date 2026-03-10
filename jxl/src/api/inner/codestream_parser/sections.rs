@@ -138,7 +138,39 @@ impl CodestreamParser {
                 #[cfg(not(feature = "threads"))]
                 let use_parallel_lf = false;
 
-                if use_parallel_lf {
+                // When VarDCT parallel and HF global section is ready, overlap LF group
+                // decode with HF global parsing. decode_hf_global only depends on lf_global
+                // (the LF Global section), not on LF group data — so both can run concurrently.
+                #[cfg(feature = "threads")]
+                let use_overlap = use_parallel_lf
+                    && frame.header().encoding
+                        != crate::headers::frame_header::Encoding::Modular
+                    && self.hf_global_section.is_some();
+
+                #[cfg(not(feature = "threads"))]
+                let use_overlap = false;
+
+                if use_overlap {
+                    #[cfg(feature = "threads")]
+                    {
+                        let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
+                        let count = lf_sections.len();
+                        let sections: Vec<(usize, Vec<u8>)> = lf_sections
+                            .into_iter()
+                            .map(|s| {
+                                let Section::Lf { group } = s.section else {
+                                    unreachable!()
+                                };
+                                (group, s.data)
+                            })
+                            .collect();
+                        let hf_data = self.hf_global_section.take().unwrap().data;
+                        frame.decode_lf_and_hf_global_parallel(sections, hf_data)?;
+                        self.section_state.remaining_lf -= count;
+                        self.section_state.hf_global_done = true;
+                        processed_section = true;
+                    }
+                } else if use_parallel_lf {
                     #[cfg(feature = "threads")]
                     {
                         let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
@@ -182,11 +214,22 @@ impl CodestreamParser {
                 let mut decode_hf_dur = std::time::Duration::ZERO;
                 let mut pipeline_dur = std::time::Duration::ZERO;
                 let mut finalize_lf_dur = std::time::Duration::ZERO;
-                if let Some(hf_global) = self.hf_global_section.take() {
+                // If HF global was already decoded in the overlap path, skip decoding.
+                // Otherwise decode it now (sequential path or no overlap).
+                let hf_newly_done = if self.section_state.hf_global_done {
+                    // Already decoded via overlap path
+                    true
+                } else if let Some(hf_global) = self.hf_global_section.take() {
                     let t = std::time::Instant::now();
                     frame.decode_hf_global(&mut BitReader::new(&hf_global.data))?;
                     decode_hf_dur = t.elapsed();
-
+                    self.section_state.hf_global_done = true;
+                    processed_section = true;
+                    true
+                } else {
+                    false
+                };
+                if hf_newly_done && frame.render_pipeline_not_ready() {
                     let t = std::time::Instant::now();
                     frame.prepare_render_pipeline(
                         self.pixel_format.as_ref().unwrap(),
@@ -203,9 +246,6 @@ impl CodestreamParser {
                     let t = std::time::Instant::now();
                     frame.finalize_lf()?;
                     finalize_lf_dur = t.elapsed();
-
-                    self.section_state.hf_global_done = true;
-                    processed_section = true;
                 }
                 if !self.section_state.hf_global_done {
                     break 'process;
