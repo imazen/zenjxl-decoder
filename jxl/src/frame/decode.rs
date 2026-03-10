@@ -1133,7 +1133,7 @@ impl Frame {
                 hf_dur.as_secs_f64() * 1000.0,
                 join_dur.as_secs_f64() * 1000.0,
                 copyback_dur.as_secs_f64() * 1000.0,
-                (lf_par_dur + hf_dur - join_dur).as_secs_f64() * 1000.0,
+                (lf_par_dur + hf_dur).saturating_sub(join_dur).as_secs_f64() * 1000.0,
             );
         }
 

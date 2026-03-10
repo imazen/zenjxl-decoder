@@ -46,10 +46,11 @@ pub fn adaptive_lf_smoothing(
     if ysize <= 2 || xsize <= 2 {
         return Ok(());
     }
+    // Use new_uninit: every pixel is written (borders copied, interior computed).
     let mut smoothed: [Image<f32>; 3] = [
-        Image::<f32>::new((xsize, ysize))?,
-        Image::<f32>::new((xsize, ysize))?,
-        Image::<f32>::new((xsize, ysize))?,
+        Image::<f32>::new_uninit((xsize, ysize))?,
+        Image::<f32>::new_uninit((xsize, ysize))?,
+        Image::<f32>::new_uninit((xsize, ysize))?,
     ];
     // Copy border rows (row 0 and ysize-1) and border columns (x=0, x=xsize-1).
     for c in 0..3 {

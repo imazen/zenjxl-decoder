@@ -234,7 +234,7 @@ impl CodestreamParser {
 
                     #[cfg(feature = "threads")]
                     if frame.decoder_state.parallel {
-                        frame.prepare_pipeline_and_finalize_lf(
+                        frame.prepare_render_pipeline(
                             self.pixel_format.as_ref().unwrap(),
                             decode_options.cms.as_deref(),
                             self.embedded_color_profile.as_ref().expect(
@@ -245,7 +245,10 @@ impl CodestreamParser {
                             ),
                         )?;
                         pipeline_dur = t.elapsed();
-                        finalize_lf_dur = std::time::Duration::ZERO;
+
+                        let t = std::time::Instant::now();
+                        frame.finalize_lf()?;
+                        finalize_lf_dur = t.elapsed();
                     } else {
                         frame.prepare_render_pipeline(
                             self.pixel_format.as_ref().unwrap(),

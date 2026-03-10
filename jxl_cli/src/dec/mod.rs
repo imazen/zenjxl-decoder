@@ -219,7 +219,7 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
     let color_type = pixel_format.color_type;
     let samples_per_pixel = pixel_format.color_type.samples_per_pixel();
 
-    let setup_dur = start.elapsed() - header_dur;
+    let setup_dur = start.elapsed().saturating_sub(header_dur);
 
     let mut total_section_dur = Duration::ZERO;
     let total_buf_alloc_dur = Duration::ZERO;
