@@ -11,6 +11,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod api;
+pub use api::{decode, decode_with, read_header, read_header_with};
 pub(crate) mod bit_reader;
 pub(crate) mod color;
 pub(crate) mod container;

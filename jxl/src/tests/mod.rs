@@ -12,6 +12,7 @@ pub mod codec_corpus;
 #[cfg(feature = "threads")]
 pub mod concurrency;
 pub mod conformance;
+pub mod convenience;
 pub mod coverage_boost;
 pub mod decode_api;
 pub mod entropy;
