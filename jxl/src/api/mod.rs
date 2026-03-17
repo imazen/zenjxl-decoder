@@ -44,6 +44,9 @@ pub use crate::headers::color_encoding::RenderingIntent;
 pub use crate::headers::extra_channels::ExtraChannel;
 pub use crate::headers::image_metadata::Orientation;
 
+// Container box types
+pub use crate::container::gain_map::GainMapBundle;
+
 // Point type used in Error variants
 pub use crate::features::spline::Point;
 

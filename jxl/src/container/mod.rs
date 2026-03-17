@@ -7,6 +7,7 @@
 
 pub mod box_header;
 pub mod frame_index;
+pub mod gain_map;
 pub mod parse;
 
 use box_header::*;

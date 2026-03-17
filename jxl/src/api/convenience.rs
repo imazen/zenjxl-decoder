@@ -25,8 +25,8 @@
 use std::sync::Arc;
 
 use super::{
-    JxlBasicInfo, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderLimits,
-    JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
+    GainMapBundle, JxlBasicInfo, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder,
+    JxlDecoderLimits, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
 };
 use crate::error::{Error, Result};
 use crate::headers::extra_channels::ExtraChannel;
@@ -52,6 +52,8 @@ pub struct JxlImage {
     pub output_profile: JxlColorProfile,
     /// The color profile embedded in the file.
     pub embedded_profile: JxlColorProfile,
+    /// HDR gain map bundle from a `jhgm` container box, if present.
+    pub gain_map: Option<GainMapBundle>,
 }
 
 /// Image metadata extracted from the file header, without decoding pixels.
@@ -178,12 +180,17 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
         })
         .collect();
 
-    match decoder.process(&mut input, &mut bufs)? {
-        ProcessingResult::Complete { .. } => {}
+    let mut decoder = match decoder.process(&mut input, &mut bufs)? {
+        ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
             return Err(Error::OutOfBounds(0));
         }
-    }
+    };
+
+    // Extract the gain map bundle if the box parser encountered a jhgm box.
+    // Note: if the jhgm box follows the codestream, it may not have been read
+    // yet. Use the low-level JxlDecoder API to access trailing boxes.
+    let gain_map = decoder.take_gain_map();
 
     // Copy to tightly packed Vec<u8>
     let total_bytes = row_bytes * height;
@@ -201,6 +208,7 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
         info,
         output_profile,
         embedded_profile,
+        gain_map,
     })
 }
 

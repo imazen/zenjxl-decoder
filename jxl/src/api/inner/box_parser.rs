@@ -6,6 +6,7 @@
 use std::io::IoSliceMut;
 
 use crate::container::frame_index::FrameIndexBox;
+use crate::container::gain_map::GainMapBundle;
 use crate::error::{Error, Result};
 
 use crate::api::{
@@ -22,6 +23,8 @@ enum ParseState {
     JbrdBox(u64),
     /// Buffering a jxli box: (remaining bytes, accumulated content).
     BufferingFrameIndex(u64, Vec<u8>),
+    /// Buffering a jhgm box: (remaining bytes, accumulated content).
+    BufferingGainMap(u64, Vec<u8>),
 }
 
 enum CodestreamBoxType {
@@ -39,6 +42,8 @@ pub(super) struct BoxParser {
     jbrd_data: Option<Vec<u8>>,
     /// Parsed frame index box, if present in the file.
     pub(super) frame_index: Option<FrameIndexBox>,
+    /// Parsed gain map bundle, if present in the file.
+    pub(super) gain_map: Option<GainMapBundle>,
 }
 
 impl BoxParser {
@@ -50,6 +55,7 @@ impl BoxParser {
             #[cfg(feature = "jpeg")]
             jbrd_data: None,
             frame_index: None,
+            gain_map: None,
         }
     }
 
@@ -158,6 +164,31 @@ impl BoxParser {
                         self.state = ParseState::BufferingFrameIndex(remaining, buf);
                     }
                 }
+                ParseState::BufferingGainMap(mut remaining, mut buf) => {
+                    let num = remaining.min(usize::MAX as u64) as usize;
+                    if !self.box_buffer.is_empty() {
+                        let take = num.min(self.box_buffer.len());
+                        buf.extend_from_slice(&self.box_buffer[..take]);
+                        self.box_buffer.consume(take);
+                        remaining -= take as u64;
+                    } else {
+                        let old_len = buf.len();
+                        buf.resize(old_len + num, 0);
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        if read == 0 {
+                            return Err(Error::OutOfBounds(num));
+                        }
+                        buf.truncate(old_len + read);
+                        remaining -= read as u64;
+                    }
+                    if remaining == 0 {
+                        // Parse the buffered gain map bundle.
+                        self.gain_map = Some(GainMapBundle::parse(&buf)?);
+                        self.state = ParseState::BoxNeeded;
+                    } else {
+                        self.state = ParseState::BufferingGainMap(remaining, buf);
+                    }
+                }
                 ParseState::BoxNeeded => {
                     self.box_buffer.refill(|b| input.read(b), None)?;
                     let min_len = match &self.box_buffer[..] {
@@ -226,6 +257,21 @@ impl BoxParser {
                         #[cfg(feature = "jpeg")]
                         b"jbrd" => {
                             self.state = ParseState::JbrdBox(content_len);
+                        }
+                        b"jhgm" => {
+                            if content_len == u64::MAX {
+                                return Err(Error::InvalidBox);
+                            }
+                            // Reasonable size limit for a gain map bundle (256 MB).
+                            // Gain maps contain a full JXL codestream so they can be large.
+                            if content_len > 256 * 1024 * 1024 {
+                                self.state = ParseState::SkippableBox(content_len);
+                            } else {
+                                self.state = ParseState::BufferingGainMap(
+                                    content_len,
+                                    Vec::with_capacity(content_len as usize),
+                                );
+                            }
                         }
                         b"jxli" => {
                             if content_len == u64::MAX {

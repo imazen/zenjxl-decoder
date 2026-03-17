@@ -298,6 +298,8 @@ pub enum Error {
     #[cfg(feature = "jpeg")]
     #[error("Invalid JBRD box: {0}")]
     InvalidJbrd(String),
+    #[error("Invalid gain map bundle (jhgm): {0}")]
+    InvalidGainMap(String),
 }
 
 impl From<enough::StopReason> for Error {

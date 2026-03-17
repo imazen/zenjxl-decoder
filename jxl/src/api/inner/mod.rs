@@ -12,6 +12,7 @@ use crate::{
 
 use super::{JxlBasicInfo, JxlColorProfile, JxlDecoderOptions, JxlPixelFormat};
 use crate::container::frame_index::FrameIndexBox;
+use crate::container::gain_map::GainMapBundle;
 use box_parser::BoxParser;
 use codestream_parser::CodestreamParser;
 
@@ -145,6 +146,17 @@ impl JxlDecoderInner {
     /// Returns the parsed frame index box, if the file contained one.
     pub fn frame_index(&self) -> Option<&FrameIndexBox> {
         self.box_parser.frame_index.as_ref()
+    }
+
+    /// Returns a reference to the parsed gain map bundle, if the file contained one.
+    pub fn gain_map(&self) -> Option<&GainMapBundle> {
+        self.box_parser.gain_map.as_ref()
+    }
+
+    /// Takes the parsed gain map bundle, if the file contained one.
+    /// After calling this, `gain_map()` will return `None`.
+    pub fn take_gain_map(&mut self) -> Option<GainMapBundle> {
+        self.box_parser.gain_map.take()
     }
 
     #[cfg(test)]

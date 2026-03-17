@@ -9,7 +9,11 @@ use super::{
 };
 #[cfg(test)]
 use crate::frame::Frame;
-use crate::{api::JxlFrameHeader, container::frame_index::FrameIndexBox, error::Result};
+use crate::{
+    api::JxlFrameHeader,
+    container::{frame_index::FrameIndexBox, gain_map::GainMapBundle},
+    error::Result,
+};
 use states::*;
 use std::marker::PhantomData;
 
@@ -69,6 +73,22 @@ impl<S: JxlState> JxlDecoder<S> {
     /// byte offsets, timestamps, and frame counts.
     pub fn frame_index(&self) -> Option<&FrameIndexBox> {
         self.inner.frame_index()
+    }
+
+    /// Returns a reference to the parsed gain map bundle, if the file contained
+    /// a `jhgm` box (ISO 21496-1 HDR gain map).
+    ///
+    /// The gain map codestream is a bare JXL codestream that can be decoded
+    /// with the same decoder. The ISO 21496-1 metadata blob is stored as raw
+    /// bytes for the caller to parse.
+    pub fn gain_map(&self) -> Option<&GainMapBundle> {
+        self.inner.gain_map()
+    }
+
+    /// Takes the parsed gain map bundle, if the file contained a `jhgm` box.
+    /// After calling this, `gain_map()` will return `None`.
+    pub fn take_gain_map(&mut self) -> Option<GainMapBundle> {
+        self.inner.take_gain_map()
     }
 
     /// Rewinds a decoder to the start of the file, allowing past frames to be displayed again.
