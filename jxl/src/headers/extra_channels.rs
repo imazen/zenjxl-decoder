@@ -92,6 +92,10 @@ impl ExtraChannelInfo {
     pub fn bit_depth(&self) -> BitDepth {
         self.bit_depth
     }
+    /// Returns the name of this extra channel, or an empty string if unnamed.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
     fn check(&self, _: &Empty) -> Result<(), Error> {
         if self.dim_shift > 3 {
             Err(Error::DimShiftTooLarge(self.dim_shift))

@@ -1577,6 +1577,83 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_extra_channel_metadata() {
+        use crate::headers::extra_channels::ExtraChannel;
+
+        let file = std::fs::read("resources/test/extra_channels.jxl").unwrap();
+        let options = JxlDecoderOptions::default();
+        let mut decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut input = file.as_slice();
+        let decoder = loop {
+            match decoder.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
+            }
+        };
+        let info = decoder.basic_info();
+        // extra_channels.jxl should have at least one extra channel
+        assert!(
+            !info.extra_channels.is_empty(),
+            "expected at least one extra channel"
+        );
+
+        // Verify all new fields are populated
+        for ec in &info.extra_channels {
+            // bits_per_sample should be a reasonable value
+            assert!(
+                ec.bits_per_sample > 0 && ec.bits_per_sample <= 32,
+                "unexpected bits_per_sample: {}",
+                ec.bits_per_sample
+            );
+            // dim_shift should be <= 3
+            assert!(ec.dim_shift <= 3, "unexpected dim_shift: {}", ec.dim_shift);
+        }
+    }
+
+    #[test]
+    fn test_extra_channel_alpha_with_new_fields() {
+        use crate::headers::extra_channels::ExtraChannel;
+
+        // 3x3a has alpha
+        let file = std::fs::read("resources/test/3x3a_srgb_lossless.jxl").unwrap();
+        let options = JxlDecoderOptions::default();
+        let mut decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut input = file.as_slice();
+        let decoder = loop {
+            match decoder.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
+            }
+        };
+        let info = decoder.basic_info();
+        // Should have exactly one extra channel of type Alpha
+        assert_eq!(info.extra_channels.len(), 1);
+        let alpha = &info.extra_channels[0];
+        assert_eq!(alpha.ec_type, ExtraChannel::Alpha);
+        assert!(alpha.bits_per_sample > 0);
+        // Default alpha channels typically have dim_shift 0 (full resolution)
+        assert_eq!(alpha.dim_shift, 0);
+    }
+
+    #[test]
+    fn test_preview_metadata_in_basic_info() {
+        // with_preview.jxl has a preview; basic.jxl does not
+        let file = std::fs::read("resources/test/with_preview.jxl").unwrap();
+        let options = JxlDecoderOptions::default();
+        let mut decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut input = file.as_slice();
+        let decoder = loop {
+            match decoder.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
+            }
+        };
+        let info = decoder.basic_info();
+        let (pw, ph) = info.preview_size.expect("expected preview_size");
+        assert!(pw > 0 && ph > 0, "preview dimensions should be positive");
+    }
+
+    #[test]
     fn test_stop_cancellation() {
         use almost_enough::Stopper;
         use enough::Stop;

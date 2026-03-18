@@ -247,6 +247,12 @@ impl JxlBitDepth {
 pub struct JxlExtraChannel {
     pub ec_type: ExtraChannel,
     pub alpha_associated: bool,
+    /// Bits per sample for this extra channel.
+    pub bits_per_sample: u32,
+    /// Channel name (empty string if unnamed).
+    pub name: String,
+    /// Dimensional shift (0 = full resolution, 1 = half, etc.).
+    pub dim_shift: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

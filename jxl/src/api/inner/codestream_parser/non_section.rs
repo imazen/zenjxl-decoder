@@ -102,6 +102,9 @@ impl CodestreamParser {
                     .map(|info| JxlExtraChannel {
                         ec_type: info.ec_type,
                         alpha_associated: info.alpha_associated(),
+                        bits_per_sample: info.bit_depth().bits_per_sample(),
+                        name: info.name().to_owned(),
+                        dim_shift: info.dim_shift(),
                     })
                     .collect(),
                 animation: data
