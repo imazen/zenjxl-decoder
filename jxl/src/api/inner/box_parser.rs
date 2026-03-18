@@ -25,6 +25,10 @@ enum ParseState {
     BufferingFrameIndex(u64, Vec<u8>),
     /// Buffering a jhgm box: (remaining bytes, accumulated content).
     BufferingGainMap(u64, Vec<u8>),
+    /// Buffering an Exif box: (remaining bytes, accumulated content).
+    BufferingExif(u64, Vec<u8>),
+    /// Buffering an xml (XMP) box: (remaining bytes, accumulated content).
+    BufferingXmp(u64, Vec<u8>),
 }
 
 enum CodestreamBoxType {
@@ -44,6 +48,10 @@ pub(super) struct BoxParser {
     pub(super) frame_index: Option<FrameIndexBox>,
     /// Parsed gain map bundle, if present in the file.
     pub(super) gain_map: Option<GainMapBundle>,
+    /// Raw EXIF data from the `Exif` container box (without the 4-byte TIFF offset prefix).
+    pub(super) exif: Option<Vec<u8>>,
+    /// Raw XMP data from the `xml ` container box.
+    pub(super) xmp: Option<Vec<u8>>,
 }
 
 impl BoxParser {
@@ -56,6 +64,8 @@ impl BoxParser {
             jbrd_data: None,
             frame_index: None,
             gain_map: None,
+            exif: None,
+            xmp: None,
         }
     }
 
@@ -189,6 +199,58 @@ impl BoxParser {
                         self.state = ParseState::BufferingGainMap(remaining, buf);
                     }
                 }
+                ParseState::BufferingExif(mut remaining, mut buf) => {
+                    let num = remaining.min(usize::MAX as u64) as usize;
+                    if !self.box_buffer.is_empty() {
+                        let take = num.min(self.box_buffer.len());
+                        buf.extend_from_slice(&self.box_buffer[..take]);
+                        self.box_buffer.consume(take);
+                        remaining -= take as u64;
+                    } else {
+                        let old_len = buf.len();
+                        buf.resize(old_len + num, 0);
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        if read == 0 {
+                            return Err(Error::OutOfBounds(num));
+                        }
+                        buf.truncate(old_len + read);
+                        remaining -= read as u64;
+                    }
+                    if remaining == 0 {
+                        // Exif box payload starts with a 4-byte TIFF header offset
+                        // (big-endian u32). Strip it to return raw EXIF/TIFF data.
+                        if buf.len() >= 4 {
+                            self.exif = Some(buf[4..].to_vec());
+                        }
+                        self.state = ParseState::BoxNeeded;
+                    } else {
+                        self.state = ParseState::BufferingExif(remaining, buf);
+                    }
+                }
+                ParseState::BufferingXmp(mut remaining, mut buf) => {
+                    let num = remaining.min(usize::MAX as u64) as usize;
+                    if !self.box_buffer.is_empty() {
+                        let take = num.min(self.box_buffer.len());
+                        buf.extend_from_slice(&self.box_buffer[..take]);
+                        self.box_buffer.consume(take);
+                        remaining -= take as u64;
+                    } else {
+                        let old_len = buf.len();
+                        buf.resize(old_len + num, 0);
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        if read == 0 {
+                            return Err(Error::OutOfBounds(num));
+                        }
+                        buf.truncate(old_len + read);
+                        remaining -= read as u64;
+                    }
+                    if remaining == 0 {
+                        self.xmp = Some(buf);
+                        self.state = ParseState::BoxNeeded;
+                    } else {
+                        self.state = ParseState::BufferingXmp(remaining, buf);
+                    }
+                }
                 ParseState::BoxNeeded => {
                     self.box_buffer.refill(|b| input.read(b), None)?;
                     let min_len = match &self.box_buffer[..] {
@@ -282,6 +344,34 @@ impl BoxParser {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
                                 self.state = ParseState::BufferingFrameIndex(
+                                    content_len,
+                                    Vec::with_capacity(content_len as usize),
+                                );
+                            }
+                        }
+                        b"Exif" => {
+                            if content_len == u64::MAX {
+                                return Err(Error::InvalidBox);
+                            }
+                            // Reasonable size limit for EXIF data (16 MB).
+                            if content_len > 16 * 1024 * 1024 {
+                                self.state = ParseState::SkippableBox(content_len);
+                            } else {
+                                self.state = ParseState::BufferingExif(
+                                    content_len,
+                                    Vec::with_capacity(content_len as usize),
+                                );
+                            }
+                        }
+                        b"xml " => {
+                            if content_len == u64::MAX {
+                                return Err(Error::InvalidBox);
+                            }
+                            // Reasonable size limit for XMP data (16 MB).
+                            if content_len > 16 * 1024 * 1024 {
+                                self.state = ParseState::SkippableBox(content_len);
+                            } else {
+                                self.state = ParseState::BufferingXmp(
                                     content_len,
                                     Vec::with_capacity(content_len as usize),
                                 );

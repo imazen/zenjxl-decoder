@@ -54,6 +54,12 @@ pub struct JxlImage {
     pub embedded_profile: JxlColorProfile,
     /// HDR gain map bundle from a `jhgm` container box, if present.
     pub gain_map: Option<GainMapBundle>,
+    /// Raw EXIF data from the `Exif` container box (TIFF header offset stripped).
+    /// `None` for bare codestreams or files without an `Exif` box.
+    pub exif: Option<Vec<u8>>,
+    /// Raw XMP data from the `xml ` container box.
+    /// `None` for bare codestreams or files without an `xml ` box.
+    pub xmp: Option<Vec<u8>>,
 }
 
 /// Image metadata extracted from the file header, without decoding pixels.
@@ -192,6 +198,10 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
     // yet. Use the low-level JxlDecoder API to access trailing boxes.
     let gain_map = decoder.take_gain_map();
 
+    // Extract EXIF and XMP metadata from container boxes.
+    let exif = decoder.take_exif();
+    let xmp = decoder.take_xmp();
+
     // Copy to tightly packed Vec<u8>
     let total_bytes = row_bytes * height;
     let mut pixels = Vec::with_capacity(total_bytes);
@@ -209,6 +219,8 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
         output_profile,
         embedded_profile,
         gain_map,
+        exif,
+        xmp,
     })
 }
 

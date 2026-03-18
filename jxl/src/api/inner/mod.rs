@@ -159,6 +159,32 @@ impl JxlDecoderInner {
         self.box_parser.gain_map.take()
     }
 
+    /// Returns the raw EXIF data from the `Exif` container box, if present.
+    ///
+    /// The 4-byte TIFF header offset prefix has been stripped; this returns
+    /// the raw EXIF/TIFF bytes starting with the byte-order marker (`II` or `MM`).
+    /// Returns `None` for bare codestreams or files without an `Exif` box.
+    pub fn exif(&self) -> Option<&[u8]> {
+        self.box_parser.exif.as_deref()
+    }
+
+    /// Takes the EXIF data, leaving `None` in its place.
+    pub fn take_exif(&mut self) -> Option<Vec<u8>> {
+        self.box_parser.exif.take()
+    }
+
+    /// Returns the raw XMP data from the `xml ` container box, if present.
+    ///
+    /// Returns `None` for bare codestreams or files without an `xml ` box.
+    pub fn xmp(&self) -> Option<&[u8]> {
+        self.box_parser.xmp.as_deref()
+    }
+
+    /// Takes the XMP data, leaving `None` in its place.
+    pub fn take_xmp(&mut self) -> Option<Vec<u8>> {
+        self.box_parser.xmp.take()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.codestream_parser.set_use_simple_pipeline(u);

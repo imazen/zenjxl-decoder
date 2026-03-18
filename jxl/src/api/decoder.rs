@@ -91,6 +91,38 @@ impl<S: JxlState> JxlDecoder<S> {
         self.inner.take_gain_map()
     }
 
+    /// Returns the raw EXIF data from the `Exif` container box, if present.
+    ///
+    /// The 4-byte TIFF header offset prefix is stripped; this returns the raw
+    /// EXIF/TIFF bytes starting with the byte-order marker (`II` or `MM`).
+    /// Returns `None` for bare codestreams or files without an `Exif` box.
+    ///
+    /// Note: the `Exif` box may appear after the codestream in the container.
+    /// Call this after decoding at least one frame for the most complete results.
+    pub fn exif(&self) -> Option<&[u8]> {
+        self.inner.exif()
+    }
+
+    /// Takes the EXIF data, leaving `None` in its place.
+    pub fn take_exif(&mut self) -> Option<Vec<u8>> {
+        self.inner.take_exif()
+    }
+
+    /// Returns the raw XMP data from the `xml ` container box, if present.
+    ///
+    /// Returns `None` for bare codestreams or files without an `xml ` box.
+    ///
+    /// Note: the `xml ` box may appear after the codestream in the container.
+    /// Call this after decoding at least one frame for the most complete results.
+    pub fn xmp(&self) -> Option<&[u8]> {
+        self.inner.xmp()
+    }
+
+    /// Takes the XMP data, leaving `None` in its place.
+    pub fn take_xmp(&mut self) -> Option<Vec<u8>> {
+        self.inner.take_xmp()
+    }
+
     /// Rewinds a decoder to the start of the file, allowing past frames to be displayed again.
     pub fn rewind(mut self) -> JxlDecoder<Initialized> {
         self.inner.rewind();
