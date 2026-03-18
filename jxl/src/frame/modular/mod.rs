@@ -877,12 +877,9 @@ impl FullModularImage {
         if self.buffer_info[buf_idx].info.output_channel_idx != Some(chan) {
             return Ok(());
         }
-        self.maybe_output(
-            buf_idx,
-            group,
-            false,
-            &mut |chan, grid, complete, img| pass_to_pipeline(chan, grid, complete, img.unwrap()),
-        )
+        self.maybe_output(buf_idx, group, false, &mut |chan, grid, complete, img| {
+            pass_to_pipeline(chan, grid, complete, img.unwrap())
+        })
     }
 
     pub fn zero_fill_empty_channels(&mut self, num_passes: usize, num_groups: usize) -> Result<()> {

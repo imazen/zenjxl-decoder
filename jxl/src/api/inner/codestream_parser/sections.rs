@@ -143,8 +143,7 @@ impl CodestreamParser {
                 // (the LF Global section), not on LF group data — so both can run concurrently.
                 #[cfg(feature = "threads")]
                 let use_overlap = use_parallel_lf
-                    && frame.header().encoding
-                        != crate::headers::frame_header::Encoding::Modular
+                    && frame.header().encoding != crate::headers::frame_header::Encoding::Modular
                     && self.hf_global_section.is_some();
 
                 #[cfg(not(feature = "threads"))]

@@ -269,7 +269,13 @@ impl<T: ImageDataType> Image<T> {
         // Use a recursive split pattern that the borrow checker can track.
         // split_rows_recursive handles the "remaining slice" ownership chain.
         let mut result = Vec::with_capacity(num_rows);
-        split_rows_into(data, bytes_per_row, bytes_between_rows, num_rows, &mut result);
+        split_rows_into(
+            data,
+            bytes_per_row,
+            bytes_between_rows,
+            num_rows,
+            &mut result,
+        );
         result
     }
 }

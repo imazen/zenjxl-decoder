@@ -247,7 +247,12 @@ impl LowMemoryRenderPipeline {
         self.scratch_channel_buffers[channel * 3 + kind].pop()
     }
 
-    pub(super) fn store_scratch_buffer(&mut self, channel: usize, kind: usize, image: OwnedRawImage) {
+    pub(super) fn store_scratch_buffer(
+        &mut self,
+        channel: usize,
+        kind: usize,
+        image: OwnedRawImage,
+    ) {
         self.scratch_channel_buffers[channel * 3 + kind].push(image)
     }
 

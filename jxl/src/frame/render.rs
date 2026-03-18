@@ -237,9 +237,7 @@ impl Frame {
         // (cross-batch boundaries have partial readiness). One-shot parallel
         // gets full readiness from the first pass, but we can't predict
         // one-shot vs incremental here, so preserve speculatively.
-        if self.header.num_groups() > 1
-            && pipeline!(self, p, p.needs_border_rendering())
-        {
+        if self.header.num_groups() > 1 && pipeline!(self, p, p.needs_border_rendering()) {
             modular_global.set_preserve_buffers(true);
         }
 
@@ -316,8 +314,7 @@ impl Frame {
                 && self.was_flushed_once
                 && self.header.num_groups() > 1
                 && pipeline!(self, p, p.needs_border_rendering())
-                && (self.header.encoding != Encoding::VarDCT
-                    || self.hf_coefficients.is_some());
+                && (self.header.encoding != Encoding::VarDCT || self.hf_coefficients.is_some());
             if is_final_rerender {
                 self.groups_to_flush.extend(0..self.header.num_groups());
                 self.changed_since_last_flush.clear();
@@ -346,7 +343,8 @@ impl Frame {
             // STEP 5: re-render VarDCT/noise data in rendered groups for which it was
             // not rendered, or re-send to pipeline modular channels that were not
             // updated in those groups.
-            let step5_groups: std::collections::BTreeSet<usize> = std::mem::take(&mut self.groups_to_flush);
+            let step5_groups: std::collections::BTreeSet<usize> =
+                std::mem::take(&mut self.groups_to_flush);
             for g in step5_groups {
                 if self
                     .changed_since_last_flush
@@ -1153,8 +1151,7 @@ impl Frame {
                             || factory.create(1).ok(),
                             |ctx_opt, (item_idx, slot_bufs)| -> Result<()> {
                                 stop.check()?;
-                                let ctx =
-                                    ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
                                 let item = &all_items[item_idx];
                                 // Create rect sub-views from fragments.
                                 // Fragments cover the full band; rect() narrows

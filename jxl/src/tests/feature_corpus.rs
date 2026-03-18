@@ -25,8 +25,8 @@ use super::parity::{CONFORMANCE_THRESHOLD_U8, ReferenceImage, compare_u8_buffers
 const DEFAULT_CORPUS_PATH: &str = "/mnt/v/output/zenjxl-decoder/feature-corpus";
 
 fn feature_corpus_dir() -> Option<std::path::PathBuf> {
-    let path = std::env::var("FEATURE_CORPUS_PATH")
-        .unwrap_or_else(|_| DEFAULT_CORPUS_PATH.to_string());
+    let path =
+        std::env::var("FEATURE_CORPUS_PATH").unwrap_or_else(|_| DEFAULT_CORPUS_PATH.to_string());
     let p = std::path::PathBuf::from(path);
     if p.exists() { Some(p) } else { None }
 }
@@ -140,8 +140,8 @@ fn decode_jxl(path: &std::path::Path) -> Result<(usize, usize, usize, Vec<u8>), 
     };
 
     // Decode
-    let mut output = Image::<u8>::new((width * channels, height))
-        .map_err(|e| format!("buffer: {e:?}"))?;
+    let mut output =
+        Image::<u8>::new((width * channels, height)).map_err(|e| format!("buffer: {e:?}"))?;
     let mut buffers = vec![JxlOutputBuffer::from_image_rect_mut(
         output
             .get_rect_mut(Rect {
@@ -178,8 +178,7 @@ fn compare_with_reference(
 ) -> Result<(), String> {
     let (width, height, channels, actual) = decode_jxl(jxl_path)?;
 
-    let reference = ReferenceImage::load(png_path)
-        .map_err(|e| format!("ref load: {e}"))?;
+    let reference = ReferenceImage::load(png_path).map_err(|e| format!("ref load: {e}"))?;
 
     if width != reference.width || height != reference.height {
         return Err(format!(
@@ -193,12 +192,19 @@ fn compare_with_reference(
         (channels, &reference.pixels[..], &actual[..])
     } else if channels == 4 && reference.channels == 3 {
         // Drop alpha from our decode for comparison
-        let rgb: Vec<u8> = actual.chunks_exact(4).flat_map(|c| &c[..3]).copied().collect();
-        return compare_buffers_owned(
-            &reference.pixels, &rgb, width, height, 3,
-        );
+        let rgb: Vec<u8> = actual
+            .chunks_exact(4)
+            .flat_map(|c| &c[..3])
+            .copied()
+            .collect();
+        return compare_buffers_owned(&reference.pixels, &rgb, width, height, 3);
     } else if channels == 3 && reference.channels == 4 {
-        let rgb: Vec<u8> = reference.pixels.chunks_exact(4).flat_map(|c| &c[..3]).copied().collect();
+        let rgb: Vec<u8> = reference
+            .pixels
+            .chunks_exact(4)
+            .flat_map(|c| &c[..3])
+            .copied()
+            .collect();
         return compare_buffers_owned(&rgb, &actual, width, height, 3);
     } else if channels == 2 && reference.channels == 4 {
         // Gray+alpha decoded, RGBA reference (djxl expands gray to RGBA)
@@ -214,10 +220,20 @@ fn compare_with_reference(
         let ref_gray: Vec<u8> = reference.pixels.chunks_exact(4).map(|c| c[0]).collect();
         return compare_buffers_owned(&ref_gray, &actual, width, height, 1);
     } else {
-        return Err(format!("channel mismatch: {} vs {}", channels, reference.channels));
+        return Err(format!(
+            "channel mismatch: {} vs {}",
+            channels, reference.channels
+        ));
     };
 
-    let result = compare_u8_buffers(ref_px, act_px, width, height, cmp_ch, CONFORMANCE_THRESHOLD_U8);
+    let result = compare_u8_buffers(
+        ref_px,
+        act_px,
+        width,
+        height,
+        cmp_ch,
+        CONFORMANCE_THRESHOLD_U8,
+    );
     if result.passed {
         Ok(())
     } else {
@@ -235,7 +251,14 @@ fn compare_buffers_owned(
     height: usize,
     channels: usize,
 ) -> Result<(), String> {
-    let result = compare_u8_buffers(reference, actual, width, height, channels, CONFORMANCE_THRESHOLD_U8);
+    let result = compare_u8_buffers(
+        reference,
+        actual,
+        width,
+        height,
+        channels,
+        CONFORMANCE_THRESHOLD_U8,
+    );
     if result.passed {
         Ok(())
     } else {
@@ -311,8 +334,10 @@ mod tests {
 
             let total = passed + failed + crashed;
             if total % 100 == 0 {
-                eprintln!("[{total}/{}] {passed} pass, {failed} fail, {crashed} crash",
-                    tests.len());
+                eprintln!(
+                    "[{total}/{}] {passed} pass, {failed} fail, {crashed} crash",
+                    tests.len()
+                );
             }
         }
 

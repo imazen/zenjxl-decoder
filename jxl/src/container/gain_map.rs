@@ -70,8 +70,7 @@ impl GainMapBundle {
                 "truncated: missing metadata size".into(),
             ));
         }
-        let metadata_size =
-            u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        let metadata_size = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
         pos += 2;
 
         if pos + metadata_size > data.len() {
@@ -112,12 +111,8 @@ impl GainMapBundle {
                 "truncated: missing alt_icc_size".into(),
             ));
         }
-        let alt_icc_size = u32::from_be_bytes([
-            data[pos],
-            data[pos + 1],
-            data[pos + 2],
-            data[pos + 3],
-        ]) as usize;
+        let alt_icc_size =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         pos += 4;
 
         let alt_icc_compressed = if alt_icc_size == 0 {
@@ -254,12 +249,7 @@ mod tests {
         let alt_icc = b"brotli-compressed-icc-data-here";
         let gain_map = b"\xff\x0a\x00\x01\x02\x03\x04\x05";
 
-        let data = build_minimal_bundle(
-            metadata,
-            Some(color_encoding),
-            Some(alt_icc),
-            gain_map,
-        );
+        let data = build_minimal_bundle(metadata, Some(color_encoding), Some(alt_icc), gain_map);
 
         let bundle = GainMapBundle::parse(&data).unwrap();
         assert_eq!(bundle.metadata.as_slice(), metadata.as_slice());
@@ -338,10 +328,7 @@ mod tests {
         let result = GainMapBundle::parse(&[0x00]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("truncated"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("truncated"), "unexpected error: {err}");
     }
 
     #[test]
@@ -353,10 +340,7 @@ mod tests {
         let result = GainMapBundle::parse(&data);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("truncated"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("truncated"), "unexpected error: {err}");
     }
 
     #[test]

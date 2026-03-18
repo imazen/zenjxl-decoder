@@ -177,10 +177,7 @@ mod tests {
     }
 
     fn test_image(name: &str) -> Vec<u8> {
-        let path = format!(
-            "{}/resources/test/{name}",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let path = format!("{}/resources/test/{name}", env!("CARGO_MANIFEST_DIR"));
         std::fs::read(&path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"))
     }
 
@@ -332,10 +329,15 @@ mod tests {
             .collect();
 
         for (i, handle) in handles.into_iter().enumerate() {
-            let (w2, h2, c2, pixels) =
-                handle.join().unwrap().unwrap_or_else(|e| panic!("Thread {i}: {e}"));
+            let (w2, h2, c2, pixels) = handle
+                .join()
+                .unwrap()
+                .unwrap_or_else(|e| panic!("Thread {i}: {e}"));
             assert_eq!((w, h, c), (w2, h2, c2), "Thread {i}: dimension mismatch");
-            assert_eq!(reference, pixels, "Thread {i}: pixel mismatch vs serial reference");
+            assert_eq!(
+                reference, pixels,
+                "Thread {i}: pixel mismatch vs serial reference"
+            );
         }
     }
 }

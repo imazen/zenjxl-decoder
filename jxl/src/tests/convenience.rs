@@ -54,7 +54,10 @@ mod tests {
         let image = decode(&data).unwrap();
         assert!(image.width > 0);
         assert!(image.height > 0);
-        assert_eq!(image.data.len(), image.width * image.height * image.channels);
+        assert_eq!(
+            image.data.len(),
+            image.width * image.height * image.channels
+        );
     }
 
     #[test]
@@ -90,6 +93,9 @@ mod tests {
     fn decode_dice() {
         let data = std::fs::read("resources/test/dice.jxl").unwrap();
         let image = decode(&data).unwrap();
-        assert_eq!(image.data.len(), image.width * image.height * image.channels);
+        assert_eq!(
+            image.data.len(),
+            image.width * image.height * image.channels
+        );
     }
 }
