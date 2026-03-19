@@ -920,7 +920,7 @@ impl Frame {
             // from neighbors' center buffers. Skip the topbottom/leftright copy.
             // In batched or incremental mode, center data is recycled between
             // batches/calls, so borders must be extracted into separate buffers.
-            let is_one_shot = num_groups == self.header.num_groups() as usize;
+            let is_one_shot = num_groups == self.header.num_groups();
             // Only skip border copy in true one-shot decode (not incremental).
             // In incremental decode, was_flushed_once is true from a prior call,
             // and the final re-render needs border buffers to correct cross-batch

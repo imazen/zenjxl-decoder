@@ -232,23 +232,7 @@ impl CodestreamParser {
                     let t = std::time::Instant::now();
 
                     #[cfg(feature = "threads")]
-                    if frame.decoder_state.parallel {
-                        frame.prepare_render_pipeline(
-                            self.pixel_format.as_ref().unwrap(),
-                            decode_options.cms.as_deref(),
-                            self.embedded_color_profile.as_ref().expect(
-                                "embedded_color_profile should be set before pipeline preparation",
-                            ),
-                            self.output_color_profile.as_ref().expect(
-                                "output_color_profile should be set before pipeline preparation",
-                            ),
-                        )?;
-                        pipeline_dur = t.elapsed();
-
-                        let t = std::time::Instant::now();
-                        frame.finalize_lf()?;
-                        finalize_lf_dur = t.elapsed();
-                    } else {
+                    {
                         frame.prepare_render_pipeline(
                             self.pixel_format.as_ref().unwrap(),
                             decode_options.cms.as_deref(),
