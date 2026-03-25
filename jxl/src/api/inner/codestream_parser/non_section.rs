@@ -127,6 +127,10 @@ impl CodestreamParser {
                     .preview
                     .as_ref()
                     .map(|p| (p.xsize() as usize, p.ysize() as usize)),
+                intrinsic_size: data
+                    .intrinsic_size
+                    .as_ref()
+                    .map(|s| (s.xsize() as usize, s.ysize() as usize)),
             });
             self.file_header = Some(file_header);
             let bits = br.total_bits_read();

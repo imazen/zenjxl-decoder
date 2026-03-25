@@ -102,4 +102,10 @@ pub struct JxlBasicInfo {
     pub uses_original_profile: bool,
     pub tone_mapping: ToneMapping,
     pub preview_size: Option<(usize, usize)>,
+    /// Intrinsic display size, if different from coded size.
+    ///
+    /// When present, the image should be rendered at this `(width, height)`
+    /// rather than the coded `size`. Used for resolution-independence
+    /// (e.g. a 4000×3000 image meant to display at 2000×1500).
+    pub intrinsic_size: Option<(usize, usize)>,
 }
