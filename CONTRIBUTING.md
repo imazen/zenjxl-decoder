@@ -1,3 +1,5 @@
+> **Note:** This contributing guide is inherited from the upstream jxl-rs project. Contributions to zenjxl-decoder should be directed to the [Imazen fork](https://github.com/imazen/zenjxl-decoder).
+
 # Contributing to jxl-rs
 
 See the [main repository](https://github.com/libjxl/libjxl) for more information.
