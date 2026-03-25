@@ -1,7 +1,3 @@
-/target
-*.swp
-perf.data
-perf.data.old
 
 # Coverage reports
 coverage_html/
@@ -9,3 +5,49 @@ coverage.json
 
 # Large test images (not needed for CI; excluded from crate via resources/)
 jxl/resources/test/portrait_4k_q90.jxl
+
+# === Standard exclusions (do not depend on user ~/.gitignore) ===
+
+# Rust build artifacts
+target/
+
+# Fuzz build artifacts and crashes
+fuzz/target/
+fuzz/artifacts/
+
+# Profiling
+perf.data
+perf.data.old
+flamegraph.svg
+heaptrack.*.zst
+cachegrind.out.*
+callgrind.out.*
+massif.out.*
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.rlib
+
+# Compiled binaries with no extension
+rust_out
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
