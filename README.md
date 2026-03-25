@@ -126,7 +126,7 @@ Set `parallel: false` on `JxlDecoderOptions` to force single-threaded mode at ru
 
 ## Conformance
 
-Against [libjxl/conformance](https://github.com/libjxl/conformance) test suite (Level 5): **17/23 passing** (74%).
+Against [libjxl/conformance](https://github.com/libjxl/conformance) test suite (Level 5): **17/23 passing** (74%, as of December 2025).
 
 ```bash
 cargo test --features cms conformance -- --ignored --nocapture
@@ -135,10 +135,10 @@ cargo test --features cms conformance -- --ignored --nocapture
 | Status | Tests |
 |--------|-------|
 | Pass | alpha_nonpremultiplied, alpha_triangles, bench_oriented_brg_5, bicycles, blendmodes_5, cafe_5, delta_palette, grayscale_5, grayscale_jpeg_5, grayscale_public_university, lz77_flower, noise_5, opsin_inverse_5, patches_5, patches_lossless, sunset_logo, upsampling_5 |
-| Skip | animation_icos4d_5, animation_newtons_cradle, animation_spline_5 (animation not yet supported) |
+| Skip | animation_icos4d_5, animation_newtons_cradle, animation_spline_5 (animation rendering not yet supported; animation metadata parsing is available via `JxlImageInfo::animation`) |
 | Fail | bike_5, progressive_5 (out-of-gamut/HDR values), spot (6-channel output not yet supported) |
 
-Against codec-corpus (184 JXL files with djxl reference output): **184/184 passing** (100%).
+Against codec-corpus (184 JXL files with djxl reference output): **184/184 passing** (100%, as of December 2025).
 
 ## Upstream Contributions
 
