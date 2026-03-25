@@ -26,11 +26,17 @@ These crates are authored by the same team, use archmage, and are `#![forbid(uns
 
 | Crate | Version | Provides | Replaces |
 |-------|---------|----------|----------|
-| **archmage** | 0.9.3 | Token dispatch, `#[autoversion]`, `incant!`, safe intrinsics | jxl_simd dispatch macros |
+| **archmage** | 0.9.5 | Token dispatch, `#[autoversion]`, `incant!`, safe intrinsics | jxl_simd dispatch macros |
 | **magetypes** | 0.9.3 | f32x8, i32x8, etc. with operators, transcendentals | jxl_simd F32SimdVec/I32SimdVec traits |
 | **linear-srgb** | 0.6.2 | sRGB/PQ/HLG/BT.709 transfer functions, rational poly, LUT tables | `color/tf.rs`, `util/rational_poly.rs`, `stages/from_linear.rs`, `stages/to_linear.rs` |
 | **garb** | 0.2.0 | RGBA↔BGRA swizzle, RGB↔RGBA expand/strip, channel interleaving | `render/simd_utils.rs` interleave/deinterleave |
 | **zenpixels-convert** | 0.1.0 | Format negotiation, depth conversion, alpha handling | `stages/convert.rs` depth/format logic |
+
+> **Version drift note (2026-03-25):** The archmage version above has been updated to 0.9.5
+> (actual resolved version per `Cargo.lock`; `jxl_simd/Cargo.toml` uses the `"0.9"` range).
+> The `garb` and `zenpixels-convert` entries are **phantom deps** — neither crate exists in
+> the workspace `Cargo.toml` or `Cargo.lock`. Before starting Phase 1, verify current
+> published versions of all listed crates on lib.rs and add them to `jxl/Cargo.toml`.
 
 ## Target Architectures
 
