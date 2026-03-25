@@ -95,10 +95,18 @@ Uses SharedImageView for parallel smoothing output. Same fix: per-chunk scratch 
 
 ## Verification
 
-- All 885 tests must pass
-- Conformance: 184/184 codec-corpus, 17/23 Level 5
+- All tests must pass (552 `#[test]` functions as of 2026-03-25; the "885" figure in earlier
+  versions of this plan was stale — recount with
+  `grep -r "#\[test\]" jxl/src/ jxl/tests/ | wc -l` before starting)
+- Conformance: 184/184 codec-corpus, 17/23 Level 5 (as of December 2025)
 - Benchmark before/after on multi-tile 4K images (city, forest, landscape, portrait)
 - Compare 1-thread and 8-thread performance
+
+> **jxl_simd unsafe surface note (2026-03-25):** The unsafe surface description in this plan
+> was written when jxl_simd contained unsafe intrinsics code. As of 2026-03-10, jxl_simd was
+> rewritten to use archmage and is now `#![forbid(unsafe_code)]`. The unsafe parallel
+> abstractions listed above (SharedImageView, DisjointRowAccess, ParallelOutputAccess) remain
+> in the `jxl` crate and are the only remaining unsafe surface.
 
 ## Success Criteria
 
