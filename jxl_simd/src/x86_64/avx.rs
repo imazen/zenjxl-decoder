@@ -78,8 +78,15 @@ impl SimdDescriptor for AvxDescriptor {
         Token::summon().map(AvxDescriptor)
     }
 
+    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        f(self)
+        #[target_feature(enable = "avx2,fma,f16c,bmi1,bmi2,lzcnt,movbe,popcnt")]
+        #[inline(never)]
+        unsafe fn inner<R>(d: AvxDescriptor, f: impl FnOnce(AvxDescriptor) -> R) -> R {
+            f(d)
+        }
+        // SAFETY: the X64V3Token inside self guarantees these features.
+        unsafe { inner(self, f) }
     }
 }
 

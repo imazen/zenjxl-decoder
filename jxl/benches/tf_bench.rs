@@ -275,6 +275,105 @@ jxl_simd::simd_function!(
 );
 
 // ============================================================================
+// Approach 5b: Fused rational poly + u8 via #[arcane] + magetypes + intrinsics
+// ============================================================================
+
+#[inline(always)]
+fn eval_rational_poly_mage<T: archmage::SimdToken + magetypes::simd::backends::F32x8Backend, const P: usize, const Q: usize>(
+    t: T,
+    x: magetypes::simd::generic::f32x8<T>,
+    p: [f32; P],
+    q: [f32; Q],
+) -> magetypes::simd::generic::f32x8<T> {
+    use magetypes::simd::generic::f32x8;
+    let mut yp = f32x8::splat(t, p[P - 1]);
+    for i in (0..P - 1).rev() {
+        yp = yp.mul_add(x, f32x8::splat(t, p[i]));
+    }
+    let mut yq = f32x8::splat(t, q[Q - 1]);
+    for i in (0..Q - 1).rev() {
+        yq = yq.mul_add(x, f32x8::splat(t, q[i]));
+    }
+    yp / yq
+}
+
+#[cfg(target_arch = "x86_64")]
+#[archmage::arcane(import_intrinsics)]
+fn fused_tf_u8_arcane(token: archmage::X64V3Token, input: &[f32], output: &mut [u8]) {
+    use magetypes::simd::generic::{f32x8, u8x16};
+
+    #[allow(clippy::excessive_precision)]
+    const P: [f32; 5] = [
+        -5.135152395e-4,
+        5.287254571e-3,
+        3.903842876e-1,
+        1.474205315,
+        7.352629620e-1,
+    ];
+    #[allow(clippy::excessive_precision)]
+    const Q: [f32; 5] = [
+        1.004519624e-2,
+        3.036675394e-1,
+        1.340816930,
+        9.258482155e-1,
+        2.424867759e-2,
+    ];
+
+    let zero = f32x8::splat(token, 0.0);
+    let one = f32x8::splat(token, 1.0);
+    let scale = f32x8::splat(token, 255.0);
+    let threshold = f32x8::splat(token, 0.0031308);
+    let linear_scale = f32x8::splat(token, 12.92);
+
+    for (in_chunk, out_chunk) in input
+        .chunks_exact(8)
+        .zip(output.chunks_exact_mut(8))
+    {
+        let x = f32x8::from_slice(token, in_chunk.try_into().unwrap());
+        let a = x.max(zero).min(one);
+
+        let mask = threshold.simd_gt(a);
+        let srgb = f32x8::blend(
+            mask,
+            a * linear_scale,
+            eval_rational_poly_mage(token, a.sqrt(), P, Q),
+        );
+
+        let scaled = srgb * scale;
+
+        // Free intrinsics: f32x8 → i32x8 → pack to u8
+        let i32s = _mm256_cvtps_epi32(scaled.into_repr());
+        let lo = _mm256_castsi256_si128(i32s);
+        let hi = _mm256_extracti128_si256::<1>(i32s);
+        let packed16 = _mm_packus_epi32(lo, hi);
+        let packed8 = _mm_packus_epi16(packed16, packed16);
+
+        // Back to magetypes for the store
+        let result = u8x16::from_repr(token, packed8);
+        let arr = result.to_array();
+        out_chunk.copy_from_slice(&arr[..8]);
+    }
+}
+
+fn fused_tf_u8_arcane_dispatch(input: &[f32], output: &mut [u8]) {
+    use archmage::SimdToken;
+    #[cfg(target_arch = "x86_64")]
+    if let Some(token) = archmage::X64V3Token::summon() {
+        return fused_tf_u8_arcane(token, input, output);
+    }
+    // scalar fallback
+    for (inp, out) in input.iter().zip(output.iter_mut()) {
+        let a = inp.clamp(0.0, 1.0);
+        let srgb = if a <= 0.0031308 {
+            a * 12.92
+        } else {
+            a.powf(1.0 / 2.4).mul_add(1.055, -0.055)
+        };
+        *out = (srgb * 255.0 + 0.5) as u8;
+    }
+}
+
+// ============================================================================
 // Approach 6: Scalar powf (reference/naive)
 // ============================================================================
 
@@ -464,6 +563,17 @@ fn bench_tf(c: &mut Criterion) {
         if size == 65536 {
             fused_linear_to_srgb_u8_dispatch(&input, &mut output);
             check_accuracy("fused_poly_u8_simd", &input, &output, &reference);
+        }
+
+        // 5b. Fused via #[arcane] + magetypes + free intrinsics
+        group.bench_function("fused_arcane_magetypes", |b| {
+            b.iter(|| {
+                fused_tf_u8_arcane_dispatch(black_box(&input), &mut output);
+            });
+        });
+        if size == 65536 {
+            fused_tf_u8_arcane_dispatch(&input, &mut output);
+            check_accuracy("fused_arcane_magetypes", &input, &output, &reference);
         }
 
         // 6. Naive powf (reference)

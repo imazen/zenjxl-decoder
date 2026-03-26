@@ -72,8 +72,15 @@ impl SimdDescriptor for Sse42Descriptor {
         Token::summon().map(Sse42Descriptor)
     }
 
+    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        f(self)
+        #[target_feature(enable = "avx2,fma,f16c,bmi1,bmi2,lzcnt,movbe,popcnt")]
+        #[inline(never)]
+        unsafe fn inner<R>(d: Sse42Descriptor, f: impl FnOnce(Sse42Descriptor) -> R) -> R {
+            f(d)
+        }
+        // SAFETY: the X64V3Token inside self guarantees these features.
+        unsafe { inner(self, f) }
     }
 }
 

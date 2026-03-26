@@ -43,6 +43,8 @@ serde_json = "1.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", version = "=0.3.0", features = ["test"] }
 criterion = { version = "0.5", features = ["html_reports"] }
+archmage = "0.9"
+magetypes = "0.9"
 
 [features]
 all-simd = ["jxl_simd/all-simd", "sse42", "avx", "avx512", "neon"]

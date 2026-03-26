@@ -70,8 +70,15 @@ impl SimdDescriptor for NeonDescriptor {
         Token::summon().map(NeonDescriptor)
     }
 
+    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        f(self)
+        #[target_feature(enable = "neon")]
+        #[inline(never)]
+        unsafe fn inner<R>(d: NeonDescriptor, f: impl FnOnce(NeonDescriptor) -> R) -> R {
+            f(d)
+        }
+        // SAFETY: the NeonToken inside self guarantees neon.
+        unsafe { inner(self, f) }
     }
 }
 

@@ -77,8 +77,15 @@ impl SimdDescriptor for Avx512Descriptor {
         Token::summon().map(Avx512Descriptor)
     }
 
+    #[allow(unsafe_code)]
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
-        f(self)
+        #[target_feature(enable = "avx512f,avx512bw,avx512cd,avx512dq,avx512vl,avx2,fma,f16c,bmi1,bmi2,lzcnt,movbe,popcnt")]
+        #[inline(never)]
+        unsafe fn inner<R>(d: Avx512Descriptor, f: impl FnOnce(Avx512Descriptor) -> R) -> R {
+            f(d)
+        }
+        // SAFETY: the X64V4Token inside self guarantees these features.
+        unsafe { inner(self, f) }
     }
 }
 
