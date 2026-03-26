@@ -161,3 +161,12 @@ Bug fixes reported to [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs):
 ## License
 
 BSD-3-Clause. See [LICENSE](LICENSE).
+
+
+
+### Upstream Contribution
+
+This is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs) (BSD-3-Clause).
+We are willing to release our improvements under the original BSD-3-Clause
+license if upstream takes over maintenance of those improvements. We'd rather
+contribute back than maintain a parallel codebase. Open an issue or reach out.
