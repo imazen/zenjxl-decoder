@@ -10,7 +10,7 @@ publish = false
 default-run = "zenjxl-decoder-cli"
 
 [dependencies]
-jxl = { package = "zenjxl-decoder", path = "../jxl", version = "=0.3.0" }
+jxl = { package = "zenjxl-decoder", path = "../zenjxl-decoder", version = "=0.3.0" }
 clap = { version = "4.5.18", features = ["derive"] }
 tracing-subscriber = { version = "0.3.18", features = [
   "env-filter",
@@ -24,7 +24,7 @@ color-eyre = "0.6.5"
 rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]
-jxl_macros = { package = "zenjxl-decoder-macros", path = "../jxl_macros", features = ["test"], version = "=0.3.0" }
+jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", features = ["test"], version = "=0.3.0" }
 criterion = { version = "0.7.0", features = ["html_reports"] }
 
 [build-dependencies]
