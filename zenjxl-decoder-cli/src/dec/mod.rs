@@ -1,0 +1,384 @@
+// Copyright (c) the JPEG XL Project Authors. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+use std::{
+    io::BufReader,
+    str::FromStr,
+    time::{Duration, Instant},
+};
+
+use color_eyre::eyre::{Result, eyre};
+use jxl::api::{
+    Endianness, ExtraChannel, JxlAnimation, JxlBitDepth, JxlBitstreamInput, JxlColorProfile,
+    JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
+    OwnedRawImage, ProcessingResult, Rect, states::WithImageInfo,
+};
+
+pub struct ImageFrame {
+    pub partial_renders: Vec<Vec<OwnedRawImage>>,
+    pub channels: Vec<OwnedRawImage>,
+    pub duration: f64,
+    pub color_type: JxlColorType,
+}
+
+pub struct DecodeOutput {
+    pub size: (usize, usize),
+    pub frames: Vec<ImageFrame>,
+    pub data_type: OutputDataType,
+    pub original_bit_depth: JxlBitDepth,
+    pub output_profile: JxlColorProfile,
+    pub embedded_profile: JxlColorProfile,
+    pub jxl_animation: Option<JxlAnimation>,
+}
+
+pub fn decode_header<In: JxlBitstreamInput>(
+    input: &mut In,
+    decoder_options: JxlDecoderOptions,
+) -> Result<JxlDecoder<WithImageInfo>> {
+    let initialized_decoder = JxlDecoder::<jxl::api::states::Initialized>::new(decoder_options);
+
+    match initialized_decoder.process(input)? {
+        ProcessingResult::Complete { result } => Ok(result),
+        ProcessingResult::NeedsMoreInput { .. } => Err(eyre!("Source file truncated")),
+    }
+}
+
+/// Output data type for decoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputDataType {
+    U8,
+    U16,
+    F16,
+    F32,
+}
+
+impl FromStr for OutputDataType {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "u8" => Ok(Self::U8),
+            "u16" => Ok(Self::U16),
+            "f16" => Ok(Self::F16),
+            "f32" => Ok(Self::F32),
+            _ => Err(format!("Unknown data type {s}")),
+        }
+    }
+}
+
+impl OutputDataType {
+    pub const ALL: &'static [OutputDataType] = &[
+        OutputDataType::U8,
+        OutputDataType::U16,
+        OutputDataType::F16,
+        OutputDataType::F32,
+    ];
+
+    /// Get the JxlDataFormat for this type.
+    pub fn to_data_format(self) -> JxlDataFormat {
+        match self {
+            Self::U8 => JxlDataFormat::U8 { bit_depth: 8 },
+            Self::U16 => JxlDataFormat::U16 {
+                endianness: Endianness::native(),
+                bit_depth: 16,
+            },
+            Self::F16 => JxlDataFormat::F16 {
+                endianness: Endianness::native(),
+            },
+            Self::F32 => JxlDataFormat::f32(),
+        }
+    }
+
+    pub fn bits_per_sample(&self) -> usize {
+        self.to_data_format().bytes_per_sample() * 8
+    }
+}
+
+pub trait JxlBitstreamInputExt: JxlBitstreamInput {
+    fn with_capped_size<T, F: FnOnce(&mut Self) -> T>(&mut self, size: Option<usize>, f: F) -> T;
+}
+
+impl JxlBitstreamInputExt for &[u8] {
+    fn with_capped_size<T, F: FnOnce(&mut Self) -> T>(&mut self, size: Option<usize>, f: F) -> T {
+        let size = size.unwrap_or(0);
+        if size == 0 {
+            return f(self);
+        }
+        let mut slice = &self[..size.min(self.len())];
+        let cur = slice.len();
+        let r = f(&mut slice);
+        *self = &self[cur - slice.len()..];
+        r
+    }
+}
+
+impl<R> JxlBitstreamInputExt for BufReader<R>
+where
+    BufReader<R>: JxlBitstreamInput,
+{
+    // noop implementation
+    fn with_capped_size<T, F: FnOnce(&mut Self) -> T>(&mut self, _size: Option<usize>, f: F) -> T {
+        f(self)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn decode_frames<In: JxlBitstreamInputExt>(
+    input: &mut In,
+    decoder_options: JxlDecoderOptions,
+    requested_bit_depth: Option<usize>,
+    requested_output_type: Option<OutputDataType>,
+    accepted_output_types: &[OutputDataType],
+    interleave_alpha: bool,
+    linear_output: bool,
+    render_interval: Option<usize>,
+    allow_partial_files: bool,
+) -> Result<(DecodeOutput, Duration)> {
+    let cli_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+    let start = Instant::now();
+
+    let mut decoder_with_image_info = decode_header(input, decoder_options)?;
+
+    let header_dur = start.elapsed();
+
+    // Get info and clone what we need before mutating the decoder
+    let info = decoder_with_image_info.basic_info().clone();
+    let embedded_profile = decoder_with_image_info.embedded_color_profile().clone();
+
+    let output_type = if let Some(ot) = requested_output_type
+        && accepted_output_types.contains(&ot)
+    {
+        ot
+    } else {
+        if requested_output_type.is_some() {
+            eprintln!("Warning: requested output type is not compatible with output format");
+        }
+        let bit_depth = requested_bit_depth.unwrap_or(info.bit_depth.bits_per_sample() as usize);
+        *accepted_output_types
+            .iter()
+            .find(|x| x.bits_per_sample() >= bit_depth)
+            .unwrap_or(accepted_output_types.last().unwrap())
+    };
+
+    let main_alpha_channel = info
+        .extra_channels
+        .iter()
+        .enumerate()
+        .find(|x| x.1.ec_type == ExtraChannel::Alpha)
+        .map(|x| x.0);
+
+    let interleave_alpha = interleave_alpha && main_alpha_channel.is_some();
+
+    // Set the pixel format to the requested data type
+    let current_format = decoder_with_image_info.current_pixel_format().clone();
+    let new_format = JxlPixelFormat {
+        color_type: if interleave_alpha {
+            current_format.color_type.add_alpha()
+        } else {
+            current_format.color_type
+        },
+        color_data_format: Some(output_type.to_data_format()),
+        extra_channel_format: current_format
+            .extra_channel_format
+            .iter()
+            .enumerate()
+            .map(|(c, f)| {
+                if interleave_alpha && Some(c) == main_alpha_channel {
+                    None
+                } else {
+                    f.as_ref().map(|_| output_type.to_data_format())
+                }
+            })
+            .collect(),
+    };
+    decoder_with_image_info.set_pixel_format(new_format);
+
+    // If linear output is requested, modify the output profile
+    if linear_output
+        && let JxlColorProfile::Simple(enc) = decoder_with_image_info.output_color_profile().clone()
+    {
+        decoder_with_image_info
+            .set_output_color_profile(JxlColorProfile::Simple(enc.with_linear_tf()))?;
+    }
+    let output_profile = decoder_with_image_info.output_color_profile().clone();
+
+    let mut image_data = DecodeOutput {
+        size: info.size,
+        frames: Vec::new(),
+        data_type: output_type,
+        original_bit_depth: info.bit_depth.clone(),
+        output_profile,
+        embedded_profile,
+        jxl_animation: info.animation.clone(),
+    };
+
+    let extra_channels = info.extra_channels.len() - if interleave_alpha { 1 } else { 0 };
+    let pixel_format = decoder_with_image_info.current_pixel_format().clone();
+    let color_type = pixel_format.color_type;
+    let samples_per_pixel = pixel_format.color_type.samples_per_pixel();
+
+    let setup_dur = start.elapsed().saturating_sub(header_dur);
+
+    let mut total_section_dur = Duration::ZERO;
+    let total_buf_alloc_dur = Duration::ZERO;
+
+    'frame: loop {
+        let image_size = info.size;
+        let byte_size = (
+            image_size.0 * output_type.bits_per_sample() / 8,
+            image_size.1,
+        );
+
+        let section_start = Instant::now();
+
+        // Use uninit allocation — the decoder fully populates every pixel.
+        // With allow-unsafe, this avoids page-faulting ~75MB of output memory
+        // upfront (saves ~40ms for 4K images).
+        let mut outputs = vec![OwnedRawImage::new_uninit((
+            byte_size.0 * samples_per_pixel,
+            byte_size.1,
+        ))?];
+
+        for _ in 0..extra_channels {
+            outputs.push(OwnedRawImage::new_uninit(byte_size)?);
+        }
+
+        // Pre-fault output pages in parallel to avoid page fault contention
+        // during rendering. Spreads ~18K page faults across rayon threads
+        // instead of hitting them under lock during the hot render loop.
+        #[cfg(feature = "threads")]
+        for output in &mut outputs {
+            output.prefault_parallel();
+        }
+
+        let mut partial_renders = vec![];
+
+        let mut decoder_with_frame_info = 'partial: loop {
+            match input
+                .with_capped_size(render_interval, |inp| decoder_with_image_info.process(inp))?
+            {
+                ProcessingResult::Complete { result } => {
+                    break 'partial result;
+                }
+                ProcessingResult::NeedsMoreInput { mut fallback, .. } => {
+                    let mut output_bufs: Vec<JxlOutputBuffer<'_>> = outputs
+                        .iter_mut()
+                        .map(|x| {
+                            let rect = Rect {
+                                size: x.byte_size(),
+                                origin: (0, 0),
+                            };
+                            JxlOutputBuffer::from_image_rect_mut(x.get_rect_mut(rect))
+                        })
+                        .collect();
+
+                    // If we have more data but we're feeding it slowly, save the partial
+                    // render and retry.
+                    if render_interval.is_some() && input.available_bytes()? > 0 {
+                        fallback.flush_pixels(&mut output_bufs)?;
+                        partial_renders.push(
+                            outputs
+                                .iter()
+                                .map(|x| x.try_clone())
+                                .collect::<Result<_, _>>()?,
+                        );
+                        decoder_with_image_info = fallback;
+                        continue 'partial;
+                    } else if allow_partial_files {
+                        fallback.flush_pixels(&mut output_bufs)?;
+                        image_data.frames.push(ImageFrame {
+                            partial_renders,
+                            duration: 0.0,
+                            channels: outputs,
+                            color_type,
+                        });
+                        break 'frame;
+                    }
+                    return Err(eyre!("Source file truncated"));
+                }
+            }
+        };
+
+        let frame_header = decoder_with_frame_info.frame_header();
+
+        total_section_dur += section_start.elapsed();
+
+        decoder_with_image_info = 'partial: loop {
+            let mut output_bufs: Vec<JxlOutputBuffer<'_>> = outputs
+                .iter_mut()
+                .map(|x| {
+                    let rect = Rect {
+                        size: x.byte_size(),
+                        origin: (0, 0),
+                    };
+                    JxlOutputBuffer::from_image_rect_mut(x.get_rect_mut(rect))
+                })
+                .collect();
+
+            match input.with_capped_size(render_interval, |inp| {
+                decoder_with_frame_info.process(inp, &mut output_bufs)
+            })? {
+                ProcessingResult::Complete { result } => {
+                    break 'partial result;
+                }
+                ProcessingResult::NeedsMoreInput { mut fallback, .. } => {
+                    // If we have more data but we're feeding it slowly, save the partial
+                    // render and retry.
+                    if render_interval.is_some() && input.available_bytes()? > 0 {
+                        fallback.flush_pixels(&mut output_bufs)?;
+                        partial_renders.push(
+                            outputs
+                                .iter()
+                                .map(|x| x.try_clone())
+                                .collect::<Result<_, _>>()?,
+                        );
+                        decoder_with_frame_info = fallback;
+                        continue 'partial;
+                    } else if allow_partial_files {
+                        fallback.flush_pixels(&mut output_bufs)?;
+                        image_data.frames.push(ImageFrame {
+                            partial_renders,
+                            duration: frame_header.duration.unwrap_or(0.0),
+                            channels: outputs,
+                            color_type,
+                        });
+                        break 'frame;
+                    }
+                    return Err(eyre!("Source file truncated"));
+                }
+            };
+        };
+
+        image_data.frames.push(ImageFrame {
+            partial_renders,
+            duration: frame_header.duration.unwrap_or(0.0),
+            channels: outputs,
+            color_type,
+        });
+
+        if !decoder_with_image_info.has_more_frames() {
+            break;
+        }
+    }
+
+    if cli_timing {
+        let total = start.elapsed();
+        let decode_render =
+            total.saturating_sub(header_dur + setup_dur + total_section_dur + total_buf_alloc_dur);
+        eprintln!(
+            "[JXL_CLI_TIMING] header: {:.2}ms | setup: {:.2}ms | \
+             sections: {:.2}ms | buf_alloc: {:.2}ms | \
+             decode+render: {:.2}ms | total: {:.2}ms",
+            header_dur.as_secs_f64() * 1000.0,
+            setup_dur.as_secs_f64() * 1000.0,
+            total_section_dur.as_secs_f64() * 1000.0,
+            total_buf_alloc_dur.as_secs_f64() * 1000.0,
+            decode_render.as_secs_f64() * 1000.0,
+            total.as_secs_f64() * 1000.0,
+        );
+    }
+
+    Ok((image_data, start.elapsed()))
+}

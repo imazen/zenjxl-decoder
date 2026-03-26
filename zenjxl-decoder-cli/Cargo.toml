@@ -1,0 +1,53 @@
+[package]
+name = "zenjxl-decoder-cli"
+description = "CLI tool for decoding JPEG XL images using zenjxl-decoder"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.89"
+license = "BSD-3-Clause"
+repository = "https://github.com/imazen/zenjxl-decoder"
+publish = false
+default-run = "zenjxl-decoder-cli"
+
+[dependencies]
+jxl = { package = "zenjxl-decoder", path = "../zenjxl-decoder", version = "=0.3.0", default-features = false }
+clap = { version = "4.5.18", features = ["derive"] }
+tracing-subscriber = { version = "0.3.18", features = [
+  "env-filter",
+], optional = true }
+lcms2 = { version = "6.1.0", features=["static"] }
+bytemuck = "1.14"
+half = "2.4.1"
+png = "0.18.0"
+exr = { version = "1.73.0", optional = true }
+color-eyre = "0.6.5"
+rayon = { version = "1.10", optional = true }
+
+[dev-dependencies]
+jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", features = ["test"], version = "=0.3.0" }
+criterion = { version = "0.7.0", features = ["html_reports"] }
+
+[build-dependencies]
+anyhow = "1.0.100"
+vergen-gitcl = { version = "9.1.0", features = ["rustc"] }
+
+[features]
+tracing-subscriber = ["dep:tracing-subscriber", "jxl/tracing"]
+exr = ["dep:exr"]
+profiling = ["jxl/profiling"]
+default = ["exr", "all-simd", "threads", "allow-unsafe"]
+allow-unsafe = ["jxl/allow-unsafe"]
+threads = ["jxl/threads", "dep:rayon"]
+
+all-simd = ["jxl/all-simd"]
+sse42 = ["jxl/sse42"]
+avx = ["jxl/avx"]
+avx512 = ["jxl/avx512"]
+neon = ["jxl/neon"]
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "decode"
+harness = false

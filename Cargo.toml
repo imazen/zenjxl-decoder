@@ -10,8 +10,7 @@ lto = "thin"
 codegen-units = 1
 
 [workspace]
-members = ["jxl", "jxl_cli", "jxl_macros", "jxl_simd"]
-# Note: directory names kept as jxl_* for source compatibility
+members = ["zenjxl-decoder", "zenjxl-decoder-cli", "zenjxl-decoder-macros", "zenjxl-decoder-simd"]
 resolver = "2"
 
 [workspace.lints.clippy]
