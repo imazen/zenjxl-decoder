@@ -82,7 +82,6 @@ macro_rules! fn_wasm128 {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct F32VecWasm128(v128, Wasm128Descriptor);
 
 impl F32SimdVec for F32VecWasm128 {
@@ -571,7 +570,6 @@ impl DivAssign<F32VecWasm128> for F32VecWasm128 {
 // --- I32 ---
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct I32VecWasm128(v128, Wasm128Descriptor);
 
 impl I32SimdVec for I32VecWasm128 {
@@ -798,7 +796,6 @@ impl BitXorAssign<I32VecWasm128> for I32VecWasm128 {
 // --- U32 ---
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U32VecWasm128(v128, Wasm128Descriptor);
 
 impl U32SimdVec for U32VecWasm128 {
@@ -822,7 +819,6 @@ impl U32SimdVec for U32VecWasm128 {
 // --- U8 ---
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U8VecWasm128(v128, Wasm128Descriptor);
 
 impl U8SimdVec for U8VecWasm128 {
@@ -909,7 +905,6 @@ impl U8SimdVec for U8VecWasm128 {
 // --- U16 ---
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U16VecWasm128(v128, Wasm128Descriptor);
 
 impl U16SimdVec for U16VecWasm128 {
@@ -996,7 +991,6 @@ impl U16SimdVec for U16VecWasm128 {
 // --- Mask ---
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct MaskWasm128(v128, Wasm128Descriptor);
 
 impl SimdMask for MaskWasm128 {

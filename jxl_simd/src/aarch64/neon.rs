@@ -96,7 +96,6 @@ macro_rules! fn_neon {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct F32VecNeon(float32x4_t, NeonDescriptor);
 
 impl F32SimdVec for F32VecNeon {
@@ -587,7 +586,6 @@ impl DivAssign<F32VecNeon> for F32VecNeon {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct I32VecNeon(int32x4_t, NeonDescriptor);
 
 impl I32SimdVec for I32VecNeon {
@@ -804,7 +802,6 @@ impl BitXorAssign<I32VecNeon> for I32VecNeon {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U32VecNeon(uint32x4_t, NeonDescriptor);
 
 impl U32SimdVec for U32VecNeon {
@@ -828,7 +825,6 @@ impl U32SimdVec for U32VecNeon {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U8VecNeon(uint8x16_t, NeonDescriptor);
 
 impl U8SimdVec for U8VecNeon {
@@ -918,7 +914,6 @@ impl U8SimdVec for U8VecNeon {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct U16VecNeon(uint16x8_t, NeonDescriptor);
 
 impl U16SimdVec for U16VecNeon {
@@ -1008,7 +1003,6 @@ impl U16SimdVec for U16VecNeon {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
 pub struct MaskNeon(uint32x4_t, NeonDescriptor);
 
 impl SimdMask for MaskNeon {
