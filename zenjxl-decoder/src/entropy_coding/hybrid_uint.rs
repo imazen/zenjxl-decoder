@@ -80,10 +80,17 @@ impl HybridUint {
         (hi << nbits) | bits
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn read(&self, symbol: u32, br: &mut BitReader) -> u32 {
         if symbol < self.split_token {
             return symbol;
+        }
+        // Fast path: when msb_in_token == 0 && lsb_in_token == 0, hi is always 1
+        // and the low/shift computation is a no-op.
+        if self.msb_in_token == 0 && self.lsb_in_token == 0 {
+            let nbits = (self.split_exponent + symbol - self.split_token) & 31;
+            let bits = br.read_optimistic(nbits as usize) as u32;
+            return (1 << nbits) | bits;
         }
         let bits_in_token = self.lsb_in_token + self.msb_in_token;
         let nbits =
