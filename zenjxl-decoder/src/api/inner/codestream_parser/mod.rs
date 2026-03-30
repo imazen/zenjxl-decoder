@@ -180,7 +180,6 @@ impl CodestreamParser {
         mut output_buffers: Option<&mut [JxlOutputBuffer]>,
         do_flush: bool,
     ) -> Result<()> {
-        eprintln!("[DEBUG] entering codestream_parser::process()");
         if let Some(output_buffers) = &output_buffers {
             let px = self.pixel_format.as_ref().unwrap();
             let expected_len = std::iter::once(&px.color_data_format)
@@ -192,16 +191,7 @@ impl CodestreamParser {
             }
         }
         // If we have sections to read, read into sections; otherwise, read into the local buffer.
-        let mut _debug_iter = 0u64;
         loop {
-            _debug_iter += 1;
-            if _debug_iter <= 3 {
-                eprintln!("[DEBUG] process() iter={}, sections_empty={}, frame={}, decoder_state={}, has_more_frames={}, process_without_output={}, skip_sections={}, preview_done={}",
-                    _debug_iter, self.sections.is_empty(), self.frame.is_some(), self.decoder_state.is_some(), self.has_more_frames, self.process_without_output, self.skip_sections, self.preview_done);
-            }
-            if _debug_iter > 100 {
-                panic!("infinite loop detected in process() at iter {}", _debug_iter);
-            }
             if !self.sections.is_empty() {
                 // Try to pick up JBRD data that may have arrived during box parsing
                 #[cfg(feature = "jpeg")]
@@ -358,23 +348,12 @@ impl CodestreamParser {
 
                 // Loop to handle incremental parsing (e.g. large ICC profiles) that may need
                 // multiple buffer refills to complete.
-                let mut _inner_iter = 0u64;
                 loop {
-                    _inner_iter += 1;
-                    if _inner_iter <= 3 || _inner_iter % 10000 == 0 {
-                        eprintln!("[DEBUG] inner loop iter={}, non_section_buf_len={}, header_needed_bytes={:?}",
-                            _inner_iter, self.non_section_buf.len(), self.header_needed_bytes);
-                    }
-                    if _inner_iter > 100000 {
-                        panic!("infinite inner loop at iter {}", _inner_iter);
-                    }
-                    eprintln!("[DEBUG] inner: get_more_codestream...");
                     let available_codestream = match box_parser.get_more_codestream(input) {
                         Err(Error::OutOfBounds(_)) => 0,
                         Ok(c) => c as usize,
                         Err(e) => return Err(e),
                     };
-                    eprintln!("[DEBUG] inner: available_codestream={}", available_codestream);
                     let c = self.non_section_buf.refill(
                         |buf| {
                             if !box_parser.box_buffer.is_empty() {
@@ -385,7 +364,6 @@ impl CodestreamParser {
                         },
                         Some(available_codestream),
                     )? as u64;
-                    eprintln!("[DEBUG] inner: refilled c={}, non_section_buf_len={}", c, self.non_section_buf.len());
                     box_parser.consume_codestream(c);
 
                     // If we know that non-section parsing will require more bytes than what
@@ -406,8 +384,6 @@ impl CodestreamParser {
                     }
 
                     let range = self.non_section_buf.range();
-                    eprintln!("[DEBUG] inner: calling process_non_section, range={:?}", range);
-
                     match self.process_non_section(decode_options) {
                         Ok(()) => {
                             self.header_needed_bytes = None;
