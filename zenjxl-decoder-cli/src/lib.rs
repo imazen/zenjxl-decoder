@@ -17,7 +17,10 @@ mod tests {
 
     fn get_test_file(name: &str) -> PathBuf {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        root.parent().unwrap().join("zenjxl-decoder/resources/test").join(name)
+        root.parent()
+            .unwrap()
+            .join("zenjxl-decoder/resources/test")
+            .join(name)
     }
 
     fn extract_f32_frames(output: &DecodeOutput) -> Vec<Vec<Vec<f32>>> {

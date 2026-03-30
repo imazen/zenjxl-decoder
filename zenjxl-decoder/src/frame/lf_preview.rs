@@ -230,12 +230,11 @@ impl Frame {
                     DataFormatConverter::None => &upsampled_rows,
                 };
 
-                let (r, g, b) =
-                    if matches!(color_type, JxlColorType::Bgr | JxlColorType::Bgra) {
-                        (2, 1, 0)
-                    } else {
-                        (0, 1, 2)
-                    };
+                let (r, g, b) = if matches!(color_type, JxlColorType::Bgr | JxlColorType::Bgra) {
+                    (2, 1, 0)
+                } else {
+                    (0, 1, 2)
+                };
                 let input_no_alpha = [&save_input[r], &save_input[g], &save_input[b]];
                 let input_alpha = [
                     &save_input[r],

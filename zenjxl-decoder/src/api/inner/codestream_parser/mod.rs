@@ -187,7 +187,16 @@ impl CodestreamParser {
             }
         }
         // If we have sections to read, read into sections; otherwise, read into the local buffer.
+        let mut _debug_iter = 0u64;
         loop {
+            _debug_iter += 1;
+            if _debug_iter == 5 {
+                eprintln!("[DEBUG] process() iter={}, sections_empty={}, frame={}, decoder_state={}, has_more_frames={}, process_without_output={}, skip_sections={}, preview_done={}",
+                    _debug_iter, self.sections.is_empty(), self.frame.is_some(), self.decoder_state.is_some(), self.has_more_frames, self.process_without_output, self.skip_sections, self.preview_done);
+            }
+            if _debug_iter > 100 {
+                panic!("infinite loop detected in process() at iter {}", _debug_iter);
+            }
             if !self.sections.is_empty() {
                 // Try to pick up JBRD data that may have arrived during box parsing
                 #[cfg(feature = "jpeg")]
@@ -253,6 +262,7 @@ impl CodestreamParser {
                         }
                         ready = ready.saturating_sub(len);
                     }
+                    let ready_before = self.ready_section_data;
                     let mut buffers = &mut section_buffers[..];
                     loop {
                         let num = if !box_parser.box_buffer.is_empty() {
@@ -273,6 +283,19 @@ impl CodestreamParser {
                         Err(Error::OutOfBounds(_)) => Err(Error::SectionTooShort),
                         Err(err) => Err(err),
                     }?;
+                    // If no section data was read and sections are still pending,
+                    // the input is truncated — return an error instead of looping
+                    // forever waiting for data that will never arrive.
+                    if !self.sections.is_empty()
+                        && self.ready_section_data == ready_before
+                        && input.available_bytes().unwrap_or(0) == 0
+                        && box_parser.box_buffer.is_empty()
+                    {
+                        let total_needed: usize = self.sections.iter().map(|s| s.len).sum();
+                        return Err(Error::OutOfBounds(
+                            total_needed.saturating_sub(self.ready_section_data),
+                        ));
+                    }
                 } else {
                     let total_size = self.sections.iter().map(|x| x.len).sum::<usize>();
                     loop {

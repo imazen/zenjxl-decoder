@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The changelog covers changes made in this fork.
 
+## [0.3.1] - 2026-03-30
+
+### Fixed
+
+- **OOM from crafted JXL codestream headers** -- A 26-byte JXL header could request a 4.2GB allocation. Three fixes:
+  - `Size::check()` now rejects `width * height > 2^30` during header parsing, before any pixel buffer allocation.
+  - `alloc_zeroed_fallible` uses `try_reserve` instead of `vec![0u8; n]`, returning an error instead of aborting on allocation failure.
+  - Default `max_pixels` lowered from 2^30 to 2^28 (256 megapixels).
+
 ## [0.3.0] - 2026-03-06
 
 Initial public release of the zenjxl-decoder fork.
