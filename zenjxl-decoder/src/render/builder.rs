@@ -145,6 +145,11 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                     stage_is_used[i] |= self.shared.channel_is_used[c];
                 }
             }
+            // Stages with non-zero shift modify channel dimensions; pruning
+            // them corrupts downstream stage channel info.
+            if stage.shift() != (0, 0) {
+                stage_is_used[i] = true;
+            }
             if stage_is_used[i] {
                 match self.shared.stages[i].is_special_case() {
                     None => (),
