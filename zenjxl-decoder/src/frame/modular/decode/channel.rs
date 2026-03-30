@@ -71,6 +71,7 @@ fn decode_modular_channel_small(
                 y,
                 &references,
                 &mut property_buffer,
+                u32::MAX, // cold path: compute all properties
             );
             let dec = reader.read_signed(&tree.histograms, br, prediction_result.context as usize);
             let val = make_pixel(dec, prediction_result.multiplier, prediction_result.guess);
