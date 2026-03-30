@@ -128,6 +128,22 @@ impl IncrementalIccReader {
             });
         }
 
+        // Amplification check: the decoded ICC size cannot exceed the
+        // available bitstream data by more than 1024x.  ANS/Huffman coding
+        // has a theoretical maximum compression ratio, and exceeding this
+        // bound with a tiny input is a sign of a crafted DoS payload.
+        // This prevents the ICC decode loop from iterating billions of
+        // times on truncated inputs.
+        let available_bits = br.total_bits_available();
+        let max_from_input = (available_bits as u64).saturating_mul(1024);
+        if len > max_from_input {
+            return Err(Error::LimitExceeded {
+                resource: "icc_size_vs_input",
+                actual: len,
+                limit: max_from_input,
+            });
+        }
+
         let len = len as usize;
 
         let histograms = Histograms::decode(ICC_CONTEXTS, br, true)?;
