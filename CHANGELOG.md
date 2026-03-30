@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The changelog covers changes made in this fork.
 
+## [0.3.3] - 2026-03-30
+
+Ports 6 upstream bugfixes from libjxl/jxl-rs (March 2026) and 5 performance optimizations from PR #705. Yanks broken 0.3.2 release.
+
+### Fixed (upstream ports)
+
+- **vsqueeze grid boundary** (PR #731) -- Grid-based processing used wrong row when `has_tail=false` but `in_next_avg` exists, corrupting squeeze output.
+- **hsqueeze grid boundary** (PR #735) -- Single-pixel-width shortcut looped over residual height instead of output height.
+- **Stage pruning with shift** (PR #725, fuzzer-found) -- Pruning render pipeline stages with non-zero shift corrupted downstream channel dimensions.
+- **EC upsampling validation** (PR #741) -- `check()` tested raw `ec_upsampling` instead of the effective value after `dim_shift`, allowing invalid configurations.
+- **Mixed-upsampling patches** (PR #742) -- Patches with EC upsampling differing from color upsampling were silently accepted instead of rejected.
+- **LF preview alpha overflow + BGR order** (PR #740) -- `1u8 << 8` overflowed to 0 (should be 255); BGR/BGRA output formats got RGB channel order.
+
+### Performance
+
+- **BitReader section padding** -- Append 8 zero bytes to section buffers so `refill()` always takes the fast 8-byte path, eliminating `refill_slow()` calls.
+- **Property used-mask** -- Skip unused property computation per pixel. Trees typically split on 2-4 of 16 properties; the rest are now skipped.
+- **HybridUint fast path** -- When `msb_in_token == 0`, simplify entropy decoding to `(1 << nbits) | bits`.
+- **Inline annotation audit** -- 14 hot-path functions upgraded to `#[inline(always)]` across BitReader, ANS, Huffman, LZ77, and modular predict.
+- **Blending SmallVec** -- Replace per-row `Vec` heap allocations with stack-based `SmallVec<[_; 8]>`.
+
+Combined effect: **+4% to +16%** across VarDCT and modular images (single-threaded).
+
+### Yanked
+
+- **0.3.2** -- Broken release: `BitReader::new_padded` was changed to return `Result`, causing 478 of 1277 tests to fail (`SectionTooShort` on valid files).
+
 ## [0.3.1] - 2026-03-30
 
 ### Fixed
