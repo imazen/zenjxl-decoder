@@ -127,3 +127,26 @@ fn test_image_allocation_is_fallible() {
         Err(e) => eprintln!("Large allocation correctly failed: {e}"),
     }
 }
+
+/// Crafted 19-byte JXL codestream that claims want_icc=true with a huge
+/// ICC size. Without the amplification check in IncrementalIccReader, the
+/// ICC decode loop iterates hundreds of millions of times, hanging the
+/// decoder indefinitely.
+#[test]
+fn test_icc_amplification_dos() {
+    let data: &[u8] = &[
+        0xff, 0x0a, 0xff, 0x00, 0x1a, 0xff, 0xd8, 0x55, 0x55, 0x55, 0x05, 0x34, 0x0a, 0x44,
+        0x49, 0x46, 0x00, 0x4e, 0x46,
+    ];
+    assert_decode_rejects(data, "icc_amplification_19bytes");
+}
+
+/// Variant from fuzz_decode_limits artifact.
+#[test]
+fn test_icc_amplification_dos_variant() {
+    let data: &[u8] = &[
+        0xff, 0x0a, 0x87, 0x40, 0x0a, 0x87, 0x87, 0x0a, 0x87, 0x59, 0x59, 0x59, 0xbb, 0xb3,
+        0xb3, 0xb3, 0x00, 0x59, 0x00,
+    ];
+    assert_decode_rejects(data, "icc_amplification_variant");
+}

@@ -113,6 +113,13 @@ pub struct IncrementalIccReader {
     len: usize,
     // [prev, prev_prev]
     prev_bytes: [u8; 2],
+    /// Cumulative input bits consumed across all `read_one` calls.
+    /// Tracks progress to detect degenerate entropy streams.
+    total_bits_consumed: u64,
+    /// `br.total_bits_read()` at the end of the previous `read_one` call,
+    /// used to compute per-call delta (since BitReader is recreated per chunk
+    /// in incremental mode).
+    last_br_bits_read: usize,
 }
 
 impl IncrementalIccReader {
@@ -132,12 +139,15 @@ impl IncrementalIccReader {
 
         let histograms = Histograms::decode(ICC_CONTEXTS, br, true)?;
         let reader = SymbolReader::new(&histograms, br, None)?;
+        let last_br_bits_read = br.total_bits_read();
         Ok(Self {
             histograms,
             reader,
             len,
             out_buf: Vec::new_with_capacity(len)?,
             prev_bytes: [0, 0],
+            total_bits_consumed: 0,
+            last_br_bits_read,
         })
     }
 
@@ -177,6 +187,12 @@ impl IncrementalIccReader {
         self.num_coded_bytes() - self.out_buf.len()
     }
 
+    /// Maximum output bytes per input byte before we consider the stream
+    /// degenerate. ANS/Huffman coding cannot achieve this ratio legitimately;
+    /// a crafted codestream exploiting near-zero-entropy histograms can
+    /// produce unbounded output from minimal input.
+    const MAX_AMPLIFICATION: usize = 1024;
+
     pub fn read_one(&mut self, br: &mut BitReader) -> Result<()> {
         let ctx = self.get_icc_ctx() as usize;
         let checkpoint = self.reader.checkpoint::<1>();
@@ -194,6 +210,34 @@ impl IncrementalIccReader {
         let b = sym as u8;
         self.out_buf.push(b);
         self.prev_bytes = [b, self.prev_bytes[0]];
+
+        // Track cumulative input bits consumed. In incremental mode the
+        // BitReader is recreated per chunk, so we track the delta from
+        // last_br_bits_read and accumulate it.
+        let current_br_bits = br.total_bits_read();
+        if current_br_bits >= self.last_br_bits_read {
+            self.total_bits_consumed += (current_br_bits - self.last_br_bits_read) as u64;
+        } else {
+            // BitReader was recreated (new chunk) — current_br_bits is from
+            // the start of the new chunk. All bits in this chunk so far are new.
+            self.total_bits_consumed += current_br_bits as u64;
+        }
+        self.last_br_bits_read = current_br_bits;
+
+        // Amplification check: verify input bits are being consumed
+        // proportionally to output bytes produced. A degenerate histogram
+        // can produce unlimited output from zero input bits, hanging the
+        // decoder indefinitely. Check every 256 bytes to amortize cost.
+        if self.out_buf.len() & 0xFF == 0 {
+            let input_bytes = (self.total_bits_consumed / 8 + 1) as usize;
+            if self.out_buf.len() / input_bytes > Self::MAX_AMPLIFICATION {
+                return Err(Error::LimitExceeded {
+                    resource: "icc_amplification",
+                    actual: self.out_buf.len() as u64,
+                    limit: (input_bytes * Self::MAX_AMPLIFICATION) as u64,
+                });
+            }
+        }
         Ok(())
     }
 
