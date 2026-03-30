@@ -18,8 +18,7 @@ fn assert_decode_rejects(data: &[u8], label: &str) {
     let mut input: &[u8] = data;
 
     // Try to get past header parsing
-    let result = decoder.process(&mut input);
-    match result {
+    let decoder = match decoder.process(&mut input) {
         Err(e) => {
             eprintln!("[{label}] Correctly rejected at header: {e}");
             return;
@@ -28,25 +27,19 @@ fn assert_decode_rejects(data: &[u8], label: &str) {
             eprintln!("[{label}] Correctly rejected: needs more input (truncated)");
             return;
         }
-        Ok(ProcessingResult::Complete { result: decoder }) => {
-            // Header parsed — try frame info
-            let mut input: &[u8] = &[];
-            match decoder.process(&mut input) {
-                Err(e) => {
-                    eprintln!("[{label}] Correctly rejected at frame info: {e}");
-                    return;
-                }
-                Ok(ProcessingResult::NeedsMoreInput { .. }) => {
-                    eprintln!("[{label}] Correctly rejected: needs more input at frame stage");
-                    return;
-                }
-                Ok(ProcessingResult::Complete { .. }) => {
-                    eprintln!(
-                        "[{label}] WARNING: header+frame parsed without error, but no OOM — test passes (limits caught it)"
-                    );
-                }
-            }
+        Ok(ProcessingResult::Complete { result }) => result,
+    };
+
+    // Header parsed — try frame info
+    let mut input: &[u8] = &[];
+    match decoder.process(&mut input) {
+        Err(e) => eprintln!("[{label}] Correctly rejected at frame info: {e}"),
+        Ok(ProcessingResult::NeedsMoreInput { .. }) => {
+            eprintln!("[{label}] Correctly rejected: needs more input at frame stage")
         }
+        Ok(ProcessingResult::Complete { .. }) => eprintln!(
+            "[{label}] WARNING: header+frame parsed without error, but no OOM — test passes (limits caught it)"
+        ),
     }
 }
 

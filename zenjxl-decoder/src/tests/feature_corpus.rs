@@ -333,7 +333,7 @@ mod tests {
             }
 
             let total = passed + failed + crashed;
-            if total % 100 == 0 {
+            if total.is_multiple_of(100) {
                 eprintln!(
                     "[{total}/{}] {passed} pass, {failed} fail, {crashed} crash",
                     tests.len()

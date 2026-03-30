@@ -716,7 +716,7 @@ pub fn for_each_test_file(input: TokenStream) -> TokenStream {
     let fn_name = parse_macro_input!(input as Ident);
     let root_test_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("jxl")
+        .join("zenjxl-decoder")
         .join("resources")
         .join("test");
     let conformance_test_dir = root_test_dir.join("conformance_test_images");

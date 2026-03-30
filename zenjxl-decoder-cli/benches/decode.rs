@@ -16,7 +16,7 @@ fn get_test_paths() -> Vec<PathBuf> {
             let root_test_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .unwrap()
-                .join("jxl")
+                .join("zenjxl-decoder")
                 .join("resources")
                 .join("test");
             [
