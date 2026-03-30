@@ -96,7 +96,7 @@ impl CodestreamParser {
                     break 'process;
                 };
                 assert!(self.sections.is_empty());
-                let mut br = BitReader::new(&sec.data);
+                let mut br = BitReader::new_padded(&sec.data, sec.len);
                 frame.decode_lf_global(&mut br)?;
                 frame.decode_lf_group(0, &mut br)?;
                 frame.decode_hf_global(&mut br)?;
@@ -122,7 +122,7 @@ impl CodestreamParser {
                 let t0 = std::time::Instant::now();
 
                 if let Some(lf_global) = self.lf_global_section.take() {
-                    frame.decode_lf_global(&mut BitReader::new(&lf_global.data))?;
+                    frame.decode_lf_global(&mut BitReader::new_padded(&lf_global.data, lf_global.len))?;
                     self.section_state.lf_global_done = true;
                     processed_section = true;
                 }
@@ -154,17 +154,17 @@ impl CodestreamParser {
                     {
                         let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
                         let count = lf_sections.len();
-                        let sections: Vec<(usize, Vec<u8>)> = lf_sections
+                        let sections: Vec<(usize, Vec<u8>, usize)> = lf_sections
                             .into_iter()
                             .map(|s| {
                                 let Section::Lf { group } = s.section else {
                                     unreachable!()
                                 };
-                                (group, s.data)
+                                (group, s.data, s.len)
                             })
                             .collect();
-                        let hf_data = self.hf_global_section.take().unwrap().data;
-                        frame.decode_lf_and_hf_global_parallel(sections, hf_data)?;
+                        let hf_sec = self.hf_global_section.take().unwrap();
+                        frame.decode_lf_and_hf_global_parallel(sections, hf_sec.data, hf_sec.len)?;
                         self.section_state.remaining_lf -= count;
                         self.section_state.hf_global_done = true;
                         processed_section = true;
@@ -174,13 +174,13 @@ impl CodestreamParser {
                     {
                         let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
                         let count = lf_sections.len();
-                        let sections: Vec<(usize, Vec<u8>)> = lf_sections
+                        let sections: Vec<(usize, Vec<u8>, usize)> = lf_sections
                             .into_iter()
                             .map(|s| {
                                 let Section::Lf { group } = s.section else {
                                     unreachable!()
                                 };
-                                (group, s.data)
+                                (group, s.data, s.len)
                             })
                             .collect();
                         if frame.header().encoding
@@ -198,7 +198,7 @@ impl CodestreamParser {
                         let Section::Lf { group } = lf_section.section else {
                             unreachable!()
                         };
-                        frame.decode_lf_group(group, &mut BitReader::new(&lf_section.data))?;
+                        frame.decode_lf_group(group, &mut BitReader::new_padded(&lf_section.data, lf_section.len))?;
                         processed_section = true;
                         self.section_state.remaining_lf -= 1;
                     }
@@ -220,7 +220,7 @@ impl CodestreamParser {
                     true
                 } else if let Some(hf_global) = self.hf_global_section.take() {
                     let t = std::time::Instant::now();
-                    frame.decode_hf_global(&mut BitReader::new(&hf_global.data))?;
+                    frame.decode_hf_global(&mut BitReader::new_padded(&hf_global.data, hf_global.len))?;
                     decode_hf_dur = t.elapsed();
                     self.section_state.hf_global_done = true;
                     processed_section = true;
@@ -288,7 +288,7 @@ impl CodestreamParser {
                             break;
                         };
                         self.section_state.completed_passes[g] += 1;
-                        sections.push((pass, BitReader::new(&s.data)));
+                        sections.push((pass, BitReader::new_padded(&s.data, s.len)));
                     }
                     if !sections.is_empty() {
                         group_readers.push((g, sections));

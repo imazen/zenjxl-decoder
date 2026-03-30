@@ -45,6 +45,31 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Constructs a BitReader for padded data where `real_len` bytes are valid
+    /// content and the remaining bytes are zero padding.
+    ///
+    /// The padding ensures `refill()` can always take the fast 8-byte read path
+    /// instead of falling back to byte-by-byte `refill_slow()`. The caller must
+    /// ensure `data.len() >= real_len + 8` (8 bytes of zero padding).
+    ///
+    /// `initial_bits` is set from `real_len`, so `check_for_error()` and
+    /// `total_bits_available()` report the correct content length.
+    pub fn new_padded(data: &[u8], real_len: usize) -> BitReader<'_> {
+        debug_assert!(
+            data.len() >= real_len + 8,
+            "padded data too short: {} < {} + 8",
+            data.len(),
+            real_len
+        );
+        BitReader {
+            data,
+            bit_buf: 0,
+            bits_in_buf: 0,
+            total_bits_read: 0,
+            initial_bits: real_len * 8,
+        }
+    }
+
     /// Reads `num` bits from the buffer without consuming them.
     #[inline]
     pub fn peek(&mut self, num: usize) -> u64 {

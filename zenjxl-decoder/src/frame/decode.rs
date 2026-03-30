@@ -464,7 +464,10 @@ impl Frame {
     /// Each LF group's modular data is decoded in parallel using rayon.
     /// Only valid for Encoding::Modular (VarDCT LF groups have shared mutable state).
     #[cfg(feature = "threads")]
-    pub fn decode_lf_groups_modular_parallel(&self, sections: Vec<(usize, Vec<u8>)>) -> Result<()> {
+    pub fn decode_lf_groups_modular_parallel(
+        &self,
+        sections: Vec<(usize, Vec<u8>, usize)>,
+    ) -> Result<()> {
         use rayon::prelude::*;
 
         assert_eq!(self.header.encoding, Encoding::Modular);
@@ -474,9 +477,9 @@ impl Frame {
         let tree = &lf_global.tree;
         let header = &self.header;
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
-        sections.into_par_iter().try_for_each(|(group, data)| {
+        sections.into_par_iter().try_for_each(|(group, data, len)| {
             stop.check()?;
-            let mut br = BitReader::new(&data);
+            let mut br = BitReader::new_padded(&data, len);
             modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
         })
     }
@@ -489,7 +492,7 @@ impl Frame {
     #[cfg(feature = "threads")]
     pub fn decode_lf_groups_vardct_parallel(
         &mut self,
-        sections: Vec<(usize, Vec<u8>)>,
+        sections: Vec<(usize, Vec<u8>, usize)>,
     ) -> Result<()> {
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -527,9 +530,9 @@ impl Frame {
 
         let results: Vec<LfGroupOutput> = sections
             .into_par_iter()
-            .map(|(group, data)| -> Result<LfGroupOutput> {
+            .map(|(group, data, len)| -> Result<LfGroupOutput> {
                 stop.check()?;
-                let mut br = BitReader::new(&data);
+                let mut br = BitReader::new_padded(&data, len);
                 let r = header.lf_group_rect(group);
 
                 // Phase 1: Decode VarDCT LF coefficients into local images.
@@ -810,8 +813,9 @@ impl Frame {
     #[cfg(feature = "threads")]
     pub fn decode_lf_and_hf_global_parallel(
         &mut self,
-        lf_sections: Vec<(usize, Vec<u8>)>,
+        lf_sections: Vec<(usize, Vec<u8>, usize)>,
         hf_data: Vec<u8>,
+        hf_len: usize,
     ) -> Result<()> {
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -868,9 +872,9 @@ impl Frame {
                 let par_start = std::time::Instant::now();
                 let results: Vec<LfGroupOutput> = lf_sections
                     .into_par_iter()
-                    .map(|(group, data)| -> Result<LfGroupOutput> {
+                    .map(|(group, data, len)| -> Result<LfGroupOutput> {
                         stop.check()?;
-                        let mut br = BitReader::new(&data);
+                        let mut br = BitReader::new_padded(&data, len);
                         let r = header.lf_group_rect(group);
 
                         let (lf_local, quant_lf_local) = if !has_lf_frame {
@@ -1002,7 +1006,7 @@ impl Frame {
             || -> Result<(HfGlobalOutput, std::time::Duration)> {
                 let hf_start = std::time::Instant::now();
                 decoder_state.check_cancelled()?;
-                let mut br = BitReader::new(&hf_data);
+                let mut br = BitReader::new_padded(&hf_data, hf_len);
                 let dequant_matrices = DequantMatrices::decode(header, lf_global_ref, &mut br)?;
                 let num_histo_bits = header.num_groups().ceil_log2();
                 let num_histograms: u32 = br.read(num_histo_bits)? as u32 + 1;
