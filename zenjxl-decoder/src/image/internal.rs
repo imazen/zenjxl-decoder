@@ -12,32 +12,21 @@ use crate::{
 
 /// Allocates zeroed memory, returning an error instead of aborting on OOM.
 ///
-/// For allocations up to 1 GB, uses `vec![0u8; n]` which goes through
-/// `alloc_zeroed`/`calloc`. On Linux, calloc leverages the kernel's lazy zero
-/// pages for large mmap allocations — no memset needed, unlike
-/// `try_reserve` + `resize(_, 0)`.
-///
-/// For allocations above 1 GB, falls back to `try_reserve` + `resize` to
-/// ensure proper error handling (the `vec!` macro aborts on failure, and
-/// `try_reserve` may succeed with overcommit for sizes that `calloc` rejects).
+/// Always uses `try_reserve` to ensure proper error handling for all allocation
+/// sizes. The `vec!` macro calls the global allocator which aborts on failure,
+/// so we avoid it for any size that could plausibly fail. After `try_reserve`
+/// succeeds, `resize` is guaranteed not to re-allocate.
 fn alloc_zeroed_fallible(
     total_len: usize,
     bytes_per_row: usize,
     num_rows: usize,
 ) -> Result<Vec<u8>> {
-    // 1 GB threshold: below this, calloc is safe and fast.
-    // Above this, use try_reserve for proper OOM error handling.
-    const CALLOC_THRESHOLD: usize = 1 << 30;
-    if total_len <= CALLOC_THRESHOLD {
-        Ok(vec![0u8; total_len])
-    } else {
-        let mut storage = Vec::new();
-        storage
-            .try_reserve(total_len)
-            .map_err(|_| Error::ImageOutOfMemory(bytes_per_row, num_rows))?;
-        storage.resize(total_len, 0);
-        Ok(storage)
-    }
+    let mut storage = Vec::new();
+    storage
+        .try_reserve(total_len)
+        .map_err(|_| Error::ImageOutOfMemory(bytes_per_row, num_rows))?;
+    storage.resize(total_len, 0);
+    Ok(storage)
 }
 
 /// Safe image buffer backed by `Vec<u8>` with cache-line alignment via offset.
@@ -182,13 +171,14 @@ impl RawImageBuffer {
             bytes_per_row.div_ceil(CACHE_LINE_BYTE_SIZE) * CACHE_LINE_BYTE_SIZE;
         let data_len = (num_rows - 1)
             .checked_mul(bytes_between_rows)
-            .unwrap()
-            .checked_add(bytes_per_row)
-            .unwrap();
+            .and_then(|v| v.checked_add(bytes_per_row))
+            .ok_or(Error::ImageSizeTooLarge(bytes_per_row, num_rows))?;
         assert_ne!(data_len, 0);
 
         // Allocate with extra space for alignment padding
-        let total_len = data_len + CACHE_LINE_BYTE_SIZE - 1;
+        let total_len = data_len
+            .checked_add(CACHE_LINE_BYTE_SIZE - 1)
+            .ok_or(Error::ImageSizeTooLarge(bytes_per_row, num_rows))?;
         let storage = if uninit {
             #[cfg(feature = "allow-unsafe")]
             {

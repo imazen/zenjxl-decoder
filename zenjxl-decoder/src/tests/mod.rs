@@ -21,6 +21,7 @@ pub mod feature_tests;
 pub mod hdr;
 #[cfg(feature = "jpeg")]
 pub mod jpeg_reconstruction;
+pub mod oom_regression;
 pub mod parity;
 pub mod streaming;
 pub mod synthetic;

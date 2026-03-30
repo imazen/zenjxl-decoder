@@ -63,7 +63,7 @@ pub struct JxlDecoderLimits {
 impl Default for JxlDecoderLimits {
     fn default() -> Self {
         Self {
-            max_pixels: Some(1 << 30),        // ~1 billion pixels
+            max_pixels: Some(1 << 28),        // ~256 megapixels
             max_extra_channels: Some(256),    // 256 extra channels
             max_icc_size: Some(1 << 28),      // 256 MB
             max_tree_size: Some(1 << 22),     // 4M nodes

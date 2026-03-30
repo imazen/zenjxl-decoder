@@ -78,6 +78,16 @@ fn map_aspect_ratio<T: Fn() -> u64>(ysize: u32, ratio: AspectRatio, fallback: T)
 }
 
 impl Size {
+    /// Hardcoded upper bound on total pixel count, checked during header parsing
+    /// before any allocations. This catches crafted headers that claim absurd
+    /// dimensions. Callers can set a lower limit via `JxlDecoderLimits::max_pixels`.
+    ///
+    /// 2^30 pixels (~1 billion) is the JXL spec limit. At 4 bytes/channel and
+    /// 3+ channels, this allows images up to ~12 GB of pixel data per channel
+    /// plane, so the memory tracker / `max_memory_bytes` provides the real defense.
+    /// This limit prevents overflow in downstream size arithmetic.
+    const MAX_TOTAL_PIXELS: u64 = 1 << 30;
+
     pub fn ysize(&self) -> u32 {
         if self.small {
             self.ysize_div8.unwrap() * 8
@@ -98,7 +108,15 @@ impl Size {
     }
 
     fn check(&self, _: &encodings::Empty) -> Result<(), Error> {
-        self.compute_xsize()?;
+        let xsize = self.compute_xsize()?;
+        let ysize = self.ysize();
+        let total = xsize as u64 * ysize as u64;
+        if total > Self::MAX_TOTAL_PIXELS {
+            return Err(Error::ImageSizeTooLarge(xsize as usize, ysize as usize));
+        }
+        if xsize == 0 || ysize == 0 {
+            return Err(Error::InvalidImageSize(xsize as usize, ysize as usize));
+        }
         Ok(())
     }
 
