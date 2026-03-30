@@ -215,8 +215,11 @@ const NUM_TREE_CONTEXTS: usize = 6;
 // All other properties should be 0 on the first call in a row.
 
 /// Computes properties for tree traversal. Shared between flat and non-flat prediction.
+/// `used_mask` is a bitmask where bit `i` indicates property `i` is used by at least one
+/// split node. Properties not in the mask are skipped to avoid unnecessary computation.
 /// Returns the weighted predictor prediction value.
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 fn compute_properties(
     prediction_data: PredictionData,
     xsize: usize,
@@ -225,6 +228,7 @@ fn compute_properties(
     y: usize,
     references: &Image<i32>,
     property_buffer: &mut [i32],
+    used_mask: u32,
 ) -> i64 {
     let PredictionData {
         left,
@@ -239,38 +243,50 @@ fn compute_properties(
     // Assert length so the compiler can eliminate bounds checks for constant indices 0..16.
     assert!(property_buffer.len() >= NUM_NONREF_PROPERTIES);
 
-    // Position
-    property_buffer[2] = y as i32;
-    property_buffer[3] = x as i32;
+    // Position (properties 2-3)
+    if used_mask & 0b1100 != 0 {
+        property_buffer[2] = y as i32;
+        property_buffer[3] = x as i32;
+    }
 
-    // Neighbours
-    property_buffer[4] = top.wrapping_abs();
-    property_buffer[5] = left.wrapping_abs();
-    property_buffer[6] = top;
-    property_buffer[7] = left;
+    // Neighbours (properties 4-7)
+    if used_mask & 0b1111_0000 != 0 {
+        property_buffer[4] = top.wrapping_abs();
+        property_buffer[5] = left.wrapping_abs();
+        property_buffer[6] = top;
+        property_buffer[7] = left;
+    }
 
-    // Local gradient
-    property_buffer[8] = left.wrapping_sub(property_buffer[9]);
-    property_buffer[9] = left.wrapping_add(top).wrapping_sub(topleft);
+    // Local gradient (properties 8-9, always computed together since 8 reads prev value of 9)
+    if used_mask & 0b11_0000_0000 != 0 {
+        property_buffer[8] = left.wrapping_sub(property_buffer[9]);
+        property_buffer[9] = left.wrapping_add(top).wrapping_sub(topleft);
+    }
 
-    // FFV1 context properties
-    property_buffer[10] = left.wrapping_sub(topleft);
-    property_buffer[11] = topleft.wrapping_sub(top);
-    property_buffer[12] = top.wrapping_sub(topright);
-    property_buffer[13] = top.wrapping_sub(toptop);
-    property_buffer[14] = left.wrapping_sub(leftleft);
+    // FFV1 context properties (properties 10-14)
+    if used_mask & 0b0111_1100_0000_0000 != 0 {
+        property_buffer[10] = left.wrapping_sub(topleft);
+        property_buffer[11] = topleft.wrapping_sub(top);
+        property_buffer[12] = top.wrapping_sub(topright);
+        property_buffer[13] = top.wrapping_sub(toptop);
+        property_buffer[14] = left.wrapping_sub(leftleft);
+    }
 
-    // Weighted predictor property.
+    // Weighted predictor property (property 15).
     let (wp_pred, wp_prop) = wp_state
         .map(|wp_state| wp_state.predict_and_property((x, y), xsize, &prediction_data))
         .unwrap_or((0, 0));
-    property_buffer[15] = wp_prop;
+    if used_mask & (1 << 15) != 0 {
+        property_buffer[15] = wp_prop;
+    }
 
-    // Reference properties.
-    let num_refs = references.size().0;
-    if num_refs != 0 {
-        let ref_properties = &mut property_buffer[NUM_NONREF_PROPERTIES..];
-        ref_properties[..num_refs].copy_from_slice(&references.row(x)[..num_refs]);
+    // Reference properties (properties 16+).
+    if used_mask >> 16 != 0 {
+        let num_refs = references.size().0;
+        if num_refs != 0 {
+            let ref_properties = &mut property_buffer[NUM_NONREF_PROPERTIES..];
+            ref_properties[..num_refs].copy_from_slice(&references.row(x)[..num_refs]);
+        }
     }
 
     wp_pred
@@ -290,6 +306,7 @@ pub(super) fn predict(
     y: usize,
     references: &Image<i32>,
     property_buffer: &mut [i32],
+    used_mask: u32,
 ) -> PredictionResult {
     let wp_pred = compute_properties(
         prediction_data,
@@ -299,6 +316,7 @@ pub(super) fn predict(
         y,
         references,
         property_buffer,
+        used_mask,
     );
 
     trace!(?property_buffer, "new properties");
@@ -359,6 +377,7 @@ pub(super) fn predict_flat(
     y: usize,
     references: &Image<i32>,
     property_buffer: &mut [i32],
+    used_mask: u32,
 ) -> PredictionResult {
     let wp_pred = compute_properties(
         prediction_data,
@@ -368,6 +387,7 @@ pub(super) fn predict_flat(
         y,
         references,
         property_buffer,
+        used_mask,
     );
 
     // Flat tree traversal
@@ -493,6 +513,24 @@ impl Tree {
             nodes: tree,
             histograms,
         })
+    }
+
+    /// Compute a bitmask of which properties are actually used by split nodes in the tree.
+    /// Bit `i` is set if any split node tests property `i`. Properties 8 and 9 are coupled
+    /// (property 8 reads the previous value of property 9), so if either is used both are set.
+    pub(super) fn compute_used_property_mask(nodes: &[TreeNode]) -> u32 {
+        let mut mask = 0u32;
+        for node in nodes {
+            if let TreeNode::Split { property, .. } = node {
+                mask |= 1u32 << *property;
+            }
+        }
+        // Properties 8 and 9 are coupled: property 8 reads the previous value of property 9,
+        // and property 9 is set alongside property 8. If either is used, both must be computed.
+        if mask & ((1 << 8) | (1 << 9)) != 0 {
+            mask |= (1 << 8) | (1 << 9);
+        }
+        mask
     }
 
     /// Build flat tree using BFS traversal (matches C++ encoding.cc:81-144).
