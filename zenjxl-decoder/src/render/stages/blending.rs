@@ -111,13 +111,9 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         let bg_x1: usize = bg_x1 as usize;
         let fg_y0: usize = fg_y0 as usize;
 
-        let mut out: SmallVec<[&mut [f32]; 8]> = row
-            .iter_mut()
-            .map(|s| &mut s[..xsize])
-            .collect();
+        let mut out: SmallVec<[&mut [f32]; 8]> = row.iter_mut().map(|s| &mut s[..xsize]).collect();
 
-        let mut fg: SmallVec<[&[f32]; 8]> =
-            smallvec::smallvec![self.zeros.as_slice(); 3 + num_ec];
+        let mut fg: SmallVec<[&[f32]; 8]> = smallvec::smallvec![self.zeros.as_slice(); 3 + num_ec];
 
         for (c, fg_ptr) in fg.iter_mut().enumerate().take(3) {
             if self.reference_frames[self.blending_info.source as usize].is_some() {

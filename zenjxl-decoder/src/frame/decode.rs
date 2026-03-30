@@ -479,7 +479,7 @@ impl Frame {
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
         sections.into_par_iter().try_for_each(|(group, data, len)| {
             stop.check()?;
-            let mut br = BitReader::new_padded(&data, len);
+            let mut br = BitReader::new_padded(&data, len)?;
             modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
         })
     }
@@ -532,7 +532,7 @@ impl Frame {
             .into_par_iter()
             .map(|(group, data, len)| -> Result<LfGroupOutput> {
                 stop.check()?;
-                let mut br = BitReader::new_padded(&data, len);
+                let mut br = BitReader::new_padded(&data, len)?;
                 let r = header.lf_group_rect(group);
 
                 // Phase 1: Decode VarDCT LF coefficients into local images.
@@ -874,7 +874,7 @@ impl Frame {
                     .into_par_iter()
                     .map(|(group, data, len)| -> Result<LfGroupOutput> {
                         stop.check()?;
-                        let mut br = BitReader::new_padded(&data, len);
+                        let mut br = BitReader::new_padded(&data, len)?;
                         let r = header.lf_group_rect(group);
 
                         let (lf_local, quant_lf_local) = if !has_lf_frame {
@@ -1006,7 +1006,7 @@ impl Frame {
             || -> Result<(HfGlobalOutput, std::time::Duration)> {
                 let hf_start = std::time::Instant::now();
                 decoder_state.check_cancelled()?;
-                let mut br = BitReader::new_padded(&hf_data, hf_len);
+                let mut br = BitReader::new_padded(&hf_data, hf_len)?;
                 let dequant_matrices = DequantMatrices::decode(header, lf_global_ref, &mut br)?;
                 let num_histo_bits = header.num_groups().ceil_log2();
                 let num_histograms: u32 = br.read(num_histo_bits)? as u32 + 1;

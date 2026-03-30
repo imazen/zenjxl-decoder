@@ -229,8 +229,7 @@ impl CodestreamParser {
                             // BitReader::refill() always takes the fast 8-byte path.
                             buf.data.resize(buf.len + SECTION_PADDING, 0);
                         }
-                        readable_section_data =
-                            readable_section_data.saturating_sub(buf.len);
+                        readable_section_data = readable_section_data.saturating_sub(buf.len);
                         if readable_section_data == 0 {
                             break;
                         }

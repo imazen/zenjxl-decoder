@@ -215,6 +215,8 @@ const NUM_TREE_CONTEXTS: usize = 6;
 // All other properties should be 0 on the first call in a row.
 
 /// Computes properties for tree traversal. Shared between flat and non-flat prediction.
+/// `used_mask` is a bitmask where bit `i` indicates property `i` is used by at least one
+/// split node. Properties not in the mask are skipped to avoid unnecessary computation.
 /// Returns the weighted predictor prediction value.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -255,13 +257,13 @@ fn compute_properties(
         property_buffer[7] = left;
     }
 
-    // Local gradient (properties 8-9, always computed together)
+    // Local gradient (properties 8-9, always computed together since 8 reads prev value of 9)
     if used_mask & 0b11_0000_0000 != 0 {
         property_buffer[8] = left.wrapping_sub(property_buffer[9]);
         property_buffer[9] = left.wrapping_add(top).wrapping_sub(topleft);
     }
 
-    // FFV1 context properties (10-14)
+    // FFV1 context properties (properties 10-14)
     if used_mask & 0b0111_1100_0000_0000 != 0 {
         property_buffer[10] = left.wrapping_sub(topleft);
         property_buffer[11] = topleft.wrapping_sub(top);
@@ -270,9 +272,7 @@ fn compute_properties(
         property_buffer[14] = left.wrapping_sub(leftleft);
     }
 
-    // Weighted predictor property (15).
-    // We always need wp_pred for the return value when wp_state is present,
-    // but only write property_buffer[15] when the tree uses it.
+    // Weighted predictor property (property 15).
     let (wp_pred, wp_prop) = wp_state
         .map(|wp_state| wp_state.predict_and_property((x, y), xsize, &prediction_data))
         .unwrap_or((0, 0));
@@ -280,7 +280,7 @@ fn compute_properties(
         property_buffer[15] = wp_prop;
     }
 
-    // Reference properties (16+).
+    // Reference properties (properties 16+).
     if used_mask >> 16 != 0 {
         let num_refs = references.size().0;
         if num_refs != 0 {
@@ -515,8 +515,9 @@ impl Tree {
         })
     }
 
-    /// Compute a bitmask of which properties the tree actually splits on.
-    /// Only those properties need to be computed per pixel in `compute_properties`.
+    /// Compute a bitmask of which properties are actually used by split nodes in the tree.
+    /// Bit `i` is set if any split node tests property `i`. Properties 8 and 9 are coupled
+    /// (property 8 reads the previous value of property 9), so if either is used both are set.
     pub(super) fn compute_used_property_mask(nodes: &[TreeNode]) -> u32 {
         let mut mask = 0u32;
         for node in nodes {
@@ -524,9 +525,8 @@ impl Tree {
                 mask |= 1u32 << *property;
             }
         }
-        // Properties 8 and 9 are coupled: property 8 reads the previous value
-        // of property 9, and property 9 is written alongside 8. If either is
-        // used by the tree, both must be computed.
+        // Properties 8 and 9 are coupled: property 8 reads the previous value of property 9,
+        // and property 9 is set alongside property 8. If either is used, both must be computed.
         if mask & ((1 << 8) | (1 << 9)) != 0 {
             mask |= (1 << 8) | (1 << 9);
         }
