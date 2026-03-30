@@ -157,6 +157,7 @@ pub fn fast_powf_simd<D: SimdDescriptor>(d: D, base: D::F32Vec, exp: D::F32Vec) 
     fast_pow2f_simd(d, fast_log2f_simd(d, base) * exp)
 }
 
+#[inline(always)]
 pub fn floor_log2_nonzero(x: u64) -> u32 {
     (u64::BITS as usize - 1) as u32 ^ x.leading_zeros()
 }

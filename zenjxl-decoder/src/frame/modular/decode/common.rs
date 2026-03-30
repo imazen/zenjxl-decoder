@@ -82,6 +82,7 @@ pub(super) fn precompute_references(
     }
 }
 
+#[inline(always)]
 pub(super) fn make_pixel(dec: i32, mul: u32, guess: i64) -> i32 {
     (guess + (mul as i64) * (dec as i64)) as i32
 }

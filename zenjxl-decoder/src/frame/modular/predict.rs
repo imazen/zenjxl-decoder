@@ -63,7 +63,7 @@ pub struct PredictionData {
 }
 
 impl PredictionData {
-    #[inline]
+    #[inline(always)]
     pub fn update_for_interior_row(
         self,
         row_top: &[i32],
@@ -93,6 +93,7 @@ impl PredictionData {
         }
     }
 
+    #[inline(always)]
     pub fn get_rows(row: &[i32], row_top: &[i32], row_toptop: &[i32], x: usize, y: usize) -> Self {
         let left = if x > 0 {
             row[x - 1]
@@ -294,6 +295,7 @@ impl PredictionData {
     }
 }
 
+#[inline(always)]
 pub fn clamped_gradient(left: i64, top: i64, topleft: i64) -> i64 {
     // Same code/logic as libjxl.
     let min = left.min(top);
@@ -306,7 +308,7 @@ pub fn clamped_gradient(left: i64, top: i64, topleft: i64) -> i64 {
 impl Predictor {
     pub const NUM_PREDICTORS: u32 = Predictor::AverageAll as u32 + 1;
 
-    #[inline]
+    #[inline(always)]
     pub fn predict_one(
         &self,
         PredictionData {

@@ -71,7 +71,7 @@ impl<'a> BitReader<'a> {
     }
 
     /// Reads `num` bits from the buffer without consuming them.
-    #[inline]
+    #[inline(always)]
     pub fn peek(&mut self, num: usize) -> u64 {
         debug_assert!(num <= MAX_BITS_PER_CALL);
         if self.bits_in_buf < num {
@@ -91,7 +91,7 @@ impl<'a> BitReader<'a> {
         Ok(())
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn consume_optimistic(&mut self, num: usize) {
         self.bit_buf >>= num;
         self.bits_in_buf = self.bits_in_buf.saturating_sub(num);
@@ -122,7 +122,7 @@ impl<'a> BitReader<'a> {
         self.read(num)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn read_optimistic(&mut self, num: usize) -> u64 {
         let ret = self.peek(num);
         self.consume_optimistic(num);
@@ -226,7 +226,7 @@ impl<'a> BitReader<'a> {
         Ok(())
     }
 
-    #[inline]
+    #[inline(always)]
     fn refill(&mut self) {
         // See Refill() in C++ code.
         if self.data.len() >= 8 {
