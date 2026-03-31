@@ -462,6 +462,27 @@ pub struct HuffmanCodes {
 }
 
 impl HuffmanCodes {
+    /// Maximum total alphabet size across all Huffman tables in a single
+    /// Histograms group. This bounds the allocation cost of constructing
+    /// Huffman code-length tables and sorted symbol arrays, preventing
+    /// malformed inputs from triggering large allocations.
+    ///
+    /// Each table allocates O(al_size) for code lengths + sorted symbols,
+    /// so total allocation is ~3 * total_alphabet bytes. Without this cap,
+    /// a crafted stream claiming many tables with large alphabets can
+    /// trigger megabytes of allocations from a few bytes of input.
+    ///
+    /// 1 << 20 (1M total symbols) is generous: legitimate JXL ICC streams
+    /// use ~256 symbols/table, frame entropy uses at most a few thousand.
+    const MAX_TOTAL_ALPHABET_SIZE: usize = 1 << 20;
+
+    /// Maximum alphabet size for any single Huffman table, proportional
+    /// to available input. Each code-length entry needs at least ~1 bit
+    /// (with repeat codes), so alphabet_size cannot usefully exceed
+    /// `available_bits * ALPHABET_BITS_RATIO`. This prevents 32K-entry
+    /// allocations from tiny malformed inputs.
+    const ALPHABET_BITS_RATIO: usize = 32;
+
     pub fn decode(num: usize, br: &mut BitReader) -> Result<HuffmanCodes> {
         let alphabet_sizes: Vec<usize> = (0..num)
             .map(|_| Ok(decode_varint16(br)? as usize + 1))
@@ -469,6 +490,26 @@ impl HuffmanCodes {
         let max = *alphabet_sizes.iter().max().unwrap();
         if max >= (1 << HUFFMAN_MAX_BITS) {
             return Err(Error::AlphabetTooLargeHuff(max));
+        }
+        // Bound total allocations across all tables.
+        let total_alphabet: usize = alphabet_sizes.iter().sum();
+        if total_alphabet > Self::MAX_TOTAL_ALPHABET_SIZE {
+            return Err(Error::AlphabetTooLargeHuff(total_alphabet));
+        }
+        // Bound per-table allocation relative to remaining input.
+        // A Huffman code-length stream needs at least ~1 bit per symbol
+        // (repeat codes can batch, but the code-length-code overhead
+        // consumes the savings). With only K bits remaining, an al_size
+        // of K * RATIO entries is the maximum that could plausibly be
+        // encoded; anything beyond that will fail with OutOfBounds during
+        // decode_huffman_code_lengths anyway, so reject early to avoid
+        // the allocation.
+        let available = br.total_bits_available();
+        let input_cap = available.saturating_mul(Self::ALPHABET_BITS_RATIO);
+        for &sz in &alphabet_sizes {
+            if sz > 1 && sz > input_cap {
+                return Err(Error::AlphabetTooLargeHuff(sz));
+            }
         }
         let tables = alphabet_sizes
             .iter()
