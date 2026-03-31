@@ -54,20 +54,17 @@ impl<'a> BitReader<'a> {
     ///
     /// `initial_bits` is set from `real_len`, so `check_for_error()` and
     /// `total_bits_available()` report the correct content length.
-    pub fn new_padded(data: &[u8], real_len: usize) -> BitReader<'_> {
-        debug_assert!(
-            data.len() >= real_len + 8,
-            "padded data too short: {} < {} + 8",
-            data.len(),
-            real_len
-        );
-        BitReader {
+    pub fn new_padded(data: &[u8], real_len: usize) -> Result<BitReader<'_>, Error> {
+        if data.len() < real_len.saturating_add(8) {
+            return Err(Error::SectionTooShort);
+        }
+        Ok(BitReader {
             data,
             bit_buf: 0,
             bits_in_buf: 0,
             total_bits_read: 0,
             initial_bits: real_len * 8,
-        }
+        })
     }
 
     /// Reads `num` bits from the buffer without consuming them.
