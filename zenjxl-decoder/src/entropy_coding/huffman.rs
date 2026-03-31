@@ -472,9 +472,11 @@ impl HuffmanCodes {
     /// a crafted stream claiming many tables with large alphabets can
     /// trigger megabytes of allocations from a few bytes of input.
     ///
-    /// 1 << 20 (1M total symbols) is generous: legitimate JXL ICC streams
-    /// use ~256 symbols/table, frame entropy uses at most a few thousand.
-    const MAX_TOTAL_ALPHABET_SIZE: usize = 1 << 20;
+    /// The JXL spec allows up to 256 clusters × 32768 symbols = 8,388,608.
+    /// We use 1 << 24 (16M) to cover the theoretical max with margin.
+    /// The per-table input-proportional cap (ALPHABET_BITS_RATIO) is the
+    /// primary DoS defense; this is a backstop.
+    const MAX_TOTAL_ALPHABET_SIZE: usize = 1 << 24;
 
     /// Maximum alphabet size for any single Huffman table, proportional
     /// to available input. Each code-length entry needs at least ~1 bit
