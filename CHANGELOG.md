@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The changelog covers changes made in this fork.
 
+## [0.3.4] - 2026-03-30
+
+### Fixed
+
+- **ICC amplification DoS** -- A crafted 19-byte JXL codestream could claim a huge ICC profile, causing the entropy decode loop to iterate hundreds of millions of times. Added a per-symbol progress check that detects degenerate streams producing output without consuming input (>1024:1 amplification ratio). Works correctly in both one-shot and incremental decode modes.
+
+### Dependencies
+
+- Updated all 55 dependencies to latest compatible versions, including `time` 0.3.46→0.3.47 (fixes GHSA-r6v5-fh4h-64xc stack exhaustion DoS), `archmage` 0.9.5→0.9.15, `zerocopy` 0.8.27→0.8.48.
+
 ## [0.3.3] - 2026-03-30
 
 Ports 6 upstream bugfixes from libjxl/jxl-rs (March 2026) and 5 performance optimizations from PR #705. Yanks broken 0.3.2 release.
