@@ -174,8 +174,12 @@ impl JxlCms for MoxCms {
 
         // Use Perceptual intent as default - this tends to work better for most images.
         // Note: skcms may use profile's embedded intent, which we don't currently extract.
+        // JXL is CICP-native so allow_use_cicp_transfer stays true (default).
+        // BarycentricWeightScale::High cuts LUT interpolation error from max≤14 to max≤2
+        // vs lcms2 with no measurable perf cost.
         let options = moxcms::TransformOptions {
             allow_extended_range_rgb_xyz: true,
+            barycentric_weight_scale: moxcms::BarycentricWeightScale::High,
             ..moxcms::TransformOptions::default()
         };
 
