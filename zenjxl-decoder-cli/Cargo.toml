@@ -25,7 +25,7 @@ rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]
 jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", features = ["test"], version = "=0.3.4" }
-criterion = { version = "0.7.0", features = ["html_reports"] }
+criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [build-dependencies]
 anyhow = "1.0.100"
