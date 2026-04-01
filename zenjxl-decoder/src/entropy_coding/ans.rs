@@ -194,7 +194,11 @@ impl AnsHistogram {
         Ok(alphabet_size)
     }
 
-    fn build_alias_map(alphabet_size: usize, log_bucket_size: usize, dist: &[u16]) -> Vec<Bucket> {
+    fn build_alias_map(
+        alphabet_size: usize,
+        log_bucket_size: usize,
+        dist: &[u16],
+    ) -> Result<Vec<Bucket>> {
         #[derive(Debug)]
         struct WorkingBucket {
             dist: u16,
@@ -236,11 +240,13 @@ impl AnsHistogram {
             }
         }
 
-        // Assertion failure happens only if `dist` doesn't sum to `SUM_PROB`, which is checked
-        // before building alias map.
-        assert!(overfull.is_empty() && underfull.is_empty());
+        // If `dist` sums to `SUM_PROB`, overfull and underfull must both be empty here.
+        // A crafted bitstream could violate this invariant, so return an error instead of panicking.
+        if !overfull.is_empty() || !underfull.is_empty() {
+            return Err(Error::InvalidAnsHistogram);
+        }
 
-        buckets
+        Ok(buckets
             .iter()
             .enumerate()
             .map(|(idx, bucket)| {
@@ -262,7 +268,7 @@ impl AnsHistogram {
                     }
                 }
             })
-            .collect()
+            .collect())
     }
 
     // log_alphabet_size: 5 + u(2)
@@ -299,10 +305,13 @@ impl AnsHistogram {
                 })
                 .collect()
         } else {
-            Self::build_alias_map(alphabet_size, log_bucket_size, &dist)
+            Self::build_alias_map(alphabet_size, log_bucket_size, &dist)?
         };
 
-        assert_eq!(buckets.len(), 1 << (LOG_SUM_PROBS - log_bucket_size));
+        let expected_len = 1 << (LOG_SUM_PROBS - log_bucket_size);
+        if buckets.len() != expected_len {
+            return Err(Error::InvalidAnsHistogram);
+        }
         // Safety note: log_bucket_size <= LOG_SUM_PROBS by construction, and we
         // just checked that buckets.len() = 2^(LOG_SUM_PROBS - log_bucket_size)
         Ok(Self {
