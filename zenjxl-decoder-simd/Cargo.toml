@@ -12,7 +12,7 @@ rust-version = "1.89"
 license = "BSD-3-Clause"
 
 [dependencies]
-archmage = { version = "0.9", path = "../../../archmage" }
+archmage = { version = "0.9"}
 paste = "1"
 
 [dev-dependencies]
