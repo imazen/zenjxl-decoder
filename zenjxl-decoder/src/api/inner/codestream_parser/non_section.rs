@@ -6,6 +6,8 @@
 use std::io::IoSliceMut;
 use std::sync::Arc;
 
+use super::SECTION_PADDING;
+
 use crate::{
     api::{
         Endianness, JxlBasicInfo, JxlBitDepth, JxlColorEncoding, JxlColorProfile, JxlColorType,
@@ -358,17 +360,19 @@ impl CodestreamParser {
         self.ready_section_data = 0;
 
         // Move data from the pre-section buffer into the sections.
+        // Allocate with SECTION_PADDING extra zero bytes so BitReader::refill()
+        // always takes the fast 8-byte read path.
         for buf in self.sections.iter_mut() {
             if self.non_section_buf.is_empty() {
                 break;
             }
             let mut data = Vec::new();
-            data.try_reserve_exact(buf.len)?;
-            data.resize(buf.len, 0);
+            data.try_reserve_exact(buf.len + SECTION_PADDING)?;
+            data.resize(buf.len + SECTION_PADDING, 0);
             buf.data = data;
             self.ready_section_data += self
                 .non_section_buf
-                .take(&mut [IoSliceMut::new(&mut buf.data)]);
+                .take(&mut [IoSliceMut::new(&mut buf.data[..buf.len])]);
         }
 
         self.section_state =
