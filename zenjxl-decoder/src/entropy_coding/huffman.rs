@@ -478,11 +478,12 @@ impl HuffmanCodes {
     const MAX_TOTAL_ALPHABET_SIZE: usize = 256 * 32768;
 
     /// Maximum alphabet size for any single Huffman table, proportional
-    /// to available input. Each code-length entry needs at least ~1 bit
-    /// (with repeat codes), so alphabet_size cannot usefully exceed
-    /// `available_bits * ALPHABET_BITS_RATIO`. This prevents 32K-entry
-    /// allocations from tiny malformed inputs.
-    const ALPHABET_BITS_RATIO: usize = 32;
+    /// to available input. Huffman code-length repeat codes grow
+    /// exponentially (a chain of code-17 repeats can encode hundreds of
+    /// zero-length entries in a few bits), so the ratio must be generous.
+    /// A ratio of 256 still rejects 32K-entry allocations from <128 bits
+    /// of input while allowing legitimate tables.
+    const ALPHABET_BITS_RATIO: usize = 256;
 
     pub fn decode(num: usize, br: &mut BitReader) -> Result<HuffmanCodes> {
         let alphabet_sizes: Vec<usize> = (0..num)
