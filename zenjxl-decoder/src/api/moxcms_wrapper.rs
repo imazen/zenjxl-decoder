@@ -8,6 +8,8 @@
 //! This module provides a color management system implementation using the moxcms crate,
 //! enabling ICC profile-based color transforms.
 
+use std::sync::Arc;
+
 use crate::api::{JxlColorEncoding, JxlColorProfile, JxlPrimaries, JxlTransferFunction};
 use crate::error::{Error, Result};
 
@@ -25,7 +27,7 @@ impl MoxCms {
 
 /// Wrapper around moxcms TransformExecutor to implement JxlCmsTransformer.
 struct MoxCmsTransformer {
-    transform: Box<dyn moxcms::TransformExecutor<f32> + Send + Sync>,
+    transform: Arc<dyn moxcms::TransformExecutor<f32> + Send + Sync>,
     input_channels: usize,
     output_channels: usize,
 }

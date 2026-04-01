@@ -22,7 +22,7 @@ array-init = "2.0.0"
 tracing = { version = "0.1.40", optional = true }
 jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.4" }
 jxl_simd = { package = "zenjxl-decoder-simd", path = "../zenjxl-decoder-simd", version = "=0.3.4" }
-moxcms = { version = "*", optional = true }
+moxcms = { version = "0.9", optional = true, git = "https://github.com/lilith/moxcms", features = ["extended_range", "options"] }
 rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
 bytemuck = { version = "1", features = ["derive"] }
@@ -43,7 +43,7 @@ serde_json = "1.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.4", features = ["test"] }
 criterion = { version = "0.8.2", features = ["html_reports"] }
-zenbench = { version = "0.1.2"}
+zenbench = { version = "0.1.2", path = "../../zenbench" }
 
 [features]
 default = ["all-simd"]
