@@ -729,6 +729,7 @@ impl Frame {
                                 header,
                                 &lf_global.tree,
                                 br,
+                                tracker,
                             )?;
                         }
                         Ok(())

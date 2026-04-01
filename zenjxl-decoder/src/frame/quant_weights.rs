@@ -24,6 +24,7 @@ use crate::{
     },
     headers::{bit_depth::BitDepth, frame_header::FrameHeader},
     image::Rect,
+    util::MemoryTracker,
 };
 
 pub const INV_LF_QUANT: [f32; 3] = [4096.0, 512.0, 256.0];
@@ -126,6 +127,7 @@ impl QuantEncoding {
         header: &FrameHeader,
         lf_global: &LfGlobalState,
         br: &mut BitReader,
+        memory_tracker: &MemoryTracker,
     ) -> Result<Self> {
         let required_size = required_size_x * required_size_y;
         required_size_x *= BLOCK_DIM;
@@ -254,6 +256,7 @@ impl QuantEncoding {
                     None,
                     &lf_global.tree,
                     br,
+                    memory_tracker,
                 )?;
                 let mut qtable = Vec::with_capacity(required_size_x * required_size_y * 3);
                 for channel in image.iter_mut() {
@@ -1119,6 +1122,7 @@ impl DequantMatrices {
         header: &FrameHeader,
         lf_global: &LfGlobalState,
         br: &mut BitReader,
+        memory_tracker: &MemoryTracker,
     ) -> Result<Self> {
         let all_default = br.read(1)? == 1;
 
@@ -1145,6 +1149,7 @@ impl DequantMatrices {
                     header,
                     lf_global,
                     br,
+                    memory_tracker,
                 )?;
 
                 // Save raw quant table for JPEG reconstruction (table 0 = DCT8)

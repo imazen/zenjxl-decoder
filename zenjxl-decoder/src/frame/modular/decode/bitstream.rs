@@ -10,6 +10,7 @@ use crate::{
     error::{Error, Result},
     frame::modular::{ModularChannel, Tree, transforms::apply::meta_apply_local_transforms},
     headers::{JxlHeader, modular::GroupHeader},
+    util::MemoryTracker,
 };
 
 // This function will decode a header and apply local transforms if a header is not given.
@@ -20,6 +21,7 @@ pub fn decode_modular_subbitstream(
     header: Option<GroupHeader>,
     global_tree: &Option<Tree>,
     br: &mut BitReader,
+    memory_tracker: &MemoryTracker,
 ) -> Result<()> {
     // Skip decoding if all grids are zero-sized.
     let is_empty = buffers
@@ -62,11 +64,7 @@ pub fn decode_modular_subbitstream(
             })
             .sum::<usize>();
         let size_limit = (1024 + num_local_samples).min(1 << 20);
-        Some(Tree::read(
-            br,
-            size_limit,
-            &crate::util::MemoryTracker::default(),
-        )?)
+        Some(Tree::read(br, size_limit, memory_tracker)?)
     } else {
         None
     };

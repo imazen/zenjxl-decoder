@@ -402,6 +402,7 @@ impl Frame {
             self.modular_color_channels(),
             &tree,
             br,
+            &self.decoder_state.memory_tracker,
         )?;
 
         self.lf_global = Some(LfGlobalState {
@@ -437,6 +438,7 @@ impl Frame {
                 self.lf_image.as_mut().unwrap(),
                 &mut self.quant_lf,
                 br,
+                &self.decoder_state.memory_tracker,
             )?;
         }
         lf_global.modular_global.read_stream(
@@ -444,6 +446,7 @@ impl Frame {
             &self.header,
             &lf_global.tree,
             br,
+            &self.decoder_state.memory_tracker,
         )?;
         if self.header.encoding == Encoding::VarDCT {
             info!("decoding HF metadata with group id {}", group);
@@ -455,6 +458,7 @@ impl Frame {
                 &lf_global.tree,
                 hf_meta,
                 br,
+                &self.decoder_state.memory_tracker,
             )?;
         }
         Ok(())
@@ -477,10 +481,17 @@ impl Frame {
         let tree = &lf_global.tree;
         let header = &self.header;
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
+        let tracker = &self.decoder_state.memory_tracker;
         sections.into_par_iter().try_for_each(|(group, data, len)| {
             stop.check()?;
             let mut br = BitReader::new_padded(&data, len)?;
-            modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)
+            modular.read_stream(
+                ModularStreamId::ModularLF(group),
+                header,
+                tree,
+                &mut br,
+                tracker,
+            )
         })
     }
 
@@ -510,6 +521,7 @@ impl Frame {
         let bctx = lf_global.block_context_map.as_ref().unwrap();
         let modular = &lf_global.modular_global;
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
+        let memory_tracker = &self.decoder_state.memory_tracker;
         let has_lf_frame = header.has_lf_frame();
         let used_hf_types = AtomicU32::new(0);
 
@@ -563,6 +575,7 @@ impl Frame {
                         None,
                         tree,
                         &mut br,
+                        memory_tracker,
                     )?;
 
                     // Allocate local images for this group's rect.
@@ -609,7 +622,13 @@ impl Frame {
                 };
 
                 // Phase 2: Modular LF stream (uses RefCell internally, already thread-safe).
-                modular.read_stream(ModularStreamId::ModularLF(group), header, tree, &mut br)?;
+                modular.read_stream(
+                    ModularStreamId::ModularLF(group),
+                    header,
+                    tree,
+                    &mut br,
+                    memory_tracker,
+                )?;
 
                 // Phase 3: Decode HF metadata into local images.
                 let cr = Rect {
@@ -643,6 +662,7 @@ impl Frame {
                     raw_quant_local.get_rect_mut(full_r),
                     epf_local.get_rect_mut(full_r),
                     &mut br,
+                    memory_tracker,
                 )?;
                 used_hf_types.fetch_or(used, Ordering::Relaxed);
 
@@ -731,7 +751,12 @@ impl Frame {
             return Ok(());
         }
         let lf_global = self.lf_global.as_mut().unwrap();
-        let dequant_matrices = DequantMatrices::decode(&self.header, lf_global, br)?;
+        let dequant_matrices = DequantMatrices::decode(
+            &self.header,
+            lf_global,
+            br,
+            &self.decoder_state.memory_tracker,
+        )?;
         let block_context_map = lf_global.block_context_map.as_mut().unwrap();
         let num_histo_bits = self.header.num_groups().ceil_log2();
         let num_histograms: u32 = br.read(num_histo_bits)? as u32 + 1;
@@ -844,6 +869,7 @@ impl Frame {
         let bctx = lf_global_ref.block_context_map.as_ref().unwrap();
         let modular = &lf_global_ref.modular_global;
         let stop: &dyn enough::Stop = &*decoder_state.stop;
+        let memory_tracker_ref = &decoder_state.memory_tracker;
         let has_lf_frame = header.has_lf_frame();
         let used_hf_types = AtomicU32::new(0);
 
@@ -904,6 +930,7 @@ impl Frame {
                                 None,
                                 tree,
                                 &mut br,
+                                memory_tracker_ref,
                             )?;
 
                             let lf_sizes: [(usize, usize); 3] = if header.is444() {
@@ -951,6 +978,7 @@ impl Frame {
                             header,
                             tree,
                             &mut br,
+                            memory_tracker_ref,
                         )?;
 
                         let cr = Rect {
@@ -986,6 +1014,7 @@ impl Frame {
                             raw_quant_local.get_rect_mut(full_r),
                             epf_local.get_rect_mut(full_r),
                             &mut br,
+                            memory_tracker_ref,
                         )?;
                         used_hf_types.fetch_or(used, Ordering::Relaxed);
 
@@ -1007,7 +1036,8 @@ impl Frame {
                 let hf_start = std::time::Instant::now();
                 decoder_state.check_cancelled()?;
                 let mut br = BitReader::new_padded(&hf_data, hf_len)?;
-                let dequant_matrices = DequantMatrices::decode(header, lf_global_ref, &mut br)?;
+                let dequant_matrices =
+                    DequantMatrices::decode(header, lf_global_ref, &mut br, memory_tracker_ref)?;
                 let num_histo_bits = header.num_groups().ceil_log2();
                 let num_histograms: u32 = br.read(num_histo_bits)? as u32 + 1;
                 let num_ac = bctx.num_ac_contexts();
@@ -1376,6 +1406,7 @@ impl Frame {
                     &self.header,
                     &lf_global.tree,
                     br,
+                    &self.decoder_state.memory_tracker,
                 )?;
             }
         }
