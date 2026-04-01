@@ -390,7 +390,8 @@ pub(super) fn predict_flat(
         used_mask,
     );
 
-    // Flat tree traversal
+    // Flat tree traversal — all child_id + offset values are validated
+    // in build_flat_tree, so indexing here cannot go out of bounds.
     let mut pos = 0;
     loop {
         let node = &flat_tree[pos];
@@ -600,6 +601,19 @@ impl Tree {
                     }
 
                     flat_nodes.push(flat);
+                }
+            }
+        }
+
+        // Validate that all child_id references are within bounds.
+        // Split nodes can index up to child_id + 3 (the maximum offset from off1).
+        let len = flat_nodes.len();
+        for node in &flat_nodes {
+            if node.property0 >= 0 {
+                // Split node: child_id + 3 must be a valid index
+                let max_child = node.child_id as usize + 3;
+                if max_child >= len {
+                    return Err(Error::TreeTooLarge(max_child + 1, len));
                 }
             }
         }

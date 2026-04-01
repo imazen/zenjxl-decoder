@@ -30,7 +30,7 @@ use crate::{
         modular::{GroupHeader, TransformId},
     },
     image::{Image, ImageRectMut, Rect},
-    util::{AtomicRefCell, CeilLog2, SmallVec, tracing_wrappers::*},
+    util::{AtomicRefCell, CeilLog2, MemoryTracker, SmallVec, tracing_wrappers::*},
 };
 
 mod borrowed_buffers;
@@ -397,6 +397,7 @@ impl FullModularImage {
         modular_color_channels: usize,
         global_tree: &Option<Tree>,
         br: &mut BitReader,
+        memory_tracker: &MemoryTracker,
     ) -> Result<Self> {
         let mut channels = vec![];
         for c in 0..modular_color_channels {
@@ -598,6 +599,7 @@ impl FullModularImage {
                 Some(header),
                 global_tree,
                 br,
+                memory_tracker,
             )
         })?;
 
@@ -639,13 +641,18 @@ impl FullModularImage {
     }
 
     #[allow(clippy::type_complexity)]
-    #[instrument(level = "debug", skip(self, frame_header, global_tree, br), ret)]
+    #[instrument(
+        level = "debug",
+        skip(self, frame_header, global_tree, br, memory_tracker),
+        ret
+    )]
     pub fn read_stream(
         &self,
         stream: ModularStreamId,
         frame_header: &FrameHeader,
         global_tree: &Option<Tree>,
         br: &mut BitReader,
+        memory_tracker: &MemoryTracker,
     ) -> Result<()> {
         if self.buffer_info.is_empty() {
             info!("No modular channels to decode");
@@ -672,6 +679,7 @@ impl FullModularImage {
                     None,
                     global_tree,
                     br,
+                    memory_tracker,
                 )
             },
         )?;
@@ -1017,6 +1025,7 @@ pub fn decode_vardct_lf(
     lf_image: &mut [Image<f32>; 3],
     quant_lf: &mut Image<u8>,
     br: &mut BitReader,
+    memory_tracker: &MemoryTracker,
 ) -> Result<()> {
     let extra_precision = br.read(2)?;
     debug!(?extra_precision);
@@ -1042,6 +1051,7 @@ pub fn decode_vardct_lf(
         None,
         global_tree,
         br,
+        memory_tracker,
     )?;
     let lf_rects = if frame_header.is444() {
         let [lf0, lf1, lf2] = lf_image;
@@ -1107,6 +1117,7 @@ pub fn decode_hf_metadata(
     global_tree: &Option<Tree>,
     hf_meta: &mut HfMetadata,
     br: &mut BitReader,
+    memory_tracker: &MemoryTracker,
 ) -> Result<()> {
     let r = frame_header.lf_group_rect(group);
     let cr = Rect {
@@ -1131,6 +1142,7 @@ pub fn decode_hf_metadata(
         raw_quant_rect,
         epf_rect,
         br,
+        memory_tracker,
     )?;
     hf_meta.used_hf_types |= used;
     Ok(())
@@ -1152,6 +1164,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
     mut raw_quant_map_rect: ImageRectMut<'_, i32>,
     mut epf_map_rect: ImageRectMut<'_, u8>,
     br: &mut BitReader,
+    memory_tracker: &MemoryTracker,
 ) -> Result<u32> {
     let stream_id = ModularStreamId::LFMeta(group).get_id(frame_header);
     debug!(?stream_id);
@@ -1172,6 +1185,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
         None,
         global_tree,
         br,
+        memory_tracker,
     )?;
     let ytox_image = &buffers[0].data;
     let ytob_image = &buffers[1].data;

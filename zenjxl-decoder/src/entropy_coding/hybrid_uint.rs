@@ -65,39 +65,50 @@ impl HybridUint {
 
     /// Specialized fast path for 420 config:
     /// split_exponent=4, msb_in_token=2, lsb_in_token=0
+    ///
+    /// `nbits_acc` accumulates raw nbits values via OR. If any call produces
+    /// nbits >= 32 (invalid bitstream), bit 5+ will be set in the accumulator.
+    /// Check `nbits_acc >= 32` after a batch of reads.
     #[inline(always)]
-    pub fn read_config_420(symbol: u32, br: &mut BitReader) -> u32 {
+    pub fn read_config_420(symbol: u32, br: &mut BitReader, nbits_acc: &mut u32) -> u32 {
         if symbol < 16 {
             return symbol;
         }
 
         // Equivalent to: 2 + ((symbol - 16) >> 2)
-        let nbits = (symbol >> 2) - 2;
-        let nbits = nbits & 31;
+        let nbits_raw = (symbol >> 2) - 2;
+        *nbits_acc |= nbits_raw;
+        let nbits = nbits_raw & 31;
         let bits = br.read_optimistic(nbits as usize) as u32;
         let hi = (symbol & 3) | 4;
 
         (hi << nbits) | bits
     }
 
+    /// Reads a hybrid uint value from the bitstream.
+    ///
+    /// `nbits_acc` accumulates raw nbits values via OR. If any call produces
+    /// nbits >= 32 (invalid bitstream), bit 5+ will be set in the accumulator.
+    /// Check `nbits_acc >= 32` after a batch of reads.
     #[inline(always)]
-    pub fn read(&self, symbol: u32, br: &mut BitReader) -> u32 {
+    pub fn read(&self, symbol: u32, br: &mut BitReader, nbits_acc: &mut u32) -> u32 {
         if symbol < self.split_token {
             return symbol;
         }
         // Fast path: when msb_in_token == 0 && lsb_in_token == 0, hi is always 1
         // and the low/shift computation is a no-op.
         if self.msb_in_token == 0 && self.lsb_in_token == 0 {
-            let nbits = (self.split_exponent + symbol - self.split_token) & 31;
+            let nbits_raw = self.split_exponent + symbol - self.split_token;
+            *nbits_acc |= nbits_raw;
+            let nbits = nbits_raw & 31;
             let bits = br.read_optimistic(nbits as usize) as u32;
             return (1 << nbits) | bits;
         }
         let bits_in_token = self.lsb_in_token + self.msb_in_token;
-        let nbits =
+        let nbits_raw =
             self.split_exponent - bits_in_token + ((symbol - self.split_token) >> bits_in_token);
-        // The bitstream is invalid if nbits >= 32. We do not report errors, and just pretend we
-        // decoded a number <32.
-        let nbits = nbits & 31;
+        *nbits_acc |= nbits_raw;
+        let nbits = nbits_raw & 31;
         let low = symbol & ((1 << self.lsb_in_token) - 1);
         let symbol_nolow = symbol >> self.lsb_in_token;
         let bits = br.read_optimistic(nbits as usize) as u32;
@@ -126,7 +137,8 @@ mod test {
         let mut br = BitReader::new(&[10, 75, 10, 75, 168, 139, 132, 255, 244]);
         br.skip_bits(1).unwrap();
         if let Ok(uint) = HybridUint::decode(15, &mut br) {
-            uint.read(1022, &mut br);
+            let mut acc = 0u32;
+            uint.read(1022, &mut br, &mut acc);
         }
     }
 }

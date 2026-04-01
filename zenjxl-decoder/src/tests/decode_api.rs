@@ -351,3 +351,74 @@ mod extra_channel_tests {
         );
     }
 }
+
+/// Regression tests for slow probe inputs discovered by fuzzing.
+/// Malformed JXL codestreams with entropy-coded ICC headers that triggered
+/// large Huffman table allocations, causing 13-120ms probe times under
+/// sanitizers. Fixed by capping per-table alphabet size relative to
+/// available input bits in HuffmanCodes::decode.
+#[cfg(test)]
+mod slow_probe_regression {
+    use super::*;
+    use std::time::Instant;
+
+    /// Probe must complete in <5ms even in debug builds.
+    const MAX_PROBE_US: u128 = 5000;
+
+    fn assert_fast_probe(name: &str, data: &[u8]) {
+        let start = Instant::now();
+        let _ = process_to_image_info(data);
+        let us = start.elapsed().as_micros();
+        assert!(
+            us <= MAX_PROBE_US,
+            "{name} probe took {us}us, limit is {MAX_PROBE_US}us"
+        );
+    }
+
+    #[test]
+    fn slow_unit_15b() {
+        assert_fast_probe(
+            "15B",
+            &[
+                0xff, 0x0a, 0x23, 0x01, 0x08, 0xff, 0xfd, 0xa0, 0xff, 0xc9, 0x97, 0xa0, 0x00, 0xff,
+                0xff,
+            ],
+        );
+    }
+
+    #[test]
+    fn slow_unit_16b() {
+        assert_fast_probe(
+            "16B",
+            &[
+                0xff, 0x0a, 0x85, 0x01, 0x08, 0xef, 0xff, 0xff, 0xff, 0x41, 0x41, 0x41, 0xff, 0x08,
+                0x60, 0x0f,
+            ],
+        );
+    }
+
+    #[test]
+    fn slow_unit_19b() {
+        assert_fast_probe(
+            "19B",
+            &[
+                0xff, 0x0a, 0x5b, 0x01, 0x08, 0x3f, 0xff, 0xff, 0xff, 0xfd, 0x00, 0x00, 0xa8, 0xa8,
+                0x00, 0xf7, 0xff, 0x0c, 0x2b,
+            ],
+        );
+    }
+
+    #[test]
+    fn slow_unit_60b() {
+        assert_fast_probe(
+            "60B",
+            &[
+                0xff, 0x0a, 0x85, 0x01, 0x08, 0xff, 0xff, 0xff, 0xff, 0x35, 0x06, 0x89, 0xcd, 0x29,
+                0x8d, 0xff, 0x60, 0x0a, 0xf7, 0x30, 0x21, 0x88, 0xff, 0xff, 0x71, 0xff, 0x0a, 0x36,
+                0x21, 0x88, 0xff, 0xd4, 0x71, 0xff, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
+                0xff, 0xff, 0x3d, 0x0a, 0x3c, 0xf8, 0x12, 0x88, 0xff, 0xff, 0x8d, 0x3d, 0xff, 0xff,
+                0xff, 0xff, 0xff, 0x64,
+            ],
+        );
+    }
+}
