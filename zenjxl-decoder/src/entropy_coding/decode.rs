@@ -160,15 +160,22 @@ impl RleState {
         histograms: &Histograms,
         br: &mut BitReader,
         cluster: usize,
+        errors: &mut ErrorState,
     ) {
         if let Some(token) = token.checked_sub(self.min_symbol) {
             let lz_length_conf = histograms.lz77_length_uint.as_ref().unwrap();
-            let count = lz_length_conf.read(token, br);
+            let (count, overflow) = lz_length_conf.read(token, br);
+            if overflow {
+                errors.invalid_symbol = true;
+            }
             // If this calculation overflows, the bitstream is invalid (it would be rejected
             // on the LZ77 path), but we don't report an error.
             self.repeat_count = count.wrapping_add(self.min_length);
         } else {
-            let sym = histograms.uint_config(cluster).read(token, br);
+            let (sym, overflow) = histograms.uint_config(cluster).read(token, br);
+            if overflow {
+                errors.invalid_symbol = true;
+            }
             self.last_sym = Some(sym);
             self.repeat_count = 1;
         }
@@ -196,6 +203,8 @@ enum SymbolReaderState {
 struct ErrorState {
     lz77_repeat: bool,
     arithmetic_overflow: bool,
+    /// Set when HybridUint decoding produces nbits >= 32 (invalid bitstream).
+    invalid_symbol: bool,
 }
 
 impl ErrorState {
@@ -208,6 +217,8 @@ impl ErrorState {
             Err(Error::UnexpectedLz77Repeat)
         } else if self.arithmetic_overflow {
             Err(Error::ArithmeticOverflow)
+        } else if self.invalid_symbol {
+            Err(Error::IntegerTooLarge(32))
         } else {
             Ok(())
         }
@@ -335,7 +346,11 @@ impl SymbolReader {
                     Codes::Huffman(hc) => hc.read(br, cluster),
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
                 };
-                histograms.uint_config(cluster).read(token, br)
+                let (sym, overflow) = histograms.uint_config(cluster).read(token, br);
+                if overflow {
+                    self.errors.invalid_symbol = true;
+                }
+                sym
             }
 
             SymbolReaderState::Lz77(lz77_state) => {
@@ -348,7 +363,10 @@ impl SymbolReader {
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
                 };
                 let Some(lz77_token) = token.checked_sub(lz77_state.min_symbol) else {
-                    let sym = histograms.uint_config(cluster).read(token, br);
+                    let (sym, overflow) = histograms.uint_config(cluster).read(token, br);
+                    if overflow {
+                        self.errors.invalid_symbol = true;
+                    }
                     lz77_state.push_decoded_symbol(sym);
                     return sym;
                 };
@@ -357,11 +375,14 @@ impl SymbolReader {
                     return 0;
                 }
 
-                let num_to_copy = histograms
+                let (num_to_copy, overflow) = histograms
                     .lz77_length_uint
                     .as_ref()
                     .unwrap()
                     .read(lz77_token, br);
+                if overflow {
+                    self.errors.invalid_symbol = true;
+                }
                 let Some(num_to_copy) = num_to_copy.checked_add(lz77_state.min_length) else {
                     warn!(
                         num_to_copy,
@@ -376,9 +397,12 @@ impl SymbolReader {
                     Codes::Huffman(hc) => hc.read(br, lz_dist_cluster),
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, lz_dist_cluster),
                 };
-                let distance_sym = histograms
+                let (distance_sym, overflow) = histograms
                     .uint_config(lz_dist_cluster)
                     .read(distance_sym, br);
+                if overflow {
+                    self.errors.invalid_symbol = true;
+                }
                 lz77_state.apply_copy(distance_sym, num_to_copy);
 
                 let sym = lz77_state.pull_symbol().unwrap();
@@ -395,7 +419,7 @@ impl SymbolReader {
                     Codes::Huffman(hc) => hc.read(br, cluster),
                     Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
                 };
-                rle_state.push_token(token, histograms, br, cluster);
+                rle_state.push_token(token, histograms, br, cluster, &mut self.errors);
                 if let Some(sym) = rle_state.pull_symbol() {
                     sym
                 } else {
@@ -456,7 +480,11 @@ impl SymbolReader {
             Codes::Huffman(hc) => hc.read(br, cluster),
             Codes::Ans(ans) => self.ans_reader.read(ans, br, cluster),
         };
-        HybridUint::read_config_420(token, br)
+        let (sym, overflow) = HybridUint::read_config_420(token, br);
+        if overflow {
+            self.errors.invalid_symbol = true;
+        }
+        sym
     }
 
     /// Specialized fast path for signed reads when all configs are 420.

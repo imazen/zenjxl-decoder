@@ -65,44 +65,58 @@ impl HybridUint {
 
     /// Specialized fast path for 420 config:
     /// split_exponent=4, msb_in_token=2, lsb_in_token=0
+    ///
+    /// Returns `(value, overflow)` where `overflow` is true if nbits >= 32.
     #[inline(always)]
-    pub fn read_config_420(symbol: u32, br: &mut BitReader) -> u32 {
+    pub fn read_config_420(symbol: u32, br: &mut BitReader) -> (u32, bool) {
         if symbol < 16 {
-            return symbol;
+            return (symbol, false);
         }
 
         // Equivalent to: 2 + ((symbol - 16) >> 2)
-        let nbits = (symbol >> 2) - 2;
-        let nbits = nbits & 31;
+        let nbits_raw = (symbol >> 2) - 2;
+        let overflow = nbits_raw >= 32;
+        let nbits = nbits_raw & 31;
         let bits = br.read_optimistic(nbits as usize) as u32;
         let hi = (symbol & 3) | 4;
 
-        (hi << nbits) | bits
+        ((hi << nbits) | bits, overflow)
     }
 
+    /// Reads a hybrid uint value from the bitstream.
+    ///
+    /// Returns `(value, overflow)` where `overflow` is true if nbits >= 32,
+    /// indicating an invalid bitstream. The value is still returned (masked to
+    /// valid range) to support deferred error reporting.
     #[inline(always)]
-    pub fn read(&self, symbol: u32, br: &mut BitReader) -> u32 {
+    pub fn read(&self, symbol: u32, br: &mut BitReader) -> (u32, bool) {
         if symbol < self.split_token {
-            return symbol;
+            return (symbol, false);
         }
         // Fast path: when msb_in_token == 0 && lsb_in_token == 0, hi is always 1
         // and the low/shift computation is a no-op.
         if self.msb_in_token == 0 && self.lsb_in_token == 0 {
-            let nbits = (self.split_exponent + symbol - self.split_token) & 31;
+            let nbits_raw = self.split_exponent + symbol - self.split_token;
+            let overflow = nbits_raw >= 32;
+            let nbits = nbits_raw & 31;
             let bits = br.read_optimistic(nbits as usize) as u32;
-            return (1 << nbits) | bits;
+            return ((1 << nbits) | bits, overflow);
         }
         let bits_in_token = self.lsb_in_token + self.msb_in_token;
-        let nbits =
+        let nbits_raw =
             self.split_exponent - bits_in_token + ((symbol - self.split_token) >> bits_in_token);
-        // The bitstream is invalid if nbits >= 32. We do not report errors, and just pretend we
-        // decoded a number <32.
-        let nbits = nbits & 31;
+        // The bitstream is invalid if nbits >= 32. We mask to valid range and
+        // report the overflow via the returned flag for deferred error checking.
+        let overflow = nbits_raw >= 32;
+        let nbits = nbits_raw & 31;
         let low = symbol & ((1 << self.lsb_in_token) - 1);
         let symbol_nolow = symbol >> self.lsb_in_token;
         let bits = br.read_optimistic(nbits as usize) as u32;
         let hi = (symbol_nolow & ((1 << self.msb_in_token) - 1)) | (1 << self.msb_in_token);
-        (((hi << nbits) | bits) << self.lsb_in_token) | low
+        (
+            (((hi << nbits) | bits) << self.lsb_in_token) | low,
+            overflow,
+        )
     }
 }
 
@@ -126,7 +140,7 @@ mod test {
         let mut br = BitReader::new(&[10, 75, 10, 75, 168, 139, 132, 255, 244]);
         br.skip_bits(1).unwrap();
         if let Ok(uint) = HybridUint::decode(15, &mut br) {
-            uint.read(1022, &mut br);
+            let (_value, _overflow) = uint.read(1022, &mut br);
         }
     }
 }

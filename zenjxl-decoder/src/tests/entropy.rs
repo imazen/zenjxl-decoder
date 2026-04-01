@@ -37,26 +37,26 @@ mod hybrid_uint_tests {
         // Test reading symbol 0 - should return 0 directly (no extra bits needed)
         let data = [0u8; 4];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(0, &mut br), 0);
+        assert_eq!(config.read(0, &mut br), (0, false));
 
         // Test reading symbol 1 with 0 extra bits - should return 1
         // For config (0,0,0): split_token=1, bits_in_token=0
         // When symbol=1: nbits = 0 - 0 + ((1-1) >> 0) = 0
         // Result = ((1 | 1) << 0) | bits << 0 | 0 = 1
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(1, &mut br), 1);
+        assert_eq!(config.read(1, &mut br), (1, false));
 
         // Symbol 2: nbits = 0 - 0 + ((2-1) >> 0) = 1
         // Need to read 1 bit
         let data = [0b00000000u8]; // extra bits = 0
         let mut br = BitReader::new(&data);
         // hi = (0 & 0) | 1 = 1, result = ((1 << 1) | 0) << 0 = 2
-        assert_eq!(config.read(2, &mut br), 2);
+        assert_eq!(config.read(2, &mut br), (2, false));
 
         let data = [0b00000001u8]; // extra bits = 1
         let mut br = BitReader::new(&data);
         // hi = (0 & 0) | 1 = 1, result = ((1 << 1) | 1) << 0 = 3
-        assert_eq!(config.read(2, &mut br), 3);
+        assert_eq!(config.read(2, &mut br), (3, false));
     }
 
     /// Test that HybridUint config (4,1,1) works correctly
@@ -68,10 +68,10 @@ mod hybrid_uint_tests {
         // Symbols < 16 are returned directly
         let data = [0u8; 4];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(0, &mut br), 0);
+        assert_eq!(config.read(0, &mut br), (0, false));
 
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(15, &mut br), 15);
+        assert_eq!(config.read(15, &mut br), (15, false));
 
         // Symbol 16: bits_in_token = 2, nbits = 4 - 2 + ((16-16) >> 2) = 2
         // low = 16 & 1 = 0, symbol_nolow = 8
@@ -79,7 +79,7 @@ mod hybrid_uint_tests {
         // With extra bits = 0: result = ((2 << 2) | 0) << 1 | 0 = 16
         let data = [0b00000000u8];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(16, &mut br), 16);
+        assert_eq!(config.read(16, &mut br), (16, false));
     }
 
     /// Test that HybridUint config (4,2,0) works correctly
@@ -91,11 +91,11 @@ mod hybrid_uint_tests {
         // Symbols < 16 are returned directly
         let data = [0u8; 4];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(0, &mut br), 0);
+        assert_eq!(config.read(0, &mut br), (0, false));
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(8, &mut br), 8);
+        assert_eq!(config.read(8, &mut br), (8, false));
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(15, &mut br), 15);
+        assert_eq!(config.read(15, &mut br), (15, false));
 
         // Symbol 16: bits_in_token = 2, nbits = 4 - 2 + ((16-16) >> 2) = 2
         // low = 0, symbol_nolow = 16
@@ -103,7 +103,7 @@ mod hybrid_uint_tests {
         // With extra bits = 0: result = ((4 << 2) | 0) << 0 = 16
         let data = [0b00000000u8];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(16, &mut br), 16);
+        assert_eq!(config.read(16, &mut br), (16, false));
     }
 
     /// Test that HybridUint config (4,2,1) works correctly
@@ -115,9 +115,9 @@ mod hybrid_uint_tests {
         // Symbols < 16 are returned directly
         let data = [0u8; 4];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(0, &mut br), 0);
+        assert_eq!(config.read(0, &mut br), (0, false));
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(15, &mut br), 15);
+        assert_eq!(config.read(15, &mut br), (15, false));
 
         // Symbol 16 with config (4,2,1):
         // bits_in_token = 3, nbits = 4 - 3 + ((16-16) >> 3) = 1
@@ -126,7 +126,7 @@ mod hybrid_uint_tests {
         // With extra bits = 0: result = ((4 << 1) | 0) << 1 | 0 = 16
         let data = [0b00000000u8];
         let mut br = BitReader::new(&data);
-        assert_eq!(config.read(16, &mut br), 16);
+        assert_eq!(config.read(16, &mut br), (16, false));
     }
 
     /// Test various values through hybrid uint roundtrip
@@ -146,7 +146,7 @@ mod hybrid_uint_tests {
             // Test symbol 0 always returns 0
             let data = [0u8; 8];
             let mut br = BitReader::new(&data);
-            assert_eq!(config.read(0, &mut br), 0);
+            assert_eq!(config.read(0, &mut br), (0, false));
         }
     }
 }
