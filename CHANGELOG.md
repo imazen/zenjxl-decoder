@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The changelog covers changes made in this fork.
 
+## [0.3.5] - 2026-04-01
+
+### Fixed
+
+- **Huffman alphabet ratio overflow** -- Increased `ALPHABET_BITS_RATIO` from 32 to 256 to prevent false rejections of valid streams.
+- **Shift overflow in property mask** -- Prevent shift overflow in `compute_used_property_mask` for large property indices.
+- **Section padding for non-section buffers** -- Add `SECTION_PADDING` to non-section buffer allocation to prevent out-of-bounds reads during BitReader refill.
+- **ANS alias map validation** -- Replace `assert!` in `build_alias_map` with proper error returns for malformed streams.
+- **Flat tree child_id bounds checking** -- Validate child_id references in flat trees to prevent out-of-bounds access.
+- **HybridUint nbits overflow** -- Track `nbits>=32` overflow in `ErrorState` for deferred reporting instead of silent corruption.
+- **Memory tracker threading** -- Thread `MemoryTracker` to local modular tree decoding for accurate accounting.
+
+### Performance
+
+- **HybridUint OR-accumulator** -- Use OR-accumulator for overflow detection, reducing branches in the hot path.
+
+### Dependencies
+
+- Updated moxcms to 0.8.1 (from crates.io, with `extended_range` + `options` features).
+- Updated wasm-bindgen 0.2.117, js-sys/web-sys 0.3.94.
+- Updated archmage 0.9.16, zenbench 0.1.3, libc 0.2.184.
+
+### CI
+
+- Added full CI matrix with i686 cross-compilation, macOS Intel, windows-11-arm.
+- Reduced i686 test parallelism to 2 threads for address space constraints.
+
 ## [0.3.4] - 2026-03-30
 
 ### Fixed
