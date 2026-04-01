@@ -474,9 +474,15 @@ pub fn load_png(path: &Path) -> std::io::Result<(usize, usize, usize, Vec<u8>)> 
         )
     })?;
 
-    let mut buf = vec![0; reader.output_buffer_size().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "PNG: unknown output buffer size")
-    })?];
+    let mut buf = vec![
+        0;
+        reader.output_buffer_size().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "PNG: unknown output buffer size",
+            )
+        })?
+    ];
     let info = reader.next_frame(&mut buf).map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,

@@ -122,7 +122,10 @@ impl CodestreamParser {
                 let t0 = std::time::Instant::now();
 
                 if let Some(lf_global) = self.lf_global_section.take() {
-                    frame.decode_lf_global(&mut BitReader::new_padded(&lf_global.data, lf_global.len)?)?;
+                    frame.decode_lf_global(&mut BitReader::new_padded(
+                        &lf_global.data,
+                        lf_global.len,
+                    )?)?;
                     self.section_state.lf_global_done = true;
                     processed_section = true;
                 }
@@ -164,7 +167,11 @@ impl CodestreamParser {
                             })
                             .collect();
                         let hf_sec = self.hf_global_section.take().unwrap();
-                        frame.decode_lf_and_hf_global_parallel(sections, hf_sec.data, hf_sec.len)?;
+                        frame.decode_lf_and_hf_global_parallel(
+                            sections,
+                            hf_sec.data,
+                            hf_sec.len,
+                        )?;
                         self.section_state.remaining_lf -= count;
                         self.section_state.hf_global_done = true;
                         processed_section = true;
@@ -198,7 +205,10 @@ impl CodestreamParser {
                         let Section::Lf { group } = lf_section.section else {
                             unreachable!()
                         };
-                        frame.decode_lf_group(group, &mut BitReader::new_padded(&lf_section.data, lf_section.len)?)?;
+                        frame.decode_lf_group(
+                            group,
+                            &mut BitReader::new_padded(&lf_section.data, lf_section.len)?,
+                        )?;
                         processed_section = true;
                         self.section_state.remaining_lf -= 1;
                     }
@@ -220,7 +230,10 @@ impl CodestreamParser {
                     true
                 } else if let Some(hf_global) = self.hf_global_section.take() {
                     let t = std::time::Instant::now();
-                    frame.decode_hf_global(&mut BitReader::new_padded(&hf_global.data, hf_global.len)?)?;
+                    frame.decode_hf_global(&mut BitReader::new_padded(
+                        &hf_global.data,
+                        hf_global.len,
+                    )?)?;
                     decode_hf_dur = t.elapsed();
                     self.section_state.hf_global_done = true;
                     processed_section = true;
