@@ -3,37 +3,31 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-# Workflow to run after merge to main
+# Extended arbtest budget after merge. Core CI is in ci.yml.
 
-name: Post merge checks
+name: Post merge
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  post_merge_tests:
+  arbtest-extended:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install latest rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2.8.0
+      - uses: Swatinem/rust-cache@v2
 
       - name: Run arbtest with extended budget
         env:
-            # 1min40sec
-            ARBTEST_BUDGET_MS: 100000
-        # RUST_BACKTRACE=1 is already set in the global env for the workflow
+          ARBTEST_BUDGET_MS: 100000
         run: cargo test --release --all --no-fail-fast --all-features

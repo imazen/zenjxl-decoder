@@ -3,9 +3,11 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-# Workflow to run pull-requests specific checks.
+# PR-specific checks (source validation, conformance, benchmarks).
+# Core CI (format, clippy, test, i686) is in ci.yml.
 
 name: PR
+
 on:
   pull_request:
     types: [opened, reopened, synchronize]
@@ -15,125 +17,27 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Run source tests: author list, copyright notice and merge conflicts.
   source_checks:
-    runs-on: [ubuntu-latest]
-    steps:
-    - name: Checkout the source
-      uses: actions/checkout@v4
-    - name: Check source code
-      run:
-        ./ci/pull_request_checks.sh
-
-  authors:
-    runs-on: [ubuntu-latest]
-    continue-on-error: true
-    steps:
-    - name: Checkout the source
-      uses: actions/checkout@v4
-    - name: Check AUTHORS file
-      run:
-        ./ci/author_check.sh
-
-  format:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+    - uses: actions/checkout@v4
+    - run: ./ci/pull_request_checks.sh
 
-      - name: Install latest rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-
-      - name: Cargo fmt (check)
-        run: cargo fmt --all -- --check
-
-  clippy:
-    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        features: [all, none]
-        os: [ubuntu-24.04-arm, ubuntu-latest, windows-11-arm, macos-26-intel]
+  authors:
+    runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install latest rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2.8.0
-        with:
-          prefix-key: ${{ matrix.os }}-clippy-${{ matrix.features }}
-
-
-      - name: Clippy with all features
-        if: ${{ matrix.features == 'all' }}
-        run: cargo clippy --release --all-targets --all-features --tests --all -- -D warnings
-
-      - name: Clippy with no features
-        if: ${{ matrix.features == 'none' }}
-        run: cargo clippy --release --all-targets --no-default-features --tests --all -- -D warnings
-
-  test:
-    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04-arm, ubuntu-latest, windows-11-arm, macos-26-intel]
-        simd: [none]
-        include:
-          - os: ubuntu-latest
-            simd: sse42
-          - os: ubuntu-latest
-            simd: avx
-          - os: ubuntu-latest
-            simd: avx512
-          - os: ubuntu-24.04-arm
-            simd: neon
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install latest rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2.8.0
-        with:
-          prefix-key: ${{ matrix.os }}-test-${{ matrix.simd }}
-
-
-      - name: Tests with SIMD feature ${{ matrix.simd }}
-        if: ${{ matrix.simd != 'none' }}
-        run: cargo test --release --all --no-fail-fast --no-default-features --features ${{ matrix.simd }}
-
-      - name: Tests with no features
-        if: ${{ matrix.simd == 'none' }}
-        run: cargo test --release --all --no-fail-fast --no-default-features
+    - uses: actions/checkout@v4
+    - run: ./ci/author_check.sh
 
   coverage:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout the source
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Install latest rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - uses: dtolnay/rust-toolchain@stable
 
-    - name: Rust cache
-      uses: Swatinem/rust-cache@v2.8.0
+    - uses: Swatinem/rust-cache@v2
 
     - name: Install llvm-cov
       run: cargo +stable install cargo-llvm-cov --locked
@@ -151,7 +55,7 @@ jobs:
       run: cargo llvm-cov report --html --release --output-dir=coverage_html
 
     - name: Upload HTML report
-      uses: actions/upload-artifact@v4.6.2
+      uses: actions/upload-artifact@v4
       with:
         name: coverage_report
         path: ./coverage_html/html
@@ -159,14 +63,13 @@ jobs:
   conformance:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout the source
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: Checkout bench
       uses: actions/checkout@master
       with:
         repository: libjxl/bench
-        path: bench      
+        path: bench
         fetch-depth: 1
 
     - name: Fix bench dependencies
@@ -175,7 +78,6 @@ jobs:
         ( cd bench/third_party && rm -rf jxl-rs && ln -s "${GITHUB_WORKSPACE}" jxl-rs )
 
     - name: Cache conformance objects
-      id: cache-conformance
       uses: actions/cache@v4
       with:
         path: bench/third_party/conformance/.objects
@@ -184,39 +86,29 @@ jobs:
     - name: Update conformance objects
       run: bash bench/third_party/conformance/scripts/download_and_symlink_using_curl.sh
 
-    - name: Install latest rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: clippy, rustfmt
+    - uses: dtolnay/rust-toolchain@stable
 
-    - name: Rust cache
-      uses: Swatinem/rust-cache@v2.8.0
+    - uses: Swatinem/rust-cache@v2
 
     - name: Build CLI
       run: cargo build --release --bin zenjxl-decoder-cli
 
-    - name: Setup python3
-      uses: actions/setup-python@v5
+    - uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-    
+
     - name: Install Python dependencies
       run: pip install numpy apng pypng
 
-    - name: Update apt
-      run: sudo apt update
-
     - name: Install binary dependencies
-      run: sudo apt install imagemagick
+      run: sudo apt update && sudo apt install imagemagick
 
-    - name: Run jxl-rs conformance tests with ICC
-      id: icc_conformance
+    - name: Run conformance tests with ICC
       run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_jxl-rs.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/zenjxl-decoder-cli %s %s --icc-out %s'" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs.json --lax
 
-    - name: Run jxl-rs conformance tests wrapped in PNG
-      id: png_conformance
-      run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_png.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/zenjxl-decoder-cli --override-bitdepth=16 %s %s '" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs_via_png.json --lax
+    - name: Run conformance tests via PNG
       continue-on-error: true
+      run: python3 ./bench/third_party/conformance/scripts/conformance.py --decoder "python3 ${GITHUB_WORKSPACE}/bench/scripts/wrap_png.py --decoder ' ${GITHUB_WORKSPACE}/bench/third_party/jxl-rs/target/release/zenjxl-decoder-cli --override-bitdepth=16 %s %s '" --corpus ${GITHUB_WORKSPACE}/bench/third_party/conformance/testcases/main_level5.txt --results=${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs_via_png.json --lax
 
     - name: Export step summary
       run: ./ci/conformance_summary.py "${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs.json" "${GITHUB_WORKSPACE}/bench/docs/dumps/dump_jxl-rs_via_png.json" >> $GITHUB_STEP_SUMMARY
@@ -225,39 +117,35 @@ jobs:
       run: ./ci/merge_conformance_report.py "${GITHUB_WORKSPACE}/bench/docs" >> conformance_report.html
 
     - name: Upload HTML report
-      uses: actions/upload-artifact@v4.6.2
+      uses: actions/upload-artifact@v4
       with:
         name: conformance_report
         path: conformance_report.html
 
   benchmark:
     runs-on: ubuntu-latest
-    continue-on-error: true  # Never block the PR on benchmark failures
+    continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
     steps:
-    - name: Checkout the source
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Full history needed for jxl-perfhistory
+        fetch-depth: 0
 
     - name: Fetch base branch
       run: git fetch origin ${{ github.base_ref }}
 
-    - name: Install latest rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - uses: dtolnay/rust-toolchain@stable
 
-    - name: Rust cache
-      uses: Swatinem/rust-cache@v2.8.0
+    - uses: Swatinem/rust-cache@v2
       with:
         prefix-key: benchmark
 
     - name: Install jxl-perfhistory
       run: cargo install --git https://github.com/zond/jxl-perfhistory
 
-    - name: Select a few test images
-      id: select-images
+    - name: Select test images
       run: |
         mkdir testimages
         cp jxl/resources/test/conformance_test_images/sunset_logo.jxl testimages
@@ -265,15 +153,13 @@ jobs:
         cp jxl/resources/test/green_queen_modular_e3.jxl testimages
         cp jxl/resources/test/green_queen_vardct_e3.jxl testimages
 
-    - name: Cache benchmark binaries
-      uses: actions/cache@v4
+    - uses: actions/cache@v4
       with:
         path: benchmark-binaries
         key: ${{ runner.os }}-${{ runner.arch }}-benchmark-binaries
 
-    - name: Run performance benchmark
-      id: benchmark
-      continue-on-error: true  # Never fail the PR
+    - name: Run benchmark
+      continue-on-error: true
       run: |
         mkdir -p benchmark-binaries
         (jxl-perfhistory -b benchmark-binaries -g "testimages/*.jxl" -c 0.99 -e 0.03 --ignore-noisy-system --pr-comment || echo "Benchmark failed") > benchmark.txt
@@ -283,7 +169,7 @@ jobs:
         echo "${{ github.event.number }}" > pr_number.txt
         echo "${{ github.event.pull_request.head.sha }}" > head_sha.txt
 
-    - name: Add to step summary
+    - name: Step summary
       if: always()
       run: |
         echo "## Performance Benchmark" >> $GITHUB_STEP_SUMMARY
@@ -291,9 +177,8 @@ jobs:
         if [ -f benchmark.txt ]; then
           cat benchmark.txt >> $GITHUB_STEP_SUMMARY
         else
-          echo "Benchmark was not run (checkout or build failed)." >> $GITHUB_STEP_SUMMARY
+          echo "Benchmark was not run." >> $GITHUB_STEP_SUMMARY
         fi
-        echo "" >> $GITHUB_STEP_SUMMARY
 
     - uses: actions/upload-artifact@v4
       if: always()
