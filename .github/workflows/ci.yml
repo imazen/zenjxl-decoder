@@ -112,7 +112,9 @@ jobs:
           prefix-key: i686
 
       - name: Test (i686, no features)
-        run: cross test --release --all --no-fail-fast --no-default-features --target i686-unknown-linux-gnu
+        # Limit parallelism: multiple large-image tests running simultaneously
+        # exhaust 32-bit address space (~3GB total for all threads combined).
+        run: cross test --release --all --no-fail-fast --no-default-features --target i686-unknown-linux-gnu -- --test-threads=2
 
       - name: Test (i686, all features)
-        run: cross test --release --all --no-fail-fast --all-features --target i686-unknown-linux-gnu
+        run: cross test --release --all --no-fail-fast --all-features --target i686-unknown-linux-gnu -- --test-threads=2
