@@ -522,7 +522,9 @@ impl Tree {
         let mut mask = 0u32;
         for node in nodes {
             if let TreeNode::Split { property, .. } = node {
-                mask |= 1u32 << *property;
+                // Properties >= 32 can't be tracked in a u32 mask; set all high
+                // bits so they are always computed in compute_properties.
+                mask |= 1u32.checked_shl(*property as u32).unwrap_or(u32::MAX);
             }
         }
         // Properties 8 and 9 are coupled: property 8 reads the previous value
