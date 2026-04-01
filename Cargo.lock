@@ -949,8 +949,9 @@ dependencies = [
 
 [[package]]
 name = "moxcms"
-version = "0.9.0"
-source = "git+https://github.com/lilith/moxcms#22dd2e6376b54e32e26529935f3936323641bf65"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
