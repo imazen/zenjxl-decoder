@@ -115,8 +115,4 @@ jobs:
         run: cross test --release --all --no-fail-fast --no-default-features --target i686-unknown-linux-gnu
 
       - name: Test (i686, all features)
-        # compare_pipelines and compare_incremental decode the image twice,
-        # doubling memory usage. For large images (portrait_4k, tirr_photo,
-        # progressive_5) this exceeds 32-bit address space. Single decodes
-        # pass fine. The double-decode variants are covered by 64-bit runs.
-        run: cross test --release --all --no-fail-fast --all-features --target i686-unknown-linux-gnu -- --skip compare_pipelines_portrait_4k --skip compare_pipelines_tirr_photo --skip compare_pipelines_progressive_5 --skip compare_incremental_tirr_photo
+        run: cross test --release --all --no-fail-fast --all-features --target i686-unknown-linux-gnu

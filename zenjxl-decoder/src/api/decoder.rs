@@ -474,18 +474,47 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    /// Hash all pixel rows for memory-efficient comparison.
+    fn hash_frames(frames: &[Vec<Image<f32>>]) -> Vec<Vec<Vec<u64>>> {
+        use std::hash::{Hash, Hasher};
+        frames
+            .iter()
+            .map(|channels| {
+                channels
+                    .iter()
+                    .map(|img| {
+                        let (_, ys) = img.size();
+                        (0..ys)
+                            .map(|y| {
+                                let mut h = std::hash::DefaultHasher::new();
+                                for &v in img.row(y) {
+                                    v.to_bits().hash(&mut h);
+                                }
+                                h.finish()
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     fn compare_pipelines(path: &Path) -> Result<(), Error> {
         let file = std::fs::read(path)?;
-        let simple_frames = decode(&file, usize::MAX, true, false, None)?.1;
+        let reference_frames = decode(&file, usize::MAX, true, false, None)?.1;
+        // Hash and drop reference pixels before second decode to halve peak
+        // memory. Critical for 32-bit targets where two full 4K decoded
+        // outputs + decoder state exceeds address space.
+        let reference_hashes = hash_frames(&reference_frames);
+        drop(reference_frames);
         let frames = decode(&file, usize::MAX, false, false, None)?.1;
-        assert_eq!(frames.len(), simple_frames.len());
-        for (fc, (f, sf)) in frames
-            .into_iter()
-            .zip(simple_frames.into_iter())
-            .enumerate()
-        {
-            compare_frames(path, fc, &f, &sf)?;
-        }
+        let frame_hashes = hash_frames(&frames);
+        assert_eq!(
+            reference_hashes,
+            frame_hashes,
+            "{}: pipeline outputs differ",
+            path.display()
+        );
         Ok(())
     }
 
@@ -493,20 +522,19 @@ pub(crate) mod tests {
 
     fn compare_incremental(path: &Path) -> Result<(), Error> {
         let file = std::fs::read(path).unwrap();
-        // One-shot decode
+        // One-shot decode — hash and drop before incremental decode.
         let (_, one_shot_frames) = decode(&file, usize::MAX, false, false, None)?;
+        let reference_hashes = hash_frames(&one_shot_frames);
+        drop(one_shot_frames);
         // Incremental decode with arbitrary flushes.
         let (_, frames) = decode(&file, 123, false, true, None)?;
-
-        // Compare one_shot_frames and frames
-        assert_eq!(one_shot_frames.len(), frames.len());
-        for (fc, (f, sf)) in frames
-            .into_iter()
-            .zip(one_shot_frames.into_iter())
-            .enumerate()
-        {
-            compare_frames(path, fc, &f, &sf)?;
-        }
+        let frame_hashes = hash_frames(&frames);
+        assert_eq!(
+            reference_hashes,
+            frame_hashes,
+            "{}: incremental vs one-shot outputs differ",
+            path.display()
+        );
 
         Ok(())
     }
