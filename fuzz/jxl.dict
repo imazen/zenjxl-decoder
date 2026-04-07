@@ -1,0 +1,33 @@
+# JPEG XL format dictionary
+# Codestream signature (bare codestream)
+"\xFF\x0A"
+# Container signature (ISOBMFF-based)
+"\x00\x00\x00\x0C\x4A\x58\x4C\x20\x0D\x0A\x87\x0A"
+# Container box types
+"JXL "
+"jxlc"
+"jxlp"
+"jxll"
+"Exif"
+"xml "
+"jumb"
+"jhgm"
+"brob"
+"ftyp"
+# Frame header bits (common small values)
+"\x00\x00"
+"\x00\x01"
+"\x01\x00"
+"\x00\x00\x00\x00"
+"\xFF\xFF"
+# Size marker patterns
+"\x00\x00\x00\x01"
+"\x00\x00\x00\x0C"
+"\x00\x00\x00\x14"
+# ICC profile markers
+"acsp"
+"mntr"
+"RGB "
+"GRAY"
+# Brotli compressed data marker
+"\x1B"

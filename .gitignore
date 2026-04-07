@@ -11,9 +11,12 @@ jxl/resources/test/portrait_4k_q90.jxl
 # Rust build artifacts
 target/
 
-# Fuzz build artifacts and crashes
+# Fuzz build artifacts, crashes, corpus, and coverage
 fuzz/target/
 fuzz/artifacts/
+fuzz/corpus/
+fuzz/coverage/
+*.profraw
 
 # Profiling
 perf.data

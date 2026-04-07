@@ -1,0 +1,39 @@
+[package]
+name = "zenjxl-decoder-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.zenjxl-decoder]
+path = "../zenjxl-decoder"
+default-features = false
+features = []
+
+# Prevent this from interfering with workspace resolution
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = true
+opt-level = 3
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+doc = false
+
+[[bin]]
+name = "probe"
+path = "fuzz_targets/probe.rs"
+doc = false
+
+[[bin]]
+name = "decode_with_limits"
+path = "fuzz_targets/decode_with_limits.rs"
+doc = false
