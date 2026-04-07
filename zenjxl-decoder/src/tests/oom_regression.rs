@@ -103,6 +103,12 @@ fn test_default_limits_are_bounded() {
         limits.max_pixels.unwrap()
     );
 
+    // Default limits should have a memory budget to prevent OOM from crafted inputs
+    assert!(
+        limits.max_memory_bytes.is_some(),
+        "Default max_memory_bytes should be set"
+    );
+
     // The restrictive preset should have a memory budget
     let restrictive = crate::api::JxlDecoderLimits::restrictive();
     assert!(
@@ -125,6 +131,19 @@ fn test_image_allocation_is_fallible() {
     match result {
         Ok(_) => eprintln!("Large allocation succeeded (system has enough memory)"),
         Err(e) => eprintln!("Large allocation correctly failed: {e}"),
+    }
+}
+
+/// 781-byte crafted JXL container (2143x1050 16-bit) that triggered
+/// unbounded internal allocation with no default memory budget.
+/// The default max_memory_bytes limit must prevent this from OOMing.
+#[test]
+fn test_oom_container_781bytes() {
+    let data = include_bytes!("oom_artifacts/oom_container_781bytes.jxl");
+    // Full decode path must return an error, not OOM
+    match crate::decode(data) {
+        Err(e) => eprintln!("[container_781bytes] decode correctly rejected: {e}"),
+        Ok(_) => panic!("Expected error from crafted 781-byte container, got Ok"),
     }
 }
 

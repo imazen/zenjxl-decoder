@@ -63,14 +63,14 @@ pub struct JxlDecoderLimits {
 impl Default for JxlDecoderLimits {
     fn default() -> Self {
         Self {
-            max_pixels: Some(1 << 28),        // ~256 megapixels
-            max_extra_channels: Some(256),    // 256 extra channels
-            max_icc_size: Some(1 << 28),      // 256 MB
-            max_tree_size: Some(1 << 22),     // 4M nodes
-            max_patches: None,                // Use image-size-based default
-            max_spline_points: Some(1 << 20), // 1M points
-            max_reference_frames: Some(4),    // 4 reference frames
-            max_memory_bytes: None,           // No overall memory limit by default
+            max_pixels: Some(1 << 28),          // ~256 megapixels
+            max_extra_channels: Some(256),      // 256 extra channels
+            max_icc_size: Some(1 << 28),        // 256 MB
+            max_tree_size: Some(1 << 22),       // 4M nodes
+            max_patches: None,                  // Use image-size-based default
+            max_spline_points: Some(1 << 20),   // 1M points
+            max_reference_frames: Some(4),      // 4 reference frames
+            max_memory_bytes: Some(4u64 << 30), // 4 GB — prevents OOM from crafted inputs
         }
     }
 }
