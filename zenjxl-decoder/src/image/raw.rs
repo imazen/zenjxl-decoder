@@ -185,7 +185,7 @@ impl OwnedRawImage {
 
         // Transfer budget ownership from guard to the clone's Drop.
         if let Some(g) = guard {
-            g.forget();
+            g.disarm();
         }
 
         Ok(clone)

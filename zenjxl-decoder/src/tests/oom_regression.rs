@@ -169,3 +169,30 @@ fn test_icc_amplification_dos_variant() {
     ];
     assert_decode_rejects(data, "icc_amplification_variant");
 }
+
+/// Regression: MemoryGuard::forget() leaked 32 bytes of Arc<MemoryTrackerInner>
+/// per tracked image allocation. The fix uses disarm() which zeroes the guard's
+/// byte count and drops normally, releasing the Arc refcount.
+///
+/// These inputs triggered the leak in `decode` and `decode_with_limits` fuzz targets.
+#[test]
+fn test_leak_memory_tracker_decode() {
+    let data1 = include_bytes!("oom_artifacts/leak_memory_tracker_decode_1.jxl");
+    let data2 = include_bytes!("oom_artifacts/leak_memory_tracker_decode_2.jxl");
+    // Should return an error, not panic or leak.
+    let _ = crate::decode(data1);
+    let _ = crate::decode(data2);
+}
+
+#[test]
+fn test_leak_memory_tracker_decode_with_limits() {
+    let data = include_bytes!("oom_artifacts/leak_memory_tracker_limits.jxl");
+    let mut limits = crate::api::JxlDecoderLimits::restrictive();
+    limits.max_pixels = Some(4_000_000);
+    limits.max_memory_bytes = Some(64 * 1024 * 1024);
+    let mut options = crate::api::JxlDecoderOptions::default();
+    options.limits = limits;
+    options.parallel = false;
+    // Should return an error, not panic or leak.
+    let _ = crate::decode_with(data, options);
+}

@@ -137,7 +137,7 @@ impl<T: ImageDataType> Image<T> {
         let guard = MemoryGuard::new(tracker.clone(), alloc_size);
         let mut img = Self::new(size)?;
         img.raw.set_tracker(tracker.clone(), alloc_size);
-        guard.forget(); // Ownership transferred to OwnedRawImage's Drop.
+        guard.disarm(); // Ownership transferred to OwnedRawImage's Drop.
         Ok(img)
     }
 
@@ -157,7 +157,7 @@ impl<T: ImageDataType> Image<T> {
         let guard = MemoryGuard::new(tracker.clone(), alloc_size);
         let mut img = Self::new_with_padding(size, offset, padding)?;
         img.raw.set_tracker(tracker.clone(), alloc_size);
-        guard.forget();
+        guard.disarm();
         Ok(img)
     }
 

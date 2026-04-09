@@ -147,8 +147,24 @@ impl MemoryGuard {
         Self { tracker, bytes }
     }
 
+    /// Disarms the guard so it will NOT release memory on drop.
+    /// Use when transferring ownership of the allocation to another structure
+    /// (e.g., `OwnedRawImage`'s `Drop`).
+    ///
+    /// Unlike `std::mem::forget`, this properly drops the internal `MemoryTracker`
+    /// clone, avoiding a 32-byte `Arc` leak per call.
+    pub fn disarm(mut self) {
+        self.bytes = 0;
+        // self drops normally here — tracker Arc refcount decrements,
+        // but release(0) is a no-op on the budget.
+    }
+
     /// Consumes the guard without releasing memory.
-    /// Use when transferring ownership of the allocation.
+    ///
+    /// **Deprecated**: use [`disarm`](Self::disarm) instead. `forget` leaks the
+    /// internal `Arc` allocation (32 bytes per call) because `std::mem::forget`
+    /// prevents the destructor from running.
+    #[deprecated(note = "use disarm() instead — forget() leaks the internal Arc")]
     pub fn forget(self) {
         std::mem::forget(self);
     }
@@ -224,13 +240,13 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_guard_forget() {
+    fn test_memory_guard_disarm() {
         let tracker = MemoryTracker::with_limit(1000);
         tracker.try_allocate(500).unwrap();
 
         let guard = MemoryGuard::new(tracker.clone(), 500);
-        guard.forget();
-        // Memory NOT released
+        guard.disarm();
+        // Memory NOT released (disarm zeroed the guard's bytes)
         assert_eq!(tracker.allocated(), 500);
     }
 }
