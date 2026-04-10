@@ -190,9 +190,11 @@ fn test_leak_memory_tracker_decode_with_limits() {
     let mut limits = crate::api::JxlDecoderLimits::restrictive();
     limits.max_pixels = Some(4_000_000);
     limits.max_memory_bytes = Some(64 * 1024 * 1024);
-    let mut options = crate::api::JxlDecoderOptions::default();
-    options.limits = limits;
-    options.parallel = false;
+    let options = crate::api::JxlDecoderOptions {
+        limits,
+        parallel: false,
+        ..Default::default()
+    };
     // Should return an error, not panic or leak.
     let _ = crate::decode_with(data, options);
 }
