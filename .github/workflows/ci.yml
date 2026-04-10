@@ -105,9 +105,9 @@ jobs:
           prefix-key: i686
 
       - name: Test (i686, no features)
-        # Limit parallelism: multiple large-image tests running simultaneously
-        # exhaust 32-bit address space (~3GB total for all threads combined).
-        run: cross test --release --all --no-fail-fast --no-default-features --target i686-unknown-linux-gnu -- --test-threads=2
+        # Single-threaded: even two concurrent 4K decodes fragment the 32-bit
+        # address space (~3 GB usable) enough to cause allocation failures.
+        run: cross test --release --all --no-fail-fast --no-default-features --target i686-unknown-linux-gnu -- --test-threads=1
 
       - name: Test (i686, all features)
-        run: cross test --release --all --no-fail-fast --all-features --target i686-unknown-linux-gnu -- --test-threads=2
+        run: cross test --release --all --no-fail-fast --all-features --target i686-unknown-linux-gnu -- --test-threads=1
