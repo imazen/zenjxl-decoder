@@ -2140,7 +2140,7 @@ dependencies = [
 
 [[package]]
 name = "zenjxl-decoder"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "aligned-vec",
  "almost-enough",
@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "zenjxl-decoder-cli"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "zenjxl-decoder-macros"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
@@ -2203,7 +2203,7 @@ dependencies = [
 
 [[package]]
 name = "zenjxl-decoder-simd"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "arbtest",
  "archmage",
