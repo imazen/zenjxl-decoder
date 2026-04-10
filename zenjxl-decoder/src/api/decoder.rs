@@ -298,7 +298,10 @@ pub(crate) mod tests {
         do_flush: bool,
         callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<(), Error>>>,
     ) -> Result<(usize, Vec<Vec<Image<f32>>>), Error> {
-        let options = JxlDecoderOptions::default();
+        let mut options = JxlDecoderOptions::default();
+        // Correctness tests should not be constrained by memory limits.
+        // OOM/limit tests verify those separately.
+        options.limits.max_memory_bytes = None;
         let mut initialized_decoder = JxlDecoder::<states::Initialized>::new(options);
 
         if let Some(callback) = callback {
