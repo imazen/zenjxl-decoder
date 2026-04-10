@@ -362,8 +362,11 @@ mod slow_probe_regression {
     use super::*;
     use std::time::Instant;
 
-    /// Probe must complete in <5ms even in debug builds.
-    const MAX_PROBE_US: u128 = 5000;
+    /// Probe must complete in <10ms — generous enough for slow CI runners
+    /// (macOS Intel GitHub Actions regularly adds 1-3ms of jitter) while
+    /// still catching the pathological O(n^2) regressions that originally
+    /// took 100+ms.
+    const MAX_PROBE_US: u128 = 10_000;
 
     fn assert_fast_probe(name: &str, data: &[u8]) {
         let start = Instant::now();
