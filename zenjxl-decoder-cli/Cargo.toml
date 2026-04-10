@@ -1,7 +1,7 @@
 [package]
 name = "zenjxl-decoder-cli"
 description = "CLI tool for decoding JPEG XL images using zenjxl-decoder"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2024"
 rust-version = "1.89"
 license = "BSD-3-Clause"
@@ -10,7 +10,7 @@ publish = false
 default-run = "zenjxl-decoder-cli"
 
 [dependencies]
-jxl = { package = "zenjxl-decoder", path = "../zenjxl-decoder", version = "=0.3.6", default-features = false }
+jxl = { package = "zenjxl-decoder", path = "../zenjxl-decoder", version = "=0.3.7", default-features = false }
 clap = { version = "4.5.18", features = ["derive"] }
 tracing-subscriber = { version = "0.3.18", features = [
   "env-filter",
@@ -24,7 +24,7 @@ color-eyre = "0.6.5"
 rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]
-jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", features = ["test"], version = "=0.3.6" }
+jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", features = ["test"], version = "=0.3.7" }
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [build-dependencies]

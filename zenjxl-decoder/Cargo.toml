@@ -1,7 +1,7 @@
 [package]
 name = "zenjxl-decoder"
 description = "High performance Rust implementation of a JPEG XL decoder"
-version = "0.3.6"
+version = "0.3.7"
 readme = "../README.md"
 keywords = ["jpeg-xl", "decoder"]
 categories = ["multimedia::images"]
@@ -20,8 +20,8 @@ num-derive = "0.4"
 num-traits = "0.2.14"
 array-init = "2.0.0"
 tracing = { version = "0.1.40", optional = true }
-jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.6" }
-jxl_simd = { package = "zenjxl-decoder-simd", path = "../zenjxl-decoder-simd", version = "=0.3.6" }
+jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.7" }
+jxl_simd = { package = "zenjxl-decoder-simd", path = "../zenjxl-decoder-simd", version = "=0.3.7" }
 moxcms = { version = "0.8.1", optional = true, features = ["extended_range", "options"] }
 rayon = { version = "1.10", optional = true }
 aligned-vec = "0.6"
@@ -41,7 +41,7 @@ rand_xorshift = "0.5.0"
 almost-enough = { version = "0.4", features = ["std"] }
 serde_json = "1.0"
 test-log = { version = "0.2.16", features = ["trace"] }
-jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.6", features = ["test"] }
+jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.7", features = ["test"] }
 criterion = { version = "0.8.2", features = ["html_reports"] }
 zenbench = { version = "0.1.2"}
 
