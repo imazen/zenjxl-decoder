@@ -740,12 +740,29 @@ pub fn for_each_test_file(input: TokenStream) -> TokenStream {
                     relative_path.strip_suffix(".jxl").unwrap()
                 );
                 let test_name = Ident::new(&test_name, fn_name.span());
-                tests.push(quote! {
-                    #[test]
-                    fn #test_name() {
-                        #fn_name(&Path::new(#pathname)).unwrap()
-                    }
-                });
+
+                // Large images (>1 MB compressed) decode to 100+ MB and
+                // exhaust the ~3 GB usable address space on 32-bit targets
+                // when multiple tests run in the same process.
+                let file_size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                let large_image = file_size > 1_000_000;
+
+                if large_image {
+                    tests.push(quote! {
+                        #[test]
+                        #[cfg(target_pointer_width = "64")]
+                        fn #test_name() {
+                            #fn_name(&Path::new(#pathname)).unwrap()
+                        }
+                    });
+                } else {
+                    tests.push(quote! {
+                        #[test]
+                        fn #test_name() {
+                            #fn_name(&Path::new(#pathname)).unwrap()
+                        }
+                    });
+                }
             }
         }
     }
