@@ -63,21 +63,21 @@ pub struct JxlDecoderLimits {
 impl Default for JxlDecoderLimits {
     fn default() -> Self {
         // On 32-bit targets, a 4 GB memory budget exceeds the usable address
-        // space (~3 GB). Use 1 GB so the guard triggers before the global
+        // space (~3 GB). Cap at 2 GB so the guard triggers before the global
         // allocator aborts on OOM.
         let max_memory = if cfg!(target_pointer_width = "32") {
-            1u64 << 30 // 1 GB
+            2u64 << 30 // 2 GB
         } else {
             4u64 << 30 // 4 GB
         };
         Self {
-            max_pixels: Some(1 << 28),         // ~256 megapixels
-            max_extra_channels: Some(256),     // 256 extra channels
-            max_icc_size: Some(1 << 28),       // 256 MB
-            max_tree_size: Some(1 << 22),      // 4M nodes
-            max_patches: None,                 // Use image-size-based default
-            max_spline_points: Some(1 << 20),  // 1M points
-            max_reference_frames: Some(4),     // 4 reference frames
+            max_pixels: Some(1 << 28),        // ~256 megapixels
+            max_extra_channels: Some(256),    // 256 extra channels
+            max_icc_size: Some(1 << 28),      // 256 MB
+            max_tree_size: Some(1 << 22),     // 4M nodes
+            max_patches: None,                // Use image-size-based default
+            max_spline_points: Some(1 << 20), // 1M points
+            max_reference_frames: Some(4),    // 4 reference frames
             max_memory_bytes: Some(max_memory),
         }
     }
