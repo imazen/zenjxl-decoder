@@ -28,6 +28,33 @@ use crate::{
 use super::{CodestreamParser, SectionBuffer};
 use crate::api::ToneMapping;
 
+/// Populate a freshly constructed [`DecoderState`] with per-run settings pulled
+/// from [`JxlDecoderOptions`] and the previously parsed embedded color profile.
+///
+/// Ported from libjxl/jxl-rs #743 (f1514f1): upstream centralized this plumbing
+/// in `DecoderState::new(file_header, &options)` to guarantee both the primary
+/// creation path and the preview-frame recovery path populate identical fields.
+/// In our tree we keep the old two-argument constructor (because our
+/// `DecoderState` has several imazen-only fields) and centralize the plumbing
+/// via this helper instead. Both call sites in `non_section.rs` and
+/// `sections.rs` MUST go through this function so that options set on the
+/// initial state are preserved after a preview-frame-triggered recreate.
+pub(super) fn apply_decoder_options(
+    state: &mut DecoderState,
+    decode_options: &JxlDecoderOptions,
+    embedded_color_profile: &Option<JxlColorProfile>,
+) {
+    state.render_spotcolors = decode_options.render_spot_colors;
+    state.high_precision = decode_options.high_precision;
+    state.premultiply_output = decode_options.premultiply_output;
+    state.desired_intensity_target = decode_options.desired_intensity_target;
+    state.embedded_color_profile = embedded_color_profile.clone();
+    state.limits = decode_options.limits.clone();
+    state.stop = Arc::clone(&decode_options.stop);
+    state.memory_tracker = MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
+    state.parallel = decode_options.parallel;
+}
+
 fn check_size_limit(
     limits: &crate::api::JxlDecoderLimits,
     (xs, ys): (usize, usize),
@@ -223,16 +250,11 @@ impl CodestreamParser {
 
             // We now have image information.
             let mut decoder_state = DecoderState::new(self.file_header.take().unwrap());
-            decoder_state.render_spotcolors = decode_options.render_spot_colors;
-            decoder_state.high_precision = decode_options.high_precision;
-            decoder_state.premultiply_output = decode_options.premultiply_output;
-            decoder_state.desired_intensity_target = decode_options.desired_intensity_target;
-            decoder_state.embedded_color_profile = self.embedded_color_profile.clone();
-            decoder_state.limits = decode_options.limits.clone();
-            decoder_state.stop = Arc::clone(&decode_options.stop);
-            decoder_state.memory_tracker =
-                MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
-            decoder_state.parallel = decode_options.parallel;
+            apply_decoder_options(
+                &mut decoder_state,
+                decode_options,
+                &self.embedded_color_profile,
+            );
             self.decoder_state = Some(decoder_state);
             // Reset bit offset to 0 since we've consumed everything up to a byte boundary
             self.non_section_bit_offset = 0;

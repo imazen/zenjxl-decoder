@@ -47,6 +47,17 @@ impl JxlDecoderInner {
         self.codestream_parser.decoded_frames
     }
 
+    /// Test-only accessor for the active [`crate::frame::DecoderState`].
+    ///
+    /// Used by regression tests that need to verify that per-run options
+    /// (limits, memory_tracker, parallel, high_precision, premultiply_output,
+    /// embedded_color_profile) survive the preview-frame recovery path in
+    /// `codestream_parser::sections::handle_frame_finalized`.
+    #[cfg(test)]
+    pub(crate) fn decoder_state_for_test(&self) -> Option<&crate::frame::DecoderState> {
+        self.codestream_parser.decoder_state.as_ref()
+    }
+
     /// Obtains the image's basic information, if available.
     pub fn basic_info(&self) -> Option<&JxlBasicInfo> {
         self.codestream_parser.basic_info.as_ref()

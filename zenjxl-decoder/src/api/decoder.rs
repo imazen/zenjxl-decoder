@@ -1697,4 +1697,139 @@ pub(crate) mod tests {
         let result: crate::error::Result<()> = stop.check().map_err(Into::into);
         assert!(matches!(result, Err(crate::error::Error::Cancelled)));
     }
+
+    /// Regression for the preview-frame recovery option-propagation bug that
+    /// was fixed upstream in libjxl/jxl-rs #743 (commit f1514f1).
+    ///
+    /// When the input file carries a preview frame, the codestream parser
+    /// decodes the preview with `process_without_output=true`, then discovers
+    /// the main frame is a separate frame and recreates the [`DecoderState`]
+    /// in `codestream_parser::sections`. Before the port, that recreation path
+    /// dropped several fields (`high_precision`, `premultiply_output`,
+    /// `parallel`, `memory_tracker`, `embedded_color_profile`) back to their
+    /// constructor defaults, silently reverting options set by the caller.
+    ///
+    /// The fix centralizes option propagation through
+    /// `non_section::apply_decoder_options` so both the primary creation path
+    /// and the preview-recovery path populate the same fields.
+    #[test]
+    fn test_preview_recovery_preserves_decoder_options() {
+        let data = std::fs::read("resources/test/with_preview.jxl")
+            .expect("with_preview.jxl test fixture should exist");
+
+        // Exercise the buggy path explicitly by flipping every option the
+        // recovery path used to drop.
+        let mut options = JxlDecoderOptions::default();
+        options.high_precision = true;
+        options.premultiply_output = true;
+        options.parallel = false; // default depends on `threads`; force a known value.
+        options.render_spot_colors = false;
+        // Restrictive budget the main frame must still observe.
+        options.limits.max_memory_bytes = Some(64 * 1024 * 1024);
+
+        let mut decoder = JxlDecoderInner::new(options);
+        let mut input = data.as_slice();
+
+        // Drive the decoder until it has finished producing image info. We
+        // don't request output buffers — the test only cares about the decoder
+        // state after the preview frame has been observed and the main frame
+        // header is being parsed, which is the same process step that
+        // previously tripped the recreate.
+        loop {
+            match decoder.process(&mut input, None) {
+                Ok(ProcessingResult::Complete { .. }) => {
+                    if decoder.decoder_state_for_test().is_some() && input.is_empty() {
+                        break;
+                    }
+                    if decoder.decoder_state_for_test().is_some()
+                        && decoder.basic_info().is_some()
+                        && decoder.frame_header().is_some()
+                    {
+                        break;
+                    }
+                    if input.is_empty() {
+                        break;
+                    }
+                }
+                Ok(ProcessingResult::NeedsMoreInput { .. }) => {
+                    panic!("with_preview.jxl should decode with full slice available");
+                }
+                Err(e) => panic!("unexpected decode error: {e:?}"),
+            }
+        }
+
+        let state = decoder
+            .decoder_state_for_test()
+            .expect("decoder_state should exist after image info processed");
+
+        // Before the fix, all of these assertions would fail for a file that
+        // has a preview followed by a main frame: the recreated state reset
+        // every knob to its DecoderState::new default.
+        assert!(
+            state.high_precision,
+            "high_precision should survive preview-frame recovery"
+        );
+        assert!(
+            state.premultiply_output,
+            "premultiply_output should survive preview-frame recovery"
+        );
+        assert!(
+            !state.parallel,
+            "parallel=false should survive preview-frame recovery (was silently flipped back to DecoderState::new default)"
+        );
+        assert!(
+            !state.render_spotcolors,
+            "render_spotcolors=false should survive preview-frame recovery"
+        );
+        assert!(
+            state.memory_tracker.has_limit(),
+            "memory_tracker should carry the configured limit after preview-frame recovery, not revert to unlimited"
+        );
+        assert_eq!(
+            state.memory_tracker.limit(),
+            Some(64 * 1024 * 1024),
+            "memory_tracker limit should equal configured max_memory_bytes"
+        );
+        assert!(
+            state.embedded_color_profile.is_some(),
+            "embedded_color_profile must be propagated so CMYK ICC and similar code paths work after preview recovery"
+        );
+        assert_eq!(
+            state.limits.max_memory_bytes,
+            Some(64 * 1024 * 1024),
+            "limits.max_memory_bytes on DecoderState must match the configured options"
+        );
+    }
+
+    /// Chunk-drip stress test mirroring the Chrome-integration repro from
+    /// libjxl/jxl-rs #743. We don't have the seek API (upstream #678) yet, but
+    /// we can still exercise the same box-parser and codestream-parser state
+    /// machines by feeding an animation file to `flush_pixels` in 1 KiB chunks
+    /// and asserting the decoder never errors or panics on any chunk boundary.
+    #[test]
+    fn test_chunked_drip_decode_animation_newtons_cradle() {
+        let data = std::fs::read("resources/test/animation_newtons_cradle.jxl")
+            .expect("animation_newtons_cradle.jxl test fixture should exist");
+
+        let options = JxlDecoderOptions::default();
+        let mut decoder = JxlDecoderInner::new(options);
+        const CHUNK: usize = 1024;
+        let mut fed = 0usize;
+
+        while fed < data.len() {
+            let end = (fed + CHUNK).min(data.len());
+            let mut chunk = &data[fed..end];
+            let before = chunk.len();
+            match decoder.process(&mut chunk, None) {
+                Ok(_) => {}
+                Err(e) => panic!("decoder errored on chunk [{fed}..{end}]: {e:?}"),
+            }
+            let consumed = before - chunk.len();
+            fed += consumed;
+            if consumed == 0 {
+                // No progress on this chunk — advance to feed more bytes.
+                fed = end;
+            }
+        }
+    }
 }

@@ -401,12 +401,22 @@ impl CodestreamParser {
         } else if might_be_preview {
             // Preview frame has is_last=true but the main frame follows.
             // Recreate decoder state from saved file header for the main frame.
+            //
+            // Ported from libjxl/jxl-rs #743 (f1514f1): route every
+            // option-propagation step through `apply_decoder_options` so the
+            // recreated state carries the same high_precision, premultiply,
+            // parallel, memory_tracker, and embedded_color_profile fields as
+            // the primary decoder_state creation. Before this, those fields
+            // silently reverted to defaults on the main frame whenever the
+            // file had a preview — dropping security limits, disabling
+            // parallel rendering, and breaking CMYK ICC handling.
             if let Some(fh) = self.saved_file_header.take() {
                 let mut new_state = crate::frame::DecoderState::new(fh);
-                new_state.render_spotcolors = decode_options.render_spot_colors;
-                new_state.desired_intensity_target = decode_options.desired_intensity_target;
-                new_state.limits = decode_options.limits.clone();
-                new_state.stop = std::sync::Arc::clone(&decode_options.stop);
+                super::non_section::apply_decoder_options(
+                    &mut new_state,
+                    decode_options,
+                    &self.embedded_color_profile,
+                );
                 self.decoder_state = Some(new_state);
             }
         } else {
