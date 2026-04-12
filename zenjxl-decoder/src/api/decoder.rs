@@ -1812,10 +1812,9 @@ pub(crate) mod tests {
     /// and asserting the decoder never errors or panics on any chunk boundary.
     #[test]
     fn test_chunked_drip_decode_animation_newtons_cradle() {
-        let data = std::fs::read(
-            "resources/test/conformance_test_images/animation_newtons_cradle.jxl",
-        )
-        .expect("animation_newtons_cradle.jxl test fixture should exist");
+        let data =
+            std::fs::read("resources/test/conformance_test_images/animation_newtons_cradle.jxl")
+                .expect("animation_newtons_cradle.jxl test fixture should exist");
 
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoderInner::new(options);
