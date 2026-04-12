@@ -1719,6 +1719,7 @@ pub(crate) mod tests {
     /// taken, then asserts every recreated field carries the configured
     /// option value rather than the `DecoderState::new` default.
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_preview_recovery_preserves_decoder_options() {
         let data = std::fs::read("resources/test/with_preview.jxl")
             .expect("with_preview.jxl test fixture should exist");
@@ -1727,7 +1728,9 @@ pub(crate) mod tests {
         // value (`render_spot_colors=false`, `high_precision=true`,
         // `premultiply_output=true`, `parallel=false`, restrictive
         // `max_memory_bytes`) so a successful decode with the buggy code
-        // would visibly carry the wrong field values.
+        // would visibly carry the wrong field values. `JxlDecoderOptions`
+        // is `#[non_exhaustive]`, so a struct literal with
+        // `..Default::default()` is not allowed.
         let mut options = JxlDecoderOptions::default();
         options.high_precision = true;
         options.premultiply_output = true;
