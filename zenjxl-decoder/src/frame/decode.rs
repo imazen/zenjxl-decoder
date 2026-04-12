@@ -20,13 +20,14 @@ use super::{
     quantizer::{LfQuantFactors, QuantizerParams},
 };
 use crate::error::Error;
+use crate::features::epf::SigmaSource;
 use crate::frame::block_context_map::{ZERO_DENSITY_CONTEXT_COUNT, ZERO_DENSITY_CONTEXT_LIMIT};
 use crate::headers::frame_header::FrameType;
 #[cfg(test)]
 use crate::render::SimpleRenderPipeline;
 use crate::render::buffer_splitter::BufferSplitter;
 use crate::transforms::transform_map::*;
-use crate::util::{ShiftRightCeil, SmallVec, mirror};
+use crate::util::{AtomicRefCell, ShiftRightCeil, SmallVec, mirror};
 use crate::{
     GROUP_DIM,
     bit_reader::BitReader,
@@ -241,6 +242,8 @@ impl Frame {
             None
         };
 
+        let num_extra_channels = image_metadata.extra_channel_info.len();
+
         Ok(Self {
             #[cfg(test)]
             use_simple_pipeline: decoder_state.use_simple_pipeline,
@@ -265,6 +268,19 @@ impl Frame {
             jpeg_coeffs: None,
             groups_to_flush: BTreeSet::new(),
             changed_since_last_flush: BTreeSet::new(),
+            // Placeholders, populated by `decode_lf_global` / `decode_hf_global`.
+            // The render pipeline can hold these `Arc`s before they are written.
+            // Ported from libjxl/jxl-rs 8b8dd57.
+            patches: Arc::new(AtomicRefCell::new(PatchesDictionary::new(
+                num_extra_channels,
+            ))),
+            splines: Arc::new(AtomicRefCell::new(Splines::default())),
+            noise: Arc::new(AtomicRefCell::new(Noise::default())),
+            lf_quant: Arc::new(AtomicRefCell::new(LfQuantFactors::default())),
+            color_correlation_params: Arc::new(AtomicRefCell::new(
+                ColorCorrelationParams::default(),
+            )),
+            epf_sigma: Arc::new(AtomicRefCell::new(SigmaSource::default())),
         })
     }
 
@@ -316,9 +332,9 @@ impl Frame {
         assert!(self.lf_global.is_none());
         trace!(pos = br.total_bits_read());
 
-        let patches = if self.header.has_patches() {
+        if self.header.has_patches() {
             info!("decoding patches");
-            Some(PatchesDictionary::read(
+            let p = PatchesDictionary::read(
                 br,
                 self.header.size_padded().0,
                 self.header.size_padded().1,
@@ -326,31 +342,29 @@ impl Frame {
                 &self.decoder_state.reference_frames[..],
                 self.decoder_state.limits.max_patches,
                 &self.decoder_state.memory_tracker,
-            )?)
-        } else {
-            None
-        };
+            )?;
+            *self.patches.borrow_mut() = p;
+        }
 
-        let splines = if self.header.has_splines() {
+        if self.header.has_splines() {
             info!("decoding splines");
-            Some(Splines::read(
+            let s = Splines::read(
                 br,
                 self.header.width * self.header.height,
                 self.decoder_state.limits.max_spline_points,
                 &self.decoder_state.memory_tracker,
-            )?)
-        } else {
-            None
-        };
+            )?;
+            *self.splines.borrow_mut() = s;
+        }
 
-        let noise = if self.header.has_noise() {
+        if self.header.has_noise() {
             info!("decoding noise");
-            Some(Noise::read(br)?)
-        } else {
-            None
-        };
+            let n = Noise::read(br)?;
+            *self.noise.borrow_mut() = n;
+        }
 
         let lf_quant = LfQuantFactors::new(br)?;
+        *self.lf_quant.borrow_mut() = lf_quant.clone();
         debug!(?lf_quant);
 
         let quant_params = if self.header.encoding == Encoding::VarDCT {
@@ -371,7 +385,9 @@ impl Frame {
 
         let color_correlation_params = if self.header.encoding == Encoding::VarDCT {
             info!("decoding color correlation params");
-            Some(ColorCorrelationParams::read(br)?)
+            let ccp = ColorCorrelationParams::read(br)?;
+            *self.color_correlation_params.borrow_mut() = ccp;
+            Some(ccp)
         } else {
             None
         };
@@ -406,9 +422,6 @@ impl Frame {
         )?;
 
         self.lf_global = Some(LfGlobalState {
-            patches: patches.map(Arc::new),
-            splines,
-            noise,
             lf_quant,
             quant_params,
             block_context_map,
@@ -748,6 +761,17 @@ impl Frame {
         self.decoder_state.check_cancelled()?;
         debug!(section_size = br.total_bits_available());
         if self.header.encoding == Encoding::Modular {
+            // Modular frames do not have an HF global section, but they may still have an
+            // EPF restoration filter that needs a `SigmaSource::Constant`. Compute it here
+            // so that the early-initialised render pipeline can read it from
+            // `self.epf_sigma`. Ported from libjxl/jxl-rs 8b8dd57.
+            if self.header.restoration_filter.epf_iters > 0 {
+                *self.epf_sigma.borrow_mut() = SigmaSource::new(
+                    &self.header,
+                    self.lf_global.as_ref().unwrap(),
+                    &self.hf_meta,
+                )?;
+            }
             return Ok(());
         }
         let lf_global = self.lf_global.as_mut().unwrap();
@@ -827,6 +851,16 @@ impl Frame {
             passes,
             dequant_matrices,
         });
+        // Set EPF sigma values now that hf_meta is fully populated. The render pipeline
+        // (built earlier) holds a clone of `self.epf_sigma` and reads from it via
+        // `borrow()` inside the EPF stages. Ported from libjxl/jxl-rs 8b8dd57.
+        if self.header.restoration_filter.epf_iters > 0 {
+            *self.epf_sigma.borrow_mut() = SigmaSource::new(
+                &self.header,
+                self.lf_global.as_ref().unwrap(),
+                &self.hf_meta,
+            )?;
+        }
         Ok(())
     }
 
@@ -857,6 +891,7 @@ impl Frame {
             quant_lf,
             hf_meta,
             decoder_state,
+            epf_sigma,
             ..
         } = self;
 
@@ -1157,6 +1192,14 @@ impl Frame {
         // Apply HF global results.
         *hf_global = Some(hf_output.hf_state);
         *hf_coefficients = hf_output.coefficients;
+
+        // Match `decode_hf_global`: now that hf_meta is populated, populate the
+        // shared epf_sigma cell so the early-initialised render pipeline can read it.
+        // Ported from libjxl/jxl-rs 8b8dd57 (this overlap path is our extension).
+        if header.restoration_filter.epf_iters > 0 {
+            *epf_sigma.borrow_mut() =
+                SigmaSource::new(header, lf_global.as_ref().unwrap(), hf_meta)?;
+        }
 
         if phase_timing {
             eprintln!(

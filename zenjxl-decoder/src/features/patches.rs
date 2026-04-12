@@ -172,6 +172,17 @@ pub struct PatchesDictionary {
 }
 
 impl PatchesDictionary {
+    /// Build an empty patches dictionary with the right `blendings_stride` for an
+    /// image with `num_extra_channels` extra channels. Used as a placeholder before
+    /// `PatchesDictionary::read` populates the real data. Ported from libjxl/jxl-rs
+    /// 8b8dd57.
+    pub fn new(num_extra_channels: usize) -> Self {
+        Self {
+            blendings_stride: num_extra_channels + 1,
+            ..Default::default()
+        }
+    }
+
     #[cfg(test)]
     pub fn random<R: rand::Rng>(
         size: (usize, usize),

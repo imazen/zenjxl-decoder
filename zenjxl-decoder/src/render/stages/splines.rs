@@ -3,29 +3,35 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use std::sync::Arc;
+
 use crate::{
-    error::Result, features::spline::Splines, frame::color_correlation_map::ColorCorrelationParams,
-    render::RenderPipelineInPlaceStage,
+    features::spline::Splines, frame::color_correlation_map::ColorCorrelationParams,
+    render::RenderPipelineInPlaceStage, util::AtomicRefCell,
 };
 
 pub struct SplinesStage {
-    splines: Splines,
+    /// Shared with `Frame::splines`. Ported from libjxl/jxl-rs 8b8dd57.
+    splines: Arc<AtomicRefCell<Splines>>,
+    image_size: (usize, usize),
+    /// Shared with `Frame::color_correlation_params`. Ported from libjxl/jxl-rs 8b8dd57.
+    color_correlation_params: Arc<AtomicRefCell<ColorCorrelationParams>>,
+    high_precision: bool,
 }
 
 impl SplinesStage {
     pub fn new(
-        mut splines: Splines,
-        frame_size: (usize, usize),
-        color_correlation_params: &ColorCorrelationParams,
+        splines: Arc<AtomicRefCell<Splines>>,
+        image_size: (usize, usize),
+        color_correlation_params: Arc<AtomicRefCell<ColorCorrelationParams>>,
         high_precision: bool,
-    ) -> Result<Self> {
-        splines.initialize_draw_cache(
-            frame_size.0 as u64,
-            frame_size.1 as u64,
+    ) -> Self {
+        SplinesStage {
+            splines,
+            image_size,
             color_correlation_params,
             high_precision,
-        )?;
-        Ok(SplinesStage { splines })
+        }
     }
 }
 
@@ -49,15 +55,39 @@ impl RenderPipelineInPlaceStage for SplinesStage {
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
-        self.splines.draw_segments(row, position, xsize);
+        // TODO(veluca): this is wrong!! Race condition in MT.
+        // The lazy `initialize_draw_cache` from libjxl/jxl-rs 8b8dd57 is not
+        // multi-thread-safe. Our parallel render path may concurrently take
+        // `borrow_mut` from multiple threads. Mitigated for now by the fact that
+        // splines and parallel render are very rarely combined; tracked as a known
+        // issue (matches upstream's TODO).
+        let mut splines = self.splines.borrow_mut();
+        if splines.splines.is_empty() {
+            return;
+        }
+        if !splines.is_initialized() {
+            let color_correlation_params = self.color_correlation_params.borrow();
+            splines
+                .initialize_draw_cache(
+                    self.image_size.0 as u64,
+                    self.image_size.1 as u64,
+                    &color_correlation_params,
+                    self.high_precision,
+                )
+                .unwrap();
+        }
+        splines.draw_segments(row, position, xsize);
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use crate::features::spline::{Point, QuantizedSpline, Splines};
     use crate::frame::color_correlation_map::ColorCorrelationParams;
     use crate::render::test::make_and_run_simple_pipeline;
+    use crate::util::AtomicRefCell;
     use crate::util::test::{self, assert_all_almost_abs_eq, read_pfm};
     use crate::{error::Result, image::Image, render::stages::splines::SplinesStage};
     use test_log::test;
@@ -104,12 +134,11 @@ mod test {
         );
         let output: Vec<Image<f32>> = make_and_run_simple_pipeline(
             SplinesStage::new(
-                splines.clone(),
+                Arc::new(AtomicRefCell::new(splines.clone())),
                 size,
-                &ColorCorrelationParams::default(),
+                Arc::new(AtomicRefCell::new(ColorCorrelationParams::default())),
                 true,
-            )
-            .unwrap(),
+            ),
             &target_images,
             size,
             0,
@@ -161,12 +190,11 @@ mod test {
         crate::render::test::test_stage_consistency(
             || {
                 SplinesStage::new(
-                    splines.clone(),
+                    Arc::new(AtomicRefCell::new(splines.clone())),
                     (500, 500),
-                    &ColorCorrelationParams::default(),
+                    Arc::new(AtomicRefCell::new(ColorCorrelationParams::default())),
                     false,
                 )
-                .unwrap()
             },
             (500, 500),
             6,

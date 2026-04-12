@@ -624,6 +624,13 @@ simd_function!(
 );
 
 impl Splines {
+    /// Returns true if the draw cache (`segment_y_start`) has been built. Used by
+    /// `SplinesStage` to lazily initialise the draw cache when the stage starts running.
+    /// Ported from libjxl/jxl-rs 8b8dd57.
+    pub fn is_initialized(&self) -> bool {
+        !self.segment_y_start.is_empty()
+    }
+
     #[cfg(test)]
     pub fn create(
         quantization_adjustment: i32,

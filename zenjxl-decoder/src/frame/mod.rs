@@ -9,7 +9,7 @@ use crate::{
     api::JxlColorProfile,
     entropy_coding::decode::Histograms,
     error::Result,
-    features::{noise::Noise, patches::PatchesDictionary, spline::Splines},
+    features::{epf::SigmaSource, noise::Noise, patches::PatchesDictionary, spline::Splines},
     headers::{
         FileHeader,
         extra_channels::ExtraChannelInfo,
@@ -18,7 +18,7 @@ use crate::{
         toc::Toc,
     },
     image::Image,
-    util::{MemoryTracker, TryVecExt, tracing_wrappers::*},
+    util::{AtomicRefCell, MemoryTracker, TryVecExt, tracing_wrappers::*},
 };
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;
@@ -48,10 +48,7 @@ pub enum Section {
 }
 
 pub struct LfGlobalState {
-    patches: Option<Arc<PatchesDictionary>>,
-    splines: Option<Splines>,
-    noise: Option<Noise>,
-    lf_quant: LfQuantFactors,
+    pub(crate) lf_quant: LfQuantFactors,
     pub quant_params: Option<QuantizerParams>,
     block_context_map: Option<BlockContextMap>,
     color_correlation_params: Option<ColorCorrelationParams>,
@@ -251,6 +248,17 @@ pub struct Frame {
     groups_to_flush: BTreeSet<usize>,
     changed_since_last_flush: BTreeSet<(usize, RenderUnit)>,
     incomplete_groups: usize,
+    // Per-feature LF global data, owned by the Frame so the render pipeline can be
+    // initialised before LF global is fully decoded. Each cell is filled in by
+    // `decode_lf_global` (or `decode_hf_global` for `epf_sigma`) and then read from
+    // inside the relevant render stages via `Arc<AtomicRefCell<_>>`. Ported from
+    // libjxl/jxl-rs 8b8dd57.
+    pub(crate) patches: Arc<AtomicRefCell<PatchesDictionary>>,
+    pub(crate) splines: Arc<AtomicRefCell<Splines>>,
+    pub(crate) noise: Arc<AtomicRefCell<Noise>>,
+    pub(crate) lf_quant: Arc<AtomicRefCell<LfQuantFactors>>,
+    pub(crate) color_correlation_params: Arc<AtomicRefCell<ColorCorrelationParams>>,
+    pub(crate) epf_sigma: Arc<AtomicRefCell<SigmaSource>>,
 }
 
 impl Frame {
@@ -611,8 +619,7 @@ mod test {
     #[test]
     fn splines() -> Result<(), Error> {
         let verify_frame = move |frame: &Frame, _| {
-            let lf_global = frame.lf_global.as_ref().unwrap();
-            let splines = lf_global.splines.as_ref().unwrap();
+            let splines = frame.splines.borrow();
             assert_eq!(splines.quantization_adjustment, 0);
             let expected_starting_points = [Point { x: 9.0, y: 54.0 }].to_vec();
             assert_eq!(splines.starting_points, expected_starting_points);
@@ -671,8 +678,7 @@ mod test {
     #[test]
     fn noise() -> Result<(), Error> {
         let verify_frame = |frame: &Frame, _| {
-            let lf_global = frame.lf_global.as_ref().unwrap();
-            let noise = lf_global.noise.as_ref().unwrap();
+            let noise = frame.noise.borrow();
             let want_noise = [
                 0.000000, 0.000977, 0.002930, 0.003906, 0.005859, 0.006836, 0.008789, 0.010742,
             ];
