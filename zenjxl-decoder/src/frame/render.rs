@@ -19,9 +19,9 @@ use crate::features::patches::PatchesDictionary;
 use crate::features::spline::Splines;
 use crate::frame::RenderUnit;
 use crate::frame::color_correlation_map::ColorCorrelationParams;
-use crate::frame::quantizer::LfQuantFactors;
 #[cfg(feature = "threads")]
 use crate::frame::decode::upsample_lf_group;
+use crate::frame::quantizer::LfQuantFactors;
 use crate::headers::frame_header::Encoding;
 use crate::headers::frame_header::FrameType;
 use crate::headers::{Orientation, color_encoding::ColorSpace, extra_channels::ExtraChannel};
@@ -1424,8 +1424,7 @@ impl Frame {
 
         if frame_header.encoding == Encoding::Modular {
             if decoder_state.file_header.image_metadata.xyb_encoded {
-                pipeline = pipeline
-                    .add_inout_stage(ConvertModularXYBToF32Stage::new(0, lf_quant))
+                pipeline = pipeline.add_inout_stage(ConvertModularXYBToF32Stage::new(0, lf_quant))
             } else {
                 for i in 0..3 {
                     pipeline = pipeline
