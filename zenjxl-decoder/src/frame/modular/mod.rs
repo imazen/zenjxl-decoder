@@ -635,6 +635,7 @@ impl FullModularImage {
     /// running transforms.  Used by the parallel decode path which calls
     /// `mark_group_to_be_read` (populates dry_run set) followed by
     /// `process_output(false)` (asserts dry_run set is empty).
+    #[cfg(feature = "threads")]
     pub fn drain_dry_run_to_ready(&mut self) {
         let dry = std::mem::take(&mut *self.ready_buffers_dry_run.lock().unwrap());
         self.ready_buffers.extend(dry);

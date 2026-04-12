@@ -35,6 +35,7 @@ pub use log2::*;
 pub use memory_tracker::*;
 pub use mirror::*;
 pub(crate) use ndarray::*;
+#[allow(unused_imports)]
 pub use profiling::*;
 pub use rational_poly::*;
 pub use shift_right_ceil::*;

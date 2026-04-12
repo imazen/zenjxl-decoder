@@ -108,6 +108,7 @@ impl<'a, 'b> BufferSplitter<'a, 'b> {
         self.requested_rects
     }
 
+    #[cfg(any(test, feature = "threads"))]
     pub fn get_full_buffers(&mut self) -> &mut [Option<JxlOutputBuffer<'b>>] {
         &mut *self.buffers
     }

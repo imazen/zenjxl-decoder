@@ -12,10 +12,7 @@ use super::{
     coeff_order::decode_coeff_orders,
     color_correlation_map::ColorCorrelationParams,
     group::{VarDctBuffers, decode_vardct_group},
-    modular::{
-        FullModularImage, ModularStreamId, Tree, decode_hf_metadata, decode_hf_metadata_into_rects,
-        decode_vardct_lf,
-    },
+    modular::{FullModularImage, ModularStreamId, Tree, decode_hf_metadata, decode_vardct_lf},
     quant_weights::DequantMatrices,
     quantizer::{LfQuantFactors, QuantizerParams},
 };
@@ -41,12 +38,16 @@ use crate::{
         frame_header::{Encoding, FrameHeader},
         toc::Toc,
     },
-    image::{Image, Rect},
+    image::Image,
     render::RenderPipeline,
     util::{CeilLog2, Xorshift128Plus, tracing_wrappers::*},
 };
 
+#[cfg(feature = "threads")]
+use super::modular::decode_hf_metadata_into_rects;
 use crate::headers::CustomTransformData;
+#[cfg(feature = "threads")]
+use crate::image::Rect;
 use crate::render::RenderPipelineInOutStage;
 use crate::render::stages::Upsample8x;
 use crate::render::{Channels, ChannelsMut};

@@ -5,6 +5,8 @@
 
 use std::{collections::BTreeSet, sync::Arc};
 
+#[cfg(feature = "jpeg")]
+use crate::util::TryVecExt;
 use crate::{
     api::JxlColorProfile,
     entropy_coding::decode::Histograms,
@@ -18,7 +20,7 @@ use crate::{
         toc::Toc,
     },
     image::Image,
-    util::{MemoryTracker, TryVecExt, tracing_wrappers::*},
+    util::{MemoryTracker, tracing_wrappers::*},
 };
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;

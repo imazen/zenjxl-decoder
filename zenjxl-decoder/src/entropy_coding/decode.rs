@@ -649,6 +649,7 @@ impl Histograms {
         &self.uint_configs[cluster]
     }
 
+    #[allow(dead_code)] // Used in debug!() tracing calls
     pub fn num_histograms(&self) -> usize {
         *self.context_map.iter().max().unwrap() as usize + 1
     }

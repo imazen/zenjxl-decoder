@@ -176,6 +176,7 @@ mod inner {
 }
 
 #[cfg(not(feature = "profiling"))]
+#[allow(dead_code)]
 mod inner {
     /// No-op guard when profiling is disabled.
     #[derive(Default)]
@@ -195,6 +196,7 @@ mod inner {
     pub fn reset_profile_counters() {}
 }
 
+#[allow(unused_imports)]
 pub use inner::*;
 
 /// Macro to create a profile guard for a specific counter.

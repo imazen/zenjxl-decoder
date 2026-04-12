@@ -17,9 +17,8 @@ pub(crate) enum BufferStorage<'a> {
         data: &'a mut [u8],
         bytes_between_rows: usize,
     },
-    Fragmented {
-        rows: Vec<&'a mut [u8]>,
-    },
+    #[allow(dead_code)] // Constructed by split methods used in threads feature
+    Fragmented { rows: Vec<&'a mut [u8]> },
 }
 
 pub struct JxlOutputBuffer<'a> {
