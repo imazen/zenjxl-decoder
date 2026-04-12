@@ -769,6 +769,8 @@ impl FrameHeader {
 
 #[cfg(test)]
 mod test_frame_header {
+    use super::super::bit_depth::BitDepth;
+    use super::super::extra_channels::{ExtraChannel, ExtraChannelInfo};
     use super::super::permutation::Permutation;
     use super::super::toc::Toc;
     use super::*;
@@ -832,6 +834,100 @@ mod test_frame_header {
 
         let err = frame_header.check(&nonserialized).unwrap_err();
         assert!(matches!(err, Error::InvalidBlendingAlphaChannel(_, _)));
+    }
+
+    /// Regression test for the EC-upsampling-after-dim_shift validation
+    /// landed in upstream jxl-rs `1e909aa` (PR #741, "Validate effective EC
+    /// upsampling after dim_shift"). The check itself is already in our
+    /// fork at `frame_header.rs` `check()`; this test exercises it so a
+    /// future refactor cannot silently regress the constraint.
+    #[test]
+    fn test_invalid_ec_upsampling_after_dim_shift() {
+        let (file_header, mut frame_header, _) =
+            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
+                .unwrap();
+        let mut nonserialized = file_header.frame_header_nonserialized();
+
+        // Force a dim_shift of 3 on the first extra channel and pair it
+        // with upsampling=8, ec_upsampling=4. The effective upsampling is
+        // `4 << 3 = 32`, which exceeds the 8x maximum.
+        nonserialized.extra_channel_info[0] = ExtraChannelInfo::new(
+            false,
+            ExtraChannel::Alpha,
+            BitDepth::integer_samples(8),
+            3,
+            String::new(),
+            false,
+            None,
+            None,
+        );
+
+        frame_header.upsampling = 8;
+        frame_header.ec_upsampling[0] = 4;
+
+        let err = frame_header.check(&nonserialized).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidEcUpsampling(8, 3, 32)),
+            "expected InvalidEcUpsampling(8, 3, 32), got {err:?}",
+        );
+    }
+
+    /// Positive companion to `test_invalid_ec_upsampling_after_dim_shift`:
+    /// a valid combination where `ec_upsampling << dim_shift == upsampling`
+    /// must pass `check()`. Without this, a future "always reject" bug in
+    /// the validation would only be caught by the negative test.
+    #[test]
+    fn test_valid_ec_upsampling_after_dim_shift() {
+        let (file_header, mut frame_header, _) =
+            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
+                .unwrap();
+        let mut nonserialized = file_header.frame_header_nonserialized();
+
+        // upsampling=4, ec_upsampling=2, dim_shift=1 → effective = 2<<1 = 4
+        // which equals the frame upsampling and is <= 8.
+        nonserialized.extra_channel_info[0] = ExtraChannelInfo::new(
+            false,
+            ExtraChannel::Alpha,
+            BitDepth::integer_samples(8),
+            1,
+            String::new(),
+            false,
+            None,
+            None,
+        );
+
+        frame_header.upsampling = 4;
+        frame_header.ec_upsampling[0] = 2;
+
+        // The check must accept this combination. Note: other validation
+        // failures may still occur (e.g. blending modes), so we only
+        // assert that the *EC upsampling* error variant is not produced.
+        match frame_header.check(&nonserialized) {
+            Ok(()) => {}
+            Err(Error::InvalidEcUpsampling(_, _, _)) => {
+                panic!("valid EC upsampling rejected by check()");
+            }
+            Err(_) => {
+                // Some other check tripped on the synthetic header. That's
+                // OK — the point of this test is the EC validation alone.
+            }
+        }
+    }
+
+    /// Sanity check that the real `extra_channels.jxl` file decodes its
+    /// frame header without tripping the EC upsampling validation. This
+    /// keeps the regression suite anchored against an actual file in case
+    /// the validation logic gets generalized in a way that breaks valid
+    /// inputs.
+    #[test]
+    fn test_extra_channels_file_passes_ec_upsampling_check() {
+        let (file_header, frame_header, _) =
+            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
+                .unwrap();
+        let nonserialized = file_header.frame_header_nonserialized();
+        // The bundled file uses upsampling=1, ec_upsampling=[1] which
+        // trivially satisfies the constraint.
+        assert!(frame_header.check(&nonserialized).is_ok());
     }
 
     #[test]
