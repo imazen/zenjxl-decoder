@@ -44,15 +44,44 @@ impl<'a> JxlOutputBuffer<'a> {
         }
     }
 
-    /// Creates a new JxlOutputBuffer from a mutable byte slice.
+    /// Creates a new JxlOutputBuffer from a densely-packed mutable byte slice.
+    ///
+    /// Row stride equals `bytes_per_row`. For padded output (stride greater
+    /// than the useful row width), use [`Self::new_with_stride`].
     pub fn new(buf: &'a mut [u8], num_rows: usize, bytes_per_row: usize) -> Self {
-        RawImageBuffer::check_vals(num_rows, bytes_per_row, bytes_per_row);
+        Self::new_with_stride(buf, num_rows, bytes_per_row, bytes_per_row)
+    }
+
+    /// Creates a new JxlOutputBuffer with an explicit row stride.
+    ///
+    /// `byte_stride` is the number of bytes between the start of consecutive
+    /// rows in `buf`. It must be at least `bytes_per_row`. The slice must be
+    /// large enough to contain `num_rows` rows with that stride, i.e. at
+    /// least `(num_rows - 1) * byte_stride + bytes_per_row` bytes.
+    ///
+    /// Ports upstream jxl-rs `e883140` ("Add a new constructor to
+    /// JxlOutputBuffer").
+    pub fn new_with_stride(
+        buf: &'a mut [u8],
+        num_rows: usize,
+        bytes_per_row: usize,
+        byte_stride: usize,
+    ) -> Self {
+        RawImageBuffer::check_vals(num_rows, bytes_per_row, byte_stride);
         let expected_len = if num_rows == 0 {
             0
         } else {
-            (num_rows - 1) * bytes_per_row + bytes_per_row
+            byte_stride
+                .checked_mul(num_rows - 1)
+                .and_then(|x| x.checked_add(bytes_per_row))
+                .expect("buffer size overflow")
         };
-        assert!(buf.len() >= expected_len);
+        assert!(
+            buf.len() >= expected_len,
+            "buf len {} is smaller than required {}",
+            buf.len(),
+            expected_len,
+        );
         Self {
             storage: BufferStorage::Contiguous {
                 data: if expected_len == 0 {
@@ -60,7 +89,66 @@ impl<'a> JxlOutputBuffer<'a> {
                 } else {
                     &mut buf[..expected_len]
                 },
-                bytes_between_rows: bytes_per_row,
+                bytes_between_rows: byte_stride,
+            },
+            bytes_per_row,
+            num_rows,
+            row_offset: 0,
+        }
+    }
+
+    /// Creates a new JxlOutputBuffer from a slice of uninitialized bytes with
+    /// an explicit row stride.
+    ///
+    /// It is guaranteed that the buffer will never be used to write
+    /// uninitialized data — the decoder only writes into these bytes and does
+    /// not read them first. Callers can therefore pass a region that was just
+    /// obtained from e.g. `Vec::with_capacity` via `spare_capacity_mut`
+    /// without zeroing it first.
+    ///
+    /// Ports upstream jxl-rs `e883140` ("Add a new constructor to
+    /// JxlOutputBuffer"). Gated on `feature = "allow-unsafe"` because the
+    /// safe default forbids the `MaybeUninit<u8>` -> `u8` slice reinterpret
+    /// this constructor requires. Downstream consumers that need zero-copy
+    /// integration with `MaybeUninit` allocators must enable the feature.
+    #[cfg(feature = "allow-unsafe")]
+    pub fn new_uninit_with_stride(
+        buf: &'a mut [std::mem::MaybeUninit<u8>],
+        num_rows: usize,
+        bytes_per_row: usize,
+        byte_stride: usize,
+    ) -> Self {
+        RawImageBuffer::check_vals(num_rows, bytes_per_row, byte_stride);
+        let expected_len = if num_rows == 0 {
+            0
+        } else {
+            byte_stride
+                .checked_mul(num_rows - 1)
+                .and_then(|x| x.checked_add(bytes_per_row))
+                .expect("buffer size overflow")
+        };
+        assert!(
+            buf.len() >= expected_len,
+            "buf len {} is smaller than required {}",
+            buf.len(),
+            expected_len,
+        );
+        #[allow(unsafe_code)]
+        let data: &'a mut [u8] = if expected_len == 0 {
+            &mut []
+        } else {
+            // SAFETY: `MaybeUninit<u8>` and `u8` have identical memory
+            // layout, the assert above guarantees `buf` covers
+            // `expected_len` bytes, and the returned `&mut [u8]` is only
+            // written to by the decoder (never read without being written
+            // first), so treating the uninitialized region as `u8` is
+            // sound for the lifetime of `Self`.
+            unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, expected_len) }
+        };
+        Self {
+            storage: BufferStorage::Contiguous {
+                data,
+                bytes_between_rows: byte_stride,
             },
             bytes_per_row,
             num_rows,
