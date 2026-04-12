@@ -53,9 +53,19 @@ impl JxlDecoderInner {
     /// (limits, memory_tracker, parallel, high_precision, premultiply_output,
     /// embedded_color_profile) survive the preview-frame recovery path in
     /// `codestream_parser::sections::handle_frame_finalized`.
+    ///
+    /// Returns the parser-owned decoder state if it has not yet been moved
+    /// into a Frame, otherwise the in-progress frame's decoder state.
     #[cfg(test)]
     pub(crate) fn decoder_state_for_test(&self) -> Option<&crate::frame::DecoderState> {
-        self.codestream_parser.decoder_state.as_ref()
+        if let Some(state) = self.codestream_parser.decoder_state.as_ref() {
+            Some(state)
+        } else {
+            self.codestream_parser
+                .frame
+                .as_ref()
+                .map(|f| &f.decoder_state)
+        }
     }
 
     /// Obtains the image's basic information, if available.
