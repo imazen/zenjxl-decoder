@@ -48,7 +48,15 @@ impl JxlDecoderInner {
     }
 
     /// Obtains the image's basic information, if available.
+    ///
+    /// Keep this aligned with typed `WithImageInfo` transitions: image info is
+    /// not observable until the embedded color profile has been parsed. This
+    /// mirrors the fix from upstream jxl-rs 28ddaeb (PR #745) so that callers
+    /// driving `set_pixel_format` off the partial info cannot race the profile
+    /// parse and observe an early-format-selection state that differs from
+    /// what the typed `WithImageInfo` transition would produce.
     pub fn basic_info(&self) -> Option<&JxlBasicInfo> {
+        self.codestream_parser.embedded_color_profile.as_ref()?;
         self.codestream_parser.basic_info.as_ref()
     }
 

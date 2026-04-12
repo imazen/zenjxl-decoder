@@ -8,6 +8,7 @@
 //! These tests verify parity with the reference implementation.
 //! Tests that fail indicate implementation bugs - DO NOT WEAKEN TOLERANCES.
 
+pub mod basic_info_profile_guard;
 pub mod codec_corpus;
 #[cfg(feature = "threads")]
 pub mod concurrency;
