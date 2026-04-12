@@ -21,7 +21,7 @@ impl FromLinearStage {
         Self { first_channel, tf }
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)] // used by integration tests
     pub fn sdr(first_channel: usize, tf: CustomTransferFunction) -> Self {
         let tf = TransferFunction::try_from(tf).expect("transfer function is not an SDR one");
         Self::new(first_channel, tf)

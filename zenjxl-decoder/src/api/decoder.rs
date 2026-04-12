@@ -446,6 +446,7 @@ pub(crate) mod tests {
 
     for_each_test_file!(decode_test_file_chunks);
 
+    #[allow(dead_code)] // used by integration tests
     fn compare_frames(
         _path: &Path,
         fc: usize,
@@ -1609,8 +1610,6 @@ pub(crate) mod tests {
 
     #[test]
     fn test_extra_channel_metadata() {
-        use crate::headers::extra_channels::ExtraChannel;
-
         let file = std::fs::read("resources/test/extra_channels.jxl").unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);

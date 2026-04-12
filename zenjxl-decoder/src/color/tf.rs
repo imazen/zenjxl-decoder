@@ -366,7 +366,7 @@ const HLG_A: f64 = 0.17883277;
 const HLG_B: f64 = 1.0 - 4.0 * HLG_A;
 const HLG_C: f64 = 0.5599107295;
 
-#[cfg(test)]
+#[allow(dead_code)] // used by integration tests
 fn hlg_ootf_inner_precise(exp: f64, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut [f32]; 3]) {
     if exp.abs() < 0.1 {
         return;
@@ -404,7 +404,7 @@ fn hlg_ootf_inner(exp: f32, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut [f32]; 3
 /// Converts scene-referred linear samples to display-referred linear samples using HLG OOTF.
 ///
 /// This version uses double precision arithmetic internally.
-#[cfg(test)]
+#[allow(dead_code)] // used by integration tests
 pub fn hlg_scene_to_display_precise(
     intensity_display: f32,
     luminance_rgb: [f32; 3],
@@ -419,7 +419,7 @@ pub fn hlg_scene_to_display_precise(
 /// OOTF.
 ///
 /// This version uses double precision arithmetic internally.
-#[cfg(test)]
+#[allow(dead_code)] // used by integration tests
 pub fn hlg_display_to_scene_precise(
     intensity_display: f32,
     luminance_rgb: [f32; 3],
