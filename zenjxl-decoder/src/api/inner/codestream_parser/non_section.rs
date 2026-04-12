@@ -378,6 +378,14 @@ impl CodestreamParser {
         self.section_state =
             SectionState::new(frame.header().num_lf_groups(), frame.header().num_groups());
 
+        // TODO(port 8b8dd57 phase 2): call `prepare_render_pipeline` here so
+        // progressive previews can run before LF global is decoded. Blocked on
+        // porting 0d75b8f (early-render gating via `can_do_early_rendering`) and
+        // reworking `decode_and_render_hf_groups` to tolerate calls before
+        // `hf_global` is set without reaching the VarDCT `.unwrap()` path. Until
+        // then, `prepare_render_pipeline` remains in sections.rs at its old late
+        // call site (after `decode_hf_global`).
+
         self.frame = Some(frame);
 
         Ok(())
