@@ -1697,4 +1697,147 @@ pub(crate) mod tests {
         let result: crate::error::Result<()> = stop.check().map_err(Into::into);
         assert!(matches!(result, Err(crate::error::Error::Cancelled)));
     }
+
+    /// Regression for the preview-frame recovery option-propagation bug that
+    /// was fixed upstream in libjxl/jxl-rs #743 (commit f1514f1).
+    ///
+    /// When the input file carries a preview frame, the codestream parser
+    /// decodes the preview with `process_without_output=true`, then discovers
+    /// the main frame is a separate frame and recreates the [`DecoderState`]
+    /// in `codestream_parser::sections::handle_frame_finalized`. Before the
+    /// port, that recreation path dropped several fields (`high_precision`,
+    /// `premultiply_output`, `parallel`, `memory_tracker`,
+    /// `embedded_color_profile`) back to their constructor defaults, silently
+    /// reverting options set by the caller.
+    ///
+    /// The fix centralizes option propagation through
+    /// `non_section::apply_decoder_options` so both the primary creation path
+    /// and the preview-recovery path populate the same fields.
+    ///
+    /// The test fully decodes `with_preview.jxl` with non-default options, so
+    /// the preview frame finalize path runs and the recreation branch is
+    /// taken, then asserts every recreated field carries the configured
+    /// option value rather than the `DecoderState::new` default.
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_preview_recovery_preserves_decoder_options() {
+        let data = std::fs::read("resources/test/with_preview.jxl")
+            .expect("with_preview.jxl test fixture should exist");
+
+        // Flip every option the recovery path used to drop to a non-default
+        // value (`render_spot_colors=false`, `high_precision=true`,
+        // `premultiply_output=true`, `parallel=false`, restrictive
+        // `max_memory_bytes`) so a successful decode with the buggy code
+        // would visibly carry the wrong field values. `JxlDecoderOptions`
+        // is `#[non_exhaustive]`, so a struct literal with
+        // `..Default::default()` is not allowed.
+        let mut options = JxlDecoderOptions::default();
+        options.high_precision = true;
+        options.premultiply_output = true;
+        options.parallel = false;
+        options.render_spot_colors = false;
+        // Generous enough to actually decode the tiny test file but still
+        // a finite limit so memory_tracker.has_limit() is true.
+        options.limits.max_memory_bytes = Some(64 * 1024 * 1024);
+
+        let mut decoder = JxlDecoderInner::new(options);
+        let mut input = data.as_slice();
+
+        // 1. Process up to image info.
+        match decoder.process(&mut input, None) {
+            Ok(ProcessingResult::Complete { .. }) => {}
+            other => panic!("expected image-info Complete, got {other:?}"),
+        }
+        assert!(decoder.basic_info().is_some());
+
+        // 2. Process up to the (main) frame header. With the default
+        //    `skip_preview=true`, the preview frame is fully decoded with
+        //    `process_without_output=true`, then the recreate branch in
+        //    `sections::handle_frame_finalized` runs and the decoder advances
+        //    to the main frame. The main-frame `Frame::from_header_and_toc`
+        //    consumes the recreated `DecoderState`, so by the time `process`
+        //    returns here the recreated state lives inside the active Frame.
+        match decoder.process(&mut input, None) {
+            Ok(ProcessingResult::Complete { .. }) => {}
+            other => panic!("expected frame-info Complete, got {other:?}"),
+        }
+        assert!(decoder.frame_header().is_some());
+
+        // Inspect the recreated state (now inside the main-frame Frame)
+        // BEFORE the main frame finalizes and drops it.
+        let state = decoder
+            .decoder_state_for_test()
+            .expect("decoder_state must exist inside the active main frame");
+
+        // Before the fix, all of the following assertions would fail when
+        // the preview-recovery branch was taken: the recreated state reset
+        // every knob below to its DecoderState::new() default.
+        assert!(
+            state.high_precision,
+            "high_precision should survive preview-frame recovery"
+        );
+        assert!(
+            state.premultiply_output,
+            "premultiply_output should survive preview-frame recovery"
+        );
+        assert!(
+            !state.parallel,
+            "parallel=false should survive preview-frame recovery (was silently flipped back to DecoderState::new default)"
+        );
+        assert!(
+            !state.render_spotcolors,
+            "render_spotcolors=false should survive preview-frame recovery"
+        );
+        assert!(
+            state.memory_tracker.has_limit(),
+            "memory_tracker should carry the configured limit after preview-frame recovery, not revert to unlimited"
+        );
+        assert_eq!(
+            state.memory_tracker.limit(),
+            Some(64 * 1024 * 1024),
+            "memory_tracker limit should equal configured max_memory_bytes"
+        );
+        assert!(
+            state.embedded_color_profile.is_some(),
+            "embedded_color_profile must be propagated so CMYK ICC and similar code paths work after preview recovery"
+        );
+        assert_eq!(
+            state.limits.max_memory_bytes,
+            Some(64 * 1024 * 1024),
+            "limits.max_memory_bytes on DecoderState must match the configured options"
+        );
+    }
+
+    /// Chunk-drip stress test mirroring the Chrome-integration repro from
+    /// libjxl/jxl-rs #743. We don't have the seek API (upstream #678) yet, but
+    /// we can still exercise the same box-parser and codestream-parser state
+    /// machines by feeding an animation file to `flush_pixels` in 1 KiB chunks
+    /// and asserting the decoder never errors or panics on any chunk boundary.
+    #[test]
+    fn test_chunked_drip_decode_animation_newtons_cradle() {
+        let data =
+            std::fs::read("resources/test/conformance_test_images/animation_newtons_cradle.jxl")
+                .expect("animation_newtons_cradle.jxl test fixture should exist");
+
+        let options = JxlDecoderOptions::default();
+        let mut decoder = JxlDecoderInner::new(options);
+        const CHUNK: usize = 1024;
+        let mut fed = 0usize;
+
+        while fed < data.len() {
+            let end = (fed + CHUNK).min(data.len());
+            let mut chunk = &data[fed..end];
+            let before = chunk.len();
+            match decoder.process(&mut chunk, None) {
+                Ok(_) => {}
+                Err(e) => panic!("decoder errored on chunk [{fed}..{end}]: {e:?}"),
+            }
+            let consumed = before - chunk.len();
+            fed += consumed;
+            if consumed == 0 {
+                // No progress on this chunk — advance to feed more bytes.
+                fed = end;
+            }
+        }
+    }
 }

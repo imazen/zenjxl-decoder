@@ -47,6 +47,27 @@ impl JxlDecoderInner {
         self.codestream_parser.decoded_frames
     }
 
+    /// Test-only accessor for the active [`crate::frame::DecoderState`].
+    ///
+    /// Used by regression tests that need to verify that per-run options
+    /// (limits, memory_tracker, parallel, high_precision, premultiply_output,
+    /// embedded_color_profile) survive the preview-frame recovery path in
+    /// `codestream_parser::sections::handle_frame_finalized`.
+    ///
+    /// Returns the parser-owned decoder state if it has not yet been moved
+    /// into a Frame, otherwise the in-progress frame's decoder state.
+    #[cfg(test)]
+    pub(crate) fn decoder_state_for_test(&self) -> Option<&crate::frame::DecoderState> {
+        if let Some(state) = self.codestream_parser.decoder_state.as_ref() {
+            Some(state)
+        } else {
+            self.codestream_parser
+                .frame
+                .as_ref()
+                .map(|f| &f.decoder_state)
+        }
+    }
+
     /// Obtains the image's basic information, if available.
     ///
     /// Keep this aligned with typed `WithImageInfo` transitions: image info is

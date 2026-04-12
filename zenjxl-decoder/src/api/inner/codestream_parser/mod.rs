@@ -42,7 +42,7 @@ pub(super) struct CodestreamParser {
     pub(super) file_header: Option<FileHeader>,
     icc_parser: Option<IncrementalIccReader>,
     // These fields are populated once image information is available.
-    decoder_state: Option<DecoderState>,
+    pub(super) decoder_state: Option<DecoderState>,
     pub(super) basic_info: Option<JxlBasicInfo>,
     pub(super) animation: Option<Animation>,
     pub(super) embedded_color_profile: Option<JxlColorProfile>,
