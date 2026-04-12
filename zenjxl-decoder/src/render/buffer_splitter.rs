@@ -172,6 +172,7 @@ pub(crate) struct OwnedLocalBuffer {
 /// Render output from one parallel work item. Contains owned buffers
 /// that need to be copied back into the real output.
 #[cfg(feature = "threads")]
+#[allow(dead_code)] // Threaded render output container
 pub(crate) struct WorkItemOutput {
     pub(crate) buffers: Vec<OwnedLocalBuffer>,
 }

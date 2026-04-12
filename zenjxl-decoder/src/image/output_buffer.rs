@@ -177,6 +177,7 @@ impl<'a> JxlOutputBuffer<'a> {
     /// While the returned sub-buffers are alive, `self` cannot be used.
     /// When they are dropped, `self` becomes available again.
     #[cfg(feature = "threads")]
+    #[allow(dead_code)] // Parallel row-band splitting for threaded output
     pub(crate) fn split_into_row_bands(
         &mut self,
         split_rows: &[usize],
@@ -289,6 +290,7 @@ impl<'a> JxlOutputBuffer<'a> {
     /// Preserves `row_offset` so callers can use the parent buffer's coordinate
     /// system for row access.
     #[cfg(feature = "threads")]
+    #[allow(dead_code)] // Parallel column-fragment splitting for threaded output
     pub(crate) fn split_into_col_fragments(
         &mut self,
         split_cols: &[usize],

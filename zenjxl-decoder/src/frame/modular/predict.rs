@@ -127,6 +127,7 @@ impl PredictionData {
         }
     }
 
+    #[allow(dead_code)] // Convenience wrapper used by some decode paths
     pub fn get(rect: &Image<i32>, x: usize, y: usize) -> Self {
         Self::get_rows(
             rect.row(y),
@@ -138,6 +139,7 @@ impl PredictionData {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Cross-group neighbor variant for tiled decode
     pub fn get_with_neighbors(
         rect: &Image<i32>,
         rect_left: Option<&Image<i32>>,

@@ -14,6 +14,5 @@ pub(crate) mod data;
 mod jbrd;
 mod writer;
 
-pub use data::JpegData;
 pub use jbrd::decode_jbrd;
 pub use writer::write_jpeg;

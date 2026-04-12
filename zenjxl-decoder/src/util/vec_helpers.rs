@@ -14,14 +14,17 @@ use aligned_vec::{AVec, ConstAlign};
 use std::collections::TryReserveError;
 
 /// Alignment for SIMD operations (64 bytes for AVX-512 compatibility).
+#[allow(dead_code)] // SIMD alignment infrastructure
 pub const SIMD_ALIGN: usize = 64;
 
 /// Type alias for AVX-512-aligned vectors.
 /// Uses 64-byte alignment which is compatible with all x86 SIMD (SSE, AVX, AVX-512)
 /// and ARM NEON (which only requires 16-byte alignment).
+#[allow(dead_code)] // SIMD alignment infrastructure
 pub type AlignedVec<T> = AVec<T, ConstAlign<SIMD_ALIGN>>;
 
 /// Creates a new aligned vector with the given capacity, returning an error on allocation failure.
+#[allow(dead_code)] // SIMD alignment infrastructure
 pub fn aligned_vec_with_capacity<T>(capacity: usize) -> Result<AlignedVec<T>, TryReserveError> {
     // AVec doesn't have try_with_capacity, so we create empty and try_reserve
     let mut vec = AVec::new(SIMD_ALIGN);
@@ -39,6 +42,7 @@ pub fn aligned_vec_with_capacity<T>(capacity: usize) -> Result<AlignedVec<T>, Tr
 }
 
 /// Creates a new aligned vector filled with zeros.
+#[allow(dead_code)] // SIMD alignment infrastructure
 pub fn aligned_vec_zeroed<T: Default + Clone>(
     len: usize,
 ) -> Result<AlignedVec<T>, TryReserveError> {
@@ -84,6 +88,7 @@ pub trait TryVecExt<T> {
         T: Clone;
 
     /// Try to extend the vector from an iterator, reserving capacity first.
+    #[allow(dead_code)]
     fn try_extend_from_slice(&mut self, slice: &[T]) -> Result<(), TryReserveError>
     where
         T: Clone;

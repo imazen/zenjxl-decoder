@@ -14,6 +14,7 @@ pub struct Xorshift128Plus {
 impl Xorshift128Plus {
     pub const N: usize = 8;
 
+    #[allow(dead_code)] // Single-seed variant of the PRNG constructor
     pub fn new_with_seed(seed: u64) -> Self {
         let mut s0 = [0; Self::N];
         let mut s1 = [0; Self::N];

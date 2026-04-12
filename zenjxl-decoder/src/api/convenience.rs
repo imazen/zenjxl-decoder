@@ -22,8 +22,6 @@
 //!
 //! [`JxlDecoder`]: super::JxlDecoder
 
-use std::sync::Arc;
-
 use super::{
     GainMapBundle, JxlBasicInfo, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder,
     JxlDecoderLimits, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,

@@ -3,7 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::util::{eval_rational_poly, eval_rational_poly_simd};
+use crate::util::eval_rational_poly_simd;
+#[cfg(test)]
+use crate::util::eval_rational_poly;
 use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask};
 
 /// Converts the linear samples with the sRGB transfer curve (SIMD version).
@@ -46,6 +48,7 @@ pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 }
 
 /// Converts samples in sRGB transfer curve to linear. Inverse of `linear_to_srgb`.
+#[cfg(test)]
 pub fn srgb_to_linear(samples: &mut [f32]) {
     #[allow(clippy::excessive_precision)]
     const P: [f32; 5] = [
@@ -152,6 +155,7 @@ pub fn linear_to_bt709_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
 }
 
 /// Converts samples in BT.709 transfer curve to linear. Inverse of `linear_to_bt709_simd`.
+#[cfg(test)]
 pub fn bt709_to_linear(samples: &mut [f32]) {
     for s in samples {
         // Per ICC parametric curve type 3: linear segment for all values below
@@ -269,6 +273,7 @@ const PQ_INV_EOTF_Q_SMALL: [f32; 5] =
 ///
 /// This version uses approximate curve using rational polynomial.
 // Max error: ~7e-7 at intensity_target = 10000
+#[cfg(test)]
 pub fn linear_to_pq(intensity_target: f32, samples: &mut [f32]) {
     let y_mult = intensity_target * 10000f32.recip();
 
@@ -321,6 +326,7 @@ pub fn linear_to_pq_simd<D: SimdDescriptor>(
 ///
 /// This version uses approximate curve using rational polynomial.
 // Max error: ~3e-6 at intensity_target = 10000
+#[cfg(test)]
 pub fn pq_to_linear(intensity_target: f32, samples: &mut [f32]) {
     let y_mult = 10000.0 / intensity_target;
 
@@ -360,6 +366,7 @@ const HLG_A: f64 = 0.17883277;
 const HLG_B: f64 = 1.0 - 4.0 * HLG_A;
 const HLG_C: f64 = 0.5599107295;
 
+#[cfg(test)]
 fn hlg_ootf_inner_precise(exp: f64, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut [f32]; 3]) {
     if exp.abs() < 0.1 {
         return;
@@ -397,6 +404,7 @@ fn hlg_ootf_inner(exp: f32, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut [f32]; 3
 /// Converts scene-referred linear samples to display-referred linear samples using HLG OOTF.
 ///
 /// This version uses double precision arithmetic internally.
+#[cfg(test)]
 pub fn hlg_scene_to_display_precise(
     intensity_display: f32,
     luminance_rgb: [f32; 3],
@@ -411,6 +419,7 @@ pub fn hlg_scene_to_display_precise(
 /// OOTF.
 ///
 /// This version uses double precision arithmetic internally.
+#[cfg(test)]
 pub fn hlg_display_to_scene_precise(
     intensity_display: f32,
     luminance_rgb: [f32; 3],
@@ -451,6 +460,7 @@ pub fn hlg_display_to_scene(
 /// Converts scene-referred linear sample to HLG signal.
 ///
 /// This version uses double precision arithmetic internally.
+#[cfg(test)]
 pub fn scene_to_hlg_precise(samples: &mut [f32]) {
     for s in samples {
         let a = s.abs() as f64;
@@ -467,6 +477,7 @@ pub fn scene_to_hlg_precise(samples: &mut [f32]) {
 /// Converts HLG signal to scene-referred linear sample.
 ///
 /// This version uses double precision arithmetic internally.
+#[cfg(test)]
 pub fn hlg_to_scene_precise(samples: &mut [f32]) {
     for s in samples {
         let a = s.abs() as f64;

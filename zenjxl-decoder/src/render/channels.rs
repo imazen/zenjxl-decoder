@@ -48,11 +48,13 @@ impl<'a, T> Channels<'a, T> {
     }
 
     /// Returns true if there are no channels.
+    #[allow(dead_code)] // Companion to len()
     pub fn is_empty(&self) -> bool {
         self.num_channels == 0
     }
 
     /// Returns an iterator over channel slices.
+    #[allow(dead_code)] // Part of Channels accessor API
     pub fn iter(&self) -> impl Iterator<Item = &[&'a [T]]> {
         (0..self.num_channels).map(move |ch| &self[ch])
     }
@@ -109,6 +111,7 @@ impl<'a, T> ChannelsMut<'a, T> {
     }
 
     /// Returns true if there are no channels.
+    #[allow(dead_code)] // Companion to len()
     pub fn is_empty(&self) -> bool {
         self.num_channels == 0
     }
@@ -133,6 +136,7 @@ impl<'a, T> ChannelsMut<'a, T> {
 
     /// Returns a mutable iterator over all channels.
     /// Each item is a mutable slice of rows for that channel.
+    #[allow(dead_code)] // Part of ChannelsMut accessor API
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [&'a mut [T]]> {
         let rpc = self.rows_per_channel;
         self.row_data.chunks_mut(rpc)

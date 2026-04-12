@@ -8,6 +8,7 @@ use crate::error::Error;
 pub type Matrix3x3<T> = [[T; 3]; 3];
 pub type Vector3<T> = [T; 3];
 
+#[allow(dead_code)] // Matrix-vector multiply for color transform pipeline
 pub fn matmul3_vec(m: [f32; 9], v: [f32; 3]) -> [f32; 3] {
     [
         v[0] * m[0] + v[1] * m[1] + v[2] * m[2],

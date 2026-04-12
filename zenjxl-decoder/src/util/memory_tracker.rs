@@ -165,6 +165,7 @@ impl MemoryGuard {
     /// internal `Arc` allocation (32 bytes per call) because `std::mem::forget`
     /// prevents the destructor from running.
     #[deprecated(note = "use disarm() instead — forget() leaks the internal Arc")]
+    #[allow(dead_code)]
     pub fn forget(self) {
         std::mem::forget(self);
     }

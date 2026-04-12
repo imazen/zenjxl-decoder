@@ -14,7 +14,7 @@ use super::{
     group::{VarDctBuffers, decode_vardct_group},
     modular::{
         FullModularImage, ModularStreamId, Tree, decode_hf_metadata, decode_hf_metadata_into_rects,
-        decode_vardct_lf, dequant_lf,
+        decode_vardct_lf,
     },
     quant_weights::DequantMatrices,
     quantizer::{LfQuantFactors, QuantizerParams},
@@ -26,7 +26,7 @@ use crate::headers::frame_header::FrameType;
 use crate::render::SimpleRenderPipeline;
 use crate::render::buffer_splitter::BufferSplitter;
 use crate::transforms::transform_map::*;
-use crate::util::{ShiftRightCeil, SmallVec, mirror};
+use crate::util::{ShiftRightCeil, mirror};
 use crate::{
     GROUP_DIM,
     bit_reader::BitReader,
@@ -286,6 +286,7 @@ impl Frame {
 
     /// Given a bit reader pointing at the end of the TOC, returns a vector of `BitReader`s, each
     /// of which reads a specific section.
+    #[allow(dead_code)] // TOC-based section splitting for future incremental decode
     pub fn sections<'a>(&self, br: &'a mut BitReader) -> Result<Vec<BitReader<'a>>> {
         debug!(toc = ?self.toc);
         let ret = self

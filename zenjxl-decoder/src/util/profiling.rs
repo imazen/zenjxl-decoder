@@ -49,6 +49,7 @@ mod inner {
             }
         }
 
+        #[allow(dead_code)] // Available for manual profiling reset
         pub fn reset(&self) {
             self.dequant_transform_ns.store(0, Ordering::Relaxed);
             self.dequant_transform_calls.store(0, Ordering::Relaxed);
@@ -168,6 +169,7 @@ mod inner {
     }
 
     /// Reset all counters.
+    #[allow(dead_code)] // Available for manual profiling reset
     pub fn reset_profile_counters() {
         COUNTERS.reset();
     }

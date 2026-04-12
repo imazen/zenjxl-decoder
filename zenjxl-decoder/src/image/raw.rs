@@ -359,6 +359,7 @@ impl<'a> RawImageRectMut<'a> {
     }
 
     /// Creates a mutable view from an external slice and dimensions.
+    #[allow(dead_code)] // Part of RawImageRectMut construction API
     pub(super) fn from_slice(
         buf: &'a mut [u8],
         num_rows: usize,

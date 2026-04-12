@@ -99,6 +99,7 @@ pub struct JpegScanInfo {
     /// (block_index, num_extra_zero_runs) for extra zero runs before EOB.
     pub extra_zero_runs: Vec<(u32, u32)>,
     /// Last needed pass (always 0 for baseline JPEG).
+    #[allow(dead_code)] // Populated from JBRD for progressive JPEG support
     pub last_needed_pass: u32,
 }
 
@@ -139,6 +140,7 @@ pub struct JpegData {
     /// Raw APP marker data.
     pub app_data: Vec<Vec<u8>>,
     /// Classification of each APP marker.
+    #[allow(dead_code)] // Populated from JBRD for marker reconstruction
     pub app_marker_type: Vec<AppMarkerType>,
     /// Raw COM marker data.
     pub com_data: Vec<Vec<u8>>,
@@ -157,6 +159,7 @@ pub struct JpegData {
     /// Data after EOI marker.
     pub tail_data: Vec<u8>,
     /// Whether there are any non-zero padding bits.
+    #[allow(dead_code)] // Populated from JBRD for bit-exact reconstruction
     pub has_zero_padding_bit: bool,
     /// Individual padding bits.
     pub padding_bits: Vec<u8>,

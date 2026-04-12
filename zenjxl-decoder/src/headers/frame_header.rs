@@ -515,16 +515,19 @@ impl FrameHeader {
         self.hshift(2) == 0 && self.vshift(2) == 0 &&  // Cr
         self.hshift(1) == 0 && self.vshift(1) == 0 // Y
     }
+    #[allow(dead_code)] // Chroma subsampling query
     pub fn is420(&self) -> bool {
         self.hshift(0) == 1 && self.vshift(0) == 1 &&  // Cb
         self.hshift(2) == 1 && self.vshift(2) == 1 &&  // Cr
         self.hshift(1) == 0 && self.vshift(1) == 0 // Y
     }
+    #[allow(dead_code)] // Chroma subsampling query
     pub fn is422(&self) -> bool {
         self.hshift(0) == 1 && self.vshift(0) == 0 &&  // Cb
         self.hshift(2) == 1 && self.vshift(2) == 0 &&  // Cr
         self.hshift(1) == 0 && self.vshift(1) == 0 // Y
     }
+    #[allow(dead_code)] // Chroma subsampling query
     pub fn is440(&self) -> bool {
         self.hshift(0) == 0 && self.vshift(0) == 1 &&  // Cb
         self.hshift(2) == 0 && self.vshift(2) == 1 &&  // Cr
@@ -588,6 +591,7 @@ impl FrameHeader {
         )
     }
 
+    #[allow(dead_code)] // Frame dimension query
     pub fn size_padded_upsampled(&self) -> (usize, usize) {
         let (xsize, ysize) = self.size_padded();
         (

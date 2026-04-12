@@ -12,7 +12,7 @@ use crate::headers::{FileHeader, OpsinInverseMatrix};
 use crate::render::stages::from_linear;
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
 use crate::util::{Matrix3x3, eval_rational_poly_simd, inv_3x3_matrix, mul_3x3_matrix};
-use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask, simd_function};
+use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 
 const SRGB_LUMINANCES: [f32; 3] = [0.2126, 0.7152, 0.0722];
 

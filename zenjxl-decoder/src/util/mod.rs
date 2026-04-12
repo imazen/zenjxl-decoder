@@ -28,7 +28,6 @@ mod xorshift128plus;
 pub use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 pub use bits::*;
 pub use cacheline::*;
-pub use concat_slice::*;
 pub use fast_math::*;
 pub use float16::f16;
 pub use linalg::*;

@@ -25,6 +25,7 @@ pub struct ExtendToImageDimensionsStage {
     pub image_size: (usize, usize),
     pub blending_info: BlendingInfo,
     pub ec_blending_info: Vec<BlendingInfo>,
+    #[allow(dead_code)] // Stored for future per-EC extend behavior
     pub extra_channels: Vec<ExtraChannelInfo>,
     pub reference_frames: Arc<[Option<ReferenceFrame>; 4]>,
     pub zeros: Vec<f32>,

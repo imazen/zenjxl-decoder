@@ -420,6 +420,7 @@ impl SymbolReader {
     }
 
     #[inline(never)]
+    #[allow(dead_code)] // Non-inlined variant for call sites where code size matters
     pub fn read_unsigned_clustered(
         &mut self,
         histograms: &Histograms,

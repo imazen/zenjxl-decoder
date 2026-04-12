@@ -492,6 +492,7 @@ impl LowMemoryRenderPipeline {
     /// preserves the non-overlapping work-item guarantee: each border pixel is
     /// rendered by exactly one group.
     #[cfg(feature = "threads")]
+    #[allow(dead_code)] // Threaded work-item emission for parallel group rendering
     pub(crate) fn emit_work_items(&mut self, g: usize) -> Result<Vec<RenderWorkItem>> {
         // Set is_ready NOW (before computing the mask) so that subsequent groups
         // see this group as ready. Earlier groups were already set in previous
