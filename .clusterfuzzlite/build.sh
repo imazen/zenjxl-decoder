@@ -4,7 +4,7 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-cd $SRC/jxl-rs/jxl
+cd $SRC/jxl-rs
 
 # Build fuzz targets with cargo-fuzz
 cargo fuzz build -O --debug-assertions
@@ -20,9 +20,9 @@ done
 
 # Create seed corpus from test JXL files
 # Both decode and decode_header targets benefit from real JXL samples
-if [ -d "resources/test" ]; then
-    zip -j "$OUT/decode_seed_corpus.zip" resources/test/*.jxl resources/test/conformance_test_images/*.jxl || true
-    zip -j "$OUT/decode_header_seed_corpus.zip" resources/test/*.jxl resources/test/conformance_test_images/*.jxl || true
+if [ -d "zenjxl-decoder/resources/test" ]; then
+    zip -j "$OUT/decode_seed_corpus.zip" zenjxl-decoder/resources/test/*.jxl zenjxl-decoder/resources/test/conformance_test_images/*.jxl || true
+    zip -j "$OUT/decode_header_seed_corpus.zip" zenjxl-decoder/resources/test/*.jxl zenjxl-decoder/resources/test/conformance_test_images/*.jxl || true
 fi
 
 # Also copy any manually curated corpus if available
