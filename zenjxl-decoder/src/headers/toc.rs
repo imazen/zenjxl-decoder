@@ -54,6 +54,7 @@ impl IncrementalTocReader {
         })
     }
 
+    #[allow(dead_code)] // Part of incremental TOC reader API
     pub fn num_read_entries(&self) -> u32 {
         self.entries.len() as u32
     }

@@ -5,10 +5,6 @@
 
 #![cfg_attr(not(feature = "allow-unsafe"), forbid(unsafe_code))]
 #![cfg_attr(feature = "allow-unsafe", deny(unsafe_code))]
-// Internal modules expose items that are used across the crate but not
-// externally.  Some items are kept for future use (container, color TFs,
-// render stages) — suppress dead-code noise so clippy -D warnings passes.
-#![allow(dead_code, unused_imports)]
 
 pub mod api;
 pub use api::{decode, decode_with, read_header, read_header_with};

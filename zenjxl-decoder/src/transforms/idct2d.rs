@@ -7,6 +7,7 @@ use super::*;
 use jxl_simd::{F32SimdVec, SimdDescriptor};
 
 #[inline(always)]
+#[allow(dead_code)] // 2x2 IDCT variant
 fn idct2d_2_2_impl<D: SimdDescriptor>(d: D, data: &mut [f32]) {
     assert_eq!(data.len(), 4, "Data length mismatch");
     const { assert!(2usize.is_multiple_of(D::F32Vec::LEN)) };
@@ -339,6 +340,7 @@ fn idct2d_32_32_impl<D: SimdDescriptor>(d: D, data: &mut [f32]) {
 
 #[inline(always)]
 #[allow(unused_variables)]
+#[allow(dead_code)] // 2x2 IDCT not currently used but part of complete set
 pub fn idct2d_2_2<D: SimdDescriptor>(d: D, data: &mut [f32]) {
     let d = jxl_simd::ScalarDescriptor::new().unwrap();
     idct2d_2_2_impl(d, data)

@@ -2132,6 +2132,7 @@ impl Frame {
     /// so it must stay on the main thread. `finalize_lf` (which doesn't need
     /// `cms`) runs on a scoped OS thread.
     #[cfg(feature = "threads")]
+    #[allow(dead_code)] // Parallel pipeline+LF preparation for threaded decode
     pub fn prepare_pipeline_and_finalize_lf(
         &mut self,
         pixel_format: &JxlPixelFormat,

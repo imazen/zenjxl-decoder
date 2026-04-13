@@ -5,7 +5,6 @@
 
 use super::*;
 use jxl_simd::{ScalarDescriptor, SimdDescriptor, test_all_instruction_sets};
-use rand::Rng;
 use rand::RngExt;
 use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;

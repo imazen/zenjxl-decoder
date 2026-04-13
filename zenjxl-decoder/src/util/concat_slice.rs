@@ -5,11 +5,13 @@
 
 use crate::error::Error;
 
+#[allow(dead_code)] // Container format support infrastructure, currently test-only
 pub struct ConcatSlice<'first, 'second> {
     slices: (&'first [u8], &'second [u8]),
     ptr: usize,
 }
 
+#[allow(dead_code)]
 impl<'first, 'second> ConcatSlice<'first, 'second> {
     pub fn new(slice0: &'first [u8], slice1: &'second [u8]) -> Self {
         Self {

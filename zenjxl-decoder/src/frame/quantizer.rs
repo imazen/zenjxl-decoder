@@ -16,6 +16,7 @@ pub const GLOBAL_SCALE_DENOM: usize = 1 << 16;
 #[derive(Debug)]
 pub struct LfQuantFactors {
     pub quant_factors: [f32; 3],
+    #[allow(dead_code)] // Inverse factors computed at parse time for future dequantization
     pub inv_quant_factors: [f32; 3],
 }
 

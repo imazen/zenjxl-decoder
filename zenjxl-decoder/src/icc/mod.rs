@@ -241,6 +241,7 @@ impl IncrementalIccReader {
         Ok(())
     }
 
+    #[allow(dead_code)] // Batch ICC read variant (vs incremental read_one)
     pub fn read_all(&mut self, br: &mut BitReader) -> Result<()> {
         for _ in self.out_buf.len()..self.num_coded_bytes() {
             self.read_one(br)?;

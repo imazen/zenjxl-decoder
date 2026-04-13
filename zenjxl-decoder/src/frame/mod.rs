@@ -5,6 +5,8 @@
 
 use std::{collections::BTreeSet, sync::Arc};
 
+#[cfg(feature = "jpeg")]
+use crate::util::TryVecExt;
 use crate::{
     api::JxlColorProfile,
     entropy_coding::decode::Histograms,
@@ -18,7 +20,7 @@ use crate::{
         toc::Toc,
     },
     image::Image,
-    util::{MemoryTracker, TryVecExt, tracing_wrappers::*},
+    util::{MemoryTracker, tracing_wrappers::*},
 };
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;
@@ -176,6 +178,7 @@ impl DecoderState {
         &self.file_header.image_metadata.extra_channel_info
     }
 
+    #[allow(dead_code)] // Part of DecoderState public API
     pub fn reference_frame(&self, i: usize) -> Option<&ReferenceFrame> {
         assert!(i < Self::MAX_STORED_FRAMES);
         self.reference_frames[i].as_ref()
@@ -267,6 +270,7 @@ impl Frame {
         self.render_pipeline.is_none()
     }
 
+    #[allow(dead_code)] // Part of Frame public API
     pub fn total_bytes_in_toc(&self) -> usize {
         self.toc.entries.iter().map(|x| *x as usize).sum()
     }

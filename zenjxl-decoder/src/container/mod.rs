@@ -5,16 +5,25 @@
 //
 // Originally written for jxl-oxide.
 
+// Container box parsing (box_header, parse) is used only by tests and
+// the ContainerParser below.  frame_index and gain_map are production.
+#[allow(dead_code)]
 pub mod box_header;
 pub mod frame_index;
 pub mod gain_map;
+#[allow(dead_code)]
 pub mod parse;
 
+#[allow(dead_code)]
 use box_header::*;
-pub use parse::ParseEvent;
+#[allow(dead_code)]
 use parse::*;
 
 /// Container format parser.
+///
+/// Currently used only from tests (`collect_codestream` helper) but kept
+/// as public infrastructure for future streaming/container-level decoding.
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct ContainerParser {
     state: DetectState,
@@ -22,6 +31,7 @@ pub struct ContainerParser {
     previous_consumed_bytes: usize,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 enum DetectState {
     #[default]
@@ -40,6 +50,7 @@ enum DetectState {
 }
 
 /// Structure of the decoded bitstream.
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum BitstreamKind {
     /// Decoder can't determine structure of the bitstream.
@@ -52,6 +63,7 @@ pub enum BitstreamKind {
     Invalid,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 enum JxlpIndexState {
     #[default]
@@ -61,6 +73,7 @@ enum JxlpIndexState {
     JxlpFinished,
 }
 
+#[allow(dead_code)]
 impl ContainerParser {
     pub fn new() -> Self {
         Self::default()

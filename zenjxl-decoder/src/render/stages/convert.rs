@@ -10,10 +10,12 @@ use crate::{
 };
 use jxl_simd::{F32SimdVec, I32SimdVec, SimdMask, simd_function};
 
+#[allow(dead_code)] // U8-to-F32 conversion stage for future JPEG input paths
 pub struct ConvertU8F32Stage {
     channel: usize,
 }
 
+#[allow(dead_code)]
 impl ConvertU8F32Stage {
     pub fn new(channel: usize) -> ConvertU8F32Stage {
         ConvertU8F32Stage { channel }

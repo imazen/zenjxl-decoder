@@ -9,6 +9,7 @@ use jxl_simd::{F32SimdVec, SimdMask, simd_function};
 /// Unpremultiply color channels by alpha.
 /// This divides RGB values by the alpha channel value.
 /// When alpha is 0, the color output is 0 (to avoid division by zero).
+#[allow(dead_code)] // Render pipeline stage for unpremultiplied alpha output
 pub struct UnpremultiplyAlphaStage {
     /// First color channel index (typically 0 for R)
     first_color_channel: usize,
@@ -30,6 +31,7 @@ impl std::fmt::Display for UnpremultiplyAlphaStage {
     }
 }
 
+#[allow(dead_code)]
 impl UnpremultiplyAlphaStage {
     pub fn new(
         first_color_channel: usize,

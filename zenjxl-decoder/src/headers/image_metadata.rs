@@ -16,6 +16,7 @@ use num_derive::FromPrimitive;
 pub struct Signature;
 
 impl Signature {
+    #[allow(dead_code)]
     pub fn new() -> Signature {
         Signature {}
     }
@@ -138,6 +139,7 @@ pub struct Animation {
 #[validate]
 pub struct ToneMapping {
     #[all_default]
+    #[allow(dead_code)] // Used by UnconditionalCoder derive macro for default detection
     pub all_default: bool,
     #[default(255.0)]
     pub intensity_target: f32,

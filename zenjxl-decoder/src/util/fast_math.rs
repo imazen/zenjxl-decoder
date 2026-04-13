@@ -42,6 +42,7 @@ pub fn fast_cos(x: f32) -> f32 {
 }
 
 #[inline]
+#[allow(dead_code)] // Error function approximation for noise generation
 pub fn fast_erff(x: f32) -> f32 {
     // Formula from
     // https://en.wikipedia.org/wiki/Error_function#Numerical_approximations

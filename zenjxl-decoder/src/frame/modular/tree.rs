@@ -635,6 +635,7 @@ impl Tree {
             + 1
     }
 
+    #[allow(dead_code)] // Part of Tree analysis API
     pub fn num_prev_channels(&self) -> usize {
         self.max_property_count()
             .saturating_sub(NUM_NONREF_PROPERTIES)

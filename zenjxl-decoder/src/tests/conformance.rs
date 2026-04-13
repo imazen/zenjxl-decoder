@@ -23,6 +23,7 @@
 //!
 //! IMPORTANT: DO NOT WEAKEN TOLERANCES. If a test fails, the implementation
 //! is wrong and must be fixed.
+#![allow(dead_code, unused_imports)] // Conformance infrastructure — used only with `cms` feature + --ignored tests
 
 #[cfg(feature = "cms")]
 use crate::api::MoxCms;

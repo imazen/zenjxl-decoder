@@ -420,6 +420,7 @@ impl SymbolReader {
     }
 
     #[inline(never)]
+    #[allow(dead_code)] // Non-inlined variant for call sites where code size matters
     pub fn read_unsigned_clustered(
         &mut self,
         histograms: &Histograms,
@@ -648,6 +649,7 @@ impl Histograms {
         &self.uint_configs[cluster]
     }
 
+    #[allow(dead_code)] // Used in debug!() tracing calls
     pub fn num_histograms(&self) -> usize {
         *self.context_map.iter().max().unwrap() as usize + 1
     }

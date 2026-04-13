@@ -108,6 +108,7 @@ impl<'a, 'b> BufferSplitter<'a, 'b> {
         self.requested_rects
     }
 
+    #[cfg(any(test, feature = "threads"))]
     pub fn get_full_buffers(&mut self) -> &mut [Option<JxlOutputBuffer<'b>>] {
         &mut *self.buffers
     }
@@ -172,6 +173,7 @@ pub(crate) struct OwnedLocalBuffer {
 /// Render output from one parallel work item. Contains owned buffers
 /// that need to be copied back into the real output.
 #[cfg(feature = "threads")]
+#[allow(dead_code)] // Threaded render output container
 pub(crate) struct WorkItemOutput {
     pub(crate) buffers: Vec<OwnedLocalBuffer>,
 }

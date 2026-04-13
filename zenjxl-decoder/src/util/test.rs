@@ -90,6 +90,7 @@ pub fn assert_almost_eq<T: AsPrimitive<f64> + Debug + Copy>(
     }
 }
 
+#[allow(dead_code)] // used by integration tests
 pub fn assert_almost_rel_eq<T: AsPrimitive<f64> + Debug + Copy>(
     left: T,
     right: T,
@@ -114,6 +115,7 @@ pub fn assert_almost_abs_eq<T: AsPrimitive<f64> + Debug + Copy>(
     }
 }
 
+#[allow(dead_code)] // used by integration tests
 pub fn assert_almost_abs_eq_coords<T: AsPrimitive<f64> + Debug + Copy>(
     left: T,
     right: T,
@@ -139,6 +141,7 @@ fn assert_same_len<T: AsPrimitive<f64> + Debug + Copy>(left: &[T], right: &[T]) 
     }
 }
 
+#[allow(dead_code)] // used by integration tests
 pub fn assert_all_almost_eq<T: AsPrimitive<f64> + Debug + Copy, V: AsRef<[T]> + Debug>(
     left: V,
     right: V,
@@ -163,6 +166,7 @@ pub fn assert_all_almost_eq<T: AsPrimitive<f64> + Debug + Copy, V: AsRef<[T]> + 
     }
 }
 
+#[allow(dead_code)] // used by integration tests
 pub fn assert_all_almost_rel_eq<T: AsPrimitive<f64> + Debug + Copy, V: AsRef<[T]> + Debug>(
     left: V,
     right: V,
@@ -273,6 +277,7 @@ pub fn read_headers_and_toc(image: &[u8]) -> Result<(FileHeader, FrameHeader, To
     Ok((file_header, frame_header, toc))
 }
 
+#[allow(dead_code)] // used by integration tests
 pub fn write_pfm(image: Vec<Image<f32>>, mut buf: impl Write) -> Result<(), Error> {
     if image.len() == 1 {
         buf.write_all(b"Pf\n")?;

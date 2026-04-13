@@ -17,6 +17,7 @@ pub const fn num_per_cache_line<T>() -> usize {
     CACHE_LINE_BYTE_SIZE / std::mem::size_of::<T>()
 }
 
+#[allow(dead_code)] // Used by SimpleRenderPipeline (test infrastructure)
 pub fn round_up_size_to_cache_line<T>(size: usize) -> usize {
     let n = const { num_per_cache_line::<T>() };
     size.div_ceil(n) * n

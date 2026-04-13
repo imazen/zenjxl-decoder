@@ -28,7 +28,6 @@ mod xorshift128plus;
 pub use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 pub use bits::*;
 pub use cacheline::*;
-pub use concat_slice::*;
 pub use fast_math::*;
 pub use float16::f16;
 pub use linalg::*;
@@ -36,6 +35,7 @@ pub use log2::*;
 pub use memory_tracker::*;
 pub use mirror::*;
 pub(crate) use ndarray::*;
+#[allow(unused_imports)]
 pub use profiling::*;
 pub use rational_poly::*;
 pub use shift_right_ceil::*;

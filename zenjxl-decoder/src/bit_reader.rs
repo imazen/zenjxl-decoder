@@ -253,6 +253,7 @@ impl<'a> BitReader<'a> {
     /// Splits off a separate BitReader to handle the next `n` *full* bytes.
     /// If `self` is not aligned to a byte boundary, it skips to the next byte boundary.
     /// `self` is automatically advanced by `n` bytes.
+    #[allow(dead_code)] // Used by Frame::sections (TOC-based section splitting)
     pub fn split_at(&mut self, n: usize) -> Result<BitReader<'a>, Error> {
         self.jump_to_byte_boundary()?;
         let mut ret = Self { ..*self };

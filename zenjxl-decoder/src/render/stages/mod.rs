@@ -45,8 +45,8 @@ pub use patches::*;
 pub use premultiply_alpha::*;
 pub use splines::*;
 pub use spot::*;
-pub use to_linear::{ToLinearStage, TransferFunction as ToLinearTransferFunction};
 pub use tone_mapping::*;
+#[allow(unused_imports)] // Stage is available but not yet wired into pipeline builder
 pub use unpremultiply_alpha::*;
 pub use upsample::*;
 pub use xyb::*;

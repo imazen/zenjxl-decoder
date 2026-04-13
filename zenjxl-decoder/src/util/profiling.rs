@@ -49,6 +49,7 @@ mod inner {
             }
         }
 
+        #[allow(dead_code)] // Available for manual profiling reset
         pub fn reset(&self) {
             self.dequant_transform_ns.store(0, Ordering::Relaxed);
             self.dequant_transform_calls.store(0, Ordering::Relaxed);
@@ -168,12 +169,14 @@ mod inner {
     }
 
     /// Reset all counters.
+    #[allow(dead_code)] // Available for manual profiling reset
     pub fn reset_profile_counters() {
         COUNTERS.reset();
     }
 }
 
 #[cfg(not(feature = "profiling"))]
+#[allow(dead_code)]
 mod inner {
     /// No-op guard when profiling is disabled.
     #[derive(Default)]
@@ -193,6 +196,7 @@ mod inner {
     pub fn reset_profile_counters() {}
 }
 
+#[allow(unused_imports)]
 pub use inner::*;
 
 /// Macro to create a profile guard for a specific counter.
