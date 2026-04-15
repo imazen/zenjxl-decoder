@@ -1,4 +1,7 @@
 
+# Agent work-in-progress marker (never committed)
+.workongoing
+
 # Coverage reports
 coverage_html/
 coverage.json

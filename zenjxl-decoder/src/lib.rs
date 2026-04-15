@@ -3,6 +3,58 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//! A JPEG XL decoder in safe Rust.
+//!
+//! `zenjxl-decoder` is a pure-Rust decoder for the JPEG XL bitstream format
+//! (ISO/IEC 18181). It is a fork of the upstream
+//! [`libjxl/jxl-rs`](https://github.com/libjxl/jxl-rs) reference decoder,
+//! which in turn tracks the C++ [`libjxl`](https://github.com/libjxl/libjxl)
+//! implementation. Upstream remains the source of truth for codec behaviour;
+//! this fork adds resource limits, cooperative cancellation, parallel decode,
+//! and a handful of bug fixes and hardening changes on top.
+//!
+//! # Crate layout
+//!
+//! The Rust library name is `jxl` -- import items as `use jxl::...`. Most
+//! users only need the [`api`] module:
+//!
+//! ```no_run
+//! use jxl::api::decode;
+//!
+//! let bytes = std::fs::read("image.jxl").unwrap();
+//! let image = decode(&bytes).unwrap();
+//! ```
+//!
+//! Pass [`api::JxlDecoderOptions`] to [`api::decode_with`] to configure
+//! resource limits, cancellation, or colour conversion.
+//!
+//! # SIMD
+//!
+//! Multi-architecture SIMD (SSE4.2, AVX2, AVX-512, NEON, WASM128) lives in
+//! the companion [`zenjxl-decoder-simd`](https://crates.io/crates/zenjxl-decoder-simd)
+//! crate and is enabled via the `all-simd` feature (or per-ISA features such
+//! as `avx`, `neon`, `wasm128`). Dispatch is runtime, via
+//! [`archmage`](https://crates.io/crates/archmage).
+//!
+//! # Safety
+//!
+//! The main `jxl` crate is `#![forbid(unsafe_code)]` by default. Enabling the
+//! `allow-unsafe` feature opts into a small set of `unsafe` fast paths guarded
+//! by safe fallbacks.
+//!
+//! # Features
+//!
+//! - `threads` -- rayon-based parallel group decode and render.
+//! - `cms` -- [`moxcms`](https://crates.io/crates/moxcms) ICC profile transforms
+//!   (required for CMYK input).
+//! - `jpeg` -- lossless JPEG reconstruction from JXL containers.
+//! - `all-simd` / `sse42` / `avx` / `avx512` / `neon` / `wasm128` -- SIMD backends.
+//! - `allow-unsafe` -- opt in to `unsafe` fast paths.
+//!
+//! # License
+//!
+//! BSD-3-Clause, matching upstream [`libjxl/jxl-rs`](https://github.com/libjxl/jxl-rs).
+
 #![cfg_attr(not(feature = "allow-unsafe"), forbid(unsafe_code))]
 #![cfg_attr(feature = "allow-unsafe", deny(unsafe_code))]
 

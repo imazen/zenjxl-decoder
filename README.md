@@ -120,8 +120,8 @@ Set `parallel: false` on `JxlDecoderOptions` to force single-threaded mode at ru
 | `threads` | Rayon-based parallel group decode and render |
 | `cms` | moxcms CMS backend for ICC profile transforms |
 | `jpeg` | JPEG reconstruction from JXL containers |
-| `all-simd` | All SIMD backends (SSE4.2, AVX2, AVX-512, NEON) |
-| `sse42` / `avx` / `avx512` / `neon` | Individual SIMD targets |
+| `all-simd` | All SIMD backends (SSE4.2, AVX2, AVX-512, NEON, WASM128) |
+| `sse42` / `avx` / `avx512` / `neon` / `wasm128` | Individual SIMD targets |
 | `allow-unsafe` | Enable `unsafe` fast paths in the main crate (safe fallbacks used otherwise) |
 
 ## Conformance

@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The changelog covers changes made in this fork.
 
+## [Unreleased]
+
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
+     Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
+
+## [0.3.7] - 2026-04-10
+
+### Fixed
+
+- **i686 address space exhaustion in test suite** -- Test suite ran out of 32-bit virtual address space under parallel execution (d4b1167).
+- **32-bit memory limit** -- Raised the default 32-bit memory limit to 2 GB so correctness tests fit on i686 (ce5b5e0).
+- **Large-image tests gated on 64-bit** -- Tests that require >2 GB address space are now excluded from 32-bit targets (ee65a6f).
+- **slow_probe_regression timing** -- Raised threshold from 5 ms to 10 ms to stabilise CI against loaded runners (4ea9ba5).
+- **Memory limit disabled in correctness tests** -- Correctness tests no longer trip the default cap on large conformance images (727f00c).
+
+## [0.3.6] - 2026-04-10
+
+### Added
+
+- **cargo-fuzz infrastructure** -- Three fuzz targets and a JXL format dictionary for continuous fuzzing (d9cfa74).
+- **Nightly fuzz workflow** -- 60-second fuzz run on every push, 5-minute run nightly (8086be0).
+- **BitReader panic regression seeds** -- Captured regression seeds for the `BitReader::new_padded` panic fixed in 0.3.5 (c5460e2).
+- **Minimized OOM regression seed** -- 781-byte seed reproducing the crafted-header OOM fixed in 0.3.1 (91cc64d).
+
+### Changed
+
+- **Default `max_memory_bytes` lowered to 4 GB** -- Prevents OOM from crafted inputs in default configuration; raise explicitly via `JxlDecoderLimits` for large images (b1693bf).
+- **Clippy runs once on Ubuntu** -- Removed redundant per-platform clippy jobs from CI; other platforms still run tests (c2026cd).
+
+### Fixed
+
+- **MemoryGuard::forget() leak** -- `MemoryGuard::forget()` leaked 32 bytes per tracked image allocation; the guard now releases its accounting slot on drop as well as on explicit forget (14e7739).
+- **OOM-test clippy lint** -- Resolved `field_reassign_with_default` on the non-exhaustive options struct in the OOM regression test (8686bea).
+
 ## [0.3.5] - 2026-04-01
 
 ### Fixed
