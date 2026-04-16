@@ -10,7 +10,7 @@ repository = "https://github.com/imazen/zenjxl-decoder"
 edition = "2024"
 rust-version = "1.89"
 license = "BSD-3-Clause"
-exclude = ["CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+include = ["/src/**", "/LICENSE*"]
 
 [lib]
 proc-macro = true
