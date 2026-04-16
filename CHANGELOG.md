@@ -10,6 +10,36 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+### Added
+
+- **`basic_info()` embedded-profile guard** -- Ported from jxl-rs #745; hides `basic_info()` until the embedded ICC/color-profile box is parsed, preventing callers from observing partial image-info state. Adds integration tests using `cmyk_layers.jxl` and `basic.jxl` (fa4400f, 470a6f4).
+- **Shared `apply_decoder_options()` helper** -- Routes both the primary `DecoderState` creation and the preview-recovery recreation through one helper so the two sites cannot drift (5bb4632).
+- **Chunked drip-decode animation stress test** -- Feeds `animation_newtons_cradle.jxl` through `JxlDecoderInner::process` in 1 KiB chunks and asserts no error or panic at any boundary, mirroring the Chrome integration repro from jxl-rs #743 (5bb4632).
+- **EC-upsampling-after-dim_shift regression tests** -- Ports the test harness from jxl-rs #741 (negative, positive, and real-file cases) so future refactors cannot silently regress the existing `check()` validation (4c7cbcc, e96e434).
+
+### Changed
+
+- **Decoder options preserved across preview-frame recovery** -- When a JXL file contains a preview frame, `sections::handle_frame_finalized` previously recreated `DecoderState` for the main frame while copying only four of nine fields. `high_precision`, `premultiply_output`, `parallel`, `memory_tracker`, and `embedded_color_profile` silently reverted to defaults. Ported as the independent subset of upstream jxl-rs #743 that does not depend on the animation seek API in #678 (5bb4632, 3e369a1).
+- **Blanket `#![allow(dead_code, unused_imports)]` removed from `lib.rs`** -- Dead code is now surfaced and handled individually instead of suppressed crate-wide; removed 9 unused imports and added targeted `#[cfg(test)]` / `#[allow(dead_code)]` with comments where items are intentionally kept (c84147f, b83639d, PR #13).
+- **Clippy passes under `-D warnings` for both `--all-features` and `--no-default-features`** -- Added `#[cfg(feature = ...)]` gates and targeted `#[allow(dead_code)]` on thread-only and jpeg-only items; removed unused imports; suppressed `field_reassign_with_default` where the `#[non_exhaustive]` struct-literal rewrite is not available to external callers (265dc07, b1b8e39, a385d59, cd6d5fa).
+
+### Fixed
+
+- **Memory budget bypass on preview-bearing files** -- A caller asking for a restrictive `max_memory_bytes` saw the budget enforced on the preview frame but silently dropped to unlimited for the main frame; `parallel=false` was flipped back on; CMYK ICC detection misfired (5bb4632).
+- **ClusterFuzzLite build paths** -- `build.sh` referenced the upstream `jxl-rs/jxl/` subdirectory layout; corrected to the fork's root workspace and `zenjxl-decoder/resources/test/` location (1a49043).
+- **Benchmark test image paths** -- Updated from the upstream `jxl/resources/test/` prefix to `zenjxl-decoder/resources/test/` (3f18f86).
+- **Missing copyright headers** -- Added headers to fuzz targets, the nightly fuzz workflow, and the fuzz script, caught by the `source_checks` CI job (e91149d).
+
+### Dependencies
+
+- Bumped `rand` 0.10.0 -> 0.10.1 (ee04a49).
+
+### Docs
+
+- README now lists `wasm128` under the all-SIMD row and per-ISA row (already wired in `Cargo.toml` and the `-simd` crate) (5055dae).
+- Added crate-level rustdoc to `zenjxl-decoder/src/lib.rs` describing the fork, entry points, SIMD dispatch, safety posture, and feature flags, with credit to upstream libjxl/jxl-rs and libjxl under BSD-3-Clause (5055dae).
+- Backfilled `[0.3.6]` and `[0.3.7]` CHANGELOG sections from git log (5055dae).
+
 ## [0.3.7] - 2026-04-10
 
 ### Fixed
