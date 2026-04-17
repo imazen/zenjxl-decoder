@@ -15,11 +15,10 @@
 //!
 //! # Crate layout
 //!
-//! The Rust library name is `jxl` -- import items as `use jxl::...`. Most
-//! users only need the [`api`] module:
+//! Most users only need the [`api`] module:
 //!
 //! ```no_run
-//! use jxl::api::decode;
+//! use zenjxl_decoder::api::decode;
 //!
 //! let bytes = std::fs::read("image.jxl").unwrap();
 //! let image = decode(&bytes).unwrap();
