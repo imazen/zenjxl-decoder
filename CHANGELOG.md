@@ -10,6 +10,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+## [0.3.8] - 2026-04-17
+
 ### Added
 
 - **`basic_info()` embedded-profile guard** -- Ported from jxl-rs #745; hides `basic_info()` until the embedded ICC/color-profile box is parsed, preventing callers from observing partial image-info state. Adds integration tests using `cmyk_layers.jxl` and `basic.jxl` (fa4400f, 470a6f4).
