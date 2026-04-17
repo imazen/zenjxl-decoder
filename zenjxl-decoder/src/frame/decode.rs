@@ -304,7 +304,7 @@ impl Frame {
             inv_perm[*pos as usize] = i;
         }
         let mut shuffled_ret = ret.clone();
-        for (br, pos) in ret.into_iter().zip(inv_perm.into_iter()) {
+        for (br, pos) in ret.into_iter().zip(inv_perm) {
             shuffled_ret[pos] = br;
         }
         Ok(shuffled_ret)
