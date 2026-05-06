@@ -24,5 +24,6 @@ pub mod hdr;
 pub mod jpeg_reconstruction;
 pub mod oom_regression;
 pub mod parity;
+pub mod regression_known_bugs;
 pub mod streaming;
 pub mod synthetic;
