@@ -21,12 +21,12 @@
 //!    `testdata_dir().join("<issue-id>/<file>.jxl")` and asserts decode
 //!    succeeds. Reference the issue in the doc comment.
 
+#[cfg(feature = "cms")]
+use crate::api::MoxCms;
 use crate::api::{
     JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
     ProcessingResult, states,
 };
-#[cfg(feature = "cms")]
-use crate::api::MoxCms;
 use crate::image::{Image, Rect};
 
 /// Path to the in-tree test-data directory, resolved from the crate manifest
@@ -107,8 +107,8 @@ fn decode_jxl(path: &std::path::Path) -> Result<(usize, usize, usize, Vec<u8>), 
         }
     };
 
-    let mut output_image = Image::<u8>::new((width * channels, height))
-        .map_err(|e| format!("alloc: {e:?}"))?;
+    let mut output_image =
+        Image::<u8>::new((width * channels, height)).map_err(|e| format!("alloc: {e:?}"))?;
     let mut buffers = vec![JxlOutputBuffer::from_image_rect_mut(
         output_image
             .get_rect_mut(Rect {
@@ -167,11 +167,13 @@ mod tests {
     #[test]
     fn issue_15_lz77_distance_cluster_after_pad() {
         let path = testdata_dir().join("issue-15/akfcrc022_e9_d3.0.jxl");
-        let (width, height, channels, pixels) = decode_jxl(&path).unwrap_or_else(|e| {
-            panic!("decode of {} failed: {e}", path.display())
-        });
+        let (width, height, channels, pixels) = decode_jxl(&path)
+            .unwrap_or_else(|e| panic!("decode of {} failed: {e}", path.display()));
         assert_eq!((width, height), (512, 512));
-        assert!(channels == 3 || channels == 4, "unexpected channels: {channels}");
+        assert!(
+            channels == 3 || channels == 4,
+            "unexpected channels: {channels}"
+        );
         assert_eq!(pixels.len(), width * height * channels);
     }
 }
