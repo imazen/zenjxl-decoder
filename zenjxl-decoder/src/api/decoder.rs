@@ -1839,4 +1839,110 @@ pub(crate) mod tests {
             }
         }
     }
+
+    /// Section-buffer allocation in `process_section_buffers` was not consulting
+    /// the `MemoryTracker`. With a malicious TOC (entries up to ~1 GB × ~720k
+    /// entries) the configured `max_memory_bytes` would not cap RAM at all.
+    ///
+    /// Regression: parse a multi-section codestream under a tight memory budget
+    /// and assert the decoder errors with `LimitExceeded` instead of allocating
+    /// past the cap. Uses a multi-group/multi-pass file (`bike_web_q85.jxl`)
+    /// so the section path is exercised at all (single-section frames go
+    /// through a different code path).
+    #[test]
+    fn test_section_alloc_respects_memory_tracker() {
+        // Multi-group, multi-pass file so the section-allocation path is
+        // actually exercised.
+        let data = std::fs::read("resources/test/city_4k_q90.jxl")
+            .expect("city_4k_q90.jxl test fixture should exist");
+
+        // 1 MB budget — large enough to parse headers, far too small for the
+        // section buffers a 4K image needs. The decode must surface the
+        // limit error from section allocation, not abort or silently
+        // allocate past the cap.
+        let result = crate::api::decoder::tests::decode_with_limit(&data, Some(1024 * 1024));
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::LimitExceeded {
+                    resource: "memory_bytes",
+                    ..
+                })
+            ),
+            "section-buffer allocation must hit MemoryTracker — got {:?}",
+            result
+        );
+    }
+
+    /// Helper: run a full decode with a configurable memory limit and surface
+    /// the first error (or `Ok(())` on success). Used by section-allocation
+    /// regression tests.
+    #[allow(clippy::field_reassign_with_default)]
+    pub(crate) fn decode_with_limit(
+        mut input: &[u8],
+        max_memory_bytes: Option<u64>,
+    ) -> Result<(), Error> {
+        use crate::api::{JxlColorType, JxlDataFormat, JxlPixelFormat};
+
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_memory_bytes = max_memory_bytes;
+        options.parallel = false;
+        let mut decoder_init = JxlDecoder::<states::Initialized>::new(options);
+
+        // Stage 1: parse image info.
+        let mut decoder_img = loop {
+            match decoder_init.process(&mut input)? {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    if input.is_empty() {
+                        return Err(Error::OutOfBounds(0));
+                    }
+                    decoder_init = fallback;
+                }
+            }
+        };
+
+        // Force RGBA-u8 so byte counts are predictable.
+        let format = JxlPixelFormat {
+            color_type: JxlColorType::Rgba,
+            color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
+            extra_channel_format: vec![],
+        };
+        decoder_img.set_pixel_format(format);
+
+        let (w, h) = {
+            let info = decoder_img.basic_info();
+            (info.size.0, info.size.1)
+        };
+        let row_stride = w * 4;
+        let mut storage = vec![0u8; row_stride * h];
+
+        // Stage 2: parse frame info.
+        let mut decoder_frame = loop {
+            match decoder_img.process(&mut input)? {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    if input.is_empty() {
+                        return Err(Error::OutOfBounds(0));
+                    }
+                    decoder_img = fallback;
+                }
+            }
+        };
+
+        // Stage 3: emit pixels — this is the path that allocates section buffers.
+        loop {
+            let mut bufs = [JxlOutputBuffer::new(&mut storage, h, row_stride)];
+            match decoder_frame.process(&mut input, &mut bufs)? {
+                ProcessingResult::Complete { .. } => return Ok(()),
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    if input.is_empty() {
+                        return Err(Error::OutOfBounds(0));
+                    }
+                    decoder_frame = fallback;
+                }
+            }
+        }
+    }
 }
