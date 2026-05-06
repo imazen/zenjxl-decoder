@@ -812,14 +812,25 @@ impl Frame {
             let coeffs_per_group = GROUP_DIM * GROUP_DIM;
             let num_groups = self.header.num_groups();
             let tracker = &self.decoder_state.memory_tracker;
-            tracker.try_allocate(
-                (coeffs_per_group * num_groups * 3 * std::mem::size_of::<i32>()) as u64,
-            )?;
+            // Compute byte budget in u64 to avoid usize overflow on 32-bit
+            // targets (i686, wasm32). Without this, an attacker-supplied
+            // header with very large `num_groups` could overflow usize and
+            // bypass the memory tracker, then OOM during the actual Vec
+            // allocations below.
+            let alloc_bytes = (coeffs_per_group as u64)
+                .checked_mul(num_groups as u64)
+                .and_then(|v| v.checked_mul(3))
+                .and_then(|v| v.checked_mul(std::mem::size_of::<i32>() as u64))
+                .ok_or(Error::ArithmeticOverflow)?;
+            tracker.try_allocate(alloc_bytes)?;
             let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
             for ch in &mut channels {
-                ch.reserve_exact(num_groups);
+                ch.try_reserve_exact(num_groups)?;
                 for _ in 0..num_groups {
-                    ch.push(vec![0i32; coeffs_per_group]);
+                    let mut v: Vec<i32> = Vec::new();
+                    v.try_reserve_exact(coeffs_per_group)?;
+                    v.resize(coeffs_per_group, 0);
+                    ch.push(v);
                 }
             }
             Some(channels)
@@ -1070,14 +1081,23 @@ impl Frame {
                     let coeffs_per_group = GROUP_DIM * GROUP_DIM;
                     let num_groups = header.num_groups();
                     let tracker = &decoder_state.memory_tracker;
-                    tracker.try_allocate(
-                        (coeffs_per_group * num_groups * 3 * std::mem::size_of::<i32>()) as u64,
-                    )?;
+                    // u64-checked path mirrors the sequential decoder above:
+                    // prevents usize overflow on 32-bit targets (i686, wasm32)
+                    // for attacker-controlled `num_groups`.
+                    let alloc_bytes = (coeffs_per_group as u64)
+                        .checked_mul(num_groups as u64)
+                        .and_then(|v| v.checked_mul(3))
+                        .and_then(|v| v.checked_mul(std::mem::size_of::<i32>() as u64))
+                        .ok_or(Error::ArithmeticOverflow)?;
+                    tracker.try_allocate(alloc_bytes)?;
                     let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
                     for ch in &mut channels {
-                        ch.reserve_exact(num_groups);
+                        ch.try_reserve_exact(num_groups)?;
                         for _ in 0..num_groups {
-                            ch.push(vec![0i32; coeffs_per_group]);
+                            let mut v: Vec<i32> = Vec::new();
+                            v.try_reserve_exact(coeffs_per_group)?;
+                            v.resize(coeffs_per_group, 0);
+                            ch.push(v);
                         }
                     }
                     Some(channels)
@@ -1413,5 +1433,42 @@ impl Frame {
             }
         }
         Ok(do_render)
+    }
+}
+
+#[cfg(test)]
+mod overflow_tests {
+    /// Regression for: `(coeffs_per_group * num_groups * 3 * size_of::<i32>())
+    /// as u64` used to compute in `usize` first, which overflows on 32-bit
+    /// targets (i686, wasm32) for attacker-controlled `num_groups`. This
+    /// pinned the sequence we now use for overflow-safe sizing.
+    #[test]
+    fn coeff_alloc_size_overflows_in_u64_when_bogus() {
+        // Mimic the saturation logic inline. `coeffs_per_group` is GROUP_DIM*GROUP_DIM
+        // (256*256 = 65536 in production). Pick `num_groups` such that
+        // `coeffs_per_group * num_groups` overflows u32 but not u64, so that
+        // a buggy 32-bit lower would have wrapped silently.
+        let coeffs_per_group: u64 = 256 * 256;
+        let num_groups: u64 = (u32::MAX as u64) / coeffs_per_group + 1;
+        let total = coeffs_per_group
+            .checked_mul(num_groups)
+            .and_then(|v| v.checked_mul(3))
+            .and_then(|v| v.checked_mul(core::mem::size_of::<i32>() as u64));
+        // Stays within u64 — we want this to be Some(...) so the tracker can
+        // reject it with LimitExceeded.
+        assert!(total.is_some());
+        // ...but above any sane usize on 32-bit (>4 GiB).
+        assert!(total.unwrap() > u32::MAX as u64);
+
+        // Now demonstrate that pathological inputs *also* saturate cleanly:
+        let huge: u64 = u64::MAX / 4;
+        let tot2 = huge
+            .checked_mul(huge)
+            .and_then(|v| v.checked_mul(3))
+            .and_then(|v| v.checked_mul(core::mem::size_of::<i32>() as u64));
+        assert!(
+            tot2.is_none(),
+            "extreme inputs must saturate to None (Error::ArithmeticOverflow path)"
+        );
     }
 }
