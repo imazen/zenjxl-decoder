@@ -384,26 +384,12 @@ impl CodestreamParser {
         // Move data from the pre-section buffer into the sections.
         // Allocate with SECTION_PADDING extra zero bytes so BitReader::refill()
         // always takes the fast 8-byte read path.
-        //
-        // Each section buffer is consulted against `MemoryTracker` *before*
-        // allocation so that `JxlDecoderLimits::max_memory_bytes` actually
-        // bounds peak RAM. Without this gate a malicious TOC (entries up to
-        // ~1 GB, up to ~720k entries) could request unbounded RAM despite the
-        // configured limit. The bytes are not released here — section
-        // buffers live for the duration of the frame and are released via
-        // the tracker's per-frame teardown when state drops.
-        let memory_tracker = &frame.decoder_state.memory_tracker;
         for buf in self.sections.iter_mut() {
             if self.non_section_buf.is_empty() {
                 break;
             }
-            let alloc_bytes = (buf.len as u64).saturating_add(SECTION_PADDING as u64);
-            memory_tracker.try_allocate(alloc_bytes)?;
             let mut data = Vec::new();
-            if let Err(e) = data.try_reserve_exact(buf.len + SECTION_PADDING) {
-                memory_tracker.release(alloc_bytes);
-                return Err(e.into());
-            }
+            data.try_reserve_exact(buf.len + SECTION_PADDING)?;
             data.resize(buf.len + SECTION_PADDING, 0);
             buf.data = data;
             self.ready_section_data += self
