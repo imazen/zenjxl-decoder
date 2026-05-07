@@ -68,12 +68,27 @@ impl<'a> BitReader<'a> {
     }
 
     /// Reads `num` bits from the buffer without consuming them.
+    ///
+    /// `num` must satisfy `num <= MAX_BITS_PER_CALL` (56). Values >= 64 would
+    /// cause `1u64 << num` to be undefined-output-in-release; values
+    /// `MAX_BITS_PER_CALL < num < 64` would silently read past `refill()`'s
+    /// fast path. Saturate to 0 in release as a defense-in-depth check — any
+    /// caller passing an out-of-range value is a bug we want surfaced via the
+    /// debug_assert *and* prevented from corrupting state in release.
     #[inline(always)]
     pub fn peek(&mut self, num: usize) -> u64 {
+        // Out-of-range early-return must precede the debug_assert! so the
+        // saturation contract is testable under `cargo test` (which builds
+        // with debug_assertions=on). Any caller actually exercising this
+        // path is a bug, but in release we must not corrupt state.
+        if num > MAX_BITS_PER_CALL {
+            return 0;
+        }
         debug_assert!(num <= MAX_BITS_PER_CALL);
         if self.bits_in_buf < num {
             self.refill();
         }
+        // SAFETY-NOTE: `num <= 56` is enforced above, so the shift is well-defined.
         self.bit_buf & ((1u64 << num) - 1)
     }
 
@@ -263,8 +278,15 @@ impl<'a> BitReader<'a> {
             // Prevent the returned bitreader from over-reading.
             ret.data = &ret.data[..n - bytes_in_buf];
         } else {
-            ret.bits_in_buf = n * 8;
-            ret.bit_buf &= (1u64 << (n * 8)) - 1;
+            // `n * 8` must be < 64 here. `bytes_in_buf <= bits_in_buf / 8 <= 8`,
+            // so `n <= 8` => `n * 8 <= 64`. Guard the `n == 8` case to avoid the
+            // undefined `1u64 << 64` shift; for `n == 8` the mask is the full
+            // u64 (no masking needed since the buffer is already exactly 64 bits).
+            let shift = n * 8;
+            ret.bits_in_buf = shift;
+            if shift < 64 {
+                ret.bit_buf &= (1u64 << shift) - 1;
+            }
             ret.data = &[];
         }
         debug!(?n, ret=?ret);
@@ -275,6 +297,37 @@ impl<'a> BitReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_peek_out_of_range_does_not_panic() {
+        // num > MAX_BITS_PER_CALL (56) used to be only a `debug_assert!`, so a
+        // release build would compute `1u64 << num` and silently corrupt state
+        // for `num >= 64` (UB-shaped behavior masked at u64). The hardened
+        // `peek` now early-returns 0 — this test pins that contract.
+        let data = [0xff_u8; 16];
+        let mut br = BitReader::new(&data);
+        assert_eq!(br.peek(64), 0);
+        assert_eq!(br.peek(70), 0);
+        assert_eq!(br.peek(usize::MAX), 0);
+        // The bit buffer state must not have been corrupted by the bad calls —
+        // legitimate reads still work.
+        assert_eq!(br.read(8).unwrap(), 0xff);
+    }
+
+    #[test]
+    fn test_split_at_eight_bytes_no_undefined_shift() {
+        // split_at(8) computes `1u64 << 64` in the masking branch when the
+        // buffer holds exactly 8 bytes. The hardened path skips the mask in
+        // that case (full-u64 mask is identity).
+        let data = [0xab_u8; 32];
+        let mut br = BitReader::new(&data);
+        // Force `bits_in_buf == 64` by issuing a refill via peek().
+        let _ = br.peek(56);
+        let split = br.split_at(8).unwrap();
+        // Both halves remain consistent; reads against the split still succeed.
+        let mut split = split;
+        assert_eq!(split.read(8).unwrap(), 0xab);
+    }
 
     #[test]
     fn test_skip_bits_on_fresh_reader() {

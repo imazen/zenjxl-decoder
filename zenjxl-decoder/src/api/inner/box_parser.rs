@@ -8,6 +8,7 @@ use std::io::IoSliceMut;
 use crate::container::frame_index::FrameIndexBox;
 use crate::container::gain_map::GainMapBundle;
 use crate::error::{Error, Result};
+use crate::util::NewWithCapacity;
 
 use crate::api::{
     JxlBitstreamInput, JxlSignatureType, check_signature_internal, inner::process::SmallBuffer,
@@ -329,9 +330,13 @@ impl BoxParser {
                             if content_len > 256 * 1024 * 1024 {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
+                                // Use fallible alloc — capacity reserves up to
+                                // 256 MB and a global allocator that can't
+                                // satisfy the request must surface as a graceful
+                                // error, never an `abort()` on the parser thread.
                                 self.state = ParseState::BufferingGainMap(
                                     content_len,
-                                    Vec::with_capacity(content_len as usize),
+                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
                                 );
                             }
                         }
@@ -345,7 +350,7 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingFrameIndex(
                                     content_len,
-                                    Vec::with_capacity(content_len as usize),
+                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
                                 );
                             }
                         }
@@ -359,7 +364,7 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingExif(
                                     content_len,
-                                    Vec::with_capacity(content_len as usize),
+                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
                                 );
                             }
                         }
@@ -373,7 +378,7 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingXmp(
                                     content_len,
-                                    Vec::with_capacity(content_len as usize),
+                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
                                 );
                             }
                         }

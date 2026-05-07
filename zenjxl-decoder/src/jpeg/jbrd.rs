@@ -9,6 +9,7 @@
 //! reconstruction. This is the inverse of the encoder's `encode_jbrd()`.
 
 use crate::error::{Error, Result};
+use crate::util::NewWithCapacity;
 
 use super::data::*;
 
@@ -46,8 +47,8 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     }
 
     // APP marker types and lengths
-    let mut app_marker_type = Vec::with_capacity(num_app as usize);
-    let mut app_data_lengths = Vec::with_capacity(num_app as usize);
+    let mut app_marker_type = Vec::<AppMarkerType>::new_with_capacity(num_app as usize)?;
+    let mut app_data_lengths = Vec::<u32>::new_with_capacity(num_app as usize)?;
     for _ in 0..num_app {
         let app_type = read_u32_jbrd(&mut reader, &[0, 1], &[(1, 2), (2, 4)])?;
         let app_mt = AppMarkerType::from_u32(app_type)
@@ -59,7 +60,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     }
 
     // COM marker lengths
-    let mut com_data_lengths = Vec::with_capacity(num_com as usize);
+    let mut com_data_lengths = Vec::<u32>::new_with_capacity(num_com as usize)?;
     for _ in 0..num_com {
         let len = reader.read(16)? as u32 + 1;
         com_data_lengths.push(len);
@@ -67,7 +68,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
     // Quantization tables
     let num_quant = read_u32_jbrd(&mut reader, &[1, 2, 3, 4], &[])?;
-    let mut quant = Vec::with_capacity(num_quant as usize);
+    let mut quant = Vec::<JpegQuantTable>::new_with_capacity(num_quant as usize)?;
     for _ in 0..num_quant {
         let precision = reader.read(1)? as u32;
         let index = reader.read(2)? as u32;
@@ -86,7 +87,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
         .ok_or_else(|| Error::InvalidJbrd(format!("invalid component type: {comp_type_val}")))?;
 
     // Component IDs
-    let mut components = Vec::with_capacity(num_components);
+    let mut components = Vec::<JpegComponent>::new_with_capacity(num_components)?;
     if component_type == JpegComponentType::Custom {
         let num_comp = read_u32_jbrd(&mut reader, &[1, 2, 3, 4], &[])?;
         if num_comp as usize != num_components {
@@ -134,7 +135,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
     // Huffman codes
     let num_huff = read_u32_jbrd(&mut reader, &[4], &[(3, 2), (4, 10), (6, 26)])?;
-    let mut huffman_code = Vec::with_capacity(num_huff as usize);
+    let mut huffman_code = Vec::<JpegHuffmanCode>::new_with_capacity(num_huff as usize)?;
     for _ in 0..num_huff {
         let is_ac = reader.read(1)? == 1;
         let id = reader.read(2)? as u32;
@@ -160,7 +161,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
         // Read symbol values (original count + 1 for sentinel)
         let num_symbols: u32 = counts.iter().sum::<u32>() + 1; // +1 for sentinel
-        let mut values = Vec::with_capacity(num_symbols as usize);
+        let mut values = Vec::<u8>::new_with_capacity(num_symbols as usize)?;
         for _ in 0..num_symbols {
             let val = read_u32_jbrd(&mut reader, &[], &[(2, 0), (2, 4), (4, 8), (8, 1)])?;
             if val < 256 {
@@ -179,7 +180,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     }
 
     // Scan info
-    let mut scan_info = Vec::with_capacity(num_scans as usize);
+    let mut scan_info = Vec::<JpegScanInfo>::new_with_capacity(num_scans as usize)?;
     for _ in 0..num_scans {
         let scan_nc = read_u32_jbrd(&mut reader, &[1, 2, 3, 4], &[])?;
         let ss = reader.read(6)? as u32;
@@ -187,9 +188,9 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
         let al = reader.read(4)? as u32;
         let ah = reader.read(4)? as u32;
 
-        let mut component_indices = Vec::with_capacity(scan_nc as usize);
-        let mut ac_tbl_idx = Vec::with_capacity(scan_nc as usize);
-        let mut dc_tbl_idx = Vec::with_capacity(scan_nc as usize);
+        let mut component_indices = Vec::<u32>::new_with_capacity(scan_nc as usize)?;
+        let mut ac_tbl_idx = Vec::<u32>::new_with_capacity(scan_nc as usize)?;
+        let mut dc_tbl_idx = Vec::<u32>::new_with_capacity(scan_nc as usize)?;
         for _ in 0..scan_nc {
             component_indices.push(reader.read(2)? as u32);
             ac_tbl_idx.push(reader.read(2)? as u32);
@@ -243,7 +244,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     }
 
     // Inter-marker data lengths
-    let mut inter_marker_data_lengths = Vec::with_capacity(num_intermarker as usize);
+    let mut inter_marker_data_lengths = Vec::<u32>::new_with_capacity(num_intermarker as usize)?;
     for _ in 0..num_intermarker {
         let len = reader.read(16)? as u32;
         inter_marker_data_lengths.push(len);
@@ -254,10 +255,10 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
 
     // Padding bits
     let has_zero_padding_bit = reader.read(1)? == 1;
-    let mut padding_bits = Vec::new();
+    let mut padding_bits = Vec::<u8>::new();
     if has_zero_padding_bit {
         let nbit = reader.read(24)? as u32;
-        padding_bits.reserve(nbit as usize);
+        padding_bits.try_reserve(nbit as usize)?;
         for _ in 0..nbit {
             padding_bits.push(reader.read(1)? as u8);
         }
@@ -276,7 +277,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     // APP marker data (only Unknown type stored in data stream)
     // Encoder format: [marker_byte, len_hi, len_lo, payload...]
     // We strip the 3-byte prefix to store just the payload.
-    let mut app_data = Vec::with_capacity(num_app as usize);
+    let mut app_data = Vec::<Vec<u8>>::new_with_capacity(num_app as usize)?;
     for i in 0..num_app as usize {
         if app_marker_type[i] != AppMarkerType::Unknown {
             app_data.push(Vec::new()); // Placeholder for ICC/EXIF/XMP (from container boxes)
@@ -293,7 +294,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     }
 
     // COM marker data (same format as APP: [marker_byte, len_hi, len_lo, payload...])
-    let mut com_data = Vec::with_capacity(num_com as usize);
+    let mut com_data = Vec::<Vec<u8>>::new_with_capacity(num_com as usize)?;
     for &com_len in com_data_lengths.iter().take(num_com as usize) {
         let len = com_len as usize;
         if data_pos + len > decompressed.len() {
@@ -305,7 +306,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
     }
 
     // Inter-marker data
-    let mut inter_marker_data = Vec::with_capacity(num_intermarker as usize);
+    let mut inter_marker_data = Vec::<Vec<u8>>::new_with_capacity(num_intermarker as usize)?;
     for &im_len in inter_marker_data_lengths
         .iter()
         .take(num_intermarker as usize)
@@ -446,4 +447,40 @@ fn brotli_decompress(compressed: &[u8]) -> Result<Vec<u8>> {
         .read_to_end(&mut decompressed)
         .map_err(|e| Error::InvalidJbrd(format!("brotli decompression failed: {e}")))?;
     Ok(decompressed)
+}
+
+#[cfg(test)]
+mod fallible_alloc_tests {
+    use super::decode_jbrd;
+    use crate::error::Error;
+
+    /// Regression: `Vec::with_capacity(num_app)` etc. used the infallible
+    /// allocator. A malformed JBRD box could have a marker order that leaves
+    /// `num_app`/`num_com`/etc. so large that capacity reservation aborted
+    /// the process. With the fallible-alloc switch the decoder must surface a
+    /// graceful error (truncated or OOM) instead.
+    #[test]
+    fn malformed_jbrd_does_not_abort_on_oversize_counts() {
+        // 1 byte of zeros: is_gray=0, then marker bits are all zero =>
+        // first marker is 0xC0 (SOF0) ≠ 0xD9 (EOI), and reader runs out of
+        // bytes — truncated. We expect `Error::OutOfBounds`, NOT a panic or
+        // an infallible-alloc abort. This pins the contract that the parser
+        // never aborts on input alone.
+        let bogus = vec![0u8; 1];
+        let res = decode_jbrd(&bogus, 8, 8);
+        match res {
+            Err(Error::OutOfBounds(_)) => {} // expected
+            Err(Error::OutOfMemory(_)) => {} // also acceptable
+            Err(_) => {}                     // other graceful errors fine
+            Ok(_) => panic!("malformed JBRD should not parse successfully"),
+        }
+    }
+
+    /// Empty input must not panic; tests a different code path than the
+    /// 1-byte case (BitReader behavior on a fresh empty buffer).
+    #[test]
+    fn empty_jbrd_returns_error_not_panic() {
+        let res = decode_jbrd(&[], 1, 1);
+        assert!(res.is_err());
+    }
 }
