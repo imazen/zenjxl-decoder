@@ -35,7 +35,7 @@ paste = "1"
 [dev-dependencies]
 arbtest = "0.3.2"
 png = "0.18.1"
-rand = "0.10.0"
+rand = "0.10.1"
 rand_chacha = "0.10.0"
 rand_xorshift = "0.5.0"
 almost-enough = { version = "0.4", features = ["std"] }
