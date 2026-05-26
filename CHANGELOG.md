@@ -10,6 +10,16 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+### Added
+
+- `zenjxl-decoder/tests/fuzz_regression.rs` regression-harness template
+  ported from zenwebp (DEDUP-J). Walks the top-level `fuzz/regression/`
+  directory and runs every seed through `decode`, `decode_with` (with
+  the restrictive limits the fuzz target uses), and `read_header` on
+  the stable toolchain — no nightly required. Drop minimized crash
+  files into `fuzz/regression/` to gate future regressions of fixed
+  bugs.
+
 ## [0.3.8] - 2026-04-17
 
 ### Added
