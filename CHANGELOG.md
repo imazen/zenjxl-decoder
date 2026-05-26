@@ -10,6 +10,13 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+### Changed
+- `zenjxl-decoder/tests/fuzz_regression.rs` now uses the shared
+  `zen-fuzz-regress` test-helper crate (DEDUP-J2). Per-target payloads
+  preserved verbatim; only the walk-dir + read-bytes + dispatch
+  scaffolding moved out. Same `../fuzz/regression/` seed path, same
+  three targets (`decode`, `decode_with_limits`, `probe`).
+
 ### Added
 
 - `zenjxl-decoder/tests/fuzz_regression.rs` regression-harness template
