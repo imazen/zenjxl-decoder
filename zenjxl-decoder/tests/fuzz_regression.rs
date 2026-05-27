@@ -2,8 +2,8 @@
 //! workspace) through every fuzz target entry point. Shared scaffolding
 //! lives in `zen-fuzz-regress`.
 
-use zen_fuzz_regress::RegressionSuite;
 use zenjxl_decoder::api::{JxlDecoderLimits, JxlDecoderOptions};
+use zenutils_fuzz::RegressionSuite;
 
 #[test]
 fn fuzz_regression() {
