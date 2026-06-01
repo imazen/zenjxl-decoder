@@ -22,7 +22,7 @@ use crate::{
         frame_header::FrameHeader, toc::IncrementalTocReader,
     },
     icc::IncrementalIccReader,
-    util::MemoryTracker,
+    util::{MemoryTracker, NewWithCapacity},
 };
 
 use super::{CodestreamParser, SectionBuffer};
@@ -290,9 +290,22 @@ impl CodestreamParser {
             self.lf_global_section = None;
             self.lf_sections.clear();
             self.hf_global_section = None;
-            self.hf_sections = (0..frame_header.num_groups())
-                .map(|_| (0..frame_header.passes.num_passes).map(|_| None).collect())
-                .collect();
+            // Use fallible allocation: `num_groups()` is derived from the
+            // (untrusted) frame header dimensions and can be astronomically
+            // large for malformed inputs. Avoid aborting the process on OOM and
+            // return a recoverable error instead. (port libjxl/jxl-rs#774,
+            // fixes #770.)
+            let num_groups = frame_header.num_groups();
+            let num_passes = frame_header.passes.num_passes as usize;
+            let mut hf_sections = Vec::new_with_capacity(num_groups)?;
+            for _ in 0..num_groups {
+                let mut row = Vec::new_with_capacity(num_passes)?;
+                for _ in 0..num_passes {
+                    row.push(None);
+                }
+                hf_sections.push(row);
+            }
+            self.hf_sections = hf_sections;
             self.candidate_hf_sections.clear();
 
             self.frame_header = Some(frame_header);
