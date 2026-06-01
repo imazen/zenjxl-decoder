@@ -355,9 +355,18 @@ impl ModularChannelDecoder for SingleGradientOnly {
         br: &mut BitReader,
         histograms: &Histograms,
     ) -> i32 {
-        let pred = Predictor::Gradient.predict_one(prediction_data, 0);
+        // Direct gradient path: Predictor::Gradient.predict_one reduces to
+        // clamped_gradient for this tree, and make_pixel(dec, 1, pred) equals
+        // dec.wrapping_add(pred as i32). Inlining drops the enum dispatch and
+        // the multiply in this hot single-predictor decode loop; output is
+        // bit-identical.
+        let pred = clamped_gradient(
+            prediction_data.left as i64,
+            prediction_data.top as i64,
+            prediction_data.topleft as i64,
+        );
         let dec = reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx);
-        make_pixel(dec, 1, pred)
+        dec.wrapping_add(pred as i32)
     }
 }
 
