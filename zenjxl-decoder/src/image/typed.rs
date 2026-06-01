@@ -27,7 +27,9 @@ pub(super) fn cast_row<T: ImageDataType>(row: &[u8]) -> &[T] {
     debug_assert!((row.as_ptr() as usize).is_multiple_of(std::mem::align_of::<T>()));
     #[allow(unsafe_code)]
     // SAFETY: Alignment and size invariants verified at Image/ImageRect construction
-    // (from_raw asserts data.is_aligned(T::DATA_TYPE_ID.size())).
+    // (from_raw asserts both data.is_aligned(T::DATA_TYPE_ID.size()) and that the byte
+    // offset is a multiple of the element size, so every row pointer is aligned to
+    // align_of::<T>()).
     // The underlying buffer is cache-line aligned (64 bytes ≥ align_of::<T>()),
     // bytes_per_row = width * sizeof(T), bytes_between_rows is a multiple of
     // CACHE_LINE_BYTE_SIZE.
@@ -64,7 +66,8 @@ pub(super) fn cast_row_mut<T: ImageDataType>(row: &mut [u8]) -> &mut [T] {
 
 #[repr(transparent)]
 pub struct Image<T: ImageDataType> {
-    // Safety invariant: self.raw.data.is_aligned(T::DATA_TYPE_ID.size()) is true.
+    // Safety invariant: self.raw.data and self.raw.byte_offset().0 are aligned to
+    // T::DATA_TYPE_ID.size().
     raw: OwnedRawImage,
     _ph: PhantomData<T>,
 }
@@ -229,6 +232,10 @@ impl<T: ImageDataType> Image<T> {
     pub fn from_raw(raw: OwnedRawImage) -> Self {
         const { assert!(CACHE_LINE_BYTE_SIZE.is_multiple_of(T::DATA_TYPE_ID.size())) };
         assert!(raw.data.is_aligned(T::DATA_TYPE_ID.size()));
+        assert!(
+            raw.byte_offset().0.is_multiple_of(T::DATA_TYPE_ID.size()),
+            "image byte offset must be aligned to element size"
+        );
         Image {
             raw,
             _ph: PhantomData,
