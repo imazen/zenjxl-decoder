@@ -275,6 +275,8 @@ pub enum Error {
     SaveDifferentDownsample((u8, u8), (u8, u8)),
     #[error("Image has {0} extra channels, more than the maximum of 256")]
     TooManyExtraChannels(usize),
+    #[error("No LF frame for level {0}")]
+    NoLfFrame(u32),
     #[error(
         "CMS transform increases channel count from {in_channels} to {out_channels}, which is not supported"
     )]

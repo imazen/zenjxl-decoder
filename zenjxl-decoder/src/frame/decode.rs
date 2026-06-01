@@ -176,12 +176,11 @@ impl Frame {
         let tracker = &decoder_state.memory_tracker;
         let lf_image = if frame_header.encoding == Encoding::VarDCT {
             if frame_header.has_lf_frame() {
-                decoder_state.lf_frames[frame_header.lf_level as usize]
-                    .as_ref()
-                    .map(|[a, b, c]| {
-                        Ok::<_, Error>([a.try_clone()?, b.try_clone()?, c.try_clone()?])
-                    })
-                    .transpose()?
+                if let Some([a, b, c]) = &decoder_state.lf_frames[frame_header.lf_level as usize] {
+                    Some([a.try_clone()?, b.try_clone()?, c.try_clone()?])
+                } else {
+                    return Err(Error::NoLfFrame(frame_header.lf_level));
+                }
             } else {
                 Some([
                     Image::new_tracked(size_blocks, tracker)?,
