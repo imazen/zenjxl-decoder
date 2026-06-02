@@ -343,7 +343,15 @@ impl CodestreamParser {
             } else {
                 // Trying to read a frame or a file header.
                 assert!(self.frame.is_none());
-                assert!(self.has_more_frames);
+                // Defensive (mirrors libjxl/jxl-rs#749): on normal input `has_more_frames`
+                // is still set when we reach this header-reading branch, but a
+                // malformed/edge input (e.g. skipping a final preview frame, or an empty
+                // follow-up `process()` call) can re-enter here with it cleared. There is
+                // nothing left to read, so return gracefully instead of panicking on
+                // untrusted input.
+                if !self.has_more_frames {
+                    return Ok(());
+                }
 
                 // Loop to handle incremental parsing (e.g. large ICC profiles) that may need
                 // multiple buffer refills to complete.
