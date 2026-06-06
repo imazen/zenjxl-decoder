@@ -252,10 +252,7 @@ pub fn reconstruct_jpeg(data: &[u8]) -> Result<Option<Vec<u8>>> {
 /// the captured quantized coefficients) and then returns the JBRD-reconstructed
 /// JPEG. The decoded pixels themselves are discarded.
 #[cfg(feature = "jpeg")]
-pub fn reconstruct_jpeg_with(
-    data: &[u8],
-    options: JxlDecoderOptions,
-) -> Result<Option<Vec<u8>>> {
+pub fn reconstruct_jpeg_with(data: &[u8], options: JxlDecoderOptions) -> Result<Option<Vec<u8>>> {
     let mut input: &[u8] = data;
 
     // Phase 1: parse header.

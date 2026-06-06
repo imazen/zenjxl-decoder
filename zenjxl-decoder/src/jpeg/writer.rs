@@ -519,7 +519,10 @@ impl<'a> JpegWriter<'a> {
         // (reset_points / extra_zero_runs) and the EOB-run structure. (Block
         // indexing still uses the MCU-padded `width_in_blocks` stride below.)
         let (mcus_per_row, mcu_rows) = if is_interleaved {
-            (jpeg.width.div_ceil(8 * max_h), jpeg.height.div_ceil(8 * max_v))
+            (
+                jpeg.width.div_ceil(8 * max_h),
+                jpeg.height.div_ceil(8 * max_v),
+            )
         } else {
             (
                 (jpeg.width * base.h_samp_factor).div_ceil(8 * max_h),
@@ -545,7 +548,9 @@ impl<'a> JpegWriter<'a> {
                 // Restart marker every `restart_interval` MCUs: flush the EOB
                 // run, pad to a byte, emit RSTn, reset DC prediction.
                 if restart_interval > 0 && restarts_to_go == 0 {
-                    if ss > 0 && let Some(ac) = ac_tables[flush_ac_idx].as_ref() {
+                    if ss > 0
+                        && let Some(ac) = ac_tables[flush_ac_idx].as_ref()
+                    {
                         cs.flush(&mut bw, ac);
                     }
                     bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
@@ -638,7 +643,9 @@ impl<'a> JpegWriter<'a> {
             }
         }
         // Final flush of any pending EOB run + byte padding.
-        if ss > 0 && let Some(ac) = ac_tables[flush_ac_idx].as_ref() {
+        if ss > 0
+            && let Some(ac) = ac_tables[flush_ac_idx].as_ref()
+        {
             cs.flush(&mut bw, ac);
         }
         bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
@@ -786,7 +793,11 @@ fn encode_block_progressive(
             temp = -temp;
             t2 -= 1;
         }
-        let nbits = if temp == 0 { 0 } else { log2_floor_nz(temp as u32) + 1 };
+        let nbits = if temp == 0 {
+            0
+        } else {
+            log2_floor_nz(temp as u32) + 1
+        };
         bw.write_huffman(dc, nbits as u8);
         if nbits > 0 {
             bw.write_bits((t2 as u32) & ((1u32 << nbits) - 1), nbits);
@@ -896,7 +907,11 @@ fn encode_refinement(
         // Newly-significant coefficient.
         cs.flush(bw, ac);
         let symbol = (((r as u32) << 4) | 1) as u8;
-        let new_nonzero_bit = if (coeffs[ZIGZAG[k]] as i32) < 0 { 0u32 } else { 1u32 };
+        let new_nonzero_bit = if (coeffs[ZIGZAG[k]] as i32) < 0 {
+            0u32
+        } else {
+            1u32
+        };
         bw.write_huffman(ac, symbol);
         bw.write_bits(new_nonzero_bit, 1);
         for &b in &refinement_bits {
