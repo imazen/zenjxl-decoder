@@ -10,6 +10,28 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+### Added
+- `reconstruct_jpeg` / `reconstruct_jpeg_with` (`jpeg` feature): one-shot
+  pure-Rust reconstruction of the original JPEG bytes from a JXL with a JBRD
+  box — the in-crate equivalent of `djxl --reconstruct_jpeg` (e3011867).
+
+### Fixed
+- **JPEG (JBRD) reconstruction byte-exactness**, found via a cross-crate
+  round-trip conformance gate:
+  - Progressive (SOF2) JPEGs now reconstruct byte-for-byte (spectral selection,
+    successive approximation, EOB-run coding, reset_points/extra_zero_runs);
+    previously a baseline stream was written for progressive scans (e17a482e).
+  - Grayscale reconstructed an all-zero (truncated) image — the lone luma
+    component was read from JXL channel 0 instead of the Y channel (1) (e3011867).
+  - SOF1 (extended-sequential) and SOF2 SOF markers were silently dropped from
+    the marker stream; now emitted (e3011867).
+  - Restart (DRI) markers were never emitted (driven by the progressive-only
+    reset_points list); now interval-driven in the baseline writer (e3011867).
+  - Progressive Huffman tables are now tracked through marker order (a
+    progressive JPEG redefines table slots per scan) (e17a482e).
+- Open follow-up: EXIF/XMP container-box payloads aren't yet re-stitched into
+  reconstructed APPn markers (imazen/zenjxl-decoder#19).
+
 ### Changed
 - `zenjxl-decoder/tests/fuzz_regression.rs` now uses the shared
   `zen-fuzz-regress` test-helper crate (DEDUP-J2). Per-target payloads
