@@ -90,7 +90,7 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
                     // DHT — emits the table bytes AND updates the active tables.
                     writer.write_dht(jpeg, &mut dht_idx, &mut active_dc, &mut active_ac)?;
                 }
-                0xC0 | 0xC1 | 0xC2 => {
+                0xC0..=0xC2 => {
                     // SOF0 (baseline) / SOF1 (extended sequential) / SOF2
                     // (progressive). Emit the exact SOF marker the original
                     // used — dropping it (the old `_ =>` fall-through) lost a
@@ -493,7 +493,7 @@ impl<'a> JpegWriter<'a> {
         let scan = &jpeg.scan_info[scan_idx];
         let ss = scan.ss as usize;
         let se = scan.se as usize;
-        let al = scan.al as u32;
+        let al = scan.al;
         let is_refinement = scan.ah > 0;
 
         let num_comp = scan.num_components as usize;
