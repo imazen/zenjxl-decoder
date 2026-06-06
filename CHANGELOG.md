@@ -29,8 +29,12 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
     reset_points list); now interval-driven in the baseline writer (e3011867).
   - Progressive Huffman tables are now tracked through marker order (a
     progressive JPEG redefines table slots per scan) (e17a482e).
-- Open follow-up: EXIF/XMP container-box payloads aren't yet re-stitched into
-  reconstructed APPn markers (imazen/zenjxl-decoder#19).
+  - EXIF / XMP / ICC metadata round-trips byte-exact (1d1ea27e, closes #19):
+    `brob` (brotli-compressed) `Exif`/`xml ` boxes are decompressed and
+    re-stitched into their APPn markers, and the chunked ICC profile is
+    recovered from the codestream color encoding and re-split into
+    `ICC_PROFILE` APP2 markers. Reconstruction defers metadata stitching to
+    `take_jpeg_reconstruction` (container boxes follow the codestream).
 
 ### Changed
 - `zenjxl-decoder/tests/fuzz_regression.rs` now uses the shared
