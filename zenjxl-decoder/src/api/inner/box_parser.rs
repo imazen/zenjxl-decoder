@@ -30,6 +30,11 @@ enum ParseState {
     BufferingExif(u64, Vec<u8>),
     /// Buffering an xml (XMP) box: (remaining bytes, accumulated content).
     BufferingXmp(u64, Vec<u8>),
+    /// Buffering a brob (brotli-compressed) box: (remaining bytes, accumulated
+    /// content). The content is `[4-byte inner box type][brotli payload]`; once
+    /// complete it is decompressed and routed to exif/xmp by the inner type.
+    #[cfg(feature = "jpeg")]
+    BufferingBrob(u64, Vec<u8>),
 }
 
 enum CodestreamBoxType {
@@ -252,6 +257,42 @@ impl BoxParser {
                         self.state = ParseState::BufferingXmp(remaining, buf);
                     }
                 }
+                #[cfg(feature = "jpeg")]
+                ParseState::BufferingBrob(mut remaining, mut buf) => {
+                    let num = remaining.min(usize::MAX as u64) as usize;
+                    if !self.box_buffer.is_empty() {
+                        let take = num.min(self.box_buffer.len());
+                        buf.extend_from_slice(&self.box_buffer[..take]);
+                        self.box_buffer.consume(take);
+                        remaining -= take as u64;
+                    } else {
+                        let old_len = buf.len();
+                        buf.resize(old_len + num, 0);
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        if read == 0 {
+                            return Err(Error::OutOfBounds(num));
+                        }
+                        buf.truncate(old_len + read);
+                        remaining -= read as u64;
+                    }
+                    if remaining == 0 {
+                        // brob payload = [4-byte inner box type][brotli stream].
+                        if buf.len() >= 4
+                            && let Some(out) = brotli_decompress_box(&buf[4..])
+                        {
+                            match &buf[0..4] {
+                                // Same handling as a raw Exif box: strip the
+                                // 4-byte TIFF-header offset.
+                                b"Exif" if out.len() >= 4 => self.exif = Some(out[4..].to_vec()),
+                                b"xml " => self.xmp = Some(out),
+                                _ => {}
+                            }
+                        }
+                        self.state = ParseState::BoxNeeded;
+                    } else {
+                        self.state = ParseState::BufferingBrob(remaining, buf);
+                    }
+                }
                 ParseState::BoxNeeded => {
                     self.box_buffer.refill(|b| input.read(b), None)?;
                     let min_len = match &self.box_buffer[..] {
@@ -382,6 +423,20 @@ impl BoxParser {
                                 );
                             }
                         }
+                        // Brotli-compressed metadata box. The encoder wraps EXIF
+                        // / XMP in `brob` when brotli shrinks them; decompress
+                        // and route by inner box type. Needs brotli (jpeg feat).
+                        #[cfg(feature = "jpeg")]
+                        b"brob" => {
+                            if content_len == u64::MAX || content_len > 16 * 1024 * 1024 {
+                                self.state = ParseState::SkippableBox(content_len);
+                            } else {
+                                self.state = ParseState::BufferingBrob(
+                                    content_len,
+                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
+                                );
+                            }
+                        }
                         _ => {
                             self.state = ParseState::SkippableBox(content_len);
                         }
@@ -402,4 +457,17 @@ impl BoxParser {
             unreachable!()
         }
     }
+}
+
+/// Brotli-decompress a `brob` box payload (the bytes after the 4-byte inner box
+/// type). Returns `None` on malformed input. Only built with the `jpeg` feature
+/// (which provides `brotli`); without it `brob` boxes are skipped.
+#[cfg(feature = "jpeg")]
+fn brotli_decompress_box(compressed: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    brotli::Decompressor::new(compressed, 4096)
+        .read_to_end(&mut out)
+        .ok()?;
+    Some(out)
 }

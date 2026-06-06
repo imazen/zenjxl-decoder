@@ -330,6 +330,30 @@ pub fn reconstruct_jpeg_with(
         ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
     };
 
+    // Phase 4: drain the remaining input so the box parser consumes the trailing
+    // Exif / xml metadata boxes (which follow the codestream in a JPEG-transcode
+    // container). Only then can `take_jpeg_reconstruction` stitch EXIF/XMP back
+    // into the reconstructed APPn markers. A JBRD transcode has a single frame,
+    // so this drains to `NeedsMoreInput` once the boxes are parsed.
+    loop {
+        if input.is_empty() {
+            break;
+        }
+        let before = input.len();
+        match decoder.process(&mut input)? {
+            ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                decoder = fallback;
+                if input.len() == before {
+                    break; // no progress — avoid spinning
+                }
+            }
+            // Unexpected second frame; the trailing boxes before it are parsed.
+            ProcessingResult::Complete { mut result } => {
+                return Ok(result.take_jpeg_reconstruction());
+            }
+        }
+    }
+
     Ok(decoder.take_jpeg_reconstruction())
 }
 

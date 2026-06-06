@@ -94,9 +94,11 @@ pub(super) struct CodestreamParser {
     /// JBRD box data for JPEG reconstruction.
     #[cfg(feature = "jpeg")]
     pub(super) jbrd_data: Option<Vec<u8>>,
-    /// Reconstructed JPEG bytes (populated after decode if jbrd present).
+    /// Reconstruction JpegData (built after the frame decodes if jbrd present).
+    /// EXIF/XMP APPn placeholders are filled, and the bytes written, lazily in
+    /// `take_jpeg_reconstruction` — after the trailing container boxes parse.
     #[cfg(feature = "jpeg")]
-    pub(super) jpeg_bytes: Option<Vec<u8>>,
+    pub(super) jpeg_recon: Option<crate::jpeg::data::JpegData>,
 }
 
 impl CodestreamParser {
@@ -139,7 +141,7 @@ impl CodestreamParser {
             #[cfg(feature = "jpeg")]
             jbrd_data: None,
             #[cfg(feature = "jpeg")]
-            jpeg_bytes: None,
+            jpeg_recon: None,
         }
     }
 

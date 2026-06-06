@@ -385,14 +385,17 @@ impl CodestreamParser {
             .is_some_and(|info| info.preview_size.is_some());
         let might_be_preview = self.process_without_output && has_preview;
 
-        // Reconstruct JPEG if we have JBRD data (before frame is consumed by finalize)
+        // Build JPEG reconstruction data if we have JBRD (while the frame's
+        // coefficients are still alive — finalize() consumes them next). The
+        // EXIF/XMP APPn payloads and the final bytes are produced lazily in
+        // take_jpeg_reconstruction, once the trailing container boxes have
+        // parsed. Reconstruction failure is non-fatal; normal decode continues.
         #[cfg(feature = "jpeg")]
         if let Some(jbrd_data) = &self.jbrd_data
             && let Some(frame) = &self.frame
-            && let Ok(bytes) = frame.jpeg_reconstruct(jbrd_data)
+            && let Ok(jpeg_data) = frame.jpeg_reconstruct(jbrd_data)
         {
-            // Reconstruction failure is non-fatal; normal decode continues
-            self.jpeg_bytes = Some(bytes);
+            self.jpeg_recon = Some(jpeg_data);
         }
 
         let decoder_state = self.frame.take().unwrap().finalize()?;

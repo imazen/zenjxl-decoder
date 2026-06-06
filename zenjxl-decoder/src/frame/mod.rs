@@ -379,9 +379,18 @@ impl Frame {
     /// Must be called after all LF and HF groups have been decoded.
     /// Returns the byte-exact original JPEG file.
     #[cfg(feature = "jpeg")]
-    pub fn jpeg_reconstruct(&self, jbrd_data: &[u8]) -> crate::error::Result<Vec<u8>> {
+    /// Build the reconstruction [`JpegData`] (coefficients + structure). The
+    /// EXIF/XMP APPn payloads are left as empty placeholders here and filled
+    /// later in `take_jpeg_reconstruction`, from container boxes that are parsed
+    /// *after* the codestream. Run `write_jpeg` on the result for the bytes.
+    ///
+    /// [`JpegData`]: crate::jpeg::data::JpegData
+    pub fn jpeg_reconstruct(
+        &self,
+        jbrd_data: &[u8],
+    ) -> crate::error::Result<crate::jpeg::data::JpegData> {
         use crate::jpeg::data::JpegComponentType;
-        use crate::jpeg::{decode_jbrd, write_jpeg};
+        use crate::jpeg::decode_jbrd;
 
         // kCFLFixedPointPrecision from libjxl — fixed-point precision for CfL
         const CFL_FP: i32 = 11;
@@ -595,7 +604,7 @@ impl Frame {
             }
         }
 
-        write_jpeg(&jpeg)
+        Ok(jpeg)
     }
 }
 

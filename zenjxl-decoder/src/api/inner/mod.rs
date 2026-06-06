@@ -167,9 +167,27 @@ impl JxlDecoderInner {
     }
 
     /// Returns the reconstructed JPEG bytes if the file contained a JBRD box.
+    ///
+    /// The reconstruction `JpegData` is built when the frame decodes, but the
+    /// EXIF/XMP APPn payloads (lifted into container boxes that follow the
+    /// codestream) and the final byte serialization are produced here, once the
+    /// whole container has been parsed.
     #[cfg(feature = "jpeg")]
     pub fn take_jpeg_reconstruction(&mut self) -> Option<Vec<u8>> {
-        self.codestream_parser.jpeg_bytes.take()
+        let mut jpeg = self.codestream_parser.jpeg_recon.take()?;
+        // The original ICC profile (if any) was lifted into the codestream color
+        // encoding; recover it to re-chunk the ICC_PROFILE APP2 markers.
+        let icc = match self.codestream_parser.embedded_color_profile.as_ref() {
+            Some(JxlColorProfile::Icc(bytes)) => Some(bytes.clone()),
+            _ => None,
+        };
+        crate::jpeg::fill_metadata(
+            &mut jpeg,
+            self.box_parser.exif.clone(),
+            self.box_parser.xmp.clone(),
+            icc.as_deref(),
+        );
+        crate::jpeg::write_jpeg(&jpeg).ok()
     }
 
     /// Returns the parsed frame index box, if the file contained one.
