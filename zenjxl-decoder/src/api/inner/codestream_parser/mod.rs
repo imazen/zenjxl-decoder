@@ -338,6 +338,22 @@ impl CodestreamParser {
                     let was_skipping = self.process_without_output;
                     self.process_without_output = false;
                     if regular_frame && !was_skipping {
+                        // JBRD reconstruction: the trailing Exif / XMP / brob
+                        // metadata boxes follow the frame's codestream. When the
+                        // codestream is large the section reads stop exactly at
+                        // the frame end without over-reading the trailing boxes,
+                        // so drive the box parser through them now — otherwise
+                        // EXIF/XMP/ICC are silently dropped from the reconstructed
+                        // APPn markers. `OutOfBounds` is the clean EOF after the
+                        // last box; only fires when a reconstruction is pending,
+                        // so non-JPEG decodes are unaffected.
+                        #[cfg(feature = "jpeg")]
+                        if self.jpeg_recon.is_some() {
+                            match box_parser.get_more_codestream(input) {
+                                Ok(_) | Err(Error::OutOfBounds(_)) => {}
+                                Err(e) => return Err(e),
+                            }
+                        }
                         return Ok(());
                     }
                     continue;

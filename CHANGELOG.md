@@ -35,6 +35,14 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
     recovered from the codestream color encoding and re-split into
     `ICC_PROFILE` APP2 markers. Reconstruction defers metadata stitching to
     `take_jpeg_reconstruction` (container boxes follow the codestream).
+  - Trailing metadata boxes are now drained for **large** codestreams too. The
+    `Exif`/`xml `/`brob` boxes follow the frame's codestream; for small files
+    they were incidentally read during frame decode, but a codestream larger
+    than the read-ahead window left them unparsed, so EXIF/XMP (incl. the EXIF
+    `Orientation` / "rotflip" tag) and chunked ICC were silently dropped from
+    the reconstruction. `codestream_parser` now drives the box parser through
+    the trailing boxes when a JBRD reconstruction is pending (gated on
+    `jpeg_recon`, so non-JPEG decodes are unaffected).
 
 ### Changed
 - `zenjxl-decoder/tests/fuzz_regression.rs` now uses the shared
