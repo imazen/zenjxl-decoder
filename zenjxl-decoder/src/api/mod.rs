@@ -20,6 +20,8 @@ mod xyb_constants;
 pub use crate::image::JxlOutputBuffer;
 pub use color::*;
 pub use convenience::{JxlImage, JxlImageInfo, decode, decode_with, read_header, read_header_with};
+#[cfg(feature = "jpeg")]
+pub use convenience::{reconstruct_jpeg, reconstruct_jpeg_with};
 pub use data_types::*;
 pub use decoder::*;
 pub use enough::{Stop, Unstoppable};

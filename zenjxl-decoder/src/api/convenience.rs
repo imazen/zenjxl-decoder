@@ -222,6 +222,117 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
     })
 }
 
+/// Reconstruct the original JPEG bytes from a JXL file that carries a JBRD
+/// (JPEG Bitstream Reconstruction Data) box — i.e. a JXL produced by lossless
+/// JPEG transcoding (`jxl_encoder::LosslessConfig::encode_jpeg_transcode`).
+///
+/// Returns `Ok(Some(bytes))` with the **byte-exact** original JPEG when the
+/// file carries reconstruction data, or `Ok(None)` when it does not (a JXL that
+/// was not produced from a JPEG). This is the pure-Rust counterpart to
+/// `djxl <in.jxl> <out.jpg> --reconstruct_jpeg`.
+///
+/// Requires the `jpeg` cargo feature.
+///
+/// # Example
+///
+/// ```no_run
+/// let jxl = std::fs::read("photo.jxl").unwrap();
+/// if let Some(jpeg) = zenjxl_decoder::reconstruct_jpeg(&jxl).unwrap() {
+///     std::fs::write("photo_reconstructed.jpg", &jpeg).unwrap();
+/// }
+/// ```
+#[cfg(feature = "jpeg")]
+pub fn reconstruct_jpeg(data: &[u8]) -> Result<Option<Vec<u8>>> {
+    reconstruct_jpeg_with(data, JxlDecoderOptions::default())
+}
+
+/// Reconstruct the original JPEG bytes with custom decoder options.
+///
+/// See [`reconstruct_jpeg`]. Drives a full frame decode (reconstruction needs
+/// the captured quantized coefficients) and then returns the JBRD-reconstructed
+/// JPEG. The decoded pixels themselves are discarded.
+#[cfg(feature = "jpeg")]
+pub fn reconstruct_jpeg_with(
+    data: &[u8],
+    options: JxlDecoderOptions,
+) -> Result<Option<Vec<u8>>> {
+    let mut input: &[u8] = data;
+
+    // Phase 1: parse header.
+    let decoder = JxlDecoder::<states::Initialized>::new(options);
+    let mut decoder = match decoder.process(&mut input)? {
+        ProcessingResult::Complete { result } => result,
+        ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
+    };
+
+    let info = decoder.basic_info().clone();
+    let (width, height) = info.size;
+
+    // Output format mirrors `decode_with`: natural color type + interleaved
+    // alpha. The pixels are discarded — we only need a complete frame decode so
+    // the JBRD coefficient capture runs.
+    let is_grayscale = decoder.current_pixel_format().color_type.is_grayscale();
+    let color_type = if is_grayscale {
+        JxlColorType::GrayscaleAlpha
+    } else {
+        JxlColorType::Rgba
+    };
+    let channels = color_type.samples_per_pixel();
+    let main_alpha = info
+        .extra_channels
+        .iter()
+        .position(|ec| ec.ec_type == ExtraChannel::Alpha);
+    let u8_format = JxlDataFormat::U8 { bit_depth: 8 };
+    let pixel_format = JxlPixelFormat {
+        color_type,
+        color_data_format: Some(u8_format),
+        extra_channel_format: info
+            .extra_channels
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                if Some(i) == main_alpha {
+                    None
+                } else {
+                    Some(u8_format)
+                }
+            })
+            .collect(),
+    };
+    decoder.set_pixel_format(pixel_format);
+    let extra_count = info.extra_channels.len() - usize::from(main_alpha.is_some());
+
+    // Phase 2: parse frame header.
+    let decoder = match decoder.process(&mut input)? {
+        ProcessingResult::Complete { result } => result,
+        ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
+    };
+
+    // Phase 3: decode the frame into throwaway buffers.
+    let row_bytes = width * channels;
+    let mut output = OwnedRawImage::new_uninit((row_bytes, height))?;
+    let mut extra_outputs: Vec<OwnedRawImage> = (0..extra_count)
+        .map(|_| OwnedRawImage::new_uninit((width, height)))
+        .collect::<Result<_>>()?;
+    let mut bufs: Vec<JxlOutputBuffer<'_>> = core::iter::once(&mut output)
+        .chain(extra_outputs.iter_mut())
+        .map(|img| {
+            let rect = Rect {
+                size: img.byte_size(),
+                origin: (0, 0),
+            };
+            JxlOutputBuffer::from_image_rect_mut(img.get_rect_mut(rect))
+        })
+        .collect();
+
+    let mut decoder = match decoder.process(&mut input, &mut bufs)? {
+        ProcessingResult::Complete { result } => result,
+        ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
+    };
+
+    Ok(decoder.take_jpeg_reconstruction())
+}
+
 /// Read image metadata without decoding pixels.
 ///
 /// Parses the file header and ICC profile. Returns dimensions, bit depth,

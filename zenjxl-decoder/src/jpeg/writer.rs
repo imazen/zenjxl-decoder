@@ -83,9 +83,12 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
                     // DHT
                     writer.write_dht(jpeg, &mut dht_idx)?;
                 }
-                0xC0 => {
-                    // SOF0 (baseline)
-                    writer.write_sof0(jpeg)?;
+                0xC0 | 0xC1 | 0xC2 => {
+                    // SOF0 (baseline) / SOF1 (extended sequential) / SOF2
+                    // (progressive). Emit the exact SOF marker the original
+                    // used — dropping it (the old `_ =>` fall-through) lost a
+                    // whole SOF segment and corrupted the marker stream.
+                    writer.write_sof(jpeg, marker)?;
                 }
                 0xDD => {
                     // DRI
@@ -246,9 +249,9 @@ impl<'a> JpegWriter<'a> {
         Ok(())
     }
 
-    fn write_sof0(&mut self, jpeg: &JpegData) -> Result<()> {
+    fn write_sof(&mut self, jpeg: &JpegData, marker: u8) -> Result<()> {
         self.out.push(0xFF);
-        self.out.push(0xC0);
+        self.out.push(marker);
 
         let nc = jpeg.components.len();
         let length = (8 + 3 * nc) as u16;
@@ -317,8 +320,13 @@ impl<'a> JpegWriter<'a> {
 
         let mut bw = BitWriter::new();
         let mut padding_bit_idx = 0usize;
-        let mut reset_point_idx = 0usize;
         let mut extra_zero_idx = 0usize;
+        // Restart (DRI): emit RSTn every `restart_interval` MCUs. Baseline
+        // restart is interval-driven — the progressive `reset_points` list is
+        // empty for baseline scans, so relying on it dropped every RST marker.
+        let restart_interval = jpeg.restart_interval;
+        let mut restart_counter: u32 = 0;
+        let mut rst_marker_idx: u32 = 0;
 
         // Track DC predictions (one per component)
         let mut dc_pred = vec![0i32; jpeg.components.len()];
@@ -354,22 +362,22 @@ impl<'a> JpegWriter<'a> {
 
         for mcu_row in 0..mcu_rows {
             for mcu_col in 0..mcu_cols {
-                // Check for reset point (RST marker)
-                if reset_point_idx < scan.reset_points.len()
-                    && block_count == scan.reset_points[reset_point_idx]
-                {
-                    // Flush bits, emit RST marker
+                // Restart marker every `restart_interval` MCUs (DRI). The
+                // original encoder pads the partial final byte of each entropy
+                // segment (captured in padding_bits) and resets DC prediction
+                // at the boundary.
+                if restart_interval > 0 && restart_counter == restart_interval {
                     bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
                     self.out.extend_from_slice(&bw.finish());
                     bw = BitWriter::new();
 
-                    let rst_marker = 0xD0 + ((reset_point_idx % 8) as u8);
+                    let rst_marker = 0xD0 + ((rst_marker_idx % 8) as u8);
                     self.out.push(0xFF);
                     self.out.push(rst_marker);
 
-                    // Reset DC prediction
                     dc_pred.fill(0);
-                    reset_point_idx += 1;
+                    rst_marker_idx += 1;
+                    restart_counter = 0;
                 }
 
                 for sci in 0..scan.num_components as usize {
@@ -433,6 +441,8 @@ impl<'a> JpegWriter<'a> {
                         }
                     }
                 }
+
+                restart_counter += 1;
             }
         }
 

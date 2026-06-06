@@ -404,9 +404,17 @@ impl Frame {
 
         // Channel mapping: JPEG component index → JXL channel index
         // JXL c0←JPEG Cb, c1←JPEG Y, c2←JPEG Cr
-        let jpeg_to_jxl: Vec<usize> = match jpeg.component_type {
-            JpegComponentType::YCbCr => vec![1, 0, 2],
-            _ => (0..num_components).collect(),
+        let jpeg_to_jxl: Vec<usize> = if num_components == 1 {
+            // Grayscale: the encoder routes the single (luma) component into the
+            // JXL Y channel (index 1) and zero-fills channels 0/2 (jxl-encoder
+            // encode.rs grayscale zero-fill). Reading channel 0 would yield an
+            // all-zero plane → an all-zero (truncated) reconstruction.
+            vec![1]
+        } else {
+            match jpeg.component_type {
+                JpegComponentType::YCbCr => vec![1, 0, 2],
+                _ => (0..num_components).collect(),
+            }
         };
 
         // Fill quant table values from raw_qtable (transpose JXL→JPEG natural order)

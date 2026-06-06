@@ -59,6 +59,8 @@
 
 pub mod api;
 pub use api::{decode, decode_with, read_header, read_header_with};
+#[cfg(feature = "jpeg")]
+pub use api::{reconstruct_jpeg, reconstruct_jpeg_with};
 pub(crate) mod bit_reader;
 pub(crate) mod color;
 pub(crate) mod container;
