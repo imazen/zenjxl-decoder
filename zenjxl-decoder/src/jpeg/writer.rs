@@ -45,6 +45,13 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
         let mut dht_idx = 0usize;
         let mut intermarker_idx = 0usize;
 
+        // Active Huffman encode tables, updated as each DHT marker is emitted.
+        // A progressive JPEG redefines the same table slots (e.g. AC table 0)
+        // between scans, so the writer must use the table in force at each SOS
+        // rather than a single set built from every huffman_code entry.
+        let mut active_dc: [Option<HuffmanEncodeTable>; 4] = [None, None, None, None];
+        let mut active_ac: [Option<HuffmanEncodeTable>; 4] = [None, None, None, None];
+
         for &marker in &jpeg.marker_order {
             match marker {
                 0xD9 => {
@@ -56,7 +63,7 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
                     if scan_idx >= jpeg.scan_info.len() {
                         return Err(Error::InvalidJbrd("too many SOS markers".into()));
                     }
-                    writer.write_sos(jpeg, scan_idx)?;
+                    writer.write_sos(jpeg, scan_idx, &active_dc, &active_ac)?;
                     scan_idx += 1;
                 }
                 0xE0..=0xEF => {
@@ -80,8 +87,8 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
                     writer.write_dqt(jpeg, &mut dqt_idx)?;
                 }
                 0xC4 => {
-                    // DHT
-                    writer.write_dht(jpeg, &mut dht_idx)?;
+                    // DHT — emits the table bytes AND updates the active tables.
+                    writer.write_dht(jpeg, &mut dht_idx, &mut active_dc, &mut active_ac)?;
                 }
                 0xC0 | 0xC1 | 0xC2 => {
                     // SOF0 (baseline) / SOF1 (extended sequential) / SOF2
@@ -210,7 +217,13 @@ impl<'a> JpegWriter<'a> {
         Ok(())
     }
 
-    fn write_dht(&mut self, jpeg: &JpegData, idx: &mut usize) -> Result<()> {
+    fn write_dht(
+        &mut self,
+        jpeg: &JpegData,
+        idx: &mut usize,
+        active_dc: &mut [Option<HuffmanEncodeTable>; 4],
+        active_ac: &mut [Option<HuffmanEncodeTable>; 4],
+    ) -> Result<()> {
         self.out.push(0xFF);
         self.out.push(0xC4);
 
@@ -244,6 +257,13 @@ impl<'a> JpegWriter<'a> {
             for &val in &hc.values {
                 self.out.push(val);
             }
+            // Update the active table set for subsequent scans.
+            let table = HuffmanEncodeTable::from_counts_values(&hc.counts, &hc.values);
+            if hc.is_ac {
+                active_ac[hc.id as usize] = Some(table);
+            } else {
+                active_dc[hc.id as usize] = Some(table);
+            }
         }
 
         Ok(())
@@ -274,7 +294,13 @@ impl<'a> JpegWriter<'a> {
         Ok(())
     }
 
-    fn write_sos(&mut self, jpeg: &JpegData, scan_idx: usize) -> Result<()> {
+    fn write_sos(
+        &mut self,
+        jpeg: &JpegData,
+        scan_idx: usize,
+        active_dc: &[Option<HuffmanEncodeTable>; 4],
+        active_ac: &[Option<HuffmanEncodeTable>; 4],
+    ) -> Result<()> {
         let scan = &jpeg.scan_info[scan_idx];
 
         // SOS header
@@ -297,25 +323,25 @@ impl<'a> JpegWriter<'a> {
         let ah_al = ((scan.ah as u8) << 4) | (scan.al as u8);
         self.out.push(ah_al);
 
-        // Huffman encode coefficients
-        self.write_scan_data(jpeg, scan_idx)?;
+        // Huffman encode coefficients (using the tables in force at this SOS).
+        self.write_scan_data(jpeg, scan_idx, active_dc, active_ac)?;
 
         Ok(())
     }
 
-    fn write_scan_data(&mut self, jpeg: &JpegData, scan_idx: usize) -> Result<()> {
+    fn write_scan_data(
+        &mut self,
+        jpeg: &JpegData,
+        scan_idx: usize,
+        dc_tables: &[Option<HuffmanEncodeTable>; 4],
+        ac_tables: &[Option<HuffmanEncodeTable>; 4],
+    ) -> Result<()> {
         let scan = &jpeg.scan_info[scan_idx];
 
-        // Build Huffman encode tables for each table used in this scan
-        let mut dc_tables: [Option<HuffmanEncodeTable>; 4] = [None, None, None, None];
-        let mut ac_tables: [Option<HuffmanEncodeTable>; 4] = [None, None, None, None];
-        for hc in &jpeg.huffman_code {
-            let table = HuffmanEncodeTable::from_counts_values(&hc.counts, &hc.values);
-            if hc.is_ac {
-                ac_tables[hc.id as usize] = Some(table);
-            } else {
-                dc_tables[hc.id as usize] = Some(table);
-            }
+        // Progressive / successive-approximation scans (spectral selection +
+        // EOB runs) use a different entropy structure than baseline sequential.
+        if !(scan.ss == 0 && scan.se == 63 && scan.ah == 0 && scan.al == 0) {
+            return self.write_scan_data_progressive(jpeg, scan_idx, dc_tables, ac_tables);
         }
 
         let mut bw = BitWriter::new();
@@ -452,6 +478,173 @@ impl<'a> JpegWriter<'a> {
 
         Ok(())
     }
+
+    /// Write a progressive (or successive-approximation refinement) scan.
+    /// Mirrors brunsli's `DoEncodeScan` (jpeg_data_writer.cc): spectral
+    /// selection [Ss,Se] + bit-plane Al, EOB-run buffering, per-block
+    /// `reset_points` (entropy-state flush, NOT a marker) and `extra_zero_runs`.
+    fn write_scan_data_progressive(
+        &mut self,
+        jpeg: &JpegData,
+        scan_idx: usize,
+        dc_tables: &[Option<HuffmanEncodeTable>; 4],
+        ac_tables: &[Option<HuffmanEncodeTable>; 4],
+    ) -> Result<()> {
+        let scan = &jpeg.scan_info[scan_idx];
+        let ss = scan.ss as usize;
+        let se = scan.se as usize;
+        let al = scan.al as u32;
+        let is_refinement = scan.ah > 0;
+
+        let num_comp = scan.num_components as usize;
+        let is_interleaved = num_comp > 1;
+        let max_h = jpeg
+            .components
+            .iter()
+            .map(|c| c.h_samp_factor)
+            .max()
+            .unwrap_or(1);
+        let max_v = jpeg
+            .components
+            .iter()
+            .map(|c| c.v_samp_factor)
+            .max()
+            .unwrap_or(1);
+        let base = &jpeg.components[scan.component_indices[0] as usize];
+        // Interleaved scans walk the MCU grid. Non-interleaved scans walk the
+        // component's NATURAL block grid `DivCeil(dim*samp, 8*max_samp)` — NOT
+        // its MCU-padded `width_in_blocks`, which is wider for luma when the
+        // image dimensions aren't a multiple of `8*max_samp`. Iterating the
+        // extra MCU-padding column/row would misalign `block_scan_index`
+        // (reset_points / extra_zero_runs) and the EOB-run structure. (Block
+        // indexing still uses the MCU-padded `width_in_blocks` stride below.)
+        let (mcus_per_row, mcu_rows) = if is_interleaved {
+            (jpeg.width.div_ceil(8 * max_h), jpeg.height.div_ceil(8 * max_v))
+        } else {
+            (
+                (jpeg.width * base.h_samp_factor).div_ceil(8 * max_h),
+                (jpeg.height * base.v_samp_factor).div_ceil(8 * max_v),
+            )
+        };
+        let restart_interval = jpeg.restart_interval;
+        let flush_ac_idx = scan.ac_tbl_idx[0] as usize;
+
+        let mut bw = BitWriter::new();
+        let mut cs = DctCodingState::new();
+        let mut padding_bit_idx = 0usize;
+        let mut last_dc = vec![0i32; jpeg.components.len()];
+        let mut restarts_to_go = restart_interval;
+        let mut next_restart_marker = 0u32;
+        let mut block_scan_index: u32 = 0;
+        let mut extra_zero_pos = 0usize;
+        let mut reset_point_pos = 0usize;
+        let zero_block = [0i16; 64];
+
+        for mcu_y in 0..mcu_rows {
+            for mcu_x in 0..mcus_per_row {
+                // Restart marker every `restart_interval` MCUs: flush the EOB
+                // run, pad to a byte, emit RSTn, reset DC prediction.
+                if restart_interval > 0 && restarts_to_go == 0 {
+                    if ss > 0 && let Some(ac) = ac_tables[flush_ac_idx].as_ref() {
+                        cs.flush(&mut bw, ac);
+                    }
+                    bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
+                    self.out.extend_from_slice(&bw.finish());
+                    bw = BitWriter::new();
+                    self.out.push(0xFF);
+                    self.out.push(0xD0 + next_restart_marker as u8);
+                    next_restart_marker = (next_restart_marker + 1) & 0x7;
+                    restarts_to_go = restart_interval;
+                    last_dc.fill(0);
+                }
+                for sci in 0..num_comp {
+                    let comp_idx = scan.component_indices[sci] as usize;
+                    let comp = &jpeg.components[comp_idx];
+                    let dc_idx = scan.dc_tbl_idx[sci] as usize;
+                    let ac_idx = scan.ac_tbl_idx[sci] as usize;
+                    let (n_blocks_y, n_blocks_x) = if is_interleaved {
+                        (comp.v_samp_factor, comp.h_samp_factor)
+                    } else {
+                        (1, 1)
+                    };
+                    for iy in 0..n_blocks_y {
+                        for ix in 0..n_blocks_x {
+                            let block_y = (mcu_y * n_blocks_y + iy) as usize;
+                            let block_x = (mcu_x * n_blocks_x + ix) as usize;
+
+                            // reset_point: flush the pending EOB run (no marker).
+                            if reset_point_pos < scan.reset_points.len()
+                                && block_scan_index == scan.reset_points[reset_point_pos]
+                            {
+                                if let Some(ac) = ac_tables[ac_idx].as_ref() {
+                                    cs.flush(&mut bw, ac);
+                                }
+                                reset_point_pos += 1;
+                            }
+                            // extra zero runs (extra ZRLs) before this block.
+                            let mut num_zero_runs = 0u32;
+                            if extra_zero_pos < scan.extra_zero_runs.len()
+                                && scan.extra_zero_runs[extra_zero_pos].0 == block_scan_index
+                            {
+                                num_zero_runs = scan.extra_zero_runs[extra_zero_pos].1;
+                                extra_zero_pos += 1;
+                            }
+
+                            // Edge MCUs reference blocks past the component grid
+                            // (MCU padding); those are all-zero.
+                            let coeffs: &[i16] = if block_y < comp.height_in_blocks as usize
+                                && block_x < comp.width_in_blocks as usize
+                            {
+                                let bi = block_y * comp.width_in_blocks as usize + block_x;
+                                &comp.coeffs[bi * 64..bi * 64 + 64]
+                            } else {
+                                &zero_block
+                            };
+
+                            // Each encoder reads only the table relevant to its
+                            // band (DC-only scans never touch the AC table, and
+                            // its DHT may not even be active yet). Supply a
+                            // non-None reference for the unused slot.
+                            let dc = dc_tables[dc_idx].as_ref();
+                            let ac = ac_tables[ac_idx].as_ref();
+                            let any = dc.or(ac).ok_or_else(|| {
+                                Error::InvalidJbrd("no active Huffman table for scan".into())
+                            })?;
+                            let dc = dc.unwrap_or(any);
+                            let ac = ac.unwrap_or(any);
+                            if is_refinement {
+                                encode_refinement(&mut bw, coeffs, ac, ss, se, al, &mut cs);
+                            } else {
+                                encode_block_progressive(
+                                    &mut bw,
+                                    coeffs,
+                                    dc,
+                                    ac,
+                                    ss,
+                                    se,
+                                    al,
+                                    num_zero_runs,
+                                    &mut cs,
+                                    &mut last_dc[comp_idx],
+                                );
+                            }
+                            block_scan_index += 1;
+                        }
+                    }
+                }
+                if restart_interval > 0 {
+                    restarts_to_go -= 1;
+                }
+            }
+        }
+        // Final flush of any pending EOB run + byte padding.
+        if ss > 0 && let Some(ac) = ac_tables[flush_ac_idx].as_ref() {
+            cs.flush(&mut bw, ac);
+        }
+        bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
+        self.out.extend_from_slice(&bw.finish());
+        Ok(())
+    }
 }
 
 /// Encode a DC coefficient using DPCM + Huffman.
@@ -514,6 +707,210 @@ fn encode_ac(bw: &mut BitWriter, block: &[i16], table: &HuffmanEncodeTable) {
 /// Encode AC EOB (for padding blocks).
 fn encode_ac_eob(bw: &mut BitWriter, table: &HuffmanEncodeTable) {
     bw.write_huffman(table, 0x00);
+}
+
+/// `Log2FloorNonZero(x)` for x > 0 (== floor(log2(x))).
+#[inline]
+fn log2_floor_nz(x: u32) -> u32 {
+    31 - x.leading_zeros()
+}
+
+/// Progressive EOB-run coding state — mirrors brunsli's `DCTCodingState`.
+/// Buffers a run of end-of-band markers (coded as one `EOBn` symbol) plus the
+/// trailing correction bits emitted by AC refinement scans.
+struct DctCodingState {
+    eob_run: u32,
+    /// Buffered correction bits, one per element, in emission order.
+    refinement_bits: Vec<u8>,
+}
+
+impl DctCodingState {
+    fn new() -> Self {
+        Self {
+            eob_run: 0,
+            refinement_bits: Vec::new(),
+        }
+    }
+
+    /// Emit the buffered EOB run (as an `EOBn` Huffman symbol + extra bits)
+    /// followed by the buffered correction bits, then reset.
+    fn flush(&mut self, bw: &mut BitWriter, ac: &HuffmanEncodeTable) {
+        if self.eob_run > 0 {
+            let nbits = log2_floor_nz(self.eob_run);
+            bw.write_huffman(ac, (nbits << 4) as u8);
+            if nbits > 0 {
+                bw.write_bits(self.eob_run & ((1 << nbits) - 1), nbits);
+            }
+            self.eob_run = 0;
+        }
+        for &b in &self.refinement_bits {
+            bw.write_bits(b as u32, 1);
+        }
+        self.refinement_bits.clear();
+    }
+
+    /// Buffer one end-of-band (+ optional correction bits). Auto-flush at the
+    /// 0x7FFF run-length ceiling.
+    fn buffer_end_of_band(&mut self, new_bits: &[u8], bw: &mut BitWriter, ac: &HuffmanEncodeTable) {
+        self.eob_run += 1;
+        self.refinement_bits.extend_from_slice(new_bits);
+        if self.eob_run == 0x7FFF {
+            self.flush(bw, ac);
+        }
+    }
+}
+
+/// Progressive first-pass block (DC-first when Ss==0, else AC-first).
+/// Port of brunsli `EncodeDCTBlockProgressive`. `coeffs` is natural order.
+#[allow(clippy::too_many_arguments)]
+fn encode_block_progressive(
+    bw: &mut BitWriter,
+    coeffs: &[i16],
+    dc: &HuffmanEncodeTable,
+    ac: &HuffmanEncodeTable,
+    ss: usize,
+    se: usize,
+    al: u32,
+    num_zero_runs: u32,
+    cs: &mut DctCodingState,
+    last_dc: &mut i32,
+) {
+    let eob_run_allowed = ss > 0;
+    let mut k0 = ss;
+    if ss == 0 {
+        let temp2 = (coeffs[0] as i32) >> al;
+        let mut temp = temp2 - *last_dc;
+        *last_dc = temp2;
+        let mut t2 = temp;
+        if temp < 0 {
+            temp = -temp;
+            t2 -= 1;
+        }
+        let nbits = if temp == 0 { 0 } else { log2_floor_nz(temp as u32) + 1 };
+        bw.write_huffman(dc, nbits as u8);
+        if nbits > 0 {
+            bw.write_bits((t2 as u32) & ((1u32 << nbits) - 1), nbits);
+        }
+        k0 = 1;
+    }
+    if k0 > se {
+        return;
+    }
+    let mut r: i32 = 0;
+    for k in k0..=se {
+        let mut temp = coeffs[ZIGZAG[k]] as i32;
+        if temp == 0 {
+            r += 1;
+            continue;
+        }
+        let t2;
+        if temp < 0 {
+            temp = -temp;
+            temp >>= al;
+            t2 = !temp;
+        } else {
+            temp >>= al;
+            t2 = temp;
+        }
+        if temp == 0 {
+            // Coefficient quantized to 0 at this bit-plane → still a zero run.
+            r += 1;
+            continue;
+        }
+        cs.flush(bw, ac);
+        while r > 15 {
+            bw.write_huffman(ac, 0xF0);
+            r -= 16;
+        }
+        let nbits = log2_floor_nz(temp as u32) + 1;
+        bw.write_huffman(ac, (((r as u32) << 4) | nbits) as u8);
+        bw.write_bits((t2 as u32) & ((1u32 << nbits) - 1), nbits);
+        r = 0;
+    }
+    if num_zero_runs > 0 {
+        cs.flush(bw, ac);
+        for _ in 0..num_zero_runs {
+            bw.write_huffman(ac, 0xF0);
+            r -= 16;
+        }
+    }
+    if r > 0 {
+        cs.buffer_end_of_band(&[], bw, ac);
+        if !eob_run_allowed {
+            cs.flush(bw, ac);
+        }
+    }
+}
+
+/// Successive-approximation refinement block (Ah > 0).
+/// Port of brunsli `EncodeRefinementBits`.
+fn encode_refinement(
+    bw: &mut BitWriter,
+    coeffs: &[i16],
+    ac: &HuffmanEncodeTable,
+    ss: usize,
+    se: usize,
+    al: u32,
+    cs: &mut DctCodingState,
+) {
+    let eob_run_allowed = ss > 0;
+    let mut k0 = ss;
+    if ss == 0 {
+        // Refine the DC: emit the next bit.
+        bw.write_bits(((coeffs[0] as i32) >> al) as u32 & 1, 1);
+        k0 = 1;
+    }
+    if k0 > se {
+        return;
+    }
+    let mut abs_values = [0i32; 64];
+    let mut eob = 0usize;
+    for k in k0..=se {
+        let abs_val = (coeffs[ZIGZAG[k]] as i32).abs();
+        abs_values[k] = abs_val >> al;
+        if abs_values[k] == 1 {
+            eob = k;
+        }
+    }
+    let mut r: i32 = 0;
+    let mut refinement_bits: Vec<u8> = Vec::new();
+    for k in k0..=se {
+        if abs_values[k] == 0 {
+            r += 1;
+            continue;
+        }
+        while r > 15 && k <= eob {
+            cs.flush(bw, ac);
+            bw.write_huffman(ac, 0xF0);
+            r -= 16;
+            for &b in &refinement_bits {
+                bw.write_bits(b as u32, 1);
+            }
+            refinement_bits.clear();
+        }
+        if abs_values[k] > 1 {
+            // Already-significant coefficient → one correction bit.
+            refinement_bits.push((abs_values[k] & 1) as u8);
+            continue;
+        }
+        // Newly-significant coefficient.
+        cs.flush(bw, ac);
+        let symbol = (((r as u32) << 4) | 1) as u8;
+        let new_nonzero_bit = if (coeffs[ZIGZAG[k]] as i32) < 0 { 0u32 } else { 1u32 };
+        bw.write_huffman(ac, symbol);
+        bw.write_bits(new_nonzero_bit, 1);
+        for &b in &refinement_bits {
+            bw.write_bits(b as u32, 1);
+        }
+        refinement_bits.clear();
+        r = 0;
+    }
+    if r > 0 || !refinement_bits.is_empty() {
+        cs.buffer_end_of_band(&refinement_bits, bw, ac);
+        if !eob_run_allowed {
+            cs.flush(bw, ac);
+        }
+    }
 }
 
 /// Categorize a coefficient value for Huffman encoding.
