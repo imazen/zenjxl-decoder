@@ -11,6 +11,12 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
 ### Added
+- `JxlDecoder::vardct_quantizer()` and the `VardctQuantizer` type
+  (`global_scale`, `quant_lf`, `inv_global_scale()`): recover the first regular
+  VarDCT frame's quantizer from a decoded JXL, so callers can estimate the lossy
+  encode quality without re-parsing the bitstream. Captured when the first
+  regular frame's `LfGlobal` is decoded; `None` for Modular (lossless) images
+  and LF/preview helper frames (d218116).
 - `reconstruct_jpeg` / `reconstruct_jpeg_with` (`jpeg` feature): one-shot
   pure-Rust reconstruction of the original JPEG bytes from a JXL with a JBRD
   box — the in-crate equivalent of `djxl --reconstruct_jpeg` (e3011867).
