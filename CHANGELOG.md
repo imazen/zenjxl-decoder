@@ -10,6 +10,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+## [0.3.9] - 2026-06-09
+
 ### Added
 - `JxlDecoder::vardct_quantizer()` and the `VardctQuantizer` type
   (`global_scale`, `quant_lf`, `inv_global_scale()`): recover the first regular
