@@ -10,7 +10,7 @@ use crate::{
     error::{Error, Result},
 };
 
-use super::{JxlBasicInfo, JxlColorProfile, JxlDecoderOptions, JxlPixelFormat};
+use super::{JxlBasicInfo, JxlColorProfile, JxlDecoderOptions, JxlPixelFormat, VardctQuantizer};
 use crate::container::frame_index::FrameIndexBox;
 use crate::container::gain_map::GainMapBundle;
 use box_parser::BoxParser;
@@ -84,6 +84,20 @@ impl JxlDecoderInner {
     /// Retrieves the file's color profile, if available.
     pub fn embedded_color_profile(&self) -> Option<&JxlColorProfile> {
         self.codestream_parser.embedded_color_profile.as_ref()
+    }
+
+    /// Returns the first regular VarDCT frame's quantizer, if this is a lossy
+    /// VarDCT image whose first frame's `LfGlobal` section has been decoded.
+    ///
+    /// `None` for Modular (lossless) images, or before the first regular frame
+    /// has been parsed (e.g. right after image-info, which `read_header` stops
+    /// at). Advance one frame (e.g. `skip_frame`) to populate it from a probe.
+    pub fn vardct_quantizer(&self) -> Option<VardctQuantizer> {
+        let (global_scale, quant_lf) = self.codestream_parser.first_vardct_quantizer?;
+        Some(VardctQuantizer {
+            global_scale,
+            quant_lf,
+        })
     }
 
     /// Retrieves the current output color profile, if available.

@@ -7,10 +7,24 @@ use crate::{
     api::{JxlDecoderOptions, JxlOutputBuffer},
     bit_reader::BitReader,
     error::Result,
-    frame::Section,
+    frame::{Frame, Section},
+    headers::frame_header::FrameType,
 };
 
 use super::CodestreamParser;
+
+/// Capture the first regular VarDCT frame's quantizer into `slot` (idempotent —
+/// only the first regular frame is kept). Called right after `decode_lf_global`,
+/// once `frame.lf_global` is populated. Skips LF/progressive helper frames and
+/// previews, and Modular (lossless) frames (whose `vardct_quantizer` is `None`).
+fn capture_first_vardct_quantizer(slot: &mut Option<(u32, u32)>, frame: &Frame) {
+    if slot.is_none()
+        && frame.header().frame_type == FrameType::RegularFrame
+        && let Some(q) = frame.vardct_quantizer()
+    {
+        *slot = Some(q);
+    }
+}
 
 pub(super) struct SectionState {
     lf_global_done: bool,
@@ -98,6 +112,7 @@ impl CodestreamParser {
                 assert!(self.sections.is_empty());
                 let mut br = BitReader::new_padded(&sec.data, sec.len)?;
                 frame.decode_lf_global(&mut br)?;
+                capture_first_vardct_quantizer(&mut self.first_vardct_quantizer, frame);
                 frame.decode_lf_group(0, &mut br)?;
                 frame.decode_hf_global(&mut br)?;
                 frame.prepare_render_pipeline(
@@ -126,6 +141,7 @@ impl CodestreamParser {
                         &lf_global.data,
                         lf_global.len,
                     )?)?;
+                    capture_first_vardct_quantizer(&mut self.first_vardct_quantizer, frame);
                     self.section_state.lf_global_done = true;
                     processed_section = true;
                 }

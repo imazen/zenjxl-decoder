@@ -84,6 +84,12 @@ pub(super) struct CodestreamParser {
 
     pub(super) has_more_frames: bool,
 
+    /// `(global_scale, quant_lf)` of the first regular VarDCT frame, captured
+    /// when its `LfGlobal` is decoded and kept for the decoder's lifetime so a
+    /// probe can recover the main image's encode quality. `None` for Modular
+    /// (lossless) files or before the first regular frame is decoded.
+    pub(super) first_vardct_quantizer: Option<(u32, u32)>,
+
     header_needed_bytes: Option<u64>,
 
     #[cfg(test)]
@@ -118,6 +124,7 @@ impl CodestreamParser {
             frame_header: None,
             toc_parser: None,
             frame: None,
+            first_vardct_quantizer: None,
             non_section_buf: SmallBuffer::new(4096),
             non_section_bit_offset: 0,
             sections: VecDeque::new(),

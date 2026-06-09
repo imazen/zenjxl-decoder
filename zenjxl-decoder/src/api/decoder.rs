@@ -10,7 +10,7 @@ use super::{
 #[cfg(test)]
 use crate::frame::Frame;
 use crate::{
-    api::JxlFrameHeader,
+    api::{JxlFrameHeader, VardctQuantizer},
     container::{frame_index::FrameIndexBox, gain_map::GainMapBundle},
     error::Result,
 };
@@ -73,6 +73,18 @@ impl<S: JxlState> JxlDecoder<S> {
     /// byte offsets, timestamps, and frame counts.
     pub fn frame_index(&self) -> Option<&FrameIndexBox> {
         self.inner.frame_index()
+    }
+
+    /// Returns the first regular VarDCT frame's quantizer (`global_scale`,
+    /// `quant_lf`), if this is a lossy VarDCT image and that frame's `LfGlobal`
+    /// section has been decoded.
+    ///
+    /// VarDCT quality is governed by `global_scale`. Returns `None` for Modular
+    /// (lossless) images, or before the first regular frame has been reached —
+    /// e.g. immediately after image info. To recover it from a header probe,
+    /// advance one frame via `skip_frame`.
+    pub fn vardct_quantizer(&self) -> Option<VardctQuantizer> {
+        self.inner.vardct_quantizer()
     }
 
     /// Returns a reference to the parsed gain map bundle, if the file contained
@@ -288,6 +300,75 @@ pub(crate) mod tests {
             .unwrap();
             Ok(())
         });
+    }
+
+    /// Fully decode a (color-only) fixture and return the live decoder so the
+    /// public `vardct_quantizer()` accessor can be exercised post-decode.
+    fn quant_of(path: &str) -> Option<VardctQuantizer> {
+        let data = std::fs::read(path).unwrap();
+        let mut input: &[u8] = &data;
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_memory_bytes = None;
+        let decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut dwi = match decoder.process(&mut input).unwrap() {
+            ProcessingResult::Complete { result } => result,
+            ProcessingResult::NeedsMoreInput { .. } => panic!("need more input for header"),
+        };
+        let (w, h) = dwi.basic_info().size;
+        let cpf = dwi.current_pixel_format().clone();
+        assert!(
+            cpf.extra_channel_format.iter().all(|e| e.is_none()),
+            "fixture must be color-only for this test"
+        );
+        let fmt = JxlPixelFormat {
+            color_type: cpf.color_type,
+            color_data_format: Some(JxlDataFormat::f32()),
+            extra_channel_format: cpf.extra_channel_format.iter().map(|_| None).collect(),
+        };
+        dwi.set_pixel_format(fmt.clone());
+        let n = fmt.color_type.samples_per_pixel();
+        loop {
+            let mut img = Image::new_with_value((w * n, h), 0.0f32).unwrap();
+            let mut bufs = vec![JxlOutputBuffer::from_image_rect_mut(
+                img.get_rect_mut(Rect {
+                    origin: (0, 0),
+                    size: img.size(),
+                })
+                .into_raw(),
+            )];
+            // WithImageInfo -> WithFrameInfo parses the next frame's header/TOC
+            // (no pixel buffers needed); the subsequent WithFrameInfo step
+            // decodes the frame body and is where the quantizer gets stashed.
+            let dfi = match dwi.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => result,
+                ProcessingResult::NeedsMoreInput { .. } => panic!("need more input (frame info)"),
+            };
+            dwi = match dfi.process(&mut input, &mut bufs).unwrap() {
+                ProcessingResult::Complete { result } => result,
+                ProcessingResult::NeedsMoreInput { .. } => panic!("need more input (frame data)"),
+            };
+            if !dwi.has_more_frames() {
+                break;
+            }
+        }
+        dwi.vardct_quantizer()
+    }
+
+    #[test]
+    fn vardct_quantizer_lossy_exposed() {
+        let q = quant_of("resources/test/green_queen_vardct_e3.jxl")
+            .expect("VarDCT image should expose a quantizer");
+        assert!(q.global_scale >= 1, "global_scale must be >= 1");
+        assert!(q.quant_lf >= 1, "quant_lf must be >= 1");
+        assert!(q.inv_global_scale() > 0.0);
+    }
+
+    #[test]
+    fn vardct_quantizer_none_for_lossless() {
+        assert!(
+            quant_of("resources/test/3x3_srgb_lossless.jxl").is_none(),
+            "lossless/modular image must have no VarDCT quantizer"
+        );
     }
 
     #[allow(clippy::type_complexity)]

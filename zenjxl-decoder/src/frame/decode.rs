@@ -421,6 +421,15 @@ impl Frame {
         Ok(())
     }
 
+    /// The VarDCT quantizer `(global_scale, quant_lf)` for this frame, if it is
+    /// a VarDCT frame whose `LfGlobal` section has been decoded. The codestream
+    /// parser persists the first regular frame's value so a probe can recover
+    /// the main image's encode quality without rendering pixels.
+    pub(crate) fn vardct_quantizer(&self) -> Option<(u32, u32)> {
+        let qp = self.lf_global.as_ref()?.quant_params.as_ref()?;
+        Some((qp.global_scale, qp.quant_lf))
+    }
+
     #[instrument(level = "debug", skip(self, br))]
     pub fn decode_lf_group(&mut self, group: usize, br: &mut BitReader) -> Result<()> {
         debug!(section_size = br.total_bits_available());

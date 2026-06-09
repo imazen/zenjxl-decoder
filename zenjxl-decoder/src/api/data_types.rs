@@ -49,6 +49,31 @@ impl JxlColorType {
     }
 }
 
+/// VarDCT quantizer fields recovered from a JPEG XL frame's `LfGlobal`
+/// section (the lossy quantization state).
+///
+/// These are the raw bitstream values. Mapping them to an encoder "quality"
+/// or Butteraugli distance is encoder-specific and approximate, so it lives in
+/// higher-level crates rather than the decoder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VardctQuantizer {
+    /// The frame's `global_scale` field. Larger = coarser quantization
+    /// (lower quality). Always >= 1.
+    pub global_scale: u32,
+    /// The frame's `quant_lf` field — the low-frequency quantization
+    /// multiplier. Always >= 1.
+    pub quant_lf: u32,
+}
+
+impl VardctQuantizer {
+    /// `2^16 / global_scale`: the inverse global scale. Larger = finer
+    /// quantization (higher quality). This is the objective dequantization
+    /// factor, independent of any encoder's quality mapping.
+    pub fn inv_global_scale(&self) -> f32 {
+        crate::frame::quantizer::GLOBAL_SCALE_DENOM as f32 / self.global_scale as f32
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Endianness {
     LittleEndian,
