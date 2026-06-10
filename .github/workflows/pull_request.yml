@@ -15,6 +15,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # The coverage job runs the whole test suite via cargo llvm-cov; skip the
+  # public-API snapshot regen there (ci.yml's clippy job runs the check).
+  ZEN_API_DOC: off
 
 jobs:
   source_checks:
