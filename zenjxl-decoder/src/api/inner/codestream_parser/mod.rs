@@ -372,9 +372,22 @@ impl CodestreamParser {
                 // is still set when we reach this header-reading branch, but a
                 // malformed/edge input (e.g. skipping a final preview frame, or an empty
                 // follow-up `process()` call) can re-enter here with it cleared. There is
-                // nothing left to read, so return gracefully instead of panicking on
-                // untrusted input.
+                // no more image data to read, so return gracefully instead of panicking
+                // on untrusted input.
                 if !self.has_more_frames {
+                    // The codestream is complete, but metadata boxes (`jhgm`
+                    // gain map, `Exif`, `xml `, `brob`) may trail it in the
+                    // container — jxl-encoder's `append_gain_map_bundle`
+                    // writes `signature + ftyp + jxlc + jhgm` (#20). Drive
+                    // the box parser through whatever input is available so
+                    // they are captured. `OutOfBounds` is the clean EOF after
+                    // the last box — or an incomplete trailing box, whose
+                    // parsing resumes if `process` is called again with more
+                    // input.
+                    match box_parser.get_more_codestream(input) {
+                        Ok(_) | Err(Error::OutOfBounds(_)) => {}
+                        Err(e) => return Err(e),
+                    }
                     return Ok(());
                 }
 

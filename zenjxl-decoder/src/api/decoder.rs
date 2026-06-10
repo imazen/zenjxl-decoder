@@ -93,6 +93,10 @@ impl<S: JxlState> JxlDecoder<S> {
     /// The gain map codestream is a bare JXL codestream that can be decoded
     /// with the same decoder. The ISO 21496-1 metadata blob is stored as raw
     /// bytes for the caller to parse.
+    ///
+    /// Note: the `jhgm` box may appear after the codestream in the container.
+    /// To capture trailing boxes, call `process` once more after the last
+    /// frame has been decoded — it drains the remaining container boxes.
     pub fn gain_map(&self) -> Option<&GainMapBundle> {
         self.inner.gain_map()
     }
@@ -110,7 +114,8 @@ impl<S: JxlState> JxlDecoder<S> {
     /// Returns `None` for bare codestreams or files without an `Exif` box.
     ///
     /// Note: the `Exif` box may appear after the codestream in the container.
-    /// Call this after decoding at least one frame for the most complete results.
+    /// To capture trailing boxes, call `process` once more after the last
+    /// frame has been decoded — it drains the remaining container boxes.
     pub fn exif(&self) -> Option<&[u8]> {
         self.inner.exif()
     }
@@ -125,7 +130,8 @@ impl<S: JxlState> JxlDecoder<S> {
     /// Returns `None` for bare codestreams or files without an `xml ` box.
     ///
     /// Note: the `xml ` box may appear after the codestream in the container.
-    /// Call this after decoding at least one frame for the most complete results.
+    /// To capture trailing boxes, call `process` once more after the last
+    /// frame has been decoded — it drains the remaining container boxes.
     pub fn xmp(&self) -> Option<&[u8]> {
         self.inner.xmp()
     }

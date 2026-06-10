@@ -10,6 +10,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+### Fixed
+- `decode()` / `decode_with()` now capture `jhgm` (gain map), `Exif`, and
+  `xml ` boxes that follow the codestream — the layout jxl-encoder's
+  `append_gain_map_bundle` writes — instead of returning `None` for them
+  (closes #20). After the last frame, the decoder drains the remaining
+  container boxes; the low-level API gets the same drain via one extra
+  `process()` call. Boxes trailing a multi-frame (animation) codestream are
+  still only reachable through the low-level API.
+
 ## [0.3.9] - 2026-06-09
 
 ### Added

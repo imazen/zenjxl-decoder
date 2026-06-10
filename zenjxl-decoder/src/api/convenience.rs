@@ -51,12 +51,24 @@ pub struct JxlImage {
     /// The color profile embedded in the file.
     pub embedded_profile: JxlColorProfile,
     /// HDR gain map bundle from a `jhgm` container box, if present.
+    ///
+    /// Captured whether the box precedes or follows the codestream. For
+    /// animations, boxes that follow the codestream are not read (decoding
+    /// stops after the first frame).
     pub gain_map: Option<GainMapBundle>,
     /// Raw EXIF data from the `Exif` container box (TIFF header offset stripped).
     /// `None` for bare codestreams or files without an `Exif` box.
+    ///
+    /// Captured whether the box precedes or follows the codestream. For
+    /// animations, boxes that follow the codestream are not read (decoding
+    /// stops after the first frame).
     pub exif: Option<Vec<u8>>,
     /// Raw XMP data from the `xml ` container box.
     /// `None` for bare codestreams or files without an `xml ` box.
+    ///
+    /// Captured whether the box precedes or follows the codestream. For
+    /// animations, boxes that follow the codestream are not read (decoding
+    /// stops after the first frame).
     pub xmp: Option<Vec<u8>>,
 }
 
@@ -191,14 +203,23 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
         }
     };
 
-    // Extract the gain map bundle if the box parser encountered a jhgm box.
-    // Note: if the jhgm box follows the codestream, it may not have been read
-    // yet. Use the low-level JxlDecoder API to access trailing boxes.
-    let gain_map = decoder.take_gain_map();
-
-    // Extract EXIF and XMP metadata from container boxes.
-    let exif = decoder.take_exif();
-    let xmp = decoder.take_xmp();
+    // Phase 4: drain trailing container boxes, then extract box metadata.
+    // The jhgm (gain map), Exif, and xml boxes may follow the codestream —
+    // jxl-encoder's `append_gain_map_bundle` writes `signature + ftyp + jxlc
+    // + jhgm` — and the box parser only reaches them by processing past the
+    // final frame (#20). Animations stop after the first frame, so boxes
+    // trailing a multi-frame codestream stay unread; use the low-level
+    // [`JxlDecoder`] API to collect those.
+    let (gain_map, exif, xmp) = if !decoder.has_more_frames() && !input.is_empty() {
+        match decoder.process(&mut input)? {
+            ProcessingResult::Complete { mut result } => take_box_metadata(&mut result),
+            ProcessingResult::NeedsMoreInput { mut fallback, .. } => {
+                take_box_metadata(&mut fallback)
+            }
+        }
+    } else {
+        take_box_metadata(&mut decoder)
+    };
 
     // Copy to tightly packed Vec<u8>
     let total_bytes = row_bytes * height;
@@ -220,6 +241,18 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> 
         exif,
         xmp,
     })
+}
+
+/// Takes the gain map, EXIF, and XMP captured by the box parser, in one call
+/// usable from any decoder state.
+fn take_box_metadata<S: states::JxlState>(
+    decoder: &mut JxlDecoder<S>,
+) -> (Option<GainMapBundle>, Option<Vec<u8>>, Option<Vec<u8>>) {
+    (
+        decoder.take_gain_map(),
+        decoder.take_exif(),
+        decoder.take_xmp(),
+    )
 }
 
 /// Reconstruct the original JPEG bytes from a JXL file that carries a JBRD

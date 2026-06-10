@@ -98,4 +98,115 @@ mod tests {
             image.width * image.height * image.channels
         );
     }
+
+    /// Build a JXL container: signature + ftyp + leading boxes + jxlc + trailing boxes.
+    fn build_container(
+        codestream: &[u8],
+        boxes_before: &[(&[u8; 4], &[u8])],
+        boxes_after: &[(&[u8; 4], &[u8])],
+    ) -> Vec<u8> {
+        fn push_box(out: &mut Vec<u8>, ty: &[u8; 4], payload: &[u8]) {
+            out.extend_from_slice(&u32::try_from(8 + payload.len()).unwrap().to_be_bytes());
+            out.extend_from_slice(ty);
+            out.extend_from_slice(payload);
+        }
+        let mut out = Vec::new();
+        // Container signature box + ftyp box (`jxl ` brand), per ISO/IEC 18181-2.
+        out.extend_from_slice(&[0, 0, 0, 0xC, b'J', b'X', b'L', b' ', 0xD, 0xA, 0x87, 0xA]);
+        push_box(&mut out, b"ftyp", b"jxl \0\0\0\0jxl ");
+        for (ty, payload) in boxes_before {
+            push_box(&mut out, ty, payload);
+        }
+        push_box(&mut out, b"jxlc", codestream);
+        for (ty, payload) in boxes_after {
+            push_box(&mut out, ty, payload);
+        }
+        out
+    }
+
+    fn test_gain_map_bundle(codestream: &[u8]) -> crate::container::gain_map::GainMapBundle {
+        crate::container::gain_map::GainMapBundle {
+            metadata: b"ISO21496-1 metadata blob".to_vec(),
+            color_encoding: None,
+            alt_icc_compressed: Some(vec![0xCC; 64]),
+            gain_map_codestream: codestream.to_vec(),
+        }
+    }
+
+    const TEST_EXIF_TIFF: &[u8] = b"II*\x00test-exif-payload";
+    const TEST_XMP: &[u8] = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>";
+
+    /// Exif box payload: 4-byte TIFF header offset prefix + TIFF data.
+    fn test_exif_payload() -> Vec<u8> {
+        let mut payload = vec![0, 0, 0, 0];
+        payload.extend_from_slice(TEST_EXIF_TIFF);
+        payload
+    }
+
+    /// #20: jhgm / Exif / xml boxes that FOLLOW the codestream — the layout
+    /// jxl-encoder's `append_gain_map_bundle` writes — must be captured by
+    /// `decode`, and the pixels must match the bare-codestream decode.
+    #[test]
+    fn decode_captures_trailing_boxes() {
+        let codestream = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let bundle = test_gain_map_bundle(&codestream);
+        let jhgm = bundle.serialize();
+        let exif = test_exif_payload();
+
+        let file = build_container(
+            &codestream,
+            &[],
+            &[
+                (b"jhgm", jhgm.as_slice()),
+                (b"Exif", exif.as_slice()),
+                (b"xml ", TEST_XMP),
+            ],
+        );
+
+        let image = decode(&file).unwrap();
+        let gm = image.gain_map.expect("trailing jhgm box must be captured");
+        assert_eq!(gm, bundle);
+        assert_eq!(image.exif.as_deref(), Some(TEST_EXIF_TIFF));
+        assert_eq!(image.xmp.as_deref(), Some(TEST_XMP));
+
+        let bare = decode(&codestream).unwrap();
+        assert_eq!(image.data, bare.data);
+    }
+
+    /// Boxes that precede the codestream were already captured before #20;
+    /// guard that the trailing-box drain didn't disturb that path.
+    #[test]
+    fn decode_captures_leading_boxes() {
+        let codestream = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let bundle = test_gain_map_bundle(&codestream);
+        let jhgm = bundle.serialize();
+        let exif = test_exif_payload();
+
+        let file = build_container(
+            &codestream,
+            &[
+                (b"jhgm", jhgm.as_slice()),
+                (b"Exif", exif.as_slice()),
+                (b"xml ", TEST_XMP),
+            ],
+            &[],
+        );
+
+        let image = decode(&file).unwrap();
+        assert_eq!(image.gain_map, Some(bundle));
+        assert_eq!(image.exif.as_deref(), Some(TEST_EXIF_TIFF));
+        assert_eq!(image.xmp.as_deref(), Some(TEST_XMP));
+    }
+
+    /// A bare codestream followed by junk bytes must still decode — the
+    /// trailing-box drain only engages for containers.
+    #[test]
+    fn decode_bare_codestream_ignores_trailing_bytes() {
+        let mut data = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let bare = decode(&data).unwrap();
+        data.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        let image = decode(&data).unwrap();
+        assert_eq!(image.data, bare.data);
+        assert!(image.gain_map.is_none());
+    }
 }
