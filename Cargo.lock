@@ -2140,7 +2140,7 @@ dependencies = [
 
 [[package]]
 name = "zenjxl-decoder"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "aligned-vec",
  "almost-enough",
@@ -2174,7 +2174,7 @@ dependencies = [
 
 [[package]]
 name = "zenjxl-decoder-cli"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "bytemuck",

@@ -2030,6 +2030,15 @@ impl Frame {
                     (false, None) => &[0, 1, 2],
                     (false, Some(c)) => &[0, 1, 2, c],
                 };
+            // `output_buffer_index` walks the PACKED position in the caller's
+            // api buffer list — color first (if requested), then each
+            // *requested* (`Some`) extra channel in order. This must match
+            // `num_api_buffers` above and the packed buffer Vec built at decode
+            // time. The previous absolute extra-channel index (`1 + i`) desynced
+            // from the packed buffers whenever an extra channel was unrequested
+            // (`None`, e.g. alpha folded into color) or color itself was absent,
+            // indexing past the end of `buffers` — the spot-colour decode panic.
+            let mut output_buffer_index = 0usize;
             if let Some(df) = &pixel_format.color_data_format {
                 // Add premultiply stage if needed (before conversion to output format)
                 if should_premultiply && let Some(alpha_channel) = alpha_in_color {
@@ -2075,11 +2084,12 @@ impl Frame {
                 pipeline = pipeline.add_save_stage(
                     color_source_channels,
                     save_orientation,
-                    0,
+                    output_buffer_index,
                     pixel_format.color_type,
                     *df,
                     fill_opaque_alpha,
                 );
+                output_buffer_index += 1;
             }
             for i in 0..frame_header.num_extra_channels as usize {
                 if let Some(df) = &pixel_format.extra_channel_format[i] {
@@ -2088,11 +2098,12 @@ impl Frame {
                     pipeline = pipeline.add_save_stage(
                         &[3 + i],
                         save_orientation,
-                        1 + i,
+                        output_buffer_index,
                         JxlColorType::Grayscale,
                         *df,
                         false,
                     );
+                    output_buffer_index += 1;
                 }
             }
         }

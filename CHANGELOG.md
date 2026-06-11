@@ -10,6 +10,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+## [0.3.10] - 2026-06-11
+
 ### Added
 - `JxlDecoderOptions::adjust_orientation` is now load-bearing in the render
   pipeline. When `true` (the default, "Correct") the stored EXIF/container
@@ -31,6 +33,17 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   container boxes; the low-level API gets the same drain via one extra
   `process()` call. Boxes trailing a multi-frame (animation) codestream are
   still only reachable through the low-level API.
+- Spot-colour / extra-channel images (e.g. the `spot.jxl` conformance image) no
+  longer panic in the low-memory render pipeline. The user-output save-stage
+  output-buffer index was the absolute extra-channel index (`1 + i`), but the
+  caller's output-buffer list is *packed* — one slot per *requested* channel,
+  with `None` extra channels (e.g. alpha folded into interleaved colour output)
+  skipped. A `None` gap before a requested extra channel made the absolute index
+  overshoot the packed buffer Vec, panicking ("index out of bounds") in
+  `check_buffer_sizes`. The index is now a packed running counter matching
+  `num_api_buffers` (and upstream jxl-rs's `save_idx`). Regression test:
+  `zenjxl-decoder-cli/tests/spot_low_memory_regression.rs`. (fork-introduced
+  regression; upstream jxl-rs is unaffected)
 
 ## [0.3.9] - 2026-06-09
 
