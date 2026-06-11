@@ -1,0 +1,42 @@
+# zenjxl-decoder public API — additions from non-default features
+# features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)         1
+#   free functions                              5
+#   inherent methods                            4
+#   enum variants                               2
+#   trait roster entries (type × trait)         3
+#   auto-trait-complete types                   1
+#
+# per-module pub lines:
+#   (root)                            3
+#   api                               9
+
+## items (10 lines)
+
+pub api::Error::InvalidJbrd(alloc::string::String)
+pub fn api::JxlDecoder<S>::take_jpeg_reconstruction(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn api::JxlDecoderInner::take_jpeg_reconstruction(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub unsafe fn api::JxlOutputBuffer<'a>::new_from_ptr(*mut core::mem::maybe_uninit::MaybeUninit<u8>, usize, usize, usize) -> Self
+pub struct api::MoxCms
+pub fn api::MoxCms::new() -> Self
+pub fn api::OwnedRawImage::prefault_parallel(&mut self)
+pub fn api::print_profile_report()
+pub fn reconstruct_jpeg(&[u8]) -> api::Result<core::option::Option<alloc::vec::Vec<u8>>> [also: api]
+pub fn reconstruct_jpeg_with(&[u8], api::JxlDecoderOptions) -> api::Result<core::option::Option<alloc::vec::Vec<u8>>> [also: api]
+
+## trait impls (1 types)
+
+api::MoxCms: Clone, Default, api::JxlCms
+
+## auto traits
+
+1 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

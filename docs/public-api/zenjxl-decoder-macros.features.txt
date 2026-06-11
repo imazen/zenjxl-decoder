@@ -1,0 +1,19 @@
+# zenjxl-decoder-macros public API — additions from non-default features
+# features: test
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   enum variants                               1
+#
+# per-module pub lines:
+#   (root)                            1
+
+## items (1 lines)
+
+pub proc macro for_each_test_file!()

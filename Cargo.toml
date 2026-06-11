@@ -11,6 +11,10 @@ codegen-units = 1
 
 [workspace]
 members = ["zenjxl-decoder", "zenjxl-decoder-cli", "zenjxl-decoder-macros", "zenjxl-decoder-simd"]
+# `apidoc/` is the CI-free public-API snapshot runner: excluded so plain
+# `cargo test` and every CI job never compile its dependency tree or run
+# rustdoc. Regenerate via `just api-doc`.
+exclude = ["apidoc"]
 resolver = "2"
 
 [workspace.lints.clippy]

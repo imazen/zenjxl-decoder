@@ -1,0 +1,42 @@
+# zenjxl-decoder-simd public API — additions from non-default features
+# features: all-simd,avx,avx512,neon,sse42,wasm128
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)         3
+#   inherent methods                            8
+#   trait roster entries (type × trait)        12
+#   auto-trait-complete types                   3
+#
+# per-module pub lines:
+#   (root)                           11
+
+## items (11 lines)
+
+pub struct Avx512Descriptor(_)
+pub fn Avx512Descriptor::as_avx(&self) -> AvxDescriptor
+pub fn Avx512Descriptor::from_token(archmage::tokens::generated::x86::X64V4Token) -> Self
+pub fn Avx512Descriptor::token(&self) -> archmage::tokens::generated::x86::X64V4Token
+pub struct AvxDescriptor(_)
+pub fn AvxDescriptor::as_sse42(&self) -> Sse42Descriptor
+pub fn AvxDescriptor::from_token(archmage::tokens::generated::x86::X64V3Token) -> Self
+pub fn AvxDescriptor::token(&self) -> archmage::tokens::generated::x86::X64V3Token
+pub struct Sse42Descriptor(_)
+pub fn Sse42Descriptor::from_token(archmage::tokens::generated::x86::X64V2Token) -> Self
+pub fn Sse42Descriptor::token(&self) -> archmage::tokens::generated::x86::X64V2Token
+
+## trait impls (3 types)
+
+Avx512Descriptor: Clone, Copy, Debug, SimdDescriptor
+AvxDescriptor: Clone, Copy, Debug, SimdDescriptor
+Sse42Descriptor: Clone, Copy, Debug, SimdDescriptor
+
+## auto traits
+
+3 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

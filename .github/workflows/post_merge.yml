@@ -14,9 +14,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # This job runs the whole test suite; skip the public-API snapshot regen
-  # (ci.yml's clippy job runs the check).
-  ZEN_API_DOC: off
 
 # Superseded runs only waste runner queue — particularly the macOS
 # jobs, which wait on GitHub's scarcest pool. Only the newest
