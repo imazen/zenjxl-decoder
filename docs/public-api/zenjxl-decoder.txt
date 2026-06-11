@@ -5,7 +5,7 @@
 # all-features section.
 # DO NOT EDIT BY HAND — commit regenerated changes together with the code.
 
-## default features (1177 items)
+## default features (1179 items)
 
 pub mod zenjxl_decoder
 pub mod zenjxl_decoder::api
@@ -733,7 +733,9 @@ impl core::panic::unwind_safe::UnwindSafe for zenjxl_decoder::api::JxlAnimation
 #[non_exhaustive] pub struct zenjxl_decoder::api::JxlBasicInfo
 pub zenjxl_decoder::api::JxlBasicInfo::animation: core::option::Option<zenjxl_decoder::api::JxlAnimation>
 pub zenjxl_decoder::api::JxlBasicInfo::bit_depth: zenjxl_decoder::api::JxlBitDepth
+pub zenjxl_decoder::api::JxlBasicInfo::coded_size: (usize, usize)
 pub zenjxl_decoder::api::JxlBasicInfo::extra_channels: alloc::vec::Vec<zenjxl_decoder::api::JxlExtraChannel>
+pub zenjxl_decoder::api::JxlBasicInfo::intrinsic_orientation: zenjxl_decoder::api::Orientation
 pub zenjxl_decoder::api::JxlBasicInfo::intrinsic_size: core::option::Option<(usize, usize)>
 pub zenjxl_decoder::api::JxlBasicInfo::orientation: zenjxl_decoder::api::Orientation
 pub zenjxl_decoder::api::JxlBasicInfo::preview_size: core::option::Option<(usize, usize)>
@@ -1185,7 +1187,7 @@ pub fn zenjxl_decoder::decode_with(&[u8], zenjxl_decoder::api::JxlDecoderOptions
 pub fn zenjxl_decoder::read_header(&[u8]) -> zenjxl_decoder::api::Result<zenjxl_decoder::api::JxlImageInfo>
 pub fn zenjxl_decoder::read_header_with(&[u8], zenjxl_decoder::api::JxlDecoderLimits) -> zenjxl_decoder::api::Result<zenjxl_decoder::api::JxlImageInfo>
 
-## all features except _* (1205 items)
+## all features except _* (1207 items)
 
 pub mod zenjxl_decoder
 pub mod zenjxl_decoder::api
@@ -1914,7 +1916,9 @@ impl core::panic::unwind_safe::UnwindSafe for zenjxl_decoder::api::JxlAnimation
 #[non_exhaustive] pub struct zenjxl_decoder::api::JxlBasicInfo
 pub zenjxl_decoder::api::JxlBasicInfo::animation: core::option::Option<zenjxl_decoder::api::JxlAnimation>
 pub zenjxl_decoder::api::JxlBasicInfo::bit_depth: zenjxl_decoder::api::JxlBitDepth
+pub zenjxl_decoder::api::JxlBasicInfo::coded_size: (usize, usize)
 pub zenjxl_decoder::api::JxlBasicInfo::extra_channels: alloc::vec::Vec<zenjxl_decoder::api::JxlExtraChannel>
+pub zenjxl_decoder::api::JxlBasicInfo::intrinsic_orientation: zenjxl_decoder::api::Orientation
 pub zenjxl_decoder::api::JxlBasicInfo::intrinsic_size: core::option::Option<(usize, usize)>
 pub zenjxl_decoder::api::JxlBasicInfo::orientation: zenjxl_decoder::api::Orientation
 pub zenjxl_decoder::api::JxlBasicInfo::preview_size: core::option::Option<(usize, usize)>

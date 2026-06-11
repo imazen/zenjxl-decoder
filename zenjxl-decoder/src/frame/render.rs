@@ -1405,6 +1405,18 @@ impl Frame {
         let num_channels = frame_header.num_extra_channels as usize + 3;
         let num_temp_channels = if frame_header.has_noise() { 3 } else { 0 };
         let metadata = &decoder_state.file_header.image_metadata;
+        // Orientation handed to the save stage. When `adjust_orientation` is set
+        // (the default), the save stage bakes the stored orientation into the
+        // output so the emitted image is upright. When it is cleared (Preserve
+        // mode), we pass `Identity` so the save stage performs no spatial
+        // transform: pixels are emitted in their stored (coded) orientation and
+        // dimensions, and the intrinsic orientation is reported on the basic
+        // info for a later baking stage to apply.
+        let save_orientation = if decoder_state.adjust_orientation {
+            metadata.orientation
+        } else {
+            Orientation::Identity
+        };
         let mut pipeline = RenderPipelineBuilder::<T>::new(
             num_channels + num_temp_channels,
             frame_header.size_upsampled(),
@@ -2062,7 +2074,7 @@ impl Frame {
                 }
                 pipeline = pipeline.add_save_stage(
                     color_source_channels,
-                    metadata.orientation,
+                    save_orientation,
                     0,
                     pixel_format.color_type,
                     *df,
@@ -2075,7 +2087,7 @@ impl Frame {
                     pipeline = Self::add_conversion_stages(pipeline, &[3 + i], *df, None);
                     pipeline = pipeline.add_save_stage(
                         &[3 + i],
-                        metadata.orientation,
+                        save_orientation,
                         1 + i,
                         JxlColorType::Grayscale,
                         *df,

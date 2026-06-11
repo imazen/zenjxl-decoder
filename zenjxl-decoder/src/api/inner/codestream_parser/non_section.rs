@@ -18,8 +18,8 @@ use crate::{
     error::{Error, Result},
     frame::{DecoderState, Frame, Section},
     headers::{
-        FileHeader, JxlHeader, color_encoding::ColorSpace, encodings::UnconditionalCoder,
-        frame_header::FrameHeader, toc::IncrementalTocReader,
+        FileHeader, JxlHeader, Orientation, color_encoding::ColorSpace,
+        encodings::UnconditionalCoder, frame_header::FrameHeader, toc::IncrementalTocReader,
     },
     icc::IncrementalIccReader,
     util::{MemoryTracker, NewWithCapacity},
@@ -47,6 +47,7 @@ pub(super) fn apply_decoder_options(
     state.render_spotcolors = decode_options.render_spot_colors;
     state.high_precision = decode_options.high_precision;
     state.premultiply_output = decode_options.premultiply_output;
+    state.adjust_orientation = decode_options.adjust_orientation;
     state.desired_intensity_target = decode_options.desired_intensity_target;
     state.embedded_color_profile = embedded_color_profile.clone();
     state.limits = decode_options.limits.clone();
@@ -108,12 +109,31 @@ impl CodestreamParser {
             }
             let data = &file_header.image_metadata;
             self.animation = data.animation.clone();
+            // The stored (coded) dimensions, before orientation is applied.
+            let coded_size = (xsize, ysize);
+            // The display dimensions, after the stored orientation is applied.
+            let display_size = if data.orientation.is_transposing() {
+                (ysize, xsize)
+            } else {
+                (xsize, ysize)
+            };
+            // When `adjust_orientation` is set (the default), the save stage
+            // bakes the stored orientation into the output: emitted pixels are
+            // upright (display dims, residual orientation Identity). When it is
+            // cleared (Preserve mode), pixels are emitted in their stored
+            // orientation (coded dims, residual orientation = stored), and the
+            // caller bakes it later. `intrinsic_orientation` always reports the
+            // stored value so re-encoders can re-tag correctly. The render
+            // pipeline's save-stage gating in `build_render_pipeline` mirrors
+            // this exactly via `DecoderState::adjust_orientation`.
+            let (output_size, residual_orientation) = if decode_options.adjust_orientation {
+                (display_size, Orientation::Identity)
+            } else {
+                (coded_size, data.orientation)
+            };
             self.basic_info = Some(JxlBasicInfo {
-                size: if data.orientation.is_transposing() {
-                    (ysize, xsize)
-                } else {
-                    (xsize, ysize)
-                },
+                size: output_size,
+                coded_size,
                 bit_depth: if data.bit_depth.floating_point_sample() {
                     JxlBitDepth::Float {
                         bits_per_sample: data.bit_depth.bits_per_sample(),
@@ -124,7 +144,8 @@ impl CodestreamParser {
                         bits_per_sample: data.bit_depth.bits_per_sample(),
                     }
                 },
-                orientation: data.orientation,
+                orientation: residual_orientation,
+                intrinsic_orientation: data.orientation,
                 extra_channels: data
                     .extra_channel_info
                     .iter()

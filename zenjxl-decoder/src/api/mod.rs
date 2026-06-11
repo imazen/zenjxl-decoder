@@ -96,9 +96,46 @@ pub struct ToneMapping {
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct JxlBasicInfo {
+    /// Dimensions of the pixel data the decoder will emit, in the order the
+    /// output buffer must be laid out (`(width, height)`).
+    ///
+    /// This depends on [`JxlDecoderOptions::adjust_orientation`]:
+    /// - When orientation is adjusted (the default, "Correct"), the stored
+    ///   orientation is baked into the output, so this is the *display* size
+    ///   (width/height are swapped relative to [`Self::coded_size`] for
+    ///   transposing orientations).
+    /// - When orientation adjustment is disabled ("Preserve"), pixels are
+    ///   emitted in their stored orientation, so this equals
+    ///   [`Self::coded_size`].
+    ///
+    /// Allocate output buffers against this size.
     pub size: (usize, usize),
+    /// The stored (coded) dimensions of the image as written in the codestream,
+    /// `(width, height)`, *before* any orientation is applied. Unaffected by
+    /// [`JxlDecoderOptions::adjust_orientation`]. For transposing orientations
+    /// this differs from the display size; see [`Self::size`].
+    pub coded_size: (usize, usize),
     pub bit_depth: JxlBitDepth,
+    /// Orientation of the pixels the decoder emits, i.e. the residual transform
+    /// a caller must still apply to obtain an upright image.
+    ///
+    /// This depends on [`JxlDecoderOptions::adjust_orientation`]:
+    /// - When orientation is adjusted (the default, "Correct"), the stored
+    ///   orientation has already been baked into the output pixels, so this is
+    ///   [`Orientation::Identity`].
+    /// - When orientation adjustment is disabled ("Preserve"), this is the
+    ///   image's stored orientation (equal to [`Self::intrinsic_orientation`]),
+    ///   which the caller should bake into the [`Self::coded_size`] pixels to
+    ///   display them upright.
     pub orientation: Orientation,
+    /// The image's intrinsic (stored) EXIF/container orientation as written in
+    /// the codestream, regardless of [`JxlDecoderOptions::adjust_orientation`].
+    ///
+    /// Use this to re-tag re-encoded output or to decide how to bake the stored
+    /// orientation. In "Correct" mode the emitted pixels are already upright
+    /// even though this reports a non-Identity value; in "Preserve" mode this
+    /// equals [`Self::orientation`].
+    pub intrinsic_orientation: Orientation,
     pub extra_channels: Vec<JxlExtraChannel>,
     pub animation: Option<JxlAnimation>,
     pub uses_original_profile: bool,

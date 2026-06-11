@@ -23,6 +23,7 @@ pub mod hdr;
 #[cfg(feature = "jpeg")]
 pub mod jpeg_reconstruction;
 pub mod oom_regression;
+pub mod orientation_preserve;
 pub mod parity;
 pub mod regression_known_bugs;
 pub mod streaming;

@@ -123,6 +123,14 @@ pub struct DecoderState {
     pub nonvisible_frame_index: usize,
     pub high_precision: bool,
     pub premultiply_output: bool,
+    /// Whether to bake the image's stored EXIF/container orientation into the
+    /// output pixels (the save stage applies the orientation transform so the
+    /// emitted image is upright). When `false`, the orientation transform is
+    /// skipped: pixels are emitted in their stored (coded) orientation and the
+    /// caller is expected to read the intrinsic orientation from the basic info
+    /// and bake it later if desired. Mirrors
+    /// [`crate::api::JxlDecoderOptions::adjust_orientation`].
+    pub adjust_orientation: bool,
     /// The embedded color profile from the JXL file (ICC or simple color encoding).
     /// This is needed for CMS-based color space conversion (e.g., CMYK → RGB).
     pub embedded_color_profile: Option<JxlColorProfile>,
@@ -159,6 +167,7 @@ impl DecoderState {
             nonvisible_frame_index: 0,
             high_precision: false,
             premultiply_output: false,
+            adjust_orientation: true,
             desired_intensity_target: None,
             embedded_color_profile: None,
             limits: crate::api::JxlDecoderLimits::default(),
