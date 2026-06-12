@@ -56,6 +56,25 @@ pub(super) fn apply_decoder_options(
     state.parallel = decode_options.parallel;
 }
 
+/// Whether `frame_header` describes progressive content for the purposes of the
+/// [`JxlDecoderOptions::reject_progressive`](crate::api::JxlDecoderOptions::reject_progressive)
+/// gate.
+///
+/// A frame is progressive when it is multi-pass (`num_passes > 1`) or it is an
+/// `LFFrame` (a low-frequency pre-pass referenced by a later frame). Patch/blend
+/// dictionary frames (`ReferenceOnly`) and `SkipProgressive` frames are
+/// explicitly **excluded** — real fixtures legitimately begin with a
+/// `ReferenceOnly` frame, and `SkipProgressive` frames are themselves the
+/// non-progressive variant — so neither trips the gate.
+fn frame_is_progressive(frame_header: &FrameHeader) -> bool {
+    use crate::headers::frame_header::FrameType;
+    match frame_header.frame_type {
+        FrameType::ReferenceOnly | FrameType::SkipProgressive => false,
+        FrameType::LFFrame => true,
+        FrameType::RegularFrame => frame_header.passes.num_passes > 1,
+    }
+}
+
 fn check_size_limit(
     limits: &crate::api::JxlDecoderLimits,
     (xs, ys): (usize, usize),
@@ -306,6 +325,26 @@ impl CodestreamParser {
                 frame_header.size(),
                 frame_header.num_extra_channels as usize,
             )?;
+
+            // Reject progressive content before decoding any of its passes, when
+            // the caller's policy forbids it. The preview frame (parsed while
+            // `!self.preview_done` and the codestream declares a preview) is
+            // skipped so a previewable image is not rejected for its preview;
+            // the first *real* (non-preview) frame is then checked. Because
+            // `frame_is_progressive` excludes `ReferenceOnly` dictionary frames,
+            // a codestream that opens with a patch/blend dictionary frame is not
+            // rejected for that frame — the gate catches the main frame that
+            // follows it.
+            if decode_options.reject_progressive {
+                let is_preview_frame = !self.preview_done
+                    && self
+                        .basic_info
+                        .as_ref()
+                        .is_some_and(|info| info.preview_size.is_some());
+                if !is_preview_frame && frame_is_progressive(&frame_header) {
+                    return Err(Error::ProgressiveRejected);
+                }
+            }
 
             // Initialize storage buffers for available sections.
             self.lf_global_section = None;

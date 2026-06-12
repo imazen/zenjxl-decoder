@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 607 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 22 lines (22 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 609 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 22 lines (22 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -16,8 +16,8 @@
 #   pub macros                                  1
 #   free functions                             10
 #   inherent methods                          160
-#   struct fields                             115
-#   enum variants                             208
+#   struct fields                             116
+#   enum variants                             209
 #   re-exports                                  2
 #   trait roster entries (type × trait)       137
 #   auto-trait-complete types                  33
@@ -25,9 +25,9 @@
 #
 # per-module pub lines:
 #   (root)                            8
-#   api                             542
+#   api                             544
 
-## items (546 lines)
+## items (548 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -176,6 +176,7 @@ pub api::Error::PatchesUnsupportedMixedUpsampling(u32, u32)
 pub api::Error::PipelineChannelTypeMismatch(alloc::string::String, usize, api::DataTypeTag, api::DataTypeTag)
 pub api::Error::PipelineInvalidStageAfterExtend(alloc::string::String)
 pub api::Error::PointListEmpty
+pub api::Error::ProgressiveRejected
 pub api::Error::SaveDifferentDownsample((u8, u8), (u8, u8))
 pub api::Error::SectionTooShort
 pub api::Error::SizeOverflow
@@ -467,6 +468,7 @@ pub api::JxlDecoderOptions::limits: api::JxlDecoderLimits
 pub api::JxlDecoderOptions::parallel: bool
 pub api::JxlDecoderOptions::premultiply_output: bool
 pub api::JxlDecoderOptions::progressive_mode: api::JxlProgressiveMode
+pub api::JxlDecoderOptions::reject_progressive: bool
 pub api::JxlDecoderOptions::render_spot_colors: bool
 pub api::JxlDecoderOptions::skip_preview: bool
 pub api::JxlDecoderOptions::stop: alloc::sync::Arc<dyn enough::Stop>

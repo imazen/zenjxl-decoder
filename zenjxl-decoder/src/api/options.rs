@@ -126,6 +126,18 @@ pub enum JxlProgressiveMode {
 #[non_exhaustive]
 pub struct JxlDecoderOptions {
     pub adjust_orientation: bool,
+    /// Reject progressive content during frame decode.
+    ///
+    /// When `true`, decode fails as soon as a progressive frame header
+    /// (multi-pass or LF frame) is seen — before decoding its passes — for
+    /// untrusted-input policies that forbid progressive content. A frame counts
+    /// as progressive when its header has `num_passes > 1` or its frame type is
+    /// `LFFrame`; patch/blend dictionary frames (`ReferenceOnly`) and
+    /// `SkipProgressive` frames do **not** trip the gate. The check is applied
+    /// to the first non-preview frame.
+    ///
+    /// Default: `false` (progressive content is decoded normally).
+    pub reject_progressive: bool,
     pub render_spot_colors: bool,
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
@@ -164,6 +176,7 @@ impl Default for JxlDecoderOptions {
     fn default() -> Self {
         Self {
             adjust_orientation: true,
+            reject_progressive: false,
             render_spot_colors: true,
             coalescing: true,
             skip_preview: true,

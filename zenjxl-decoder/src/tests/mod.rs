@@ -28,3 +28,4 @@ pub mod parity;
 pub mod regression_known_bugs;
 pub mod streaming;
 pub mod synthetic;
+pub mod reject_progressive;

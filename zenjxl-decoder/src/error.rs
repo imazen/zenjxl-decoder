@@ -306,6 +306,10 @@ pub enum Error {
     InvalidJbrd(String),
     #[error("Invalid gain map bundle (jhgm): {0}")]
     InvalidGainMap(String),
+    #[error(
+        "Progressive content rejected: a progressive frame header (multi-pass or LF frame) was seen but `JxlDecoderOptions::reject_progressive` forbids it"
+    )]
+    ProgressiveRejected,
 }
 
 impl From<enough::StopReason> for Error {

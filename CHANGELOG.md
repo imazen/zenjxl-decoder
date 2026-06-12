@@ -10,6 +10,18 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
 
+### Added
+- `JxlDecoderOptions::reject_progressive` (default `false`): when `true`, decode
+  fails with the new `Error::ProgressiveRejected` as soon as a progressive frame
+  header is seen — before decoding its passes — for untrusted-input policies that
+  forbid progressive content. A frame counts as progressive when its header has
+  `num_passes > 1` or its frame type is `LFFrame`; `ReferenceOnly` (patch/blend
+  dictionary) and `SkipProgressive` frames do not trip the gate, and the check
+  applies to the first non-preview frame. Both additions are additive
+  (`JxlDecoderOptions` and `Error` are `#[non_exhaustive]`); the probe
+  (`JxlBasicInfo`) is unchanged — progressive is enforced during decode, not
+  surfaced on the probe. (2e89a25)
+
 ## [0.3.10] - 2026-06-11
 
 ### Added
