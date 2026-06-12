@@ -20,7 +20,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   applies to the first non-preview frame. Both additions are additive
   (`JxlDecoderOptions` and `Error` are `#[non_exhaustive]`); the probe
   (`JxlBasicInfo`) is unchanged — progressive is enforced during decode, not
-  surfaced on the probe. (2e89a25)
+  surfaced on the probe. (966f9c5)
 
 ## [0.3.10] - 2026-06-11
 
