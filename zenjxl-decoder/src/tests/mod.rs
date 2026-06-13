@@ -26,6 +26,6 @@ pub mod oom_regression;
 pub mod orientation_preserve;
 pub mod parity;
 pub mod regression_known_bugs;
+pub mod reject_progressive;
 pub mod streaming;
 pub mod synthetic;
-pub mod reject_progressive;

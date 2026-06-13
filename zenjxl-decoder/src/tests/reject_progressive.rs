@@ -42,9 +42,9 @@ fn progressive_multipass_rejected_when_gate_set() {
             ..Default::default()
         },
     ) {
-        Ok(_) => panic!(
-            "progressive (num_passes=3) frame must be rejected when reject_progressive=true"
-        ),
+        Ok(_) => {
+            panic!("progressive (num_passes=3) frame must be rejected when reject_progressive=true")
+        }
         Err(Error::ProgressiveRejected) => {}
         Err(other) => panic!("expected Error::ProgressiveRejected, got {other:?}"),
     }
@@ -91,7 +91,9 @@ fn non_progressive_decodes_with_gate_set() {
                 ..Default::default()
             },
         )
-        .unwrap_or_else(|e| panic!("non-progressive fixture {name} must decode with gate on: {e:?}"));
+        .unwrap_or_else(|e| {
+            panic!("non-progressive fixture {name} must decode with gate on: {e:?}")
+        });
         assert!(
             img.width > 0 && img.height > 0,
             "{name}: decoded image must have non-zero dimensions"
