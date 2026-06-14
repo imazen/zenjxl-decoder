@@ -7,6 +7,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use num_traits::Float;
+use whereat::at;
 
 use crate::transforms::{transform::*, transform_map::*};
 
@@ -388,10 +389,10 @@ impl<'a, 'b> PassInfo<'a, 'b> {
         // two. Reject those here, otherwise downstream indexing into the
         // per-pass histogram context map can go out of bounds.
         if histogram_index >= hf_global.num_histograms as usize {
-            return Err(Error::InvalidHistogramIndex(
+            return Err(at!(Error::InvalidHistogramIndex(
                 histogram_index,
                 hf_global.num_histograms as usize,
-            ));
+            )));
         }
         let reader = Some(SymbolReader::new(
             &hf_global.passes[pass].histograms,
@@ -455,7 +456,7 @@ pub fn decode_vardct_group(
     buffers: &mut VarDctBuffers,
     tracker: &MemoryTracker,
     #[cfg(feature = "jpeg")] mut jpeg_coeffs: Option<&mut [Vec<i16>; 3]>,
-) -> Result<(), Error> {
+) -> Result<()> {
     crate::profile!(entropy_decode);
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
     let b_dm_multiplier = (1.0 / (1.25)).powf(frame_header.b_qm_scale as f32 - 2.0);
@@ -648,7 +649,7 @@ pub fn decode_vardct_group(
                         sbx[c], sby[c]
                     );
                     if nonzeros + num_blocks > num_coeffs {
-                        return Err(Error::InvalidNumNonZeros(nonzeros, num_blocks));
+                        return Err(at!(Error::InvalidNumNonZeros(nonzeros, num_blocks)));
                     }
                     for iy in 0..cy {
                         let nzrow = num_nzeros[c].row_mut(sby[c] + iy);
@@ -675,7 +676,7 @@ pub fn decode_vardct_group(
                         current_coeffs[coeff_index] += coeff;
                     }
                     if nonzeros != 0 {
-                        return Err(Error::EndOfBlockResidualNonZeros(nonzeros));
+                        return Err(at!(Error::EndOfBlockResidualNonZeros(nonzeros)));
                     }
                 }
             }

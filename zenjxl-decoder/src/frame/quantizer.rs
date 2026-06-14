@@ -9,6 +9,7 @@ use crate::{
     frame::quant_weights,
     headers::encodings::{Empty, UnconditionalCoder},
 };
+use whereat::at;
 
 pub const NUM_QUANT_TABLES: usize = 17;
 pub const GLOBAL_SCALE_DENOM: usize = 1 << 16;
@@ -29,7 +30,7 @@ impl LfQuantFactors {
             for qf in quant_factors.iter_mut() {
                 *qf = f32::read_unconditional(&(), br, &Empty {})? / 128.0;
                 if *qf < 1e-8 {
-                    return Err(Error::LfQuantFactorTooSmall(*qf));
+                    return Err(at!(Error::LfQuantFactorTooSmall(*qf)));
                 }
             }
         }

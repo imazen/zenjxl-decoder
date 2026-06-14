@@ -9,6 +9,7 @@ use crate::{
     headers::Orientation,
     image::DataTypeTag,
 };
+use whereat::at;
 
 #[derive(Debug)]
 pub struct SaveStage {
@@ -76,14 +77,14 @@ impl SaveStage {
         let expected_w = self.output_channels() * self.data_format.bytes_per_sample() * osize.0;
 
         if buf.byte_size() != (expected_w, osize.1) {
-            return Err(Error::InvalidOutputBufferSize(
+            return Err(at!(Error::InvalidOutputBufferSize(
                 buf.byte_size().0,
                 buf.byte_size().1,
                 osize.0,
                 osize.1,
                 self.color_type,
                 self.data_format,
-            ));
+            )));
         }
         Ok(())
     }
