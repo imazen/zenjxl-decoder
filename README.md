@@ -79,10 +79,15 @@ All limits return `Error::LimitExceeded { resource, actual, limit }` when exceed
 
 ### Cancellation
 
-The decoder accepts any [`enough::Stop`](https://docs.rs/enough) implementation:
+The decoder accepts any [`enough::Stop`](https://docs.rs/enough) implementation. The
+ready-made thread-safe `Stopper` used below lives in the separate
+[`almost-enough`](https://docs.rs/almost-enough) crate — add it with `cargo add
+almost-enough`. To avoid the extra dependency, implement `enough::Stop` on your own
+type instead (e.g. wrapping an `AtomicBool` whose `check()` returns
+`Err(enough::StopReason::Cancelled)` once set).
 
 ```rust
-use almost_enough::Stopper;
+use almost_enough::Stopper; // separate crate: `cargo add almost-enough`
 use std::sync::Arc;
 
 let stop = Arc::new(Stopper::new());
