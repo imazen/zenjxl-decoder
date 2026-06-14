@@ -45,8 +45,9 @@ fn progressive_multipass_rejected_when_gate_set() {
         Ok(_) => {
             panic!("progressive (num_passes=3) frame must be rejected when reject_progressive=true")
         }
-        Err(Error::ProgressiveRejected) => {}
-        Err(other) => panic!("expected Error::ProgressiveRejected, got {other:?}"),
+        // `decode_with` now returns `At<Error>`; unwrap with `.error()` to match.
+        Err(e) if matches!(e.error(), Error::ProgressiveRejected) => {}
+        Err(other) => panic!("expected Error::ProgressiveRejected, got {:?}", other.error()),
     }
 }
 

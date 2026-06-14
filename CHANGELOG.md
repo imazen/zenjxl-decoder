@@ -9,6 +9,13 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
+- `decode` / `decode_with` now return `Result<JxlImage, whereat::At<Error>>`
+  instead of `Result<JxlImage, Error>`, attaching a source location to errors
+  for server-side logs. Callers matching the error must unwrap the `At` first:
+  `err.error()` borrows `&Error`, `err.decompose().0` owns the `Error`. This is
+  boundary-only capture (the internal decode path is byte-identical, no
+  inner-loop cost); deeper per-origin location for the cold structural parsers
+  is a planned follow-up (see #28).
 
 ### Added
 - `JxlDecoderOptions::reject_progressive` (default `false`): when `true`, decode

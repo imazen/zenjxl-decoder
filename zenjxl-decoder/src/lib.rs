@@ -57,6 +57,10 @@
 #![cfg_attr(not(feature = "allow-unsafe"), forbid(unsafe_code))]
 #![cfg_attr(feature = "allow-unsafe", deny(unsafe_code))]
 
+// Required by the `whereat::at!` macro (used at the public decode boundary to
+// attach a source location to errors for server-side logs).
+whereat::define_at_crate_info!();
+
 pub mod api;
 pub use api::{decode, decode_with, read_header, read_header_with};
 #[cfg(feature = "jpeg")]
