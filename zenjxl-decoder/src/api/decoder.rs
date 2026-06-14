@@ -1685,7 +1685,7 @@ pub(crate) mod tests {
     fn test_restrictive_limits_preset() {
         // Verify the restrictive preset is reasonable
         let limits = crate::api::JxlDecoderLimits::restrictive();
-        assert_eq!(limits.max_pixels, Some(100_000_000));
+        assert_eq!(limits.max_pixels, Some(120_000_000));
         assert_eq!(limits.max_extra_channels, Some(16));
         assert_eq!(limits.max_icc_size, Some(1 << 20));
         assert_eq!(limits.max_tree_size, Some(1 << 20));
