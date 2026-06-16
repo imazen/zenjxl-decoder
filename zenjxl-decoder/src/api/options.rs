@@ -28,8 +28,9 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct JxlDecoderLimits {
-    /// Maximum total pixels (width × height). Default: 2^30 (~1 billion).
+    /// Maximum total pixels (width × height). Default: 1 << 28 (~256 megapixels).
     /// This is checked early during header parsing.
+    /// [`JxlDecoderLimits::restrictive`] lowers this to a 120-megapixel house cap.
     pub max_pixels: Option<usize>,
 
     /// Maximum number of extra channels (alpha, depth, etc.). Default: 256.
