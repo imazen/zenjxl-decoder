@@ -42,6 +42,22 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   surfaced on the probe. (966f9c5)
 
 ### Changed
+- VarDCT decode no longer makes per-block / per-pass scratch heap allocations on
+  the `frame::group::dequant_and_transform_to_pixels` hot path. The AFV transform
+  arms allocated three transient `Vec<f32>`s per AFV block (a 64-element input
+  snapshot plus two `4x4`/`4x8` scratch buffers); these are now fixed-size stack
+  arrays, matching the sibling IDENTITY/DCT2X2/DCT4X4 arms. The per-pass
+  `PassInfo::num_nzeros: [Image<u32>; 3]` non-zero-count maps (which carried an
+  in-code `// TODO(veluca): reuse this allocation.`) are now reused across groups
+  via a pool on `VarDctBuffers`, resized only on a dimension change and re-zeroed
+  per group. Measured on `resources/test/bike_web_q85.jxl` (5.24 MP) via
+  `examples/heaptrack_decode`: total allocations dropped from ~29,300/decode to
+  ~3,200/decode (234,333 → 25,805 over 8 iterations, −89%), with the
+  `dequant_and_transform_to_pixels` allocation site eliminated entirely. Peak heap
+  (44.7 MiB) and leaked allocations (31, all one-time statics) are unchanged.
+  Pure internal allocation-lifetime change, gated on a bit-identical-output
+  regression test (`tests/decode_bit_identical.rs`) — no public API or output
+  change. (closes #40)
 - `get_distinct_slices` (the per-row multi-slice helper on the modular /
   VarDCT-LF decode hot path) no longer heap-allocates a transient `Vec` on every
   call. Because the slice count `S` is a const generic, the scratch now lives on
