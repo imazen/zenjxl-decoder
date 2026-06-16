@@ -11,7 +11,7 @@ edition = "2024"
 rust-version = "1.89"
 license = "BSD-3-Clause"
 
-include = ["/src/**", "/tests/**", "/benches/**", "/LICENSE*"]
+include = ["/src/**", "/tests/**", "/benches/**", "/examples/**", "/LICENSE*"]
 
 [dependencies]
 thiserror = "2.0"
@@ -69,6 +69,11 @@ harness = false
 [[bench]]
 name = "decode_bench"
 harness = false
+
+# Heaptrack allocation-profiling harness for the decode-from-bytes path.
+# Decode is in the default feature set; no extra features needed.
+[[example]]
+name = "heaptrack_decode"
 
 [lints]
 workspace = true

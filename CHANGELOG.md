@@ -17,6 +17,19 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   only the frame/render/api layer carries the wrapper. (#28)
 
 ### Added
+- `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
+  decodes a JXL file from bytes via `zenjxl_decoder::decode(..)` in a loop, for
+  profiling heap-allocation behaviour. Defaults to the committed
+  `resources/test/bike_web_q85.jxl` (2048×2560, 5.24 MP VarDCT photo) decoded 8×;
+  a path + iteration count can be passed. Driven by `just heaptrack-decode`.
+  Profiled result: heap **size** and leaks are healthy — peak 44.7 MiB (~2.1× the
+  20 MiB RGBA8 output, O(image)), and leaked allocations are pinned at 31 across
+  2/8/16 iterations (one-time statics, no per-decode growth). Allocation **count**
+  is elevated at ~29,300/decode, dominated by ~17,400/decode of small transient
+  zeroed scratch in the per-group `frame::group::dequant_and_transform_to_pixels`
+  path, including the per-pass `PassInfo::num_nzeros: [Image<u32>; 3]` already
+  flagged with an in-code `// TODO(veluca): reuse this allocation.` Tracked as a
+  resource follow-up.
 - `JxlDecoderOptions::reject_progressive` (default `false`): when `true`, decode
   fails with the new `Error::ProgressiveRejected` as soon as a progressive frame
   header is seen — before decoding its passes — for untrusted-input policies that
