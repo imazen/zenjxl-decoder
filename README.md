@@ -122,7 +122,7 @@ almost-enough = "0.4"
 ```
 
 ```rust
-use almost_enough::Stopper;
+use almost_enough::Stopper; // separate crate: `cargo add almost-enough`
 use std::sync::Arc;
 
 let stop = Arc::new(Stopper::new()); // Arc<Stopper> coerces to Arc<dyn enough::Stop>
