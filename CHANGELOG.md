@@ -28,6 +28,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   (`JxlBasicInfo`) is unchanged — progressive is enforced during decode, not
   surfaced on the probe. (966f9c5)
 
+### Changed
+- `get_distinct_slices` (the per-row multi-slice helper on the modular /
+  VarDCT-LF decode hot path) no longer heap-allocates a transient `Vec` on every
+  call. Because the slice count `S` is a const generic, the scratch now lives on
+  the stack (`[Option<&mut [u8]>; S]`, filled by original index so no sort-back is
+  needed). It was called once per scanline per modular channel, so this removes
+  ~16k short-lived allocations from a 64 MP decode (the count scaled linearly with
+  image area). Pure internal change — no public API or output change. (#35)
+
 ### Fixed
 - docs(readme): the Basic decode example now shows a real decode-to-pixels flow
   (`width`/`height`/`data`/`channels` off `JxlImage`) instead of stopping short,

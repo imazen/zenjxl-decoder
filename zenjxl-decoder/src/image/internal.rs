@@ -317,25 +317,73 @@ fn get_distinct_slices<const S: usize>(
         );
     }
 
-    // Collect the slices using split_at_mut, then restore original order
-    let mut slices: Vec<(usize, &mut [u8])> = Vec::with_capacity(S);
+    // Peel the slices off the front in ascending-start order via split_at_mut,
+    // placing each directly at its original index. `S` is a const generic, so
+    // this scratch lives on the stack — no per-call heap allocation, and no
+    // sort-back is needed because we index by `orig_idx` as we go.
+    let mut out: [Option<&mut [u8]>; S] = std::array::from_fn(|_| None);
     let mut remaining = data;
     let mut consumed = 0usize;
-    for item in indexed.iter().take(S) {
+    for item in indexed.iter() {
         let (orig_idx, ref range) = *item;
         let skip = range.start - consumed;
         let len = range.len();
         let (_, rest) = remaining.split_at_mut(skip);
         let (chunk, rest2) = rest.split_at_mut(len);
-        slices.push((orig_idx, chunk));
+        out[orig_idx] = Some(chunk);
         remaining = rest2;
         consumed = range.end;
     }
 
-    // Sort back to original order
-    slices.sort_by_key(|(idx, _)| *idx);
+    // Every original index 0..S was assigned exactly once, so no slot is None.
+    out.map(|s| s.unwrap())
+}
 
-    // Convert to fixed-size array
-    let mut iter = slices.into_iter().map(|(_, s)| s);
-    std::array::from_fn(|_| iter.next().unwrap())
+#[cfg(test)]
+mod tests {
+    use super::get_distinct_slices;
+
+    #[test]
+    fn distinct_slices_preserve_input_order_when_ranges_descend() {
+        // The hot modular caller passes [y+2, y+1, y] — i.e. ranges in
+        // *descending* start order. The returned slices must come back in the
+        // original input order, not the internal ascending-start sort order.
+        let mut data: Vec<u8> = (0..12).collect();
+        let slices = get_distinct_slices(&mut data, [6..9, 3..6, 0..3]);
+        assert_eq!(&*slices[0], [6, 7, 8].as_slice());
+        assert_eq!(&*slices[1], [3, 4, 5].as_slice());
+        assert_eq!(&*slices[2], [0, 1, 2].as_slice());
+    }
+
+    #[test]
+    fn distinct_slices_are_independently_writable() {
+        // Writing through each returned slice must land in the matching range,
+        // proving the slices are non-overlapping and correctly mapped.
+        let mut data: Vec<u8> = vec![0; 9];
+        {
+            let slices = get_distinct_slices(&mut data, [0..3, 3..6, 6..9]);
+            slices[0].copy_from_slice(&[1, 1, 1]);
+            slices[1].copy_from_slice(&[2, 2, 2]);
+            slices[2].copy_from_slice(&[3, 3, 3]);
+        }
+        assert_eq!(data, [1, 1, 1, 2, 2, 2, 3, 3, 3]);
+    }
+
+    #[test]
+    fn distinct_slices_handle_gaps_and_arbitrary_order() {
+        // Ranges separated by padding (as when bytes_between_rows >
+        // bytes_per_row), requested in a non-monotonic order.
+        let mut data: Vec<u8> = (0..16).collect();
+        let slices = get_distinct_slices(&mut data, [6..9, 12..15, 0..3]);
+        assert_eq!(&*slices[0], [6, 7, 8].as_slice());
+        assert_eq!(&*slices[1], [12, 13, 14].as_slice());
+        assert_eq!(&*slices[2], [0, 1, 2].as_slice());
+    }
+
+    #[test]
+    fn distinct_slices_single_range() {
+        let mut data: Vec<u8> = (0..6).collect();
+        let slices = get_distinct_slices(&mut data, [3..6]);
+        assert_eq!(&*slices[0], [3, 4, 5].as_slice());
+    }
 }
