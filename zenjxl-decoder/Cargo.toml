@@ -15,6 +15,7 @@ include = ["/src/**", "/tests/**", "/benches/**", "/LICENSE*"]
 
 [dependencies]
 thiserror = "2.0"
+whereat = "0.1.5"
 byteorder = "1.4.3"
 num-derive = "0.4"
 num-traits = "0.2.14"

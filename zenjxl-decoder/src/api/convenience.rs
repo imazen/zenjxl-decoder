@@ -29,6 +29,7 @@ use super::{
 use whereat::at;
 use crate::error::{Error, Result};
 use crate::headers::extra_channels::ExtraChannel;
+use whereat::{At, at};
 use crate::image::{OwnedRawImage, Rect};
 
 /// A decoded JXL image with interleaved RGBA (or GrayAlpha) u8 pixel data.
@@ -102,7 +103,8 @@ pub struct JxlImageInfo {
 /// let image = zenjxl_decoder::decode(&data).unwrap();
 /// assert_eq!(image.data.len(), image.width * image.height * image.channels);
 /// ```
-pub fn decode(data: &[u8]) -> Result<JxlImage> {
+#[track_caller]
+pub fn decode(data: &[u8]) -> Result<JxlImage, At<Error>> {
     decode_with(data, JxlDecoderOptions::default())
 }
 
@@ -110,7 +112,19 @@ pub fn decode(data: &[u8]) -> Result<JxlImage> {
 ///
 /// Same output format as [`decode`] (RGBA u8 or GrayAlpha u8), but allows
 /// configuring security limits, cancellation, parallel mode, and CMS.
-pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> {
+#[track_caller]
+pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage, At<Error>> {
+    // Capture the caller's source location ONLY at this public boundary — the
+    // internal decode path (entropy/per-block hot loops) keeps the bare `Error`
+    // and is byte-identical, so this adds no inner-loop cost. Deeper per-origin
+    // location for the cold structural parsers is tracked as a follow-up.
+    match decode_with_inner(data, options) {
+        Ok(img) => Ok(img),
+        Err(e) => Err(at!(e)),
+    }
+}
+
+fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> {
     let mut input: &[u8] = data;
 
     // Phase 1: Initialized → WithImageInfo (parse header + ICC)
