@@ -38,6 +38,11 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   image area). Pure internal change — no public API or output change. (#35)
 
 ### Fixed
+- docs: the `JxlDecoderLimits::max_pixels` field doc stated the default was
+  `2^30 (~1 billion)`, but the actual default is `1 << 28` (~256 megapixels).
+  Corrected the doc comment to match the code and noted that `restrictive()`
+  lowers it to a 120-megapixel house cap. Doc-only; no behavior change. Found in
+  a production-readiness audit.
 - docs(readme): the Basic decode example now shows a real decode-to-pixels flow
   (`width`/`height`/`data`/`channels` off `JxlImage`) instead of stopping short,
   and documents the output format (8-bit interleaved RGBA8/GrayAlpha8, straight
