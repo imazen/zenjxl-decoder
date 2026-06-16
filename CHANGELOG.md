@@ -22,6 +22,17 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   (`JxlBasicInfo`) is unchanged — progressive is enforced during decode, not
   surfaced on the probe. (966f9c5)
 
+### Fixed
+- docs(readme): the Basic decode example now shows a real decode-to-pixels flow
+  (`width`/`height`/`data`/`channels` off `JxlImage`) instead of stopping short,
+  and documents the output format (8-bit interleaved RGBA8/GrayAlpha8, straight
+  alpha by default). Corrected the limits table (default `max_pixels` is 2^28
+  ~256M not 2^30; `restrictive()` `max_pixels` is 120M not 100M; default
+  `max_memory_bytes` is 4 GB / 2 GB-on-32-bit, not `None`) and the cancellation
+  section (the `stop` field is `Arc<dyn enough::Stop>` defaulting to the
+  `enough::Unstoppable` no-op; `almost_enough::Stopper` at `0.4` is how you
+  actually cancel). Found by an insulated external-developer usability test.
+
 ## [0.3.10] - 2026-06-11
 
 ### Added
