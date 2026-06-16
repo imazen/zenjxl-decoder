@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::io::IoSliceMut;
+use whereat::at;
 use std::sync::Arc;
 
 use super::SECTION_PADDING;
@@ -85,21 +86,21 @@ fn check_size_limit(
     if let Some(limit) = limits.max_pixels
         && total_pixels > limit
     {
-        return Err(Error::LimitExceeded {
+        return Err(at!(Error::LimitExceeded {
             resource: "pixels",
             actual: total_pixels as u64,
             limit: limit as u64,
-        });
+        }));
     }
     // Check extra channels limit
     if let Some(limit) = limits.max_extra_channels
         && num_ec > limit
     {
-        return Err(Error::LimitExceeded {
+        return Err(at!(Error::LimitExceeded {
             resource: "extra_channels",
             actual: num_ec as u64,
             limit: limit as u64,
-        });
+        }));
     }
     Ok(())
 }
@@ -225,11 +226,14 @@ impl CodestreamParser {
                 for _ in 0..icc_parser.remaining() {
                     match icc_parser.read_one(&mut br) {
                         Ok(()) => bits = br.total_bits_read(),
-                        Err(Error::OutOfBounds(c)) => {
+                        Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {
+                            let &Error::OutOfBounds(c) = e.error() else {
+                                unreachable!()
+                            };
                             self.non_section_buf.consume(bits / 8);
                             self.non_section_bit_offset = (bits % 8) as u8;
                             // Estimate >= one bit per remaining character to read.
-                            return Err(Error::OutOfBounds(c + icc_parser.remaining() / 8));
+                            return Err(at!(Error::OutOfBounds(c + icc_parser.remaining() / 8)));
                         }
                         Err(e) => return Err(e),
                     }
@@ -277,7 +281,7 @@ impl CodestreamParser {
                     && decode_options.cms.is_none()
                     && *user_profile != embedded_color_profile
                 {
-                    return Err(Error::NonXybOutputNoCMS);
+                    return Err(at!(Error::NonXybOutputNoCMS));
                 }
             } else {
                 self.update_default_output_color_profile();
@@ -342,7 +346,7 @@ impl CodestreamParser {
                         .as_ref()
                         .is_some_and(|info| info.preview_size.is_some());
                 if !is_preview_frame && frame_is_progressive(&frame_header) {
-                    return Err(Error::ProgressiveRejected);
+                    return Err(at!(Error::ProgressiveRejected));
                 }
             }
 
@@ -357,9 +361,9 @@ impl CodestreamParser {
             // fixes #770.)
             let num_groups = frame_header.num_groups();
             let num_passes = frame_header.passes.num_passes as usize;
-            let mut hf_sections = Vec::new_with_capacity(num_groups)?;
+            let mut hf_sections = Vec::new_with_capacity(num_groups).map_err(|e| at!(Error::from(e)))?;
             for _ in 0..num_groups {
-                let mut row = Vec::new_with_capacity(num_passes)?;
+                let mut row = Vec::new_with_capacity(num_passes).map_err(|e| at!(Error::from(e)))?;
                 for _ in 0..num_passes {
                     row.push(None);
                 }
@@ -387,13 +391,16 @@ impl CodestreamParser {
             while !toc_parser.is_complete() {
                 match toc_parser.read_step(&mut br) {
                     Ok(()) => bits = br.total_bits_read(),
-                    Err(Error::OutOfBounds(c)) => {
+                    Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {
+                        let &Error::OutOfBounds(c) = e.error() else {
+                            unreachable!()
+                        };
                         self.non_section_buf.consume(bits / 8);
                         self.non_section_bit_offset = (bits % 8) as u8;
                         // Estimate >= 16 bits per remaining entry to read.
-                        return Err(Error::OutOfBounds(
+                        return Err(at!(Error::OutOfBounds(
                             c + toc_parser.remaining_entries() as usize * 2,
-                        ));
+                        )));
                     }
                     Err(e) => return Err(e),
                 }
@@ -462,7 +469,7 @@ impl CodestreamParser {
                 break;
             }
             let mut data = Vec::new();
-            data.try_reserve_exact(buf.len + SECTION_PADDING)?;
+            data.try_reserve_exact(buf.len + SECTION_PADDING).map_err(|e| at!(Error::from(e)))?;
             data.resize(buf.len + SECTION_PADDING, 0);
             buf.data = data;
             self.ready_section_data += self

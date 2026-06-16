@@ -9,6 +9,7 @@
 //! `max_memory_bytes` limits during decoding.
 
 use std::sync::Arc;
+use whereat::at;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
@@ -85,11 +86,11 @@ impl MemoryTracker {
         if new_total > inner.limit {
             // Rollback the allocation
             inner.allocated.fetch_sub(bytes, Ordering::Relaxed);
-            return Err(Error::LimitExceeded {
+            return Err(at!(Error::LimitExceeded {
                 resource: "memory_bytes",
                 actual: new_total,
                 limit: inner.limit,
-            });
+            }));
         }
 
         Ok(())
@@ -120,14 +121,14 @@ impl MemoryTracker {
             let Some(inner) = &self.inner else {
                 return Ok(());
             };
-            return Err(Error::LimitExceeded {
+            return Err(at!(Error::LimitExceeded {
                 resource: "memory_bytes",
                 actual: inner
                     .allocated
                     .load(Ordering::Relaxed)
                     .saturating_add(bytes),
                 limit: inner.limit,
-            });
+            }));
         }
         Ok(())
     }

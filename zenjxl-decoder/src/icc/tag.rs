@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::io::{Cursor, Write};
+use whereat::at;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
@@ -47,7 +48,7 @@ pub(super) fn read_tag_list(
                 tag
             }
             2..=20 => *COMMON_TAGS[(tagcode - 2) as usize],
-            _ => return Err(Error::InvalidIccStream),
+            _ => return Err(at!(Error::InvalidIccStream)),
         };
 
         let tagstart = if command & 64 == 0 {
@@ -64,7 +65,7 @@ pub(super) fn read_tag_list(
         };
         if (tagstart as u64 + tagsize as u64) > output_size {
             warn!(output_size, tagstart, tagsize, "tag size overflow");
-            return Err(Error::InvalidIccStream);
+            return Err(at!(Error::InvalidIccStream));
         }
 
         prev_tagstart = tagstart;
@@ -106,7 +107,7 @@ pub(super) fn read_tag_list(
 
 fn shuffle_w2(bytes: &[u8]) -> Result<Vec<u8>> {
     let len = bytes.len();
-    let mut out = Vec::new_with_capacity(len)?;
+    let mut out = Vec::new_with_capacity(len).map_err(|e| at!(Error::from(e)))?;
 
     let height = len / 2;
     let odd = len % 2;
@@ -122,7 +123,7 @@ fn shuffle_w2(bytes: &[u8]) -> Result<Vec<u8>> {
 
 fn shuffle_w4(bytes: &[u8]) -> Result<Vec<u8>> {
     let len = bytes.len();
-    let mut out = Vec::new_with_capacity(len)?;
+    let mut out = Vec::new_with_capacity(len).map_err(|e| at!(Error::from(e)))?;
 
     let step = len / 4;
     let wide_count = len % 4;
@@ -175,7 +176,7 @@ pub(super) fn read_single_command(
             let width = ((flags & 3) + 1) as usize;
             let order = (flags >> 2) & 3;
             if width == 3 || order == 3 {
-                return Err(Error::InvalidIccStream);
+                return Err(at!(Error::InvalidIccStream));
             }
 
             let stride = if (flags & 16) == 0 {
@@ -183,12 +184,12 @@ pub(super) fn read_single_command(
             } else {
                 let stride = read_varint_from_reader(commands_stream)? as usize;
                 if stride < width {
-                    return Err(Error::InvalidIccStream);
+                    return Err(at!(Error::InvalidIccStream));
                 }
                 stride
             };
             if stride.saturating_mul(4) >= decoded_profile.position() as usize {
-                return Err(Error::InvalidIccStream);
+                return Err(at!(Error::InvalidIccStream));
             }
 
             let num = read_varint_from_reader(commands_stream)? as usize;
@@ -243,7 +244,7 @@ pub(super) fn read_single_command(
                 .map_err(|_| Error::InvalidIccStream)?;
         }
         _ => {
-            return Err(Error::InvalidIccStream);
+            return Err(at!(Error::InvalidIccStream));
         }
     }
 

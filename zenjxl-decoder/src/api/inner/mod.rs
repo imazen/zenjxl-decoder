@@ -5,6 +5,7 @@
 
 #[cfg(test)]
 use crate::api::FrameCallback;
+use whereat::at;
 use crate::{
     api::JxlFrameHeader,
     error::{Error, Result},
@@ -109,7 +110,7 @@ impl JxlDecoderInner {
     /// Same semantics as JxlDecoderSetOutputColorProfile.
     pub fn set_output_color_profile(&mut self, profile: JxlColorProfile) -> Result<()> {
         if let (JxlColorProfile::Icc(_), None) = (&profile, &self.options.cms) {
-            return Err(Error::ICCOutputNoCMS);
+            return Err(at!(Error::ICCOutputNoCMS));
         }
         self.codestream_parser.output_color_profile = Some(profile);
         self.codestream_parser.output_color_profile_set_by_user = true;

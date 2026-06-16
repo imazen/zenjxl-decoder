@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::{collections::BTreeSet, sync::Arc};
+use whereat::at;
 
 #[cfg(feature = "jpeg")]
 use crate::util::TryVecExt;
@@ -180,7 +181,7 @@ impl DecoderState {
 
     /// Check cancellation status and return error if cancelled.
     pub fn check_cancelled(&self) -> crate::error::Result<()> {
-        Ok(self.stop.check()?)
+        self.stop.check().map_err(|e| at!(crate::error::Error::from(e)))
     }
 
     pub fn extra_channel_info(&self) -> &Vec<ExtraChannelInfo> {
@@ -335,11 +336,11 @@ impl Frame {
             if let Some(limit) = self.decoder_state.limits.max_reference_frames
                 && slot >= limit
             {
-                return Err(crate::error::Error::LimitExceeded {
+                return Err(at!(crate::error::Error::LimitExceeded {
                     resource: "reference_frames",
                     actual: (slot + 1) as u64,
                     limit: limit as u64,
-                });
+                }));
             }
             info!("Saving frame in slot {}", self.header.save_as_reference);
             let rf = Arc::get_mut(&mut self.decoder_state.reference_frames)
@@ -622,7 +623,7 @@ mod test {
     use std::panic;
 
     use crate::{
-        error::{Error, Result},
+        error::Result,
         features::spline::Point,
         util::test::assert_almost_abs_eq,
     };
@@ -639,7 +640,7 @@ mod test {
     }
 
     #[test]
-    fn splines() -> Result<(), Error> {
+    fn splines() -> Result<()> {
         let verify_frame = move |frame: &Frame, _| {
             let lf_global = frame.lf_global.as_ref().unwrap();
             let splines = lf_global.splines.as_ref().unwrap();
@@ -699,7 +700,7 @@ mod test {
     }
 
     #[test]
-    fn noise() -> Result<(), Error> {
+    fn noise() -> Result<()> {
         let verify_frame = |frame: &Frame, _| {
             let lf_global = frame.lf_global.as_ref().unwrap();
             let noise = lf_global.noise.as_ref().unwrap();
@@ -722,7 +723,7 @@ mod test {
     }
 
     #[test]
-    fn patches() -> Result<(), Error> {
+    fn patches() -> Result<()> {
         let verify_frame = |frame: &Frame, frame_index| {
             if frame_index == 0 {
                 assert!(!frame.header().has_patches());
@@ -744,7 +745,7 @@ mod test {
     }
 
     #[test]
-    fn multiple_lf_420() -> Result<(), Error> {
+    fn multiple_lf_420() -> Result<()> {
         let verify_frame = |frame: &Frame, _| {
             assert!(frame.header().is420());
             let Some(lf_image) = &frame.lf_image else {
@@ -774,7 +775,7 @@ mod test {
     }
 
     #[test]
-    fn xyb_grayscale_patches() -> Result<(), Error> {
+    fn xyb_grayscale_patches() -> Result<()> {
         let verify_frame = |frame: &Frame, frame_index| {
             if frame_index == 0 {
                 assert_eq!(

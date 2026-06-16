@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::borrow::Cow;
+use whereat::at;
 
 use crate::bit_reader::BitReader;
 use crate::entropy_coding::decode::Histograms;
@@ -50,37 +51,37 @@ impl Permutation {
         mut read: impl FnMut(usize) -> Result<u32>,
     ) -> Result<Self> {
         if end > size - skip {
-            return Err(Error::InvalidPermutationSize { size, skip, end });
+            return Err(at!(Error::InvalidPermutationSize { size, skip, end }));
         }
 
         // Check memory budget for permutation allocations (lehmer + permutation vectors)
         memory_tracker.check_alloc((size as u64) * 4)?;
-        let mut lehmer = Vec::new_with_capacity(end as usize)?;
+        let mut lehmer = Vec::new_with_capacity(end as usize).map_err(|e| at!(Error::from(e)))?;
 
         let mut prev_val = 0u32;
         for idx in skip..(skip + end) {
             let val = match read(get_context(prev_val)) {
                 Ok(val) => val,
-                Err(Error::OutOfBounds(_)) => {
+                Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {
                     // Estimate 1.5 bits for each remaining code
                     let bits = (((skip + end) - idx) as usize).saturating_mul(3) / 2;
-                    return Err(Error::OutOfBounds(bits));
+                    return Err(at!(Error::OutOfBounds(bits)));
                 }
                 Err(e) => return Err(e),
             };
             if val >= size - idx {
-                return Err(Error::InvalidPermutationLehmerCode {
+                return Err(at!(Error::InvalidPermutationLehmerCode {
                     size,
                     idx,
                     lehmer: val,
-                });
+                }));
             }
             lehmer.push(val);
             prev_val = val;
         }
 
         // Initialize the full permutation vector with skipped elements intact
-        let mut permutation = Vec::new_with_capacity((size - skip) as usize)?;
+        let mut permutation = Vec::new_with_capacity((size - skip) as usize).map_err(|e| at!(Error::from(e)))?;
         permutation.extend(0..size);
 
         // Decode the Lehmer code into the slice starting at `skip`
@@ -110,20 +111,20 @@ impl Permutation {
 fn decode_lehmer_code(code: &[u32], permutation_slice: &[u32]) -> Result<Vec<u32>> {
     let n = permutation_slice.len();
     if n == 0 {
-        return Err(Error::InvalidPermutationLehmerCode {
+        return Err(at!(Error::InvalidPermutationLehmerCode {
             size: 0,
             idx: 0,
             lehmer: 0,
-        });
+        }));
     }
 
-    let mut permuted = Vec::new_with_capacity(n)?;
+    let mut permuted = Vec::new_with_capacity(n).map_err(|e| at!(Error::from(e)))?;
     permuted.extend_from_slice(permutation_slice);
 
     let padded_n = (n as u32).next_power_of_two() as usize;
 
     // Allocate temp array inside the function
-    let mut temp = Vec::new_with_capacity(padded_n)?;
+    let mut temp = Vec::new_with_capacity(padded_n).map_err(|e| at!(Error::from(e)))?;
     temp.extend((0..padded_n as u32).map(|x| value_of_lowest_1_bit(x + 1)));
 
     for (i, permuted_item) in permuted.iter_mut().enumerate() {
@@ -131,11 +132,11 @@ fn decode_lehmer_code(code: &[u32], permutation_slice: &[u32]) -> Result<Vec<u32
 
         // Adjust the maximum allowed value for code_i
         if code_i as usize > n - i - 1 {
-            return Err(Error::InvalidPermutationLehmerCode {
+            return Err(at!(Error::InvalidPermutationLehmerCode {
                 size: n as u32,
                 idx: i as u32,
                 lehmer: code_i,
-            });
+            }));
         }
 
         let mut rank = code_i + 1;
@@ -146,11 +147,11 @@ fn decode_lehmer_code(code: &[u32], permutation_slice: &[u32]) -> Result<Vec<u32
         while bit != 0 {
             let cand = next + bit;
             if cand == 0 || cand > padded_n {
-                return Err(Error::InvalidPermutationLehmerCode {
+                return Err(at!(Error::InvalidPermutationLehmerCode {
                     size: n as u32,
                     idx: i as u32,
                     lehmer: code_i,
-                });
+                }));
             }
             bit >>= 1;
             if temp[cand - 1] < rank {
@@ -176,34 +177,34 @@ fn decode_lehmer_code(code: &[u32], permutation_slice: &[u32]) -> Result<Vec<u32
 fn decode_lehmer_code_naive(code: &[u32], permutation_slice: &[u32]) -> Result<Vec<u32>> {
     let n = code.len();
     if n == 0 {
-        return Err(Error::InvalidPermutationLehmerCode {
+        return Err(at!(Error::InvalidPermutationLehmerCode {
             size: 0,
             idx: 0,
             lehmer: 0,
-        });
+        }));
     }
 
     // Ensure permutation_slice has sufficient length
     if permutation_slice.len() < n {
-        return Err(Error::InvalidPermutationLehmerCode {
+        return Err(at!(Error::InvalidPermutationLehmerCode {
             size: n as u32,
             idx: 0,
             lehmer: 0,
-        });
+        }));
     }
 
     // Create temp array with values from permutation_slice
     let mut temp = permutation_slice.to_vec();
-    let mut permuted = Vec::new_with_capacity(n)?;
+    let mut permuted = Vec::new_with_capacity(n).map_err(|e| at!(Error::from(e)))?;
 
     // Iterate over the Lehmer code
     for (i, &idx) in code.iter().enumerate() {
         if idx as usize >= temp.len() {
-            return Err(Error::InvalidPermutationLehmerCode {
+            return Err(at!(Error::InvalidPermutationLehmerCode {
                 size: n as u32,
                 idx: i as u32,
                 lehmer: idx,
-            });
+            }));
         }
 
         // Assign temp[idx] to permuted vector

@@ -70,15 +70,18 @@ pub enum ProcessingResult<T, U> {
 }
 
 impl<T> ProcessingResult<T, ()> {
-    fn new(
-        result: Result<T, crate::error::Error>,
-    ) -> Result<ProcessingResult<T, ()>, crate::error::Error> {
+    fn new(result: Result<T>) -> Result<ProcessingResult<T, ()>> {
         match result {
             Ok(v) => Ok(ProcessingResult::Complete { result: v }),
-            Err(crate::error::Error::OutOfBounds(v)) => Ok(ProcessingResult::NeedsMoreInput {
-                size_hint: v,
-                fallback: (),
-            }),
+            Err(e) if matches!(e.error(), crate::error::Error::OutOfBounds(_)) => {
+                let &crate::error::Error::OutOfBounds(v) = e.error() else {
+                    unreachable!()
+                };
+                Ok(ProcessingResult::NeedsMoreInput {
+                    size_hint: v,
+                    fallback: (),
+                })
+            }
             Err(e) => Err(e),
         }
     }

@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::fmt::Debug;
+use whereat::at;
 
 use crate::bit_reader::BitReader;
 use crate::entropy_coding::decode::*;
@@ -77,12 +78,12 @@ impl Table {
         for symbol in symbols.iter_mut().take(num_symbols) {
             let sym = br.read(max_bits)? as usize;
             if sym >= al_size {
-                return Err(Error::InvalidHuffman);
+                return Err(at!(Error::InvalidHuffman));
             }
             *symbol = sym as u16;
         }
         if (0..num_symbols - 1).any(|i| symbols[..i].contains(&symbols[i + 1])) {
-            return Err(Error::InvalidHuffman);
+            return Err(at!(Error::InvalidHuffman));
         }
 
         let special_4_symbols = if num_symbols == 4 {
@@ -100,7 +101,7 @@ impl Table {
                 TABLE_SIZE
             ]),
             (2, _) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE)?;
+                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols[0..2].sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 1) {
                     ret.push(TableEntry {
@@ -115,7 +116,7 @@ impl Table {
                 Ok(ret)
             }
             (3, _) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE)?;
+                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols[1..3].sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 2) {
                     ret.push(TableEntry {
@@ -138,7 +139,7 @@ impl Table {
                 Ok(ret)
             }
             (4, false) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE)?;
+                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols.sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 2) {
                     ret.push(TableEntry {
@@ -161,7 +162,7 @@ impl Table {
                 Ok(ret)
             }
             (4, true) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE)?;
+                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols[2..4].sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 3) {
                     ret.push(TableEntry {
@@ -252,7 +253,7 @@ impl Table {
                 repeat += br.read(extra_bits as usize)? as usize + 3;
                 let repeat_delta = repeat - old_repeat;
                 if symbol + repeat_delta > al_size {
-                    return Err(Error::InvalidHuffman);
+                    return Err(at!(Error::InvalidHuffman));
                 }
                 for i in 0..repeat_delta {
                     code_lengths[symbol + i] = repeat_code_len;
@@ -266,7 +267,7 @@ impl Table {
             }
         }
         if space != 0 {
-            return Err(Error::InvalidHuffman);
+            return Err(at!(Error::InvalidHuffman));
         }
         Ok(code_lengths)
     }
@@ -274,7 +275,7 @@ impl Table {
     #[instrument(level = "trace", ret, err)]
     fn build(root_bits: usize, code_lengths: &[u8]) -> Result<Vec<TableEntry>> {
         if code_lengths.len() > 1 << HUFFMAN_MAX_BITS {
-            return Err(Error::InvalidHuffman);
+            return Err(at!(Error::InvalidHuffman));
         }
         let mut counts = [0u16; HUFFMAN_MAX_BITS + 1];
         for &v in code_lengths.iter() {
@@ -430,7 +431,7 @@ impl Table {
                     }
                 }
                 if num_codes != 1 && space != 0 {
-                    return Err(Error::InvalidHuffman);
+                    return Err(at!(Error::InvalidHuffman));
                 }
                 let code_lengths =
                     Table::decode_huffman_code_lengths(code_length_code_lengths, al_size, br)?;
@@ -491,12 +492,12 @@ impl HuffmanCodes {
             .collect::<Result<_>>()?;
         let max = *alphabet_sizes.iter().max().unwrap();
         if max >= (1 << HUFFMAN_MAX_BITS) {
-            return Err(Error::AlphabetTooLargeHuff(max));
+            return Err(at!(Error::AlphabetTooLargeHuff(max)));
         }
         // Bound total allocations across all tables.
         let total_alphabet: usize = alphabet_sizes.iter().sum();
         if total_alphabet > Self::MAX_TOTAL_ALPHABET_SIZE {
-            return Err(Error::AlphabetTooLargeHuff(total_alphabet));
+            return Err(at!(Error::AlphabetTooLargeHuff(total_alphabet)));
         }
         // Bound per-table allocation relative to remaining input.
         // A Huffman code-length stream needs at least ~1 bit per symbol
@@ -510,7 +511,7 @@ impl HuffmanCodes {
         let input_cap = available.saturating_mul(Self::ALPHABET_BITS_RATIO);
         for &sz in &alphabet_sizes {
             if sz > 1 && sz > input_cap {
-                return Err(Error::AlphabetTooLargeHuff(sz));
+                return Err(at!(Error::AlphabetTooLargeHuff(sz)));
             }
         }
         let tables = alphabet_sizes

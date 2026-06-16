@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use super::channel::decode_modular_channel;
+use whereat::at;
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::SymbolReader,
@@ -53,7 +54,7 @@ pub fn decode_modular_subbitstream(
     };
 
     if header.use_global_tree && global_tree.is_none() {
-        return Err(Error::NoGlobalTree);
+        return Err(at!(Error::NoGlobalTree));
     }
     let local_tree = if !header.use_global_tree {
         let num_local_samples = buffers
