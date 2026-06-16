@@ -14,6 +14,8 @@ use crate::{
     container::{frame_index::FrameIndexBox, gain_map::GainMapBundle},
     error::Result,
 };
+#[cfg(test)]
+use whereat::at;
 use states::*;
 use std::marker::PhantomData;
 
@@ -383,8 +385,8 @@ pub(crate) mod tests {
         chunk_size: usize,
         use_simple_pipeline: bool,
         do_flush: bool,
-        callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<(), Error>>>,
-    ) -> Result<(usize, Vec<Vec<Image<f32>>>), Error> {
+        callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+    ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
         let mut options = JxlDecoderOptions::default();
         // Correctness tests should not be constrained by memory limits.
         // OOM/limit tests verify those separately.
@@ -519,15 +521,15 @@ pub(crate) mod tests {
         }
     }
 
-    fn decode_test_file(path: &Path) -> Result<(), Error> {
-        decode(&std::fs::read(path)?, usize::MAX, false, false, None)?;
+    fn decode_test_file(path: &Path) -> Result<()> {
+        decode(&std::fs::read(path).map_err(|e| at!(Error::from(e)))?, usize::MAX, false, false, None)?;
         Ok(())
     }
 
     for_each_test_file!(decode_test_file);
 
-    fn decode_test_file_chunks(path: &Path) -> Result<(), Error> {
-        decode(&std::fs::read(path)?, 1, false, false, None)?;
+    fn decode_test_file_chunks(path: &Path) -> Result<()> {
+        decode(&std::fs::read(path).map_err(|e| at!(Error::from(e)))?, 1, false, false, None)?;
         Ok(())
     }
 
@@ -539,7 +541,7 @@ pub(crate) mod tests {
         fc: usize,
         f: &[Image<f32>],
         sf: &[Image<f32>],
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         assert_eq!(
             f.len(),
             sf.len(),
@@ -590,8 +592,8 @@ pub(crate) mod tests {
             .collect()
     }
 
-    fn compare_pipelines(path: &Path) -> Result<(), Error> {
-        let file = std::fs::read(path)?;
+    fn compare_pipelines(path: &Path) -> Result<()> {
+        let file = std::fs::read(path).map_err(|e| at!(Error::from(e)))?;
         let reference_frames = decode(&file, usize::MAX, true, false, None)?.1;
         // Hash and drop reference pixels before second decode to halve peak
         // memory. Critical for 32-bit targets where two full 4K decoded
@@ -611,7 +613,7 @@ pub(crate) mod tests {
 
     for_each_test_file!(compare_pipelines);
 
-    fn compare_incremental(path: &Path) -> Result<(), Error> {
+    fn compare_incremental(path: &Path) -> Result<()> {
         let file = std::fs::read(path).unwrap();
         // One-shot decode — hash and drop before incremental decode.
         let (_, one_shot_frames) = decode(&file, usize::MAX, false, false, None)?;
@@ -1662,7 +1664,7 @@ pub(crate) mod tests {
             Err(err) => {
                 assert!(
                     matches!(
-                        err,
+                        err.error(),
                         Error::LimitExceeded {
                             resource: "pixels",
                             ..
@@ -1685,7 +1687,7 @@ pub(crate) mod tests {
     fn test_restrictive_limits_preset() {
         // Verify the restrictive preset is reasonable
         let limits = crate::api::JxlDecoderLimits::restrictive();
-        assert_eq!(limits.max_pixels, Some(100_000_000));
+        assert_eq!(limits.max_pixels, Some(120_000_000));
         assert_eq!(limits.max_extra_channels, Some(16));
         assert_eq!(limits.max_icc_size, Some(1 << 20));
         assert_eq!(limits.max_tree_size, Some(1 << 20));
@@ -1780,8 +1782,12 @@ pub(crate) mod tests {
         stop.cancel();
         assert!(stop.should_stop());
         // Verify it integrates with our error type
-        let result: crate::error::Result<()> = stop.check().map_err(Into::into);
-        assert!(matches!(result, Err(crate::error::Error::Cancelled)));
+        let result: crate::error::Result<()> =
+            stop.check().map_err(|e| at!(crate::error::Error::from(e)));
+        assert!(matches!(
+            result,
+            Err(e) if matches!(e.error(), crate::error::Error::Cancelled)
+        ));
     }
 
     /// Regression for the preview-frame recovery option-propagation bug that

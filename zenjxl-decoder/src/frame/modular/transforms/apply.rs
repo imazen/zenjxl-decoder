@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::fmt::Debug;
+use whereat::at;
 
 use num_traits::FromPrimitive;
 
@@ -423,18 +424,18 @@ fn check_equal_channels(
     num: usize,
 ) -> Result<()> {
     if first_chan + num > channels.len() {
-        return Err(Error::InvalidChannelRange(
+        return Err(at!(Error::InvalidChannelRange(
             first_chan,
             first_chan + num,
             channels.len(),
-        ));
+        )));
     }
     for inc in 1..num {
         if !channels[first_chan]
             .1
             .is_equivalent(&channels[first_chan + inc].1)
         {
-            return Err(Error::MixingDifferentChannels);
+            return Err(at!(Error::MixingDifferentChannels));
         }
     }
     Ok(())
@@ -503,7 +504,7 @@ fn meta_apply_single_transform(
                     let chan = &channels[begin_channel + ic].1;
                     let new_shift = if let Some(shift) = chan.shift {
                         if shift.0 > 30 || shift.1 > 30 {
-                            return Err(Error::TooManySqueezes);
+                            return Err(at!(Error::TooManySqueezes));
                         }
                         if horizontal {
                             Some((shift.0 + 1, shift.1))

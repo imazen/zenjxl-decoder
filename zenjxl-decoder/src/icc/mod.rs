@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::io::Cursor;
+use whereat::at;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
@@ -27,20 +28,20 @@ use tag::{read_single_command, read_tag_list};
 const ICC_CONTEXTS: usize = 41;
 const ICC_HEADER_SIZE: u64 = 128;
 
-fn read_icc_inner(stream: &mut IccStream) -> Result<Vec<u8>, Error> {
+fn read_icc_inner(stream: &mut IccStream) -> Result<Vec<u8>> {
     let output_size = stream.read_varint()?;
     let commands_size = stream.read_varint()?;
     if stream.bytes_read().saturating_add(commands_size) > stream.len() {
-        return Err(Error::InvalidIccStream);
+        return Err(at!(Error::InvalidIccStream));
     }
 
     // Simple check to avoid allocating too large buffer.
     if output_size > (1 << 28) {
-        return Err(Error::IccTooLarge);
+        return Err(at!(Error::IccTooLarge));
     }
 
     if output_size + 65536 < stream.len() {
-        return Err(Error::IccTooLarge);
+        return Err(at!(Error::IccTooLarge));
     }
 
     // Extract command stream first.
@@ -67,7 +68,7 @@ fn read_icc_inner(stream: &mut IccStream) -> Result<Vec<u8>, Error> {
     if let Some(num_tags) = v.checked_sub(1) {
         if (output_size - ICC_HEADER_SIZE) / 12 < num_tags {
             warn!(output_size, num_tags, "num_tags too large");
-            return Err(Error::InvalidIccStream);
+            return Err(at!(Error::InvalidIccStream));
         }
 
         let num_tags = num_tags as u32;
@@ -99,7 +100,7 @@ fn read_icc_inner(stream: &mut IccStream) -> Result<Vec<u8>, Error> {
     let actual_len = decoded_profile_writer.position();
     if actual_len != output_size {
         warn!(output_size, actual_len, "ICC profile size mismatch");
-        return Err(Error::InvalidIccStream);
+        return Err(at!(Error::InvalidIccStream));
     }
 
     Ok(decoded_profile)
@@ -128,11 +129,11 @@ impl IncrementalIccReader {
         // Use provided limit or fall back to default 256MB
         let limit = max_icc_size.unwrap_or(1 << 28) as u64;
         if len > limit {
-            return Err(Error::LimitExceeded {
+            return Err(at!(Error::LimitExceeded {
                 resource: "icc_size",
                 actual: len,
                 limit,
-            });
+            }));
         }
 
         let len = len as usize;
@@ -144,7 +145,7 @@ impl IncrementalIccReader {
             histograms,
             reader,
             len,
-            out_buf: Vec::new_with_capacity(len)?,
+            out_buf: Vec::new_with_capacity(len).map_err(|e| at!(Error::from(e)))?,
             prev_bytes: [0, 0],
             total_bits_consumed: 0,
             last_br_bits_read,
@@ -200,11 +201,11 @@ impl IncrementalIccReader {
 
         if let Err(err) = br.check_for_error() {
             self.reader.restore(checkpoint);
-            return Err(err);
+            return Err(at!(err));
         }
         if sym >= 256 {
             warn!(sym, "Invalid symbol in ICC stream");
-            return Err(Error::InvalidIccStream);
+            return Err(at!(Error::InvalidIccStream));
         }
 
         let b = sym as u8;
@@ -231,11 +232,11 @@ impl IncrementalIccReader {
         if self.out_buf.len() & 0xFF == 0 {
             let input_bytes = (self.total_bits_consumed / 8 + 1) as usize;
             if self.out_buf.len() / input_bytes > Self::MAX_AMPLIFICATION {
-                return Err(Error::LimitExceeded {
+                return Err(at!(Error::LimitExceeded {
                     resource: "icc_amplification",
                     actual: self.out_buf.len() as u64,
                     limit: (input_bytes * Self::MAX_AMPLIFICATION) as u64,
-                });
+                }));
             }
         }
         Ok(())

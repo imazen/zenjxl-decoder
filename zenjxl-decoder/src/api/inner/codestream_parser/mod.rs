@@ -7,6 +7,7 @@ use std::{
     collections::{HashSet, VecDeque},
     io::IoSliceMut,
 };
+use whereat::at;
 
 use sections::SectionState;
 
@@ -196,7 +197,7 @@ impl CodestreamParser {
                 .filter(|x| x.is_some())
                 .count();
             if output_buffers.len() != expected_len {
-                return Err(Error::WrongBufferCount(output_buffers.len(), expected_len));
+                return Err(at!(Error::WrongBufferCount(output_buffers.len(), expected_len)));
             }
         }
         // If we have sections to read, read into sections; otherwise, read into the local buffer.
@@ -228,7 +229,7 @@ impl CodestreamParser {
                 if !self.skip_sections {
                     // This is just an estimate as there could be box bytes in the middle.
                     let mut readable_section_data = (self.non_section_buf.len()
-                        + input.available_bytes()?
+                        + input.available_bytes().map_err(|e| at!(Error::from(e)))?
                         + self.ready_section_data)
                         .max(1);
                     // Ensure enough section buffers are available for reading available data.
@@ -245,7 +246,7 @@ impl CodestreamParser {
                     }
                     // Read sections up to the end of the current box.
                     let mut available_codestream = match box_parser.get_more_codestream(input) {
-                        Err(Error::OutOfBounds(_)) => 0,
+                        Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => 0,
                         Ok(c) => c as usize,
                         Err(e) => return Err(e),
                     };
@@ -273,7 +274,7 @@ impl CodestreamParser {
                         let num = if !box_parser.box_buffer.is_empty() {
                             box_parser.box_buffer.take(buffers)
                         } else {
-                            input.read(buffers)?
+                            input.read(buffers).map_err(|e| at!(Error::from(e)))?
                         };
                         self.ready_section_data += num;
                         box_parser.consume_codestream(num as u64);
@@ -284,8 +285,10 @@ impl CodestreamParser {
                     }
                     match self.process_sections(decode_options, &mut output_buffers, do_flush) {
                         Ok(None) => Ok(()),
-                        Ok(Some(missing)) => Err(Error::OutOfBounds(missing)),
-                        Err(Error::OutOfBounds(_)) => Err(Error::SectionTooShort),
+                        Ok(Some(missing)) => Err(at!(Error::OutOfBounds(missing))),
+                        Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {
+                            Err(at!(Error::SectionTooShort))
+                        }
                         Err(err) => Err(err),
                     }?;
                     // If no section data was read and sections are still pending,
@@ -297,9 +300,9 @@ impl CodestreamParser {
                         && box_parser.box_buffer.is_empty()
                     {
                         let total_needed: usize = self.sections.iter().map(|s| s.len).sum();
-                        return Err(Error::OutOfBounds(
+                        return Err(at!(Error::OutOfBounds(
                             total_needed.saturating_sub(self.ready_section_data),
-                        ));
+                        )));
                     }
                 } else {
                     let total_size = self.sections.iter().map(|x| x.len).sum::<usize>();
@@ -313,7 +316,7 @@ impl CodestreamParser {
                         let skipped = if !box_parser.box_buffer.is_empty() {
                             box_parser.box_buffer.consume(to_skip)
                         } else {
-                            input.skip(to_skip)?
+                            input.skip(to_skip).map_err(|e| at!(Error::from(e)))?
                         };
                         box_parser.consume_codestream(skipped as u64);
                         self.ready_section_data += skipped;
@@ -322,7 +325,7 @@ impl CodestreamParser {
                         }
                     }
                     if self.ready_section_data < total_size {
-                        return Err(Error::OutOfBounds(total_size - self.ready_section_data));
+                        return Err(at!(Error::OutOfBounds(total_size - self.ready_section_data)));
                     } else {
                         self.sections.clear();
                         // Finalize the skipped frame, mirroring what process_sections does
@@ -385,7 +388,8 @@ impl CodestreamParser {
                     // parsing resumes if `process` is called again with more
                     // input.
                     match box_parser.get_more_codestream(input) {
-                        Ok(_) | Err(Error::OutOfBounds(_)) => {}
+                        Ok(_) => {}
+                        Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {}
                         Err(e) => return Err(e),
                     }
                     return Ok(());
@@ -395,7 +399,7 @@ impl CodestreamParser {
                 // multiple buffer refills to complete.
                 loop {
                     let available_codestream = match box_parser.get_more_codestream(input) {
-                        Err(Error::OutOfBounds(_)) => 0,
+                        Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => 0,
                         Ok(c) => c as usize,
                         Err(e) => return Err(e),
                     };
@@ -423,7 +427,7 @@ impl CodestreamParser {
                             if input.available_bytes().unwrap_or(0) > 0 {
                                 continue;
                             } else {
-                                return Err(Error::OutOfBounds(*needed as usize));
+                                return Err(at!(Error::OutOfBounds(*needed as usize)));
                             }
                         }
                     }
@@ -434,7 +438,10 @@ impl CodestreamParser {
                             self.header_needed_bytes = None;
                             break;
                         }
-                        Err(Error::OutOfBounds(n)) => {
+                        Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {
+                            let &Error::OutOfBounds(n) = e.error() else {
+                                unreachable!()
+                            };
                             let new_range = self.non_section_buf.range();
                             // If non-section parsing consumed no bytes, and the non-section buffer
                             // cannot accept more bytes, enlarge the buffer to allow to make progress.
@@ -446,7 +453,7 @@ impl CodestreamParser {
                             if input.available_bytes().unwrap_or(0) > 0 {
                                 continue;
                             } else {
-                                return Err(Error::OutOfBounds(n));
+                                return Err(at!(Error::OutOfBounds(n)));
                             }
                         }
                         Err(e) => return Err(e),

@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::collections::BTreeSet;
+use whereat::at;
 use std::sync::Arc;
 
 use super::render::pipeline;
@@ -179,7 +180,7 @@ impl Frame {
                 if let Some([a, b, c]) = &decoder_state.lf_frames[frame_header.lf_level as usize] {
                     Some([a.try_clone()?, b.try_clone()?, c.try_clone()?])
                 } else {
-                    return Err(Error::NoLfFrame(frame_header.lf_level));
+                    return Err(at!(Error::NoLfFrame(frame_header.lf_level)));
                 }
             } else {
                 Some([
@@ -294,7 +295,7 @@ impl Frame {
             .entries
             .iter()
             .scan(br, |br, count| Some(br.split_at(*count as usize)))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         if !self.toc.permuted {
             return Ok(ret);
         }
@@ -833,10 +834,10 @@ impl Frame {
             tracker.try_allocate(alloc_bytes)?;
             let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
             for ch in &mut channels {
-                ch.try_reserve_exact(num_groups)?;
+                ch.try_reserve_exact(num_groups).map_err(|e| at!(Error::from(e)))?;
                 for _ in 0..num_groups {
                     let mut v: Vec<i32> = Vec::new();
-                    v.try_reserve_exact(coeffs_per_group)?;
+                    v.try_reserve_exact(coeffs_per_group).map_err(|e| at!(Error::from(e)))?;
                     v.resize(coeffs_per_group, 0);
                     ch.push(v);
                 }

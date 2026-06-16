@@ -57,6 +57,11 @@
 #![cfg_attr(not(feature = "allow-unsafe"), forbid(unsafe_code))]
 #![cfg_attr(feature = "allow-unsafe", deny(unsafe_code))]
 
+// Enables `at!()` source-location tracking (`whereat`) and clickable GitHub
+// links in error traces. The `path` matches this crate's location within the
+// repository so the generated blob URLs resolve correctly.
+whereat::define_at_crate_info!(path = "zenjxl-decoder/");
+
 pub mod api;
 pub use api::{decode, decode_with, read_header, read_header_with};
 #[cfg(feature = "jpeg")]

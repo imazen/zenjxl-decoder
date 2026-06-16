@@ -6,6 +6,7 @@
 use jxl_simd::{
     F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U32SimdVec, shl, shr, simd_function,
 };
+use whereat::at;
 
 use crate::{
     error::{Error, Result},
@@ -24,18 +25,18 @@ pub fn check_squeeze_params(
 ) -> Result<()> {
     let end_channel = (params.begin_channel + params.num_channels) as usize;
     if end_channel > channels.len() {
-        return Err(Error::InvalidChannelRange(
+        return Err(at!(Error::InvalidChannelRange(
             params.begin_channel as usize,
             params.num_channels as usize,
             channels.len(),
-        ));
+        )));
     }
     if channels[params.begin_channel as usize].1.is_meta() != channels[end_channel - 1].1.is_meta()
     {
-        return Err(Error::MixingDifferentChannels);
+        return Err(at!(Error::MixingDifferentChannels));
     }
     if channels[params.begin_channel as usize].1.is_meta() && !params.in_place {
-        return Err(Error::MetaSqueezeRequiresInPlace);
+        return Err(at!(Error::MetaSqueezeRequiresInPlace));
     }
     Ok(())
 }

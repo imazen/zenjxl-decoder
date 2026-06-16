@@ -9,7 +9,7 @@ Maintained by [Lilith River](https://github.com/lilith) at [Imazen](https://gith
 zenjxl-decoder = "0.3"
 ```
 
-The Rust lib name is `jxl`, so you `use jxl::...` in code.
+The Rust lib name is `zenjxl_decoder`, so you `use zenjxl_decoder::...` in code.
 
 If you find a conformant JXL file that decodes incorrectly (or not at all), [open an issue](https://github.com/imazen/zenjxl-decoder/issues/new).
 
@@ -45,23 +45,25 @@ This fork fixes several decoding bugs, adds resource limits and cooperative canc
 ### Basic decode
 
 ```rust
-use jxl::api::{JxlDecoder, JxlDecoderOptions};
+use zenjxl_decoder::decode;
 
 let data = std::fs::read("image.jxl")?;
-let mut decoder = JxlDecoder::new(&data, JxlDecoderOptions::default());
-// ... process frames
+let image = decode(&data)?; // one-shot: bytes -> JxlImage (RGBA8 or GrayAlpha8)
+println!("{}x{}, {} channels", image.width, image.height, image.channels);
+assert_eq!(image.data.len(), image.width * image.height * image.channels);
 ```
 
 ### Resource limits
 
 ```rust
-use jxl::api::{JxlDecoderLimits, JxlDecoderOptions};
+use zenjxl_decoder::{decode_with, api::{JxlDecoderLimits, JxlDecoderOptions}};
 
-// For untrusted input
+// For untrusted input, start from the restrictive preset.
 let options = JxlDecoderOptions {
     limits: JxlDecoderLimits::restrictive(),
     ..Default::default()
 };
+let image = decode_with(&data, options)?;
 ```
 
 | Limit | Default | Restrictive |
@@ -80,11 +82,8 @@ All limits return `Error::LimitExceeded { resource, actual, limit }` when exceed
 ### Cancellation
 
 The decoder accepts any [`enough::Stop`](https://docs.rs/enough) implementation. The
-ready-made thread-safe `Stopper` used below lives in the separate
-[`almost-enough`](https://docs.rs/almost-enough) crate — add it with `cargo add
-almost-enough`. To avoid the extra dependency, implement `enough::Stop` on your own
-type instead (e.g. wrapping an `AtomicBool` whose `check()` returns
-`Err(enough::StopReason::Cancelled)` once set).
+ready-made `Stopper` lives in the companion [`almost-enough`](https://crates.io/crates/almost-enough)
+crate — add it with `cargo add almost-enough`:
 
 ```rust
 use almost_enough::Stopper; // separate crate: `cargo add almost-enough`
@@ -106,6 +105,27 @@ let options = JxlDecoderOptions {
 ```
 
 Cancellation checks run inside parallel closures too, so a cancel request is noticed mid-batch.
+
+### Errors
+
+`decode` / `decode_with` return `zenjxl_decoder::Result<JxlImage>` = `Result<JxlImage, Error>`.
+`Error` is `#[non_exhaustive]`, so keep a wildcard arm. Match the variants to handle
+resource-limit, cancellation, and malformed-input failures differently:
+
+```rust
+use zenjxl_decoder::{decode_with, Error, api::{JxlDecoderLimits, JxlDecoderOptions}};
+
+let options = JxlDecoderOptions { limits: JxlDecoderLimits::restrictive(), ..Default::default() };
+match decode_with(&data, options) {
+    Ok(image) => { /* image.width, image.height, image.data … */ }
+    Err(Error::Cancelled) => { /* a Stop token requested cancellation or timeout */ }
+    Err(Error::LimitExceeded { resource, actual, limit }) => {
+        // reject oversized / hostile input (e.g. HTTP 413)
+        eprintln!("limit '{resource}' exceeded: {actual} > {limit}");
+    }
+    Err(e) => eprintln!("malformed or unsupported JXL: {e}"), // every other variant
+}
+```
 
 ### Parallel decoding
 
