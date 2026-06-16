@@ -381,6 +381,9 @@ mod tests {
     }
 
     #[test]
+    // The single-element array of ranges is intentional: this exercises the
+    // `S == 1` case of the const-generic `[Range; S]` parameter.
+    #[allow(clippy::single_range_in_vec_init)]
     fn distinct_slices_single_range() {
         let mut data: Vec<u8> = (0..6).collect();
         let slices = get_distinct_slices(&mut data, [3..6]);
