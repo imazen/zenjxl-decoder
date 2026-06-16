@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 609 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 22 lines (22 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 630 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 22 lines (22 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,7 +15,7 @@
 #   pub consts/statics                          2
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          160
+#   inherent methods                          181
 #   struct fields                             116
 #   enum variants                             209
 #   re-exports                                  2
@@ -25,9 +25,9 @@
 #
 # per-module pub lines:
 #   (root)                            8
-#   api                             544
+#   api                             565
 
-## items (548 lines)
+## items (569 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -458,6 +458,14 @@ pub api::JxlDecoderLimits::max_spline_points: core::option::Option<u32>
 pub api::JxlDecoderLimits::max_tree_size: core::option::Option<usize>
 pub fn api::JxlDecoderLimits::restrictive() -> Self
 pub fn api::JxlDecoderLimits::unlimited() -> Self
+pub fn api::JxlDecoderLimits::with_max_extra_channels(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_icc_size(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_memory_bytes(self, u64) -> Self
+pub fn api::JxlDecoderLimits::with_max_patches(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_pixels(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_reference_frames(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_spline_points(self, u32) -> Self
+pub fn api::JxlDecoderLimits::with_max_tree_size(self, usize) -> Self
 #[non_exhaustive] pub struct api::JxlDecoderOptions
 pub api::JxlDecoderOptions::adjust_orientation: bool
 pub api::JxlDecoderOptions::cms: core::option::Option<alloc::boxed::Box<dyn api::JxlCms>>
@@ -472,6 +480,19 @@ pub api::JxlDecoderOptions::reject_progressive: bool
 pub api::JxlDecoderOptions::render_spot_colors: bool
 pub api::JxlDecoderOptions::skip_preview: bool
 pub api::JxlDecoderOptions::stop: alloc::sync::Arc<dyn enough::Stop>
+pub fn api::JxlDecoderOptions::with_adjust_orientation(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_cms(self, alloc::boxed::Box<dyn api::JxlCms>) -> Self
+pub fn api::JxlDecoderOptions::with_coalescing(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_desired_intensity_target(self, f32) -> Self
+pub fn api::JxlDecoderOptions::with_high_precision(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_limits(self, api::JxlDecoderLimits) -> Self
+pub fn api::JxlDecoderOptions::with_parallel(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_premultiply_output(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_progressive_mode(self, api::JxlProgressiveMode) -> Self
+pub fn api::JxlDecoderOptions::with_reject_progressive(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_render_spot_colors(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_skip_preview(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_stop(self, alloc::sync::Arc<dyn enough::Stop>) -> Self
 pub struct api::JxlExtraChannel
 pub api::JxlExtraChannel::alpha_associated: bool
 pub api::JxlExtraChannel::bits_per_sample: u32
