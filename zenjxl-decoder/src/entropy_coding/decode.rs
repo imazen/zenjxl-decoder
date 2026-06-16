@@ -277,7 +277,8 @@ impl SymbolReader {
                     min_symbol,
                     min_length,
                     dist_multiplier,
-                    window: Vec::new_with_capacity(1 << Lz77State::LOG_WINDOW_SIZE).map_err(|e| at!(Error::from(e)))?,
+                    window: Vec::new_with_capacity(1 << Lz77State::LOG_WINDOW_SIZE)
+                        .map_err(|e| at!(Error::from(e)))?,
                     num_to_copy: 0,
                     copy_pos: 0,
                     num_decoded: 0,

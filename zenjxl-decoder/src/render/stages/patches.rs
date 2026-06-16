@@ -53,7 +53,8 @@ impl RenderPipelineInPlaceStage for PatchesStage {
         &self,
         _thread_index: usize,
     ) -> crate::error::Result<Option<Box<dyn Any + Send>>> {
-        let patches_for_row_result = Vec::<usize>::new_with_capacity(self.patches.positions.len()).map_err(|e| at!(crate::error::Error::from(e)))?;
+        let patches_for_row_result = Vec::<usize>::new_with_capacity(self.patches.positions.len())
+            .map_err(|e| at!(crate::error::Error::from(e)))?;
         Ok(Some(Box::new(patches_for_row_result) as Box<dyn Any + Send>))
     }
 }

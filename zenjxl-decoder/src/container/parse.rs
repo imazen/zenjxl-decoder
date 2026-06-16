@@ -6,12 +6,12 @@
 // Originally written for jxl-oxide.
 
 use super::{BitstreamKind, ContainerParser, DetectState, JxlpIndexState, box_header::*};
-use whereat::at;
 use crate::{
     api::{CODESTREAM_SIGNATURE, CONTAINER_SIGNATURE},
     error::{Error, Result},
     util::tracing_wrappers::*,
 };
+use whereat::at;
 
 /// Iterator that reads over a buffer and emits parser events.
 pub struct ParseEvents<'inner, 'buf> {

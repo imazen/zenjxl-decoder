@@ -9,8 +9,8 @@
 //! `max_memory_bytes` limits during decoding.
 
 use std::sync::Arc;
-use whereat::at;
 use std::sync::atomic::{AtomicU64, Ordering};
+use whereat::at;
 
 use crate::error::{Error, Result};
 

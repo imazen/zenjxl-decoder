@@ -450,7 +450,8 @@ impl Tree {
                 return Err(at!(Error::TreeTooLarge(tree.len(), size_limit)));
             }
             if tree.len() >= tree.capacity() {
-                tree.try_reserve(tree.len() * 2 + 1).map_err(|e| at!(Error::from(e)))?;
+                tree.try_reserve(tree.len() * 2 + 1)
+                    .map_err(|e| at!(Error::from(e)))?;
             }
             to_decode -= 1;
             let property = tree_reader.read_unsigned(&tree_histograms, br, PROPERTY_CONTEXT);
@@ -546,7 +547,8 @@ impl Tree {
             return Ok(vec![]);
         }
 
-        let mut flat_nodes = Vec::new_with_capacity(nodes.len()).map_err(|e| at!(Error::from(e)))?;
+        let mut flat_nodes =
+            Vec::new_with_capacity(nodes.len()).map_err(|e| at!(Error::from(e)))?;
         let mut queue: VecDeque<usize> = VecDeque::new();
         queue.push_back(0); // Start with root
 

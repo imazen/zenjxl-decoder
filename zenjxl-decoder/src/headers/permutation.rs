@@ -81,7 +81,8 @@ impl Permutation {
         }
 
         // Initialize the full permutation vector with skipped elements intact
-        let mut permutation = Vec::new_with_capacity((size - skip) as usize).map_err(|e| at!(Error::from(e)))?;
+        let mut permutation =
+            Vec::new_with_capacity((size - skip) as usize).map_err(|e| at!(Error::from(e)))?;
         permutation.extend(0..size);
 
         // Decode the Lehmer code into the slice starting at `skip`

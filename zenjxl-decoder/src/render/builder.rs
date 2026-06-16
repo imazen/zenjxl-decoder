@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 use crate::api::{JxlColorType, JxlDataFormat};
-use whereat::at;
 use crate::error::{Error, Result};
 use crate::headers::Orientation;
 use crate::render::StageSpecialCase;
@@ -12,6 +11,7 @@ use crate::render::internal::ChannelInfo;
 use crate::render::save::SaveStage;
 use crate::render::stages::ConvertI32ToU8Stage;
 use crate::util::{MemoryTracker, ShiftRightCeil, tracing_wrappers::*};
+use whereat::at;
 
 use super::internal::{RenderPipelineShared, Stage};
 use super::stages::ExtendToImageDimensionsStage;
@@ -229,7 +229,9 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
             if self.shared.extend_stage_index.is_some()
                 && (shift != (0, 0) || border != (0, 0) || is_extend)
             {
-                return Err(at!(Error::PipelineInvalidStageAfterExtend(stage.to_string())));
+                return Err(at!(Error::PipelineInvalidStageAfterExtend(
+                    stage.to_string()
+                )));
             }
             if is_extend {
                 self.shared.extend_stage_index = Some(i);

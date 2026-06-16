@@ -101,7 +101,8 @@ impl Table {
                 TABLE_SIZE
             ]),
             (2, _) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
+                let mut ret =
+                    Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols[0..2].sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 1) {
                     ret.push(TableEntry {
@@ -116,7 +117,8 @@ impl Table {
                 Ok(ret)
             }
             (3, _) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
+                let mut ret =
+                    Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols[1..3].sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 2) {
                     ret.push(TableEntry {
@@ -139,7 +141,8 @@ impl Table {
                 Ok(ret)
             }
             (4, false) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
+                let mut ret =
+                    Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols.sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 2) {
                     ret.push(TableEntry {
@@ -162,7 +165,8 @@ impl Table {
                 Ok(ret)
             }
             (4, true) => {
-                let mut ret = Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
+                let mut ret =
+                    Vec::new_with_capacity(TABLE_SIZE).map_err(|e| at!(Error::from(e)))?;
                 symbols[2..4].sort_unstable();
                 for _ in 0..(TABLE_SIZE >> 3) {
                     ret.push(TableEntry {

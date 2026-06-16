@@ -416,8 +416,12 @@ pub fn specialize_tree(
     // TODO(veluca): consider skipping the pruning if header.uses_global_tree is true.
     let mut pruned_tree = Vec::new();
     let mut queue = VecDeque::new();
-    pruned_tree.try_reserve(tree.nodes.len()).map_err(|e| at!(crate::error::Error::from(e)))?;
-    queue.try_reserve(tree.nodes.len()).map_err(|e| at!(crate::error::Error::from(e)))?;
+    pruned_tree
+        .try_reserve(tree.nodes.len())
+        .map_err(|e| at!(crate::error::Error::from(e)))?;
+    queue
+        .try_reserve(tree.nodes.len())
+        .map_err(|e| at!(crate::error::Error::from(e)))?;
     queue.push_front(0);
 
     let mut uses_wp = false;

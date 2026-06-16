@@ -14,10 +14,10 @@ use crate::{
     container::{frame_index::FrameIndexBox, gain_map::GainMapBundle},
     error::Result,
 };
-#[cfg(test)]
-use whereat::at;
 use states::*;
 use std::marker::PhantomData;
+#[cfg(test)]
+use whereat::at;
 
 pub mod states {
     pub trait JxlState {}
@@ -522,26 +522,33 @@ pub(crate) mod tests {
     }
 
     fn decode_test_file(path: &Path) -> Result<()> {
-        decode(&std::fs::read(path).map_err(|e| at!(Error::from(e)))?, usize::MAX, false, false, None)?;
+        decode(
+            &std::fs::read(path).map_err(|e| at!(Error::from(e)))?,
+            usize::MAX,
+            false,
+            false,
+            None,
+        )?;
         Ok(())
     }
 
     for_each_test_file!(decode_test_file);
 
     fn decode_test_file_chunks(path: &Path) -> Result<()> {
-        decode(&std::fs::read(path).map_err(|e| at!(Error::from(e)))?, 1, false, false, None)?;
+        decode(
+            &std::fs::read(path).map_err(|e| at!(Error::from(e)))?,
+            1,
+            false,
+            false,
+            None,
+        )?;
         Ok(())
     }
 
     for_each_test_file!(decode_test_file_chunks);
 
     #[allow(dead_code)] // used by integration tests
-    fn compare_frames(
-        _path: &Path,
-        fc: usize,
-        f: &[Image<f32>],
-        sf: &[Image<f32>],
-    ) -> Result<()> {
+    fn compare_frames(_path: &Path, fc: usize, f: &[Image<f32>], sf: &[Image<f32>]) -> Result<()> {
         assert_eq!(
             f.len(),
             sf.len(),

@@ -5,11 +5,11 @@
 
 #[cfg(test)]
 use crate::api::FrameCallback;
-use whereat::at;
 use crate::{
     api::JxlFrameHeader,
     error::{Error, Result},
 };
+use whereat::at;
 
 use super::{JxlBasicInfo, JxlColorProfile, JxlDecoderOptions, JxlPixelFormat, VardctQuantizer};
 use crate::container::frame_index::FrameIndexBox;

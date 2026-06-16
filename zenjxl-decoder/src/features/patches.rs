@@ -4,8 +4,8 @@
 // license that can be found in the LICENSE file.
 
 use num_derive::FromPrimitive;
-use whereat::at;
 use num_traits::FromPrimitive;
+use whereat::at;
 
 use crate::{
     bit_reader::BitReader,
@@ -249,7 +249,8 @@ impl PatchesDictionary {
         }
 
         // Create a y-interval for each patch.
-        let mut intervals: Vec<PatchInterval> = Vec::new_with_capacity(self.positions.len()).map_err(|e| at!(Error::from(e)))?;
+        let mut intervals: Vec<PatchInterval> =
+            Vec::new_with_capacity(self.positions.len()).map_err(|e| at!(Error::from(e)))?;
         for (i, pos) in self.positions.iter().enumerate() {
             let ref_pos = self.ref_positions[pos.ref_pos_idx];
             if ref_pos.xsize > 0 && ref_pos.ysize > 0 {
@@ -314,9 +315,11 @@ impl PatchesDictionary {
             node.start = self.sorted_patches_y0.len();
 
             self.sorted_patches_y1
-                .try_reserve(right_start.saturating_sub(left_end)).map_err(|e| at!(Error::from(e)))?;
+                .try_reserve(right_start.saturating_sub(left_end))
+                .map_err(|e| at!(Error::from(e)))?;
             self.sorted_patches_y0
-                .try_reserve(right_start.saturating_sub(left_end)).map_err(|e| at!(Error::from(e)))?;
+                .try_reserve(right_start.saturating_sub(left_end))
+                .map_err(|e| at!(Error::from(e)))?;
             for i in (left_end..right_start).rev() {
                 self.sorted_patches_y1
                     .push((intervals[i].y1, intervals[i].idx));
@@ -337,7 +340,9 @@ impl PatchesDictionary {
                 left.start = start;
                 left.num = left_end - left.start;
                 self.patch_tree[next].left_child = self.patch_tree.len() as isize;
-                self.patch_tree.try_reserve(1).map_err(|e| at!(Error::from(e)))?;
+                self.patch_tree
+                    .try_reserve(1)
+                    .map_err(|e| at!(Error::from(e)))?;
                 self.patch_tree.push(left);
             }
             if right_start < end {
@@ -345,7 +350,9 @@ impl PatchesDictionary {
                 right.start = right_start;
                 right.num = end - right.start;
                 self.patch_tree[next].right_child = self.patch_tree.len() as isize;
-                self.patch_tree.try_reserve(1).map_err(|e| at!(Error::from(e)))?;
+                self.patch_tree
+                    .try_reserve(1)
+                    .map_err(|e| at!(Error::from(e)))?;
                 self.patch_tree.push(right);
             }
 
@@ -404,7 +411,8 @@ impl PatchesDictionary {
         let mut blendings = Vec::new();
         memory_tracker
             .check_alloc((num_ref_patch * std::mem::size_of::<PatchReferencePosition>()) as u64)?;
-        let mut ref_positions = Vec::new_with_capacity(num_ref_patch).map_err(|e| at!(Error::from(e)))?;
+        let mut ref_positions =
+            Vec::new_with_capacity(num_ref_patch).map_err(|e| at!(Error::from(e)))?;
         for _ in 0..num_ref_patch {
             let reference = patches_reader.read_unsigned(
                 &patches_histograms,
@@ -502,12 +510,16 @@ impl PatchesDictionary {
                     max_patches,
                 )));
             }
-            positions.try_reserve(next_size.saturating_sub(positions.len())).map_err(|e| at!(Error::from(e)))?;
+            positions
+                .try_reserve(next_size.saturating_sub(positions.len()))
+                .map_err(|e| at!(Error::from(e)))?;
             // Use checked_mul to fail rather than silently under-allocate
             let blendings_needed = next_size
                 .checked_mul(PatchBlendMode::NUM_BLEND_MODES as usize)
                 .ok_or(Error::ArithmeticOverflow)?;
-            blendings.try_reserve(blendings_needed.saturating_sub(blendings.len())).map_err(|e| at!(Error::from(e)))?;
+            blendings
+                .try_reserve(blendings_needed.saturating_sub(blendings.len()))
+                .map_err(|e| at!(Error::from(e)))?;
 
             for i in 0..id_count {
                 let mut pos = PatchPosition {

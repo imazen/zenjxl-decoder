@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 use super::channel::decode_modular_channel;
-use whereat::at;
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::SymbolReader,
@@ -13,6 +12,7 @@ use crate::{
     headers::{JxlHeader, modular::GroupHeader},
     util::MemoryTracker,
 };
+use whereat::at;
 
 // This function will decode a header and apply local transforms if a header is not given.
 // The intended use of passing a header is for the DcGlobal section.

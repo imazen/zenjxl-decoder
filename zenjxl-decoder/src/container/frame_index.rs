@@ -92,7 +92,8 @@ impl FrameIndexBox {
         // Each entry requires at least 3 bytes (three varints, min 1 byte each).
         // Cap the pre-allocation to avoid OOM from a crafted NF value.
         // Use new_with_capacity to return Err on allocation failure instead of aborting.
-        let mut entries = Vec::new_with_capacity(nf.min(reader.len() / 3)).map_err(|e| at!(Error::from(e)))?;
+        let mut entries =
+            Vec::new_with_capacity(nf.min(reader.len() / 3)).map_err(|e| at!(Error::from(e)))?;
         let mut absolute_offset: u64 = 0;
 
         for _ in 0..nf {

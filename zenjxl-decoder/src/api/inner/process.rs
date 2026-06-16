@@ -51,7 +51,8 @@ impl SmallBuffer {
             } else {
                 self.buf.len()
             };
-            let num = get_input(&mut [IoSliceMut::new(&mut self.buf[self.range.end..stop])]).map_err(|e| at!(crate::error::Error::from(e)))?;
+            let num = get_input(&mut [IoSliceMut::new(&mut self.buf[self.range.end..stop])])
+                .map_err(|e| at!(crate::error::Error::from(e)))?;
             total += num;
             self.range.end += num;
             if num == 0 {

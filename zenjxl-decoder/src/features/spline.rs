@@ -201,7 +201,8 @@ impl QuantizedSpline {
                 max_control_points,
             )));
         }
-        let mut control_points = Vec::new_with_capacity(num_control_points as usize).map_err(|e| at!(Error::from(e)))?;
+        let mut control_points =
+            Vec::new_with_capacity(num_control_points as usize).map_err(|e| at!(Error::from(e)))?;
         for _ in 0..num_control_points {
             let x =
                 splines_reader.read_signed(splines_histograms, br, CONTROL_POINTS_CONTEXT) as i64;
@@ -248,7 +249,8 @@ impl QuantizedSpline {
         let area_limit = area_limit(image_size);
 
         let mut result = Spline {
-            control_points: Vec::new_with_capacity(self.control_points.len() + 1).map_err(|e| at!(Error::from(e)))?,
+            control_points: Vec::new_with_capacity(self.control_points.len() + 1)
+                .map_err(|e| at!(Error::from(e)))?,
             ..Default::default()
         };
 
@@ -805,11 +807,15 @@ impl Splines {
         segments_by_y.sort_by_key(|segment| segment.0);
 
         self.segment_indices.clear();
-        self.segment_indices.try_reserve(segments_by_y.len()).map_err(|e| at!(Error::from(e)))?;
+        self.segment_indices
+            .try_reserve(segments_by_y.len())
+            .map_err(|e| at!(Error::from(e)))?;
         self.segment_indices.resize(segments_by_y.len(), 0);
 
         self.segment_y_start.clear();
-        self.segment_y_start.try_reserve(image_ysize as usize + 1).map_err(|e| at!(Error::from(e)))?;
+        self.segment_y_start
+            .try_reserve(image_ysize as usize + 1)
+            .map_err(|e| at!(Error::from(e)))?;
         self.segment_y_start.resize(image_ysize as usize + 1, 0);
 
         for (i, segment) in segments_by_y.iter().enumerate() {

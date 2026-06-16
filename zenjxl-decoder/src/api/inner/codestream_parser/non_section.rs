@@ -4,8 +4,8 @@
 // license that can be found in the LICENSE file.
 
 use std::io::IoSliceMut;
-use whereat::at;
 use std::sync::Arc;
+use whereat::at;
 
 use super::SECTION_PADDING;
 
@@ -361,9 +361,11 @@ impl CodestreamParser {
             // fixes #770.)
             let num_groups = frame_header.num_groups();
             let num_passes = frame_header.passes.num_passes as usize;
-            let mut hf_sections = Vec::new_with_capacity(num_groups).map_err(|e| at!(Error::from(e)))?;
+            let mut hf_sections =
+                Vec::new_with_capacity(num_groups).map_err(|e| at!(Error::from(e)))?;
             for _ in 0..num_groups {
-                let mut row = Vec::new_with_capacity(num_passes).map_err(|e| at!(Error::from(e)))?;
+                let mut row =
+                    Vec::new_with_capacity(num_passes).map_err(|e| at!(Error::from(e)))?;
                 for _ in 0..num_passes {
                     row.push(None);
                 }
@@ -469,7 +471,8 @@ impl CodestreamParser {
                 break;
             }
             let mut data = Vec::new();
-            data.try_reserve_exact(buf.len + SECTION_PADDING).map_err(|e| at!(Error::from(e)))?;
+            data.try_reserve_exact(buf.len + SECTION_PADDING)
+                .map_err(|e| at!(Error::from(e)))?;
             data.resize(buf.len + SECTION_PADDING, 0);
             buf.data = data;
             self.ready_section_data += self

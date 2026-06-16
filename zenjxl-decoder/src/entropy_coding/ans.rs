@@ -6,8 +6,8 @@
 // Originally written for jxl-oxide.
 
 use crate::bit_reader::BitReader;
-use whereat::at;
 use crate::error::{Error, Result};
+use whereat::at;
 
 const LOG_SUM_PROBS: usize = 12;
 const SUM_PROBS: u16 = 1 << LOG_SUM_PROBS;

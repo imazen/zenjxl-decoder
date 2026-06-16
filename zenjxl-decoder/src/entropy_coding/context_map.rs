@@ -4,10 +4,10 @@
 // license that can be found in the LICENSE file.
 
 use crate::bit_reader::BitReader;
-use whereat::at;
 use crate::error::{Error, Result};
 use crate::util::TryVecExt;
 use std::collections::HashSet;
+use whereat::at;
 
 use crate::entropy_coding::decode::*;
 

@@ -10,8 +10,8 @@
 //! DO NOT WEAKEN TOLERANCES or modify tests to pass when implementation is wrong.
 
 use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
-use whereat::at;
 use crate::error::Result;
+use whereat::at;
 
 fn test_resources_dir() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -38,10 +38,7 @@ fn decode_oneshot(data: &[u8]) -> Result<JxlDecoder<states::WithImageInfo>> {
 }
 
 /// Helper to decode with chunked input, returning basic info
-fn decode_chunked(
-    data: &[u8],
-    chunk_size: usize,
-) -> Result<JxlDecoder<states::WithImageInfo>> {
+fn decode_chunked(data: &[u8], chunk_size: usize) -> Result<JxlDecoder<states::WithImageInfo>> {
     let options = JxlDecoderOptions::default();
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut offset = 0;

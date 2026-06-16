@@ -11,13 +11,11 @@
 use crate::api::{
     JxlDecoder, JxlDecoderOptions, JxlSignatureType, ProcessingResult, check_signature, states,
 };
-use whereat::at;
 use crate::error::Result;
+use whereat::at;
 
 /// Helper to process decoder to WithImageInfo state
-fn process_to_image_info(
-    data: &[u8],
-) -> Result<crate::api::JxlDecoder<states::WithImageInfo>> {
+fn process_to_image_info(data: &[u8]) -> Result<crate::api::JxlDecoder<states::WithImageInfo>> {
     let options = JxlDecoderOptions::default();
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = data;
