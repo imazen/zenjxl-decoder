@@ -34,6 +34,12 @@ pub struct VarDctBuffers {
     pub transform_buffer: [Vec<f32>; 3],
     /// Coefficient storage for single-pass decoding (when hf_coefficients is None)
     pub coeffs_storage: Vec<i32>,
+    /// Per-pass non-zero-count prediction maps, reused across groups. One
+    /// `[Image<u32>; 3]` (X/Y/B planes) per pass. Each group resizes (only on a
+    /// dimension change) and zeroes the entries it needs via
+    /// [`VarDctBuffers::prepare_num_nzeros`], so this allocation is amortized
+    /// across every group rather than rebuilt per pass per group (issue #40).
+    num_nzeros: Vec<[Image<u32>; 3]>,
 }
 
 impl VarDctBuffers {
@@ -52,14 +58,49 @@ impl VarDctBuffers {
             ],
             coeffs_storage: Vec::try_from_elem(0, 3 * GROUP_DIM * GROUP_DIM)
                 .map_err(|_| Error::ImageOutOfMemory(3 * GROUP_DIM * GROUP_DIM, 1))?,
+            num_nzeros: Vec::new(),
         })
     }
 
-    /// Reset buffers for reuse. Only coeffs_storage needs zeroing because
-    /// coefficients are accumulated with `+=`. scratch and transform_buffer are
-    /// fully written by dequant_block/copy_from_slice before each read.
-    pub fn reset(&mut self) {
-        self.coeffs_storage.fill(0);
+    /// Prepares the reused per-pass `num_nzeros` maps for one group, sizing and
+    /// zeroing the first `num_passes` entries.
+    ///
+    /// Each pass needs three planes sized `sizes[c]` (the block-group rect after
+    /// per-channel sub-sampling). Entries are reused in place when their
+    /// dimensions already match — only the cells are re-zeroed; a dimension
+    /// change (edge groups, or a pool grown for a new frame) reallocates the
+    /// affected plane. After this call the first `num_passes` entries are fully
+    /// zeroed, matching the freshly-`new_tracked` images this replaced, which is
+    /// required for correctness: `predict_num_nonzeros` reads not-yet-written
+    /// neighbour cells that must read as zero.
+    ///
+    /// Returns `()` rather than the slice so the caller can split-borrow the
+    /// `num_nzeros` field directly afterward (keeping it disjoint from the other
+    /// reused buffers borrowed across the decode loop).
+    fn prepare_num_nzeros(
+        &mut self,
+        num_passes: usize,
+        sizes: [(usize, usize); 3],
+        tracker: &MemoryTracker,
+    ) -> Result<()> {
+        // Grow the pool to cover this frame's pass count (only ever grows).
+        while self.num_nzeros.len() < num_passes {
+            self.num_nzeros.push([
+                Image::new_tracked(sizes[0], tracker)?,
+                Image::new_tracked(sizes[1], tracker)?,
+                Image::new_tracked(sizes[2], tracker)?,
+            ]);
+        }
+        for planes in self.num_nzeros[..num_passes].iter_mut() {
+            for (plane, &size) in planes.iter_mut().zip(sizes.iter()) {
+                if plane.size() == size {
+                    plane.fill(0);
+                } else {
+                    *plane = Image::new_tracked(size, tracker)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -361,24 +402,24 @@ simd_function!(
     }
 );
 
-struct PassInfo<'a, 'b> {
+struct PassInfo<'a, 'b, 'c> {
     histogram_index: usize,
     reader: Option<SymbolReader>,
     br: &'a mut BitReader<'b>,
     shift: u32,
     pass: usize,
-    // TODO(veluca): reuse this allocation.
-    num_nzeros: [Image<u32>; 3],
+    /// Borrowed (X/Y/B) non-zero-count maps, owned and reused by
+    /// [`VarDctBuffers::num_nzeros`] and pre-sized + zeroed for this group.
+    num_nzeros: &'c mut [Image<u32>; 3],
 }
 
-impl<'a, 'b> PassInfo<'a, 'b> {
+impl<'a, 'b, 'c> PassInfo<'a, 'b, 'c> {
     fn new(
         hf_global: &HfGlobalState,
         frame_header: &FrameHeader,
-        block_group_rect: Rect,
         pass: usize,
         br: &'a mut BitReader<'b>,
-        tracker: &MemoryTracker,
+        num_nzeros: &'c mut [Image<u32>; 3],
     ) -> Result<Self> {
         let num_histo_bits = hf_global.num_histograms.ceil_log2();
         debug!(?pass);
@@ -404,29 +445,6 @@ impl<'a, 'b> PassInfo<'a, 'b> {
         } else {
             0
         };
-        let num_nzeros = [
-            Image::new_tracked(
-                (
-                    block_group_rect.size.0 >> frame_header.hshift(0),
-                    block_group_rect.size.1 >> frame_header.vshift(0),
-                ),
-                tracker,
-            )?,
-            Image::new_tracked(
-                (
-                    block_group_rect.size.0 >> frame_header.hshift(1),
-                    block_group_rect.size.1 >> frame_header.vshift(1),
-                ),
-                tracker,
-            )?,
-            Image::new_tracked(
-                (
-                    block_group_rect.size.0 >> frame_header.hshift(2),
-                    block_group_rect.size.1 >> frame_header.vshift(2),
-                ),
-                tracker,
-            )?,
-        ];
 
         Ok(Self {
             histogram_index,
@@ -463,17 +481,21 @@ pub fn decode_vardct_group(
 
     let block_group_rect = frame_header.block_group_rect(group);
     debug!(?block_group_rect);
+    // Per-channel (X/Y/B) dimensions of the non-zero-count maps for this group.
+    let num_nzeros_sizes: [(usize, usize); 3] = core::array::from_fn(|c| {
+        (
+            block_group_rect.size.0 >> frame_header.hshift(c),
+            block_group_rect.size.1 >> frame_header.vshift(c),
+        )
+    });
+    // Size + zero the reused per-pass num_nzeros maps, then split-borrow the
+    // field directly so it stays disjoint from scratch/coeffs/transform_buffer.
+    buffers.prepare_num_nzeros(passes.len(), num_nzeros_sizes, tracker)?;
     let mut pass_info = passes
         .iter_mut()
-        .map(|(pass, br)| {
-            PassInfo::new(
-                hf_global,
-                frame_header,
-                block_group_rect,
-                *pass,
-                br,
-                tracker,
-            )
+        .zip(buffers.num_nzeros.iter_mut())
+        .map(|((pass, br), num_nzeros)| {
+            PassInfo::new(hf_global, frame_header, *pass, br, num_nzeros)
         })
         .collect::<Result<SmallVec<[_; 4]>>>()?;
 
@@ -484,7 +506,10 @@ pub fn decode_vardct_group(
     let uses_local_coeffs = hf_coefficients.is_none();
     let single_pass = pass_info.len() == 1;
     if uses_local_coeffs && !single_pass {
-        buffers.reset();
+        // Inlined `buffers.reset()`: a direct field access keeps this borrow
+        // disjoint from `buffers.num_nzeros` (held by `pass_info`) and from the
+        // scratch/transform_buffer borrows taken below.
+        buffers.coeffs_storage.fill(0);
     }
     let scratch = &mut buffers.scratch;
     let color_correlation_params = lf_global.color_correlation_params.as_ref().unwrap();
