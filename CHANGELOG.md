@@ -9,13 +9,12 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
-- `decode` / `decode_with` now return `Result<JxlImage, whereat::At<Error>>`
-  instead of `Result<JxlImage, Error>`, attaching a source location to errors
-  for server-side logs. Callers matching the error must unwrap the `At` first:
-  `err.error()` borrows `&Error`, `err.decompose().0` owns the `Error`. This is
-  boundary-only capture (the internal decode path is byte-identical, no
-  inner-loop cost); deeper per-origin location for the cold structural parsers
-  is a planned follow-up (see #28).
+- The public `Error` is now wrapped as [`whereat::At<Error>`](https://docs.rs/whereat)
+  via the `Result` alias, so decode errors carry a `file:line` source location for
+  server-side stack traces. Match on the cause with `e.error()` (borrow) or
+  `e.decompose().0` (owned); `into_inner()` is deprecated. The low-level
+  bitstream/entropy hot path keeps a bare `Error` (no `At<>` in inner loops);
+  only the frame/render/api layer carries the wrapper. (#28)
 
 ### Added
 - `JxlDecoderOptions::reject_progressive` (default `false`): when `true`, decode
@@ -28,6 +27,17 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   (`JxlDecoderOptions` and `Error` are `#[non_exhaustive]`); the probe
   (`JxlBasicInfo`) is unchanged — progressive is enforced during decode, not
   surfaced on the probe. (966f9c5)
+
+### Fixed
+- docs(readme): the Basic decode example now shows a real decode-to-pixels flow
+  (`width`/`height`/`data`/`channels` off `JxlImage`) instead of stopping short,
+  and documents the output format (8-bit interleaved RGBA8/GrayAlpha8, straight
+  alpha by default). Corrected the limits table (default `max_pixels` is 2^28
+  ~256M not 2^30; `restrictive()` `max_pixels` is 120M not 100M; default
+  `max_memory_bytes` is 4 GB / 2 GB-on-32-bit, not `None`) and the cancellation
+  section (the `stop` field is `Arc<dyn enough::Stop>` defaulting to the
+  `enough::Unstoppable` no-op; `almost_enough::Stopper` at `0.4` is how you
+  actually cancel). Found by an insulated external-developer usability test.
 
 ## [0.3.10] - 2026-06-11
 

@@ -102,7 +102,7 @@ impl JxlDecoderLimits {
     /// Returns restrictive limits suitable for untrusted web content.
     pub fn restrictive() -> Self {
         Self {
-            max_pixels: Some(100_000_000),    // 100 megapixels
+            max_pixels: Some(120_000_000),    // 120 megapixels (admits common ~108 MP camera photos)
             max_extra_channels: Some(16),     // 16 extra channels
             max_icc_size: Some(1 << 20),      // 1 MB
             max_tree_size: Some(1 << 20),     // 1M nodes
@@ -111,6 +111,62 @@ impl JxlDecoderLimits {
             max_reference_frames: Some(2),    // 2 reference frames
             max_memory_bytes: Some(1 << 30),  // 1 GB total memory
         }
+    }
+
+    /// Set the maximum total pixel count (width × height).
+    #[must_use]
+    pub fn with_max_pixels(mut self, max: usize) -> Self {
+        self.max_pixels = Some(max);
+        self
+    }
+
+    /// Set the maximum number of extra channels (alpha, depth, etc.).
+    #[must_use]
+    pub fn with_max_extra_channels(mut self, max: usize) -> Self {
+        self.max_extra_channels = Some(max);
+        self
+    }
+
+    /// Set the maximum ICC profile size in bytes.
+    #[must_use]
+    pub fn with_max_icc_size(mut self, max: usize) -> Self {
+        self.max_icc_size = Some(max);
+        self
+    }
+
+    /// Set the maximum modular tree size (number of nodes).
+    #[must_use]
+    pub fn with_max_tree_size(mut self, max: usize) -> Self {
+        self.max_tree_size = Some(max);
+        self
+    }
+
+    /// Set the maximum number of patches.
+    #[must_use]
+    pub fn with_max_patches(mut self, max: usize) -> Self {
+        self.max_patches = Some(max);
+        self
+    }
+
+    /// Set the maximum number of spline control points.
+    #[must_use]
+    pub fn with_max_spline_points(mut self, max: u32) -> Self {
+        self.max_spline_points = Some(max);
+        self
+    }
+
+    /// Set the maximum number of reference frames.
+    #[must_use]
+    pub fn with_max_reference_frames(mut self, max: usize) -> Self {
+        self.max_reference_frames = Some(max);
+        self
+    }
+
+    /// Set the maximum total memory budget in bytes.
+    #[must_use]
+    pub fn with_max_memory_bytes(mut self, max: u64) -> Self {
+        self.max_memory_bytes = Some(max);
+        self
     }
 }
 
@@ -123,6 +179,22 @@ pub enum JxlProgressiveMode {
     FullFrame,
 }
 
+/// Decoder configuration.
+///
+/// This struct is `#[non_exhaustive]`, so downstream crates **cannot** build it
+/// with a struct literal. Start from [`default`](Self::default) and chain the
+/// `with_*` setters (or assign the public fields on a `mut` binding):
+///
+/// ```
+/// use zenjxl_decoder::api::{JxlDecoderOptions, JxlDecoderLimits};
+///
+/// let options = JxlDecoderOptions::default()
+///     .with_limits(JxlDecoderLimits::restrictive().with_max_pixels(120_000_000))
+///     .with_reject_progressive(true);
+///
+/// assert!(options.reject_progressive);
+/// assert_eq!(options.limits.max_pixels, Some(120_000_000));
+/// ```
 #[non_exhaustive]
 pub struct JxlDecoderOptions {
     pub adjust_orientation: bool,
@@ -189,5 +261,99 @@ impl Default for JxlDecoderOptions {
             stop: Arc::new(enough::Unstoppable),
             parallel: cfg!(feature = "threads"),
         }
+    }
+}
+
+impl JxlDecoderOptions {
+    /// Apply EXIF orientation to the decoded image.
+    #[must_use]
+    pub fn with_adjust_orientation(mut self, v: bool) -> Self {
+        self.adjust_orientation = v;
+        self
+    }
+
+    /// Reject progressive content during frame decode (untrusted-input policy).
+    #[must_use]
+    pub fn with_reject_progressive(mut self, v: bool) -> Self {
+        self.reject_progressive = v;
+        self
+    }
+
+    /// Render spot colors.
+    #[must_use]
+    pub fn with_render_spot_colors(mut self, v: bool) -> Self {
+        self.render_spot_colors = v;
+        self
+    }
+
+    /// Coalesce animation frames onto the canvas.
+    #[must_use]
+    pub fn with_coalescing(mut self, v: bool) -> Self {
+        self.coalescing = v;
+        self
+    }
+
+    /// Set the desired display intensity target (nits).
+    #[must_use]
+    pub fn with_desired_intensity_target(mut self, nits: f32) -> Self {
+        self.desired_intensity_target = Some(nits);
+        self
+    }
+
+    /// Skip decoding the preview frame.
+    #[must_use]
+    pub fn with_skip_preview(mut self, v: bool) -> Self {
+        self.skip_preview = v;
+        self
+    }
+
+    /// Set the progressive rendering mode.
+    #[must_use]
+    pub fn with_progressive_mode(mut self, mode: JxlProgressiveMode) -> Self {
+        self.progressive_mode = mode;
+        self
+    }
+
+    /// Set the color-management system used for ICC conversions.
+    #[must_use]
+    pub fn with_cms(mut self, cms: Box<dyn JxlCms>) -> Self {
+        self.cms = Some(cms);
+        self
+    }
+
+    /// Use higher-precision decoding (slower).
+    #[must_use]
+    pub fn with_high_precision(mut self, v: bool) -> Self {
+        self.high_precision = v;
+        self
+    }
+
+    /// Emit premultiplied alpha in the output.
+    #[must_use]
+    pub fn with_premultiply_output(mut self, v: bool) -> Self {
+        self.premultiply_output = v;
+        self
+    }
+
+    /// Set the resource limits (see [`JxlDecoderLimits::restrictive`] for a
+    /// safe untrusted-input preset).
+    #[must_use]
+    pub fn with_limits(mut self, limits: JxlDecoderLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Set the cooperative-cancellation token (an [`enough::Stop`]).
+    #[must_use]
+    pub fn with_stop(mut self, stop: Arc<dyn enough::Stop>) -> Self {
+        self.stop = stop;
+        self
+    }
+
+    /// Enable multi-threaded decoding (requires the `threads` feature).
+    #[must_use]
+    pub fn with_parallel(mut self, v: bool) -> Self {
+        self.parallel = v;
+        self
     }
 }

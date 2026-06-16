@@ -10,6 +10,8 @@
 //! DO NOT WEAKEN TOLERANCES or modify tests to pass when implementation is wrong.
 
 use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+use whereat::at;
+use crate::error::Result;
 
 fn test_resources_dir() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -17,7 +19,7 @@ fn test_resources_dir() -> std::path::PathBuf {
 }
 
 /// Helper to decode a JXL file with all data at once
-fn decode_oneshot(data: &[u8]) -> Result<JxlDecoder<states::WithImageInfo>, crate::error::Error> {
+fn decode_oneshot(data: &[u8]) -> Result<JxlDecoder<states::WithImageInfo>> {
     let options = JxlDecoderOptions::default();
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = data;
@@ -27,7 +29,7 @@ fn decode_oneshot(data: &[u8]) -> Result<JxlDecoder<states::WithImageInfo>, crat
             ProcessingResult::Complete { result } => return Ok(result),
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 if input.is_empty() {
-                    return Err(crate::error::Error::OutOfBounds(0));
+                    return Err(at!(crate::error::Error::OutOfBounds(0)));
                 }
                 decoder = fallback;
             }
@@ -39,7 +41,7 @@ fn decode_oneshot(data: &[u8]) -> Result<JxlDecoder<states::WithImageInfo>, crat
 fn decode_chunked(
     data: &[u8],
     chunk_size: usize,
-) -> Result<JxlDecoder<states::WithImageInfo>, crate::error::Error> {
+) -> Result<JxlDecoder<states::WithImageInfo>> {
     let options = JxlDecoderOptions::default();
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut offset = 0;
@@ -56,7 +58,7 @@ fn decode_chunked(
                 offset += consumed;
 
                 if offset >= data.len() {
-                    return Err(crate::error::Error::OutOfBounds(0));
+                    return Err(at!(crate::error::Error::OutOfBounds(0)));
                 }
                 decoder = fallback;
             }

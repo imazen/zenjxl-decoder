@@ -140,7 +140,7 @@ pub struct Transform {
 }
 
 impl Transform {
-    fn check(&self, _: &encodings::Empty) -> Result<()> {
+    fn check(&self, _: &encodings::Empty) -> Result<(), Error> {
         if self.id == TransformId::Invalid {
             return Err(Error::InvalidTransformId);
         }

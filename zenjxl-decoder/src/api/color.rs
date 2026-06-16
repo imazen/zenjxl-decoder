@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::{borrow::Cow, fmt};
+use whereat::at;
 
 use crate::{
     color::tf::{hlg_to_scene, linear_to_pq_precise, pq_to_linear_precise},
@@ -452,7 +453,7 @@ impl JxlColorEncoding {
         let rendering_intent = internal.rendering_intent;
         if internal.color_space == ColorSpace::XYB {
             if rendering_intent != RenderingIntent::Perceptual {
-                return Err(Error::InvalidRenderingIntent);
+                return Err(at!(Error::InvalidRenderingIntent));
             }
             return Ok(Self::XYB { rendering_intent });
         }
@@ -477,7 +478,7 @@ impl JxlColorEncoding {
                 TransferFunction::DCI => JxlTransferFunction::DCI,
                 TransferFunction::HLG => JxlTransferFunction::HLG,
                 TransferFunction::Unknown => {
-                    return Err(Error::InvalidColorEncoding);
+                    return Err(at!(Error::InvalidColorEncoding));
                 }
             }
         };
@@ -517,7 +518,7 @@ impl JxlColorEncoding {
                 transfer_function,
                 rendering_intent,
             }),
-            ColorSpace::Unknown => Err(Error::InvalidColorSpace),
+            ColorSpace::Unknown => Err(at!(Error::InvalidColorSpace)),
         }
     }
 

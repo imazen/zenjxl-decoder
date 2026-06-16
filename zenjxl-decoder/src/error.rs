@@ -6,6 +6,7 @@
 use std::collections::TryReserveError;
 
 use thiserror::Error;
+use whereat::At;
 
 use crate::{
     api::{JxlColorType, JxlDataFormat},
@@ -320,4 +321,7 @@ impl From<enough::StopReason> for Error {
     }
 }
 
-pub type Result<T, E = Error> = std::result::Result<T, E>;
+/// Result alias whose default error type carries a `whereat` source-location
+/// trace ([`At<Error>`]). Origins are created with `at!(Error::X)`; propagation
+/// via `?` preserves the trace through `whereat`'s blanket `From<E> for At<E>`.
+pub type Result<T, E = At<Error>> = std::result::Result<T, E>;

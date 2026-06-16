@@ -9,6 +9,7 @@ use crate::{
     image::Image,
     util::{TryVecExt, floor_log2_nonzero},
 };
+use whereat::at;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -46,7 +47,7 @@ impl Predictor {
 impl TryFrom<u32> for Predictor {
     type Error = Error;
 
-    fn try_from(value: u32) -> Result<Self> {
+    fn try_from(value: u32) -> Result<Self, Error> {
         Self::from_u32(value).ok_or(Error::InvalidPredictor(value))
     }
 }
@@ -425,8 +426,8 @@ impl WeightedPredictorState {
             // Position-major layout: errors for same position are contiguous
             // Layout: [pos0: p0,p1,p2,p3] [pos1: p0,p1,p2,p3] ...
             // This gives better cache locality when accessing all predictors for a position
-            pred_errors_buffer: Vec::try_from_elem(0u32, num_errors * NUM_PREDICTORS)?,
-            error: Vec::try_from_elem(0i32, num_errors)?,
+            pred_errors_buffer: Vec::try_from_elem(0u32, num_errors * NUM_PREDICTORS).map_err(|e| at!(Error::from(e)))?,
+            error: Vec::try_from_elem(0i32, num_errors).map_err(|e| at!(Error::from(e)))?,
             wp_header: wp_header.clone(),
         })
     }

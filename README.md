@@ -9,7 +9,7 @@ Maintained by [Lilith River](https://github.com/lilith) at [Imazen](https://gith
 zenjxl-decoder = "0.3"
 ```
 
-The Rust lib name is `jxl`, so you `use jxl::...` in code.
+The Rust lib name is `zenjxl_decoder`, so you `use zenjxl_decoder::...` in code.
 
 If you find a conformant JXL file that decodes incorrectly (or not at all), [open an issue](https://github.com/imazen/zenjxl-decoder/issues/new).
 
@@ -44,63 +44,126 @@ This fork fixes several decoding bugs, adds resource limits and cooperative canc
 
 ### Basic decode
 
+`decode` is the one-liner for trusted input. It returns a [`JxlImage`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/struct.JxlImage.html)
+whose public fields hold everything you need to get pixels out:
+
 ```rust
-use jxl::api::{JxlDecoder, JxlDecoderOptions};
+use zenjxl_decoder::decode;
 
 let data = std::fs::read("image.jxl")?;
-let mut decoder = JxlDecoder::new(&data, JxlDecoderOptions::default());
-// ... process frames
+let image = decode(&data)?; // one-shot: bytes -> JxlImage
+
+let width: usize = image.width;
+let height: usize = image.height;
+let pixels: &[u8] = &image.data; // interleaved, row-major, tightly packed
+let channels: usize = image.channels; // 4 = RGBA, 2 = GrayAlpha
+
+println!("{width}x{height}, {channels} channels, {} bytes", pixels.len());
+assert_eq!(image.data.len(), width * height * channels);
 ```
+
+**Output format.** `decode` / `decode_with` always emit **8-bit interleaved**
+pixels with an alpha channel: `RGBA8` (4 channels) for color images, or
+`GrayAlpha8` (2 channels) when `image.is_grayscale` is `true`. Images without a
+source alpha channel get an opaque `255` alpha. Alpha is **straight (not
+premultiplied)** by default — set `premultiply_output: true` on
+`JxlDecoderOptions` if you want premultiplied output for compositing. Pixels are
+in the output color profile (`image.output_profile`); for XYB/wide-gamut sources
+this is sRGB with the sRGB transfer function applied, so HDR/float values are
+range-mapped into u8, not returned as floats. Only the first frame is decoded;
+for animation use the streaming `JxlDecoder` API.
+
+`decode` uses the default security limits — note `max_pixels` defaults to ~256
+megapixels, which is **not** as tight as the `restrictive()` preset below. For
+untrusted input, prefer `decode_with` + `restrictive()`.
 
 ### Resource limits
 
 ```rust
-use jxl::api::{JxlDecoderLimits, JxlDecoderOptions};
+use zenjxl_decoder::{decode_with, api::{JxlDecoderLimits, JxlDecoderOptions}};
 
-// For untrusted input
+// For untrusted input, start from the restrictive preset.
 let options = JxlDecoderOptions {
     limits: JxlDecoderLimits::restrictive(),
     ..Default::default()
 };
+let image = decode_with(&data, options)?;
 ```
 
 | Limit | Default | Restrictive |
 |-------|---------|-------------|
-| `max_pixels` | 2^30 (~1B) | 100M |
+| `max_pixels` | 2^28 (~256M) | 120M |
 | `max_extra_channels` | 256 | 16 |
 | `max_icc_size` | 256 MB | 1 MB |
 | `max_tree_size` | 4M nodes | 1M nodes |
 | `max_patches` | (derived) | 64K |
 | `max_spline_points` | 1M | 64K |
 | `max_reference_frames` | 4 | 2 |
-| `max_memory_bytes` | None | 1 GB |
+| `max_memory_bytes` | 4 GB (2 GB on 32-bit) | 1 GB |
 
-All limits return `Error::LimitExceeded { resource, actual, limit }` when exceeded.
+`unlimited()` sets every field to `None`. All limits return
+`Error::LimitExceeded { resource, actual, limit }` when exceeded.
 
 ### Cancellation
 
-The decoder accepts any [`enough::Stop`](https://docs.rs/enough) implementation:
+The `stop` field on `JxlDecoderOptions` is an
+`Arc<dyn `[`enough::Stop`](https://docs.rs/enough)`>`. It defaults to
+`Arc::new(enough::Unstoppable)` — the no-op handle from the
+[`enough`](https://crates.io/crates/enough) crate (a transitive dependency, so
+you do not need to add it) — which never cancels.
+
+To *actually* cancel or time out a decode, use the ready-made `Stopper` from the
+companion [`almost-enough`](https://crates.io/crates/almost-enough) crate. Both
+are at `0.4`; add the constructible one with `cargo add almost-enough`:
+
+```toml
+[dependencies]
+almost-enough = "0.4"
+```
 
 ```rust
-use almost_enough::Stopper;
+use almost_enough::Stopper; // separate crate: `cargo add almost-enough`
 use std::sync::Arc;
 
-let stop = Arc::new(Stopper::new());
+let stop = Arc::new(Stopper::new()); // Arc<Stopper> coerces to Arc<dyn enough::Stop>
 let stop_clone = Arc::clone(&stop);
 
-// Cancel from another thread
+// Cancel from another thread (e.g. a request timeout)
 std::thread::spawn(move || {
     std::thread::sleep(std::time::Duration::from_secs(5));
     stop_clone.cancel();
 });
 
 let options = JxlDecoderOptions {
-    stop,
+    stop, // overrides the default enough::Unstoppable no-op
     ..Default::default()
 };
+let image = decode_with(&data, options)?;
 ```
 
-Cancellation checks run inside parallel closures too, so a cancel request is noticed mid-batch.
+A cancelled decode returns `Err(Error::Cancelled)`. Cancellation checks run
+inside the parallel closures too, so a cancel request is noticed mid-batch.
+
+### Errors
+
+`decode` / `decode_with` return `zenjxl_decoder::Result<JxlImage>` = `Result<JxlImage, Error>`.
+`Error` is `#[non_exhaustive]`, so keep a wildcard arm. Match the variants to handle
+resource-limit, cancellation, and malformed-input failures differently:
+
+```rust
+use zenjxl_decoder::{decode_with, Error, api::{JxlDecoderLimits, JxlDecoderOptions}};
+
+let options = JxlDecoderOptions { limits: JxlDecoderLimits::restrictive(), ..Default::default() };
+match decode_with(&data, options) {
+    Ok(image) => { /* image.width, image.height, image.data … */ }
+    Err(Error::Cancelled) => { /* a Stop token requested cancellation or timeout */ }
+    Err(Error::LimitExceeded { resource, actual, limit }) => {
+        // reject oversized / hostile input (e.g. HTTP 413)
+        eprintln!("limit '{resource}' exceeded: {actual} > {limit}");
+    }
+    Err(e) => eprintln!("malformed or unsupported JXL: {e}"), // every other variant
+}
+```
 
 ### Parallel decoding
 

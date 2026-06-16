@@ -26,6 +26,7 @@ use super::{
     GainMapBundle, JxlBasicInfo, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder,
     JxlDecoderLimits, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
 };
+use whereat::at;
 use crate::error::{Error, Result};
 use crate::headers::extra_channels::ExtraChannel;
 use whereat::{At, at};
@@ -131,7 +132,7 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
     let mut decoder = match decoder.process(&mut input)? {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(Error::OutOfBounds(0));
+            return Err(at!(Error::OutOfBounds(0)));
         }
     };
 
@@ -184,7 +185,7 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
     let decoder = match decoder.process(&mut input)? {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(Error::OutOfBounds(0));
+            return Err(at!(Error::OutOfBounds(0)));
         }
     };
 
@@ -213,7 +214,7 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
     let mut decoder = match decoder.process(&mut input, &mut bufs)? {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(Error::OutOfBounds(0));
+            return Err(at!(Error::OutOfBounds(0)));
         }
     };
 
@@ -431,7 +432,7 @@ pub fn read_header_with(data: &[u8], limits: JxlDecoderLimits) -> Result<JxlImag
     let decoder = match decoder.process(&mut input)? {
         ProcessingResult::Complete { result } => result,
         ProcessingResult::NeedsMoreInput { .. } => {
-            return Err(Error::OutOfBounds(0));
+            return Err(at!(Error::OutOfBounds(0)));
         }
     };
 
