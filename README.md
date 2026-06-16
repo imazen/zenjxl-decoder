@@ -141,27 +141,34 @@ let options = JxlDecoderOptions {
 let image = decode_with(&data, options)?;
 ```
 
-A cancelled decode returns `Err(Error::Cancelled)`. Cancellation checks run
-inside the parallel closures too, so a cancel request is noticed mid-batch.
+A cancelled decode surfaces `Error::Cancelled` (see the matching below for how to
+inspect it through the `At<Error>` wrapper). Cancellation checks run inside the
+parallel closures too, so a cancel request is noticed mid-batch.
 
 ### Errors
 
-`decode` / `decode_with` return `zenjxl_decoder::Result<JxlImage>` = `Result<JxlImage, Error>`.
-`Error` is `#[non_exhaustive]`, so keep a wildcard arm. Match the variants to handle
-resource-limit, cancellation, and malformed-input failures differently:
+`decode` / `decode_with` return `zenjxl_decoder::api::Result<JxlImage>` = `Result<JxlImage, At<Error>>`.
+The error type is [`whereat::At<Error>`](https://docs.rs/whereat) — a source-location wrapper
+around the crate's [`Error`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/enum.Error.html);
+call `.error()` on it to inspect the inner `Error`. `Error` is `#[non_exhaustive]`, so keep a
+wildcard arm. Match the variants to handle resource-limit, cancellation, and malformed-input
+failures differently:
 
 ```rust
-use zenjxl_decoder::{decode_with, Error, api::{JxlDecoderLimits, JxlDecoderOptions}};
+use zenjxl_decoder::{decode_with, api::{Error, JxlDecoderLimits, JxlDecoderOptions}};
 
 let options = JxlDecoderOptions { limits: JxlDecoderLimits::restrictive(), ..Default::default() };
 match decode_with(&data, options) {
     Ok(image) => { /* image.width, image.height, image.data … */ }
-    Err(Error::Cancelled) => { /* a Stop token requested cancellation or timeout */ }
-    Err(Error::LimitExceeded { resource, actual, limit }) => {
-        // reject oversized / hostile input (e.g. HTTP 413)
-        eprintln!("limit '{resource}' exceeded: {actual} > {limit}");
-    }
-    Err(e) => eprintln!("malformed or unsupported JXL: {e}"), // every other variant
+    // `decode_with` returns `At<Error>`; unwrap with `.error()` to match the inner variant.
+    Err(e) => match e.error() {
+        Error::Cancelled => { /* a Stop token requested cancellation or timeout */ }
+        Error::LimitExceeded { resource, actual, limit } => {
+            // reject oversized / hostile input (e.g. HTTP 413)
+            eprintln!("limit '{resource}' exceeded: {actual} > {limit}");
+        }
+        _ => eprintln!("malformed or unsupported JXL: {e}"), // every other variant
+    },
 }
 ```
 
