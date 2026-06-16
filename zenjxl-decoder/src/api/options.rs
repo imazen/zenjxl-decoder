@@ -102,7 +102,7 @@ impl JxlDecoderLimits {
     /// Returns restrictive limits suitable for untrusted web content.
     pub fn restrictive() -> Self {
         Self {
-            max_pixels: Some(120_000_000),    // 120 megapixels
+            max_pixels: Some(120_000_000),    // 120 megapixels (admits common ~108 MP camera photos)
             max_extra_channels: Some(16),     // 16 extra channels
             max_icc_size: Some(1 << 20),      // 1 MB
             max_tree_size: Some(1 << 20),     // 1M nodes
