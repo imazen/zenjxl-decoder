@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use jxl_macros::UnconditionalCoder;
+use whereat::at;
 
 use crate::{
     bit_reader::BitReader,
@@ -45,7 +46,7 @@ impl IncrementalTocReader {
     pub fn new(num_entries: u32, br: &mut BitReader) -> Result<Self> {
         let permuted = bool::read_unconditional(&(), br, &Empty {})?;
         let mut entries = Vec::new();
-        entries.try_reserve(num_entries as usize)?;
+        entries.try_reserve(num_entries as usize).map_err(|e| at!(Error::from(e)))?;
         Ok(Self {
             num_entries,
             permuted,

@@ -183,11 +183,17 @@ impl UnconditionalCoder<()> for Permutation {
     ) -> Result<Permutation, Error> {
         // TODO: This is quadratic when incrementally parsing byte by byte,
         // we might want to find a better way of reading the permutation.
+        // This trait method returns a bare `Error` (the `UnconditionalCoder`
+        // contract), while the entropy-decode helpers it calls return
+        // `At<Error>`; bridge by taking the owned inner error. A fresh
+        // `whereat` trace is started at the caller via the blanket `From`.
         let ret = if nonserialized.permuted {
             let size = nonserialized.num_entries;
             let num_contexts = 8;
-            let histograms = Histograms::decode(num_contexts, br, /*allow_lz77=*/ true)?;
-            let mut reader = SymbolReader::new(&histograms, br, None)?;
+            let histograms = Histograms::decode(num_contexts, br, /*allow_lz77=*/ true)
+                .map_err(|e| e.decompose().0)?;
+            let mut reader =
+                SymbolReader::new(&histograms, br, None).map_err(|e| e.decompose().0)?;
             Permutation::decode(
                 size,
                 0,
@@ -196,6 +202,7 @@ impl UnconditionalCoder<()> for Permutation {
                 &mut reader,
                 &crate::util::MemoryTracker::default(),
             )
+            .map_err(|e| e.decompose().0)
         } else {
             Ok(Permutation::default())
         };

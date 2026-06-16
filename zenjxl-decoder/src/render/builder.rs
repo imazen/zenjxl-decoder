@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use crate::api::{JxlColorType, JxlDataFormat};
+use whereat::at;
 use crate::error::{Error, Result};
 use crate::headers::Orientation;
 use crate::render::StageSpecialCase;
@@ -212,12 +213,12 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                     if let Some(ty) = info.ty
                         && ty != input_type
                     {
-                        return Err(Error::PipelineChannelTypeMismatch(
+                        return Err(at!(Error::PipelineChannelTypeMismatch(
                             stage.to_string(),
                             c,
                             input_type,
                             ty,
-                        ));
+                        )));
                     }
                     after_info.push(ChannelInfo {
                         ty: Some(output_type.unwrap_or(input_type)),
@@ -228,7 +229,7 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
             if self.shared.extend_stage_index.is_some()
                 && (shift != (0, 0) || border != (0, 0) || is_extend)
             {
-                return Err(Error::PipelineInvalidStageAfterExtend(stage.to_string()));
+                return Err(at!(Error::PipelineInvalidStageAfterExtend(stage.to_string())));
             }
             if is_extend {
                 self.shared.extend_stage_index = Some(i);
@@ -268,10 +269,10 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                     && save_downsample.is_some_and(|x| x != *cur_downsample)
                 {
                     save_downsample = Some(*cur_downsample);
-                    return Err(Error::SaveDifferentDownsample(
+                    return Err(at!(Error::SaveDifferentDownsample(
                         save_downsample.unwrap(),
                         *cur_downsample,
-                    ));
+                    )));
                 }
                 let next_downsample = &mut next_chan.downsample;
                 let next_total_downsample = *cur_downsample;

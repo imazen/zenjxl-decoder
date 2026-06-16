@@ -4,7 +4,8 @@
 // license that can be found in the LICENSE file.
 
 use crate::bit_reader::BitReader;
-use crate::error::Error;
+use whereat::at;
+use crate::error::{Error, Result};
 use crate::util::TryVecExt;
 use std::collections::HashSet;
 
@@ -41,7 +42,7 @@ fn verify_context_map(ctx_map: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn decode_context_map(num_contexts: usize, br: &mut BitReader) -> Result<Vec<u8>, Error> {
+pub fn decode_context_map(num_contexts: usize, br: &mut BitReader) -> Result<Vec<u8>> {
     let is_simple = br.read(1)? != 0;
     if is_simple {
         let bits_per_entry = br.read(2)? as usize;
@@ -50,7 +51,7 @@ pub fn decode_context_map(num_contexts: usize, br: &mut BitReader) -> Result<Vec
                 .map(|_| Ok(br.read(bits_per_entry)? as u8))
                 .collect()
         } else {
-            Ok(Vec::try_from_elem(0u8, num_contexts)?)
+            Ok(Vec::try_from_elem(0u8, num_contexts).map_err(|e| at!(Error::from(e)))?)
         }
     } else {
         let use_mtf = br.read(1)? != 0;

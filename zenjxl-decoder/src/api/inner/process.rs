@@ -7,6 +7,7 @@ use std::{
     io::IoSliceMut,
     ops::{Deref, Range},
 };
+use whereat::at;
 
 use crate::error::Result;
 
@@ -50,7 +51,7 @@ impl SmallBuffer {
             } else {
                 self.buf.len()
             };
-            let num = get_input(&mut [IoSliceMut::new(&mut self.buf[self.range.end..stop])])?;
+            let num = get_input(&mut [IoSliceMut::new(&mut self.buf[self.range.end..stop])]).map_err(|e| at!(crate::error::Error::from(e)))?;
             total += num;
             self.range.end += num;
             if num == 0 {
@@ -142,7 +143,7 @@ impl JxlDecoderInner {
             true,
         ) {
             Ok(()) => Ok(()),
-            Err(crate::error::Error::OutOfBounds(_)) => Ok(()),
+            Err(e) if matches!(e.error(), crate::error::Error::OutOfBounds(_)) => Ok(()),
             Err(e) => Err(e),
         }
     }

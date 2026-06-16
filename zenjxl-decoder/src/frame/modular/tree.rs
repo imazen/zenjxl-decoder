@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::fmt::Debug;
+use whereat::at;
 
 use super::{Predictor, predict::WeightedPredictorState};
 use crate::{
@@ -106,7 +107,7 @@ fn validate_tree(tree: &[TreeNode], num_properties: usize) -> Result<()> {
 
     while let Some(mut frame) = stack.pop() {
         if frame.depth > HEIGHT_LIMIT {
-            return Err(Error::TreeTooTall(frame.depth, HEIGHT_LIMIT));
+            return Err(at!(Error::TreeTooTall(frame.depth, HEIGHT_LIMIT)));
         }
 
         match (frame.stage, tree[frame.node]) {
@@ -127,7 +128,7 @@ fn validate_tree(tree: &[TreeNode], num_properties: usize) -> Result<()> {
                 let p = property as usize;
                 let (l, u) = property_ranges[p];
                 if l > val || u <= val {
-                    return Err(Error::TreeSplitOnEmptyRange(property, val, l, u));
+                    return Err(at!(Error::TreeSplitOnEmptyRange(property, val, l, u)));
                 }
 
                 frame.stage = Stage::AfterLeft;
@@ -156,7 +157,7 @@ fn validate_tree(tree: &[TreeNode], num_properties: usize) -> Result<()> {
                 let p = property as usize;
                 let (l, u) = property_ranges[p];
                 if l > val || u <= val {
-                    return Err(Error::TreeSplitOnEmptyRange(property, val, l, u));
+                    return Err(at!(Error::TreeSplitOnEmptyRange(property, val, l, u)));
                 }
 
                 frame.stage = Stage::AfterRight;
@@ -446,10 +447,10 @@ impl Tree {
         let mut max_property = 0;
         while to_decode > 0 {
             if tree.len() > size_limit {
-                return Err(Error::TreeTooLarge(tree.len(), size_limit));
+                return Err(at!(Error::TreeTooLarge(tree.len(), size_limit)));
             }
             if tree.len() >= tree.capacity() {
-                tree.try_reserve(tree.len() * 2 + 1)?;
+                tree.try_reserve(tree.len() * 2 + 1).map_err(|e| at!(Error::from(e)))?;
             }
             to_decode -= 1;
             let property = tree_reader.read_unsigned(&tree_histograms, br, PROPERTY_CONTEXT);
@@ -457,7 +458,7 @@ impl Tree {
             if let Some(property) = property.checked_sub(1) {
                 // inner node.
                 if property > 255 {
-                    return Err(Error::InvalidProperty(property));
+                    return Err(at!(Error::InvalidProperty(property)));
                 }
                 max_property = max_property.max(property);
                 let splitval = tree_reader.read_signed(&tree_histograms, br, SPLIT_VAL_CONTEXT);
@@ -481,13 +482,13 @@ impl Tree {
                 let mul_log =
                     tree_reader.read_unsigned(&tree_histograms, br, MULTIPLIER_LOG_CONTEXT);
                 if mul_log >= 31 {
-                    return Err(Error::TreeMultiplierTooLarge(mul_log, 31));
+                    return Err(at!(Error::TreeMultiplierTooLarge(mul_log, 31)));
                 }
                 let mul_bits =
                     tree_reader.read_unsigned(&tree_histograms, br, MULTIPLIER_BITS_CONTEXT);
                 let multiplier = (mul_bits as u64 + 1) << mul_log;
                 if multiplier > (u32::MAX as u64) {
-                    return Err(Error::TreeMultiplierBitsTooLarge(mul_bits, mul_log));
+                    return Err(at!(Error::TreeMultiplierBitsTooLarge(mul_bits, mul_log)));
                 }
                 let node = TreeNode::Leaf {
                     predictor,
@@ -545,7 +546,7 @@ impl Tree {
             return Ok(vec![]);
         }
 
-        let mut flat_nodes = Vec::new_with_capacity(nodes.len())?;
+        let mut flat_nodes = Vec::new_with_capacity(nodes.len()).map_err(|e| at!(Error::from(e)))?;
         let mut queue: VecDeque<usize> = VecDeque::new();
         queue.push_back(0); // Start with root
 
@@ -615,7 +616,7 @@ impl Tree {
                 // Split node: child_id + 3 must be a valid index
                 let max_child = node.child_id as usize + 3;
                 if max_child >= len {
-                    return Err(Error::TreeTooLarge(max_child + 1, len));
+                    return Err(at!(Error::TreeTooLarge(max_child + 1, len)));
                 }
             }
         }

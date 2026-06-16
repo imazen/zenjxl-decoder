@@ -14,6 +14,7 @@
 //! to parse (e.g., via ultrahdr-core).
 
 use crate::error::{Error, Result};
+use whereat::at;
 
 /// Current version of the gain map bundle format.
 const JHGM_VERSION: u8 = 0x00;
@@ -54,39 +55,39 @@ impl GainMapBundle {
 
         // --- version ---
         if data.is_empty() {
-            return Err(Error::InvalidGainMap("empty jhgm box".into()));
+            return Err(at!(Error::InvalidGainMap("empty jhgm box".into())));
         }
         let version = data[pos];
         pos += 1;
         if version != JHGM_VERSION {
-            return Err(Error::InvalidGainMap(format!(
+            return Err(at!(Error::InvalidGainMap(format!(
                 "unsupported jhgm version: {version:#04x}, expected {JHGM_VERSION:#04x}"
-            )));
+            ))));
         }
 
         // --- gain_map_metadata_size (u16 BE) ---
         if pos + 2 > data.len() {
-            return Err(Error::InvalidGainMap(
+            return Err(at!(Error::InvalidGainMap(
                 "truncated: missing metadata size".into(),
-            ));
+            )));
         }
         let metadata_size = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
         pos += 2;
 
         if pos + metadata_size > data.len() {
-            return Err(Error::InvalidGainMap(format!(
+            return Err(at!(Error::InvalidGainMap(format!(
                 "truncated: metadata size {metadata_size} exceeds remaining {} bytes",
                 data.len() - pos
-            )));
+            ))));
         }
         let metadata = data[pos..pos + metadata_size].to_vec();
         pos += metadata_size;
 
         // --- color_encoding_size (u8) ---
         if pos >= data.len() {
-            return Err(Error::InvalidGainMap(
+            return Err(at!(Error::InvalidGainMap(
                 "truncated: missing color_encoding_size".into(),
-            ));
+            )));
         }
         let color_encoding_size = data[pos] as usize;
         pos += 1;
@@ -95,10 +96,10 @@ impl GainMapBundle {
             None
         } else {
             if pos + color_encoding_size > data.len() {
-                return Err(Error::InvalidGainMap(format!(
+                return Err(at!(Error::InvalidGainMap(format!(
                     "truncated: color_encoding size {color_encoding_size} exceeds remaining {} bytes",
                     data.len() - pos
-                )));
+                ))));
             }
             let ce = data[pos..pos + color_encoding_size].to_vec();
             pos += color_encoding_size;
@@ -107,9 +108,9 @@ impl GainMapBundle {
 
         // --- alt_icc_size (u32 BE) ---
         if pos + 4 > data.len() {
-            return Err(Error::InvalidGainMap(
+            return Err(at!(Error::InvalidGainMap(
                 "truncated: missing alt_icc_size".into(),
-            ));
+            )));
         }
         let alt_icc_size =
             u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
@@ -119,10 +120,10 @@ impl GainMapBundle {
             None
         } else {
             if pos + alt_icc_size > data.len() {
-                return Err(Error::InvalidGainMap(format!(
+                return Err(at!(Error::InvalidGainMap(format!(
                     "truncated: alt_icc size {alt_icc_size} exceeds remaining {} bytes",
                     data.len() - pos
-                )));
+                ))));
             }
             let icc = data[pos..pos + alt_icc_size].to_vec();
             pos += alt_icc_size;

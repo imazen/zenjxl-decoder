@@ -6,6 +6,7 @@
 // Originally written for jxl-oxide.
 
 use super::{BitstreamKind, ContainerParser, DetectState, JxlpIndexState, box_header::*};
+use whereat::at;
 use crate::{
     api::{CODESTREAM_SIGNATURE, CONTAINER_SIGNATURE},
     error::{Error, Result},
@@ -83,11 +84,11 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                                 }
                                 JxlpIndexState::SingleJxlc => {
                                     warn!("Duplicate jxlc box found");
-                                    return Err(Error::InvalidBox);
+                                    return Err(at!(Error::InvalidBox));
                                 }
                                 JxlpIndexState::Jxlp(_) | JxlpIndexState::JxlpFinished => {
                                     warn!("Found jxlc box instead of jxlp box");
-                                    return Err(Error::InvalidBox);
+                                    return Err(at!(Error::InvalidBox));
                                 }
                             }
 
@@ -99,7 +100,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                             if let Some(box_size) = header.box_size()
                                 && box_size < 4
                             {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
 
                             match jxlp_index_state {
@@ -111,11 +112,11 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                                 }
                                 JxlpIndexState::SingleJxlc => {
                                     warn!("jxlp box found after jxlc box");
-                                    return Err(Error::InvalidBox);
+                                    return Err(at!(Error::InvalidBox));
                                 }
                                 JxlpIndexState::JxlpFinished => {
                                     warn!("found another jxlp box after the final one");
-                                    return Err(Error::InvalidBox);
+                                    return Err(at!(Error::InvalidBox));
                                 }
                             }
 
@@ -150,7 +151,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                                 actual_index = index,
                                 "Out-of-order jxlp box found",
                             );
-                            return Err(Error::InvalidBox);
+                            return Err(at!(Error::InvalidBox));
                         }
                         state => {
                             unreachable!("invalid jxlp index state in WaitingJxlpIndex: {state:?}");
