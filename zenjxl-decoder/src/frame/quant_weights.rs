@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::{borrow::Cow, f32::consts::SQRT_2, sync::OnceLock};
+use whereat::at;
 
 use crate::util::f16;
 
@@ -69,7 +70,7 @@ impl DctQuantWeightParams {
                 *item = f32::from(f16::from_bits(br.read(16)? as u16));
             }
             if row[0] < ALMOST_ZERO {
-                return Err(HfQuantFactorTooSmall(row[0]));
+                return Err(at!(HfQuantFactorTooSmall(row[0])));
             }
             row[0] *= 64.0;
         }
@@ -137,17 +138,17 @@ impl QuantEncoding {
             0 => Ok(Self::Library),
             1 => {
                 if required_size != 1 {
-                    return Err(InvalidQuantEncoding {
+                    return Err(at!(InvalidQuantEncoding {
                         mode,
                         required_size,
-                    });
+                    }));
                 }
                 let mut xyb_weights = [[0.0; 3]; 3];
                 for row in xyb_weights.iter_mut() {
                     for item in row.iter_mut() {
                         *item = f32::from(f16::from_bits(br.read(16)? as u16));
                         if item.abs() < ALMOST_ZERO {
-                            return Err(HfQuantFactorTooSmall(*item));
+                            return Err(at!(HfQuantFactorTooSmall(*item)));
                         }
                         *item *= 64.0;
                     }
@@ -156,17 +157,17 @@ impl QuantEncoding {
             }
             2 => {
                 if required_size != 1 {
-                    return Err(InvalidQuantEncoding {
+                    return Err(at!(InvalidQuantEncoding {
                         mode,
                         required_size,
-                    });
+                    }));
                 }
                 let mut xyb_weights = [[0.0; 6]; 3];
                 for row in xyb_weights.iter_mut() {
                     for item in row.iter_mut() {
                         *item = f32::from(f16::from_bits(br.read(16)? as u16));
                         if item.abs() < ALMOST_ZERO {
-                            return Err(HfQuantFactorTooSmall(*item));
+                            return Err(at!(HfQuantFactorTooSmall(*item)));
                         }
                         *item *= 64.0;
                     }
@@ -175,17 +176,17 @@ impl QuantEncoding {
             }
             3 => {
                 if required_size != 1 {
-                    return Err(InvalidQuantEncoding {
+                    return Err(at!(InvalidQuantEncoding {
                         mode,
                         required_size,
-                    });
+                    }));
                 }
                 let mut xyb_mul = [[0.0; 2]; 3];
                 for row in xyb_mul.iter_mut() {
                     for item in row.iter_mut() {
                         *item = f32::from(f16::from_bits(br.read(16)? as u16));
                         if item.abs() < ALMOST_ZERO {
-                            return Err(HfQuantFactorTooSmall(*item));
+                            return Err(at!(HfQuantFactorTooSmall(*item)));
                         }
                     }
                 }
@@ -194,16 +195,16 @@ impl QuantEncoding {
             }
             4 => {
                 if required_size != 1 {
-                    return Err(InvalidQuantEncoding {
+                    return Err(at!(InvalidQuantEncoding {
                         mode,
                         required_size,
-                    });
+                    }));
                 }
                 let mut xyb_mul = [0.0; 3];
                 for item in xyb_mul.iter_mut() {
                     *item = f32::from(f16::from_bits(br.read(16)? as u16));
                     if item.abs() < ALMOST_ZERO {
-                        return Err(HfQuantFactorTooSmall(*item));
+                        return Err(at!(HfQuantFactorTooSmall(*item)));
                     }
                 }
                 let params = DctQuantWeightParams::decode(br)?;
@@ -211,10 +212,10 @@ impl QuantEncoding {
             }
             5 => {
                 if required_size != 1 {
-                    return Err(InvalidQuantEncoding {
+                    return Err(at!(InvalidQuantEncoding {
                         mode,
                         required_size,
-                    });
+                    }));
                 }
                 let mut weights = [[0.0; 9]; 3];
                 for row in weights.iter_mut() {
@@ -241,7 +242,7 @@ impl QuantEncoding {
                 let qtable_den = f32::from(f16::from_bits(br.read(16)? as u16));
                 if qtable_den < ALMOST_ZERO {
                     // qtable[] values are already checked for <= 0 so the denominator may not be negative.
-                    return Err(InvalidRawQuantTable);
+                    return Err(at!(InvalidRawQuantTable));
                 }
                 let bit_depth = BitDepth::integer_samples(8);
                 let mut image = [
@@ -270,16 +271,16 @@ impl QuantEncoding {
                     {
                         qtable.push(entry);
                         if entry <= 0 {
-                            return Err(InvalidRawQuantTable);
+                            return Err(at!(InvalidRawQuantTable));
                         }
                     }
                 }
                 Ok(Self::Raw { qtable, qtable_den })
             }
-            _ => Err(InvalidQuantEncoding {
+            _ => Err(at!(InvalidQuantEncoding {
                 mode,
                 required_size,
-            }),
+            })),
         }
     }
 }
@@ -932,7 +933,7 @@ impl DequantMatrices {
         match encoding {
             QuantEncoding::Library => {
                 // Library encoding should be resolved by the caller.
-                return Err(InvalidQuantEncodingMode);
+                return Err(at!(InvalidQuantEncodingMode));
             }
             QuantEncoding::Identity { xyb_weights } => {
                 for c in 0..3 {
@@ -1008,7 +1009,7 @@ impl DequantMatrices {
             }
             QuantEncoding::Raw { qtable, qtable_den } => {
                 if qtable.len() != 3 * num {
-                    return Err(InvalidRawQuantTable);
+                    return Err(at!(InvalidRawQuantTable));
                 }
                 for i in 0..3 * num {
                     weights[i] = 1f32 / (qtable_den * qtable[i] as f32);
@@ -1047,12 +1048,12 @@ impl DequantMatrices {
                     let mut bands = [0f32; 4];
                     bands[0] = afv_weights[c][5];
                     if bands[0] < ALMOST_ZERO {
-                        return Err(InvalidDistanceBand(0, bands[0]));
+                        return Err(at!(InvalidDistanceBand(0, bands[0])));
                     }
                     for i in 1..4 {
                         bands[i] = bands[i - 1] * mult(afv_weights[c][i + 5]);
                         if bands[i] < ALMOST_ZERO {
-                            return Err(InvalidDistanceBand(i, bands[i]));
+                            return Err(at!(InvalidDistanceBand(i, bands[i])));
                         }
                     }
 
@@ -1104,7 +1105,7 @@ impl DequantMatrices {
         // Convert weights in place to the final table format (1.0 / weight)
         for weight in &mut weights {
             if !(ALMOST_ZERO..=1.0 / ALMOST_ZERO).contains(weight) {
-                return Err(InvalidQuantizationTableWeight(*weight));
+                return Err(at!(InvalidQuantizationTableWeight(*weight)));
             }
             *weight = 1f32 / *weight;
         }
@@ -1196,12 +1197,12 @@ fn get_quant_weights(
         let mut bands = [0f32; DctQuantWeightParams::MAX_DISTANCE_BANDS];
         bands[0] = distance_bands.params[c][0];
         if bands[0] < ALMOST_ZERO {
-            return Err(InvalidDistanceBand(0, bands[0]));
+            return Err(at!(InvalidDistanceBand(0, bands[0])));
         }
         for i in 1..distance_bands.num_bands {
             bands[i] = bands[i - 1] * mult(distance_bands.params[c][i]);
             if bands[i] < ALMOST_ZERO {
-                return Err(InvalidDistanceBand(i, bands[i]));
+                return Err(at!(InvalidDistanceBand(i, bands[i])));
             }
         }
         let scale = (distance_bands.num_bands - 1) as f32 / (SQRT_2 + 1e-6);

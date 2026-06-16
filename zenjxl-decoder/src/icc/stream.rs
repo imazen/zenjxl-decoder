@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::io::{Read, Write};
+use whereat::at;
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 
@@ -26,7 +27,7 @@ fn read_varint(mut read_one: impl FnMut() -> Result<u8>) -> Result<u64> {
 }
 
 pub(crate) fn read_varint_from_reader(stream: &mut impl Read) -> Result<u64> {
-    read_varint(|| stream.read_u8().map_err(|_| Error::IccEndOfStream))
+    read_varint(|| stream.read_u8().map_err(|_| at!(Error::IccEndOfStream)))
 }
 
 pub(super) struct IccStream {
@@ -56,7 +57,7 @@ impl IccStream {
 
     fn read_one(&mut self) -> Result<u8> {
         if self.remaining_bytes() == 0 {
-            return Err(Error::IccEndOfStream);
+            return Err(at!(Error::IccEndOfStream));
         }
         self.bytes_read += 1;
         Ok(self.command_stream[self.bytes_read as usize - 1])
@@ -64,7 +65,7 @@ impl IccStream {
 
     pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
         if buf.len() > self.remaining_bytes() as usize {
-            return Err(Error::IccEndOfStream);
+            return Err(at!(Error::IccEndOfStream));
         }
 
         for b in buf {
@@ -76,10 +77,10 @@ impl IccStream {
 
     pub fn read_to_vec_exact(&mut self, len: usize) -> Result<Vec<u8>> {
         if len > self.remaining_bytes() as usize {
-            return Err(Error::IccEndOfStream);
+            return Err(at!(Error::IccEndOfStream));
         }
 
-        let mut out = Vec::new_with_capacity(len)?;
+        let mut out = Vec::new_with_capacity(len).map_err(|e| at!(Error::from(e)))?;
 
         for _ in 0..len {
             out.push(self.read_one()?);
@@ -94,7 +95,7 @@ impl IccStream {
 
     pub fn copy_bytes(&mut self, writer: &mut impl Write, len: usize) -> Result<()> {
         if len > self.remaining_bytes() as usize {
-            return Err(Error::IccEndOfStream);
+            return Err(at!(Error::IccEndOfStream));
         }
 
         for _ in 0..len {
@@ -112,7 +113,7 @@ impl IccStream {
             Ok(())
         } else {
             warn!("ICC stream is not fully consumed");
-            Err(Error::InvalidIccStream)
+            Err(at!(Error::InvalidIccStream))
         }
     }
 }

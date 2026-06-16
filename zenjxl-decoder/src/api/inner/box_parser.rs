@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::io::IoSliceMut;
+use whereat::at;
 
 use crate::container::frame_index::FrameIndexBox;
 use crate::container::gain_map::GainMapBundle;
@@ -93,7 +94,7 @@ impl BoxParser {
                 ParseState::SignatureNeeded => {
                     self.box_buffer.refill(|b| input.read(b), None)?;
                     match check_signature_internal(&self.box_buffer)? {
-                        None => return Err(Error::InvalidSignature),
+                        None => return Err(at!(Error::InvalidSignature)),
                         Some(JxlSignatureType::Codestream) => {
                             self.state = ParseState::CodestreamBox(u64::MAX);
                             return Ok(u64::MAX);
@@ -113,10 +114,10 @@ impl BoxParser {
                     let skipped = if !self.box_buffer.is_empty() {
                         self.box_buffer.consume(num)
                     } else {
-                        input.skip(num)?
+                        input.skip(num).map_err(|e| at!(Error::from(e)))?
                     };
                     if skipped == 0 {
-                        return Err(Error::OutOfBounds(num));
+                        return Err(at!(Error::OutOfBounds(num)));
                     }
                     s -= skipped as u64;
                     if s == 0 {
@@ -165,9 +166,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
-                            return Err(Error::OutOfBounds(num));
+                            return Err(at!(Error::OutOfBounds(num)));
                         }
                         buf.truncate(old_len + read);
                         remaining -= read as u64;
@@ -190,9 +191,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
-                            return Err(Error::OutOfBounds(num));
+                            return Err(at!(Error::OutOfBounds(num)));
                         }
                         buf.truncate(old_len + read);
                         remaining -= read as u64;
@@ -215,9 +216,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
-                            return Err(Error::OutOfBounds(num));
+                            return Err(at!(Error::OutOfBounds(num)));
                         }
                         buf.truncate(old_len + read);
                         remaining -= read as u64;
@@ -243,9 +244,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
-                            return Err(Error::OutOfBounds(num));
+                            return Err(at!(Error::OutOfBounds(num)));
                         }
                         buf.truncate(old_len + read);
                         remaining -= read as u64;
@@ -300,14 +301,14 @@ impl BoxParser {
                         _ => 8,
                     };
                     if self.box_buffer.len() <= min_len {
-                        return Err(Error::OutOfBounds(min_len - self.box_buffer.len()));
+                        return Err(at!(Error::OutOfBounds(min_len - self.box_buffer.len())));
                     }
                     let ty: [_; 4] = self.box_buffer[4..8].try_into().unwrap();
                     let extra_len = if &ty == b"jxlp" { 4 } else { 0 };
                     if self.box_buffer.len() <= min_len + extra_len {
-                        return Err(Error::OutOfBounds(
+                        return Err(at!(Error::OutOfBounds(
                             min_len + extra_len - self.box_buffer.len(),
-                        ));
+                        )));
                     }
                     let box_len = match &self.box_buffer[..] {
                         [0, 0, 0, 1, ..] => {
@@ -320,7 +321,7 @@ impl BoxParser {
                         u64::MAX
                     } else {
                         if box_len <= (min_len + extra_len) as u64 {
-                            return Err(Error::InvalidBox);
+                            return Err(at!(Error::InvalidBox));
                         }
                         box_len - min_len as u64 - extra_len as u64
                     };
@@ -330,7 +331,7 @@ impl BoxParser {
                                 self.box_type,
                                 CodestreamBoxType::Jxlp(..) | CodestreamBoxType::LastJxlp
                             ) {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
                             self.box_type = CodestreamBoxType::Jxlc;
                             self.state = ParseState::CodestreamBox(content_len);
@@ -341,7 +342,7 @@ impl BoxParser {
                             );
                             let wanted_idx = match self.box_type {
                                 CodestreamBoxType::Jxlc | CodestreamBoxType::LastJxlp => {
-                                    return Err(Error::InvalidBox);
+                                    return Err(at!(Error::InvalidBox));
                                 }
                                 CodestreamBoxType::None => 0,
                                 CodestreamBoxType::Jxlp(i) => i + 1,
@@ -349,7 +350,7 @@ impl BoxParser {
                             let last = index & 0x80000000 != 0;
                             let idx = index & 0x7fffffff;
                             if idx != wanted_idx {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
                             self.box_type = if last {
                                 CodestreamBoxType::LastJxlp
@@ -364,7 +365,7 @@ impl BoxParser {
                         }
                         b"jhgm" => {
                             if content_len == u64::MAX {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
                             // Reasonable size limit for a gain map bundle (256 MB).
                             // Gain maps contain a full JXL codestream so they can be large.
@@ -377,13 +378,13 @@ impl BoxParser {
                                 // error, never an `abort()` on the parser thread.
                                 self.state = ParseState::BufferingGainMap(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
                         b"jxli" => {
                             if content_len == u64::MAX {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
                             // Reasonable size limit for a frame index box (16 MB).
                             if content_len > 16 * 1024 * 1024 {
@@ -391,13 +392,13 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingFrameIndex(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
                         b"Exif" => {
                             if content_len == u64::MAX {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
                             // Reasonable size limit for EXIF data (16 MB).
                             if content_len > 16 * 1024 * 1024 {
@@ -405,13 +406,13 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingExif(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
                         b"xml " => {
                             if content_len == u64::MAX {
-                                return Err(Error::InvalidBox);
+                                return Err(at!(Error::InvalidBox));
                             }
                             // Reasonable size limit for XMP data (16 MB).
                             if content_len > 16 * 1024 * 1024 {
@@ -419,7 +420,7 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingXmp(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }

@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::ops::Range;
+use whereat::at;
 
 use crate::{
     error::Result,
@@ -43,7 +44,7 @@ impl RowBuffer {
         let row_stride =
             (row_len * data_type.size()).div_ceil(CACHE_LINE_BYTE_SIZE) + (3 << x_shift);
         let mut buffer = Vec::<CacheLine>::new();
-        buffer.try_reserve_exact(row_stride * num_rows)?;
+        buffer.try_reserve_exact(row_stride * num_rows).map_err(|e| at!(crate::error::Error::from(e)))?;
         buffer.resize(row_stride * num_rows, CacheLine::default());
         let buffer = buffer.into_boxed_slice();
         Ok(Self {

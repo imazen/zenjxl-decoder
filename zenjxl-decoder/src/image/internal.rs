@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::fmt::Debug;
+use whereat::at;
 
 use crate::{
     error::{Error, Result},
@@ -164,7 +165,7 @@ impl RawImageBuffer {
             });
         }
         if bytes_per_row as u64 >= i64::MAX as u64 / 4 || num_rows as u64 >= i64::MAX as u64 / 4 {
-            return Err(Error::ImageSizeTooLarge(bytes_per_row, num_rows));
+            return Err(at!(Error::ImageSizeTooLarge(bytes_per_row, num_rows)));
         }
         debug!("trying to allocate image");
         let bytes_between_rows =

@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use num_derive::FromPrimitive;
+use whereat::at;
 use num_traits::FromPrimitive;
 
 use crate::{
@@ -89,10 +90,10 @@ impl PatchBlendMode {
             5 => Ok(PatchBlendMode::BlendBelow),
             6 => Ok(PatchBlendMode::AlphaWeightedAddAbove),
             7 => Ok(PatchBlendMode::AlphaWeightedAddBelow),
-            _ => Err(Error::PatchesInvalidBlendMode(
+            _ => Err(at!(Error::PatchesInvalidBlendMode(
                 i,
                 PatchBlendMode::NUM_BLEND_MODES,
-            )),
+            ))),
         }
     }
 
@@ -248,7 +249,7 @@ impl PatchesDictionary {
         }
 
         // Create a y-interval for each patch.
-        let mut intervals: Vec<PatchInterval> = Vec::new_with_capacity(self.positions.len())?;
+        let mut intervals: Vec<PatchInterval> = Vec::new_with_capacity(self.positions.len()).map_err(|e| at!(Error::from(e)))?;
         for (i, pos) in self.positions.iter().enumerate() {
             let ref_pos = self.ref_positions[pos.ref_pos_idx];
             if ref_pos.xsize > 0 && ref_pos.ysize > 0 {
@@ -313,9 +314,9 @@ impl PatchesDictionary {
             node.start = self.sorted_patches_y0.len();
 
             self.sorted_patches_y1
-                .try_reserve(right_start.saturating_sub(left_end))?;
+                .try_reserve(right_start.saturating_sub(left_end)).map_err(|e| at!(Error::from(e)))?;
             self.sorted_patches_y0
-                .try_reserve(right_start.saturating_sub(left_end))?;
+                .try_reserve(right_start.saturating_sub(left_end)).map_err(|e| at!(Error::from(e)))?;
             for i in (left_end..right_start).rev() {
                 self.sorted_patches_y1
                     .push((intervals[i].y1, intervals[i].idx));
@@ -336,7 +337,7 @@ impl PatchesDictionary {
                 left.start = start;
                 left.num = left_end - left.start;
                 self.patch_tree[next].left_child = self.patch_tree.len() as isize;
-                self.patch_tree.try_reserve(1)?;
+                self.patch_tree.try_reserve(1).map_err(|e| at!(Error::from(e)))?;
                 self.patch_tree.push(left);
             }
             if right_start < end {
@@ -344,7 +345,7 @@ impl PatchesDictionary {
                 right.start = right_start;
                 right.num = end - right.start;
                 self.patch_tree[next].right_child = self.patch_tree.len() as isize;
-                self.patch_tree.try_reserve(1)?;
+                self.patch_tree.try_reserve(1).map_err(|e| at!(Error::from(e)))?;
                 self.patch_tree.push(right);
             }
 
@@ -391,11 +392,11 @@ impl PatchesDictionary {
             .checked_mul(4)
             .ok_or(Error::ArithmeticOverflow)?;
         if num_ref_patch > max_ref_patches {
-            return Err(Error::PatchesTooMany(
+            return Err(at!(Error::PatchesTooMany(
                 "reference patches".to_string(),
                 num_ref_patch,
                 max_ref_patches,
-            ));
+            )));
         }
         let mut total_patches = 0;
         let mut next_size = 1;
@@ -403,7 +404,7 @@ impl PatchesDictionary {
         let mut blendings = Vec::new();
         memory_tracker
             .check_alloc((num_ref_patch * std::mem::size_of::<PatchReferencePosition>()) as u64)?;
-        let mut ref_positions = Vec::new_with_capacity(num_ref_patch)?;
+        let mut ref_positions = Vec::new_with_capacity(num_ref_patch).map_err(|e| at!(Error::from(e)))?;
         for _ in 0..num_ref_patch {
             let reference = patches_reader.read_unsigned(
                 &patches_histograms,
@@ -411,10 +412,10 @@ impl PatchesDictionary {
                 PatchContext::ReferenceFrame as usize,
             ) as usize;
             if reference >= DecoderState::MAX_STORED_FRAMES {
-                return Err(Error::PatchesRefTooLarge(
+                return Err(at!(Error::PatchesRefTooLarge(
                     reference,
                     DecoderState::MAX_STORED_FRAMES,
-                ));
+                )));
             }
 
             let x0 = patches_reader.read_unsigned(
@@ -442,26 +443,26 @@ impl PatchesDictionary {
             let reference_frame = &reference_frames[reference];
             // TODO(firsching): make sure this check is correct in the presence of downsampled extra channels (also in libjxl).
             match reference_frame {
-                None => return Err(Error::PatchesInvalidReference(reference)),
+                None => return Err(at!(Error::PatchesInvalidReference(reference))),
                 Some(reference) => {
                     if !reference.saved_before_color_transform {
-                        return Err(Error::PatchesPostColorTransform());
+                        return Err(at!(Error::PatchesPostColorTransform()));
                     }
                     if x0 + ref_pos_xsize > reference.frame[0].size().0 {
-                        return Err(Error::PatchesInvalidPosition(
+                        return Err(at!(Error::PatchesInvalidPosition(
                             "x".to_string(),
                             x0,
                             ref_pos_xsize,
                             reference.frame[0].size().0,
-                        ));
+                        )));
                     }
                     if y0 + ref_pos_ysize > reference.frame[0].size().1 {
-                        return Err(Error::PatchesInvalidPosition(
+                        return Err(at!(Error::PatchesInvalidPosition(
                             "y".to_string(),
                             y0,
                             ref_pos_ysize,
                             reference.frame[0].size().1,
-                        ));
+                        )));
                     }
                 }
             }
@@ -473,20 +474,20 @@ impl PatchesDictionary {
             ) as usize
                 + 1;
             if id_count > max_patches + 1 {
-                return Err(Error::PatchesTooMany(
+                return Err(at!(Error::PatchesTooMany(
                     "patches".to_string(),
                     id_count,
                     max_patches,
-                ));
+                )));
             }
             total_patches += id_count;
 
             if total_patches > max_patches {
-                return Err(Error::PatchesTooMany(
+                return Err(at!(Error::PatchesTooMany(
                     "patches".to_string(),
                     total_patches,
                     max_patches,
-                ));
+                )));
             }
 
             if next_size < total_patches {
@@ -495,18 +496,18 @@ impl PatchesDictionary {
             }
             // Use saturating_mul to prevent overflow attack bypassing the limit check
             if next_size.saturating_mul(blendings_stride) > max_blending_infos {
-                return Err(Error::PatchesTooMany(
+                return Err(at!(Error::PatchesTooMany(
                     "blending_info".to_string(),
                     total_patches,
                     max_patches,
-                ));
+                )));
             }
-            positions.try_reserve(next_size.saturating_sub(positions.len()))?;
+            positions.try_reserve(next_size.saturating_sub(positions.len())).map_err(|e| at!(Error::from(e)))?;
             // Use checked_mul to fail rather than silently under-allocate
             let blendings_needed = next_size
                 .checked_mul(PatchBlendMode::NUM_BLEND_MODES as usize)
                 .ok_or(Error::ArithmeticOverflow)?;
-            blendings.try_reserve(blendings_needed.saturating_sub(blendings.len()))?;
+            blendings.try_reserve(blendings_needed.saturating_sub(blendings.len())).map_err(|e| at!(Error::from(e)))?;
 
             for i in 0..id_count {
                 let mut pos = PatchPosition {
@@ -534,11 +535,11 @@ impl PatchesDictionary {
                         PatchContext::PatchOffset as usize,
                     );
                     if delta_x < 0 && (-delta_x as usize) > positions.last().unwrap().x {
-                        return Err(Error::PatchesInvalidDelta(
+                        return Err(at!(Error::PatchesInvalidDelta(
                             "x".to_string(),
                             positions.last().unwrap().x,
                             delta_x,
-                        ));
+                        )));
                     }
                     pos.x = (positions.last().unwrap().x as i32 + delta_x) as usize;
 
@@ -548,30 +549,30 @@ impl PatchesDictionary {
                         PatchContext::PatchOffset as usize,
                     );
                     if delta_y < 0 && (-delta_y as usize) > positions.last().unwrap().y {
-                        return Err(Error::PatchesInvalidDelta(
+                        return Err(at!(Error::PatchesInvalidDelta(
                             "y".to_string(),
                             positions.last().unwrap().y,
                             delta_y,
-                        ));
+                        )));
                     }
                     pos.y = (positions.last().unwrap().y as i32 + delta_y) as usize;
                 }
 
                 if pos.x + ref_pos_xsize > xsize {
-                    return Err(Error::PatchesOutOfBounds(
+                    return Err(at!(Error::PatchesOutOfBounds(
                         "x".to_string(),
                         pos.x,
                         ref_pos_xsize,
                         xsize,
-                    ));
+                    )));
                 }
                 if pos.y + ref_pos_ysize > ysize {
-                    return Err(Error::PatchesOutOfBounds(
+                    return Err(at!(Error::PatchesOutOfBounds(
                         "y".to_string(),
                         pos.y,
                         ref_pos_ysize,
                         ysize,
-                    ));
+                    )));
                 }
 
                 for _ in 0..blendings_stride {
@@ -584,10 +585,10 @@ impl PatchesDictionary {
                     ) as u8;
                     let blend_mode = match PatchBlendMode::from_u8(maybe_blend_mode) {
                         None => {
-                            return Err(Error::PatchesInvalidBlendMode(
+                            return Err(at!(Error::PatchesInvalidBlendMode(
                                 maybe_blend_mode,
                                 PatchBlendMode::NUM_BLEND_MODES,
-                            ));
+                            )));
                         }
                         Some(blend_mode) => blend_mode,
                     };
@@ -599,10 +600,10 @@ impl PatchesDictionary {
                             PatchContext::PatchAlphaChannel as usize,
                         ) as usize;
                         if alpha_channel >= num_extra_channels {
-                            return Err(Error::PatchesInvalidAlphaChannel(
+                            return Err(at!(Error::PatchesInvalidAlphaChannel(
                                 alpha_channel,
                                 num_extra_channels,
-                            ));
+                            )));
                         }
                     }
 

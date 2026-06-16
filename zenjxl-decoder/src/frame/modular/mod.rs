@@ -13,6 +13,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use whereat::at;
 
 use crate::transforms::transform_map::*;
 use crate::{
@@ -1260,14 +1261,14 @@ pub(crate) fn decode_hf_metadata_into_rects(
         for x in 0..r.size.0 {
             let epf_val = epf_row_in[x];
             if !(0..8).contains(&epf_val) {
-                return Err(Error::InvalidEpfValue(epf_val));
+                return Err(at!(Error::InvalidEpfValue(epf_val)));
             }
             epf_row_out[x] = epf_val as u8;
             if transform_map_rect.row(y)[x] != HfTransformType::INVALID_TRANSFORM {
                 continue;
             }
             if num >= count {
-                return Err(Error::InvalidVarDCTTransformMap);
+                return Err(at!(Error::InvalidVarDCTTransformMap));
             }
             let raw_transform = transform_image.row(0)[num];
             let raw_quant = 1 + transform_image.row(1)[num].clamp(0, 255);
@@ -1277,11 +1278,11 @@ pub(crate) fn decode_hf_metadata_into_rects(
             let cx = covered_blocks_x(transform_type) as usize;
             let cy = covered_blocks_y(transform_type) as usize;
             if (cx > 1 || cy > 1) && !frame_header.is444() {
-                return Err(Error::InvalidBlockSizeForChromaSubsampling);
+                return Err(at!(Error::InvalidBlockSizeForChromaSubsampling));
             }
             let next_group = ((x / 32 + 1) * 32, (y / 32 + 1) * 32);
             if x + cx > min(r.size.0, next_group.0) || y + cy > min(r.size.1, next_group.1) {
-                return Err(Error::HFBlockOutOfBounds);
+                return Err(at!(Error::HFBlockOutOfBounds));
             }
             let transform_id = raw_transform as u8;
             for iy in 0..cy {

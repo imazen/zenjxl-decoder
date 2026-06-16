@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use crate::api::JxlCms;
+use whereat::at;
 use crate::api::JxlColorEncoding;
 use crate::api::JxlColorProfile;
 use crate::api::JxlColorType;
@@ -120,10 +121,10 @@ impl Frame {
                 .get(k_ec_idx)
                 .is_some_and(|f| f.is_some())
             {
-                return Err(Error::CmsConsumedChannelRequested {
+                return Err(at!(Error::CmsConsumedChannelRequested {
                     channel_index: k_ec_idx,
                     channel_type: "Black".to_string(),
-                });
+                }));
             }
         }
         Ok(())
@@ -1786,10 +1787,10 @@ impl Frame {
             )?;
             // CMS cannot add channels - reject transforms that would
             if out_channels > in_channels {
-                return Err(Error::CmsChannelCountIncrease {
+                return Err(at!(Error::CmsChannelCountIncrease {
                     in_channels,
                     out_channels,
-                });
+                }));
             }
             // Only pass black_channel to CmsStage if CMS is actually processing CMYK input.
             // For XYB images, even if original was CMYK, CMS input is linear RGB.
@@ -2003,7 +2004,7 @@ impl Frame {
             let source_alpha_associated =
                 alpha_channel_info.is_some_and(|(_, info)| info.alpha_associated());
             if pixel_format.color_type.is_grayscale() && num_color_channels == 3 {
-                return Err(Error::NotGrayscale);
+                return Err(at!(Error::NotGrayscale));
             }
             // Determine if we need to fill opaque alpha:
             // - color_type requests alpha (has_alpha() is true)

@@ -6,6 +6,7 @@
 // Originally written for jxl-oxide.
 
 use crate::bit_reader::BitReader;
+use whereat::at;
 use crate::error::{Error, Result};
 
 const LOG_SUM_PROBS: usize = 12;
@@ -45,12 +46,12 @@ impl AnsHistogram {
         let v0 = Self::read_u8(br)? as usize;
         let v1 = Self::read_u8(br)? as usize;
         if v0 == v1 {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         let alphabet_size = v0.max(v1) + 1;
         if alphabet_size > table_size {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         let prob = br.read(LOG_SUM_PROBS)? as u16;
@@ -66,7 +67,7 @@ impl AnsHistogram {
         let val = Self::read_u8(br)? as usize;
         let alphabet_size = val + 1;
         if alphabet_size > table_size {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         dist[val] = SUM_PROBS;
@@ -79,7 +80,7 @@ impl AnsHistogram {
 
         let alphabet_size = Self::read_u8(br)? as usize + 1;
         if alphabet_size > table_size {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         let base = SUM_PROBS as usize / alphabet_size;
@@ -104,12 +105,12 @@ impl AnsHistogram {
 
         let shift = (br.read(len)? + (1 << len) - 1) as i16;
         if shift > 13 {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         let alphabet_size = Self::read_u8(br)? as usize + 3;
         if alphabet_size > table_size {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         // TODO(tirr-c): This could be an array of length `SUM_PROB / 4` (4 is from the minimum
@@ -122,7 +123,7 @@ impl AnsHistogram {
             if dist[idx] == RLE_MARKER_SYM {
                 let repeat_count = Self::read_u8(br)? as usize + 4;
                 if idx + repeat_count > alphabet_size {
-                    return Err(Error::InvalidAnsHistogram);
+                    return Err(at!(Error::InvalidAnsHistogram));
                 }
                 repeat_ranges.push(idx..(idx + repeat_count));
                 idx += repeat_count;
@@ -142,10 +143,10 @@ impl AnsHistogram {
             idx += 1;
         }
         let Some((_, omit_pos)) = omit_data else {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         };
         if dist.get(omit_pos + 1) == Some(&RLE_MARKER_SYM) {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         let mut repeat_range_idx = 0usize;
@@ -162,7 +163,7 @@ impl AnsHistogram {
                     acc += *code;
                     // dist[omit_pos] > 0
                     if acc >= SUM_PROBS {
-                        return Err(Error::InvalidAnsHistogram);
+                        return Err(at!(Error::InvalidAnsHistogram));
                     }
                     continue;
                 }
@@ -186,7 +187,7 @@ impl AnsHistogram {
             acc += *code;
             // dist[omit_pos] > 0
             if acc >= SUM_PROBS {
-                return Err(Error::InvalidAnsHistogram);
+                return Err(at!(Error::InvalidAnsHistogram));
             }
         }
         dist[omit_pos] = SUM_PROBS - acc;
@@ -243,7 +244,7 @@ impl AnsHistogram {
         // If `dist` sums to `SUM_PROB`, overfull and underfull must both be empty here.
         // A crafted bitstream could violate this invariant, so return an error instead of panicking.
         if !overfull.is_empty() || !underfull.is_empty() {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
 
         Ok(buckets
@@ -310,7 +311,7 @@ impl AnsHistogram {
 
         let expected_len = 1 << (LOG_SUM_PROBS - log_bucket_size);
         if buckets.len() != expected_len {
-            return Err(Error::InvalidAnsHistogram);
+            return Err(at!(Error::InvalidAnsHistogram));
         }
         // Safety note: log_bucket_size <= LOG_SUM_PROBS by construction, and we
         // just checked that buckets.len() = 2^(LOG_SUM_PROBS - log_bucket_size)
@@ -439,7 +440,7 @@ impl AnsReader {
         if self.0 == Self::CHECKSUM {
             Ok(())
         } else {
-            Err(Error::AnsChecksumMismatch)
+            Err(at!(Error::AnsChecksumMismatch))
         }
     }
 
@@ -492,7 +493,7 @@ mod test {
             loop {
                 match AnsHistogram::decode(&mut br, 8) {
                     Ok(histogram) => validate_buckets(&histogram.buckets),
-                    Err(Error::OutOfBounds(_)) => break,
+                    Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => break,
                     Err(_) => {}
                 }
             }

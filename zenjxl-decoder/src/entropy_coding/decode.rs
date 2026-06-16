@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use jxl_macros::UnconditionalCoder;
+use whereat::at;
 
 use crate::bit_reader::BitReader;
 use crate::entropy_coding::ans::*;
@@ -218,11 +219,11 @@ impl ErrorState {
 
     fn check_for_error(&self) -> Result<()> {
         if self.lz77_repeat {
-            Err(Error::UnexpectedLz77Repeat)
+            Err(at!(Error::UnexpectedLz77Repeat))
         } else if self.arithmetic_overflow {
-            Err(Error::ArithmeticOverflow)
+            Err(at!(Error::ArithmeticOverflow))
         } else if self.nbits_acc >= 32 {
-            Err(Error::IntegerTooLarge(32))
+            Err(at!(Error::IntegerTooLarge(32)))
         } else {
             Ok(())
         }
@@ -276,7 +277,7 @@ impl SymbolReader {
                     min_symbol,
                     min_length,
                     dist_multiplier,
-                    window: Vec::new_with_capacity(1 << Lz77State::LOG_WINDOW_SIZE)?,
+                    window: Vec::new_with_capacity(1 << Lz77State::LOG_WINDOW_SIZE).map_err(|e| at!(Error::from(e)))?,
                     num_to_copy: 0,
                     copy_pos: 0,
                     num_decoded: 0,
@@ -600,7 +601,7 @@ impl Histograms {
     pub fn decode(num_contexts: usize, br: &mut BitReader, allow_lz77: bool) -> Result<Histograms> {
         let lz77_params = Lz77Params::read_unconditional(&(), br, &Empty {})?;
         if !allow_lz77 && lz77_params.enabled {
-            return Err(Error::Lz77Disallowed);
+            return Err(at!(Error::Lz77Disallowed));
         }
         let (num_contexts, lz77_length_uint) = if lz77_params.enabled {
             (
@@ -635,7 +636,7 @@ impl Histograms {
         };
         let num_histograms = *context_map.iter().max().unwrap() + 1;
         let uint_configs = ((0..num_histograms).map(|_| HybridUint::decode(log_alpha_size, br)))
-            .collect::<Result<_>>()?;
+            .collect::<Result<_, Error>>()?;
 
         let codes = if use_prefix_code {
             Codes::Huffman(HuffmanCodes::decode(num_histograms as usize, br)?)

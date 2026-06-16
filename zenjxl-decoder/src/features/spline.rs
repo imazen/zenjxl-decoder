@@ -8,6 +8,7 @@ use std::{
     iter::{self, zip},
     ops,
 };
+use whereat::at;
 
 use crate::{
     bit_reader::BitReader,
@@ -118,12 +119,12 @@ impl Spline {
         )
         .find(|((_, p0), p1)| **p0 == **p1)
         {
-            return Err(Error::SplineAdjacentCoincidingControlPoints(
+            return Err(at!(Error::SplineAdjacentCoincidingControlPoints(
                 index,
                 *p0,
                 index + 1,
                 *p1,
-            ));
+            )));
         }
         Ok(())
     }
@@ -150,24 +151,24 @@ fn validate_spline_point_pos<T: num_traits::ToPrimitive>(x: T, y: T) -> Result<(
     let yi = y.to_i32().unwrap();
     let ok_range = -(1i32 << 23)..(1i32 << 23);
     if !ok_range.contains(&xi) {
-        return Err(Error::SplinesPointOutOfRange(
+        return Err(at!(Error::SplinesPointOutOfRange(
             Point {
                 x: xi as f32,
                 y: yi as f32,
             },
             xi,
             ok_range,
-        ));
+        )));
     }
     if !ok_range.contains(&yi) {
-        return Err(Error::SplinesPointOutOfRange(
+        return Err(at!(Error::SplinesPointOutOfRange(
             Point {
                 x: xi as f32,
                 y: yi as f32,
             },
             yi,
             ok_range,
-        ));
+        )));
     }
     Ok(())
 }
@@ -195,12 +196,12 @@ impl QuantizedSpline {
             splines_reader.read_unsigned(splines_histograms, br, NUM_CONTROL_POINTS_CONTEXT);
         *total_num_control_points += num_control_points;
         if *total_num_control_points > max_control_points {
-            return Err(Error::SplinesTooManyControlPoints(
+            return Err(at!(Error::SplinesTooManyControlPoints(
                 *total_num_control_points,
                 max_control_points,
-            ));
+            )));
         }
-        let mut control_points = Vec::new_with_capacity(num_control_points as usize)?;
+        let mut control_points = Vec::new_with_capacity(num_control_points as usize).map_err(|e| at!(Error::from(e)))?;
         for _ in 0..num_control_points {
             let x =
                 splines_reader.read_signed(splines_histograms, br, CONTROL_POINTS_CONTEXT) as i64;
@@ -210,7 +211,7 @@ impl QuantizedSpline {
             // Add check that double deltas are not outrageous (not in spec).
             let max_delta_delta = x.abs().max(y.abs());
             if max_delta_delta >= DELTA_LIMIT {
-                return Err(Error::SplinesDeltaLimit(max_delta_delta, DELTA_LIMIT));
+                return Err(at!(Error::SplinesDeltaLimit(max_delta_delta, DELTA_LIMIT)));
             }
         }
         // Decode DCTs and populate the QuantizedSpline struct
@@ -247,7 +248,7 @@ impl QuantizedSpline {
         let area_limit = area_limit(image_size);
 
         let mut result = Spline {
-            control_points: Vec::new_with_capacity(self.control_points.len() + 1)?,
+            control_points: Vec::new_with_capacity(self.control_points.len() + 1).map_err(|e| at!(Error::from(e)))?,
             ..Default::default()
         };
 
@@ -274,10 +275,10 @@ impl QuantizedSpline {
                 current_delta_x.unsigned_abs() as u64 + current_delta_y.unsigned_abs() as u64;
 
             if manhattan_distance > area_limit {
-                return Err(Error::SplinesDistanceTooLarge(
+                return Err(at!(Error::SplinesDistanceTooLarge(
                     manhattan_distance,
                     area_limit,
-                ));
+                )));
             }
 
             current_x += current_delta_x;
@@ -756,10 +757,10 @@ impl Splines {
             )?;
             total_estimated_area_reached += spline.estimated_area_reached;
             if total_estimated_area_reached > area_limit {
-                return Err(Error::SplinesAreaTooLarge(
+                return Err(at!(Error::SplinesAreaTooLarge(
                     total_estimated_area_reached,
                     area_limit,
-                ));
+                )));
             }
             spline.validate_adjacent_point_coincidence()?;
             splines.push(spline);
@@ -804,11 +805,11 @@ impl Splines {
         segments_by_y.sort_by_key(|segment| segment.0);
 
         self.segment_indices.clear();
-        self.segment_indices.try_reserve(segments_by_y.len())?;
+        self.segment_indices.try_reserve(segments_by_y.len()).map_err(|e| at!(Error::from(e)))?;
         self.segment_indices.resize(segments_by_y.len(), 0);
 
         self.segment_y_start.clear();
-        self.segment_y_start.try_reserve(image_ysize as usize + 1)?;
+        self.segment_y_start.try_reserve(image_ysize as usize + 1).map_err(|e| at!(Error::from(e)))?;
         self.segment_y_start.resize(image_ysize as usize + 1, 0);
 
         for (i, segment) in segments_by_y.iter().enumerate() {
@@ -842,7 +843,7 @@ impl Splines {
         let max_control_points =
             hard_limit.min(num_pixels / MAX_NUM_CONTROL_POINTS_PER_PIXEL_RATIO);
         if num_splines > max_control_points {
-            return Err(Error::SplinesTooMany(num_splines, max_control_points));
+            return Err(at!(Error::SplinesTooMany(num_splines, max_control_points)));
         }
 
         let mut starting_points = Vec::new();
@@ -865,10 +866,10 @@ impl Splines {
             // It is not in spec, but reasonable limit to avoid overflows.
             let max_coordinate = x.abs().max(y.abs());
             if max_coordinate >= SPLINE_POS_LIMIT {
-                return Err(Error::SplinesCoordinatesLimit(
+                return Err(at!(Error::SplinesCoordinatesLimit(
                     max_coordinate,
                     SPLINE_POS_LIMIT,
-                ));
+                )));
             }
 
             starting_points.push(Point {
@@ -914,7 +915,7 @@ mod test_splines {
     use test_log::test;
 
     use crate::{
-        error::{Error, Result},
+        error::Result,
         features::spline::SplineSegment,
         frame::color_correlation_map::ColorCorrelationParams,
         util::test::{assert_all_almost_abs_eq, assert_almost_abs_eq, assert_almost_eq},
@@ -938,7 +939,7 @@ mod test_splines {
     }
 
     #[test]
-    fn dequantize() -> Result<(), Error> {
+    fn dequantize() -> Result<()> {
         // Golden data generated by libjxl.
         let quantized_and_dequantized = [
             (
@@ -1556,7 +1557,7 @@ mod test_splines {
     }
 
     #[test]
-    fn centripetal_catmull_rom_spline() -> Result<(), Error> {
+    fn centripetal_catmull_rom_spline() -> Result<()> {
         let control_points = vec![Point { x: 1.0, y: 2.0 }, Point { x: 4.0, y: 3.0 }];
         let want_result = [
             Point { x: 1.0, y: 2.0 },
@@ -1623,7 +1624,7 @@ mod test_splines {
     }
 
     #[test]
-    fn equally_spaced_points() -> Result<(), Error> {
+    fn equally_spaced_points() -> Result<()> {
         let desired_rendering_distance = 10.0f32;
         let segments = [
             Point { x: 0.0, y: 0.0 },
@@ -1662,7 +1663,7 @@ mod test_splines {
     }
 
     #[test]
-    fn dct32() -> Result<(), Error> {
+    fn dct32() -> Result<()> {
         let mut dct = Dct32::default();
         for (i, coeff) in dct.0.iter_mut().enumerate() {
             *coeff = 0.05f32 * i as f32;
@@ -1743,7 +1744,7 @@ mod test_splines {
     }
 
     #[test]
-    fn spline_segments_add_segment() -> Result<(), Error> {
+    fn spline_segments_add_segment() -> Result<()> {
         let mut splines = Splines::default();
         let mut segments_by_y = Vec::<(u64, usize)>::new();
 
@@ -1785,7 +1786,7 @@ mod test_splines {
     }
 
     #[test]
-    fn spline_segments_add_segments_from_points() -> Result<(), Error> {
+    fn spline_segments_add_segments_from_points() -> Result<()> {
         let mut splines = Splines::default();
         let mut segments_by_y = Vec::<(u64, usize)>::new();
         let mut color_dct = [Dct32::default(); 3];
@@ -1861,7 +1862,7 @@ mod test_splines {
     }
 
     #[test]
-    fn init_draw_cache() -> Result<(), Error> {
+    fn init_draw_cache() -> Result<()> {
         let mut splines = Splines {
             splines: vec![
                 QuantizedSpline {

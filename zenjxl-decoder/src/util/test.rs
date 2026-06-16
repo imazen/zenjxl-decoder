@@ -55,6 +55,14 @@ impl From<JXLError> for Error {
     }
 }
 
+// Test helpers propagate the decoder's location-tracked `At<Error>` via `?`;
+// the trace is not needed in test output, so collapse to the inner error.
+impl From<whereat::At<JXLError>> for Error {
+    fn from(value: whereat::At<JXLError>) -> Self {
+        Error::InvalidPFM(value.decompose().0.to_string())
+    }
+}
+
 fn rel_error_gt<T: AsPrimitive<f64>>(left: T, right: T, max_rel_error: T) -> bool {
     let left_f64: f64 = left.as_();
     let right_f64: f64 = right.as_();

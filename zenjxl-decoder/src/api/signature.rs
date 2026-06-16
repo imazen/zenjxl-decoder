@@ -7,6 +7,7 @@ use crate::{
     api::ProcessingResult,
     error::{Error, Result},
 };
+use whereat::at;
 
 /// The magic bytes for a bare JPEG XL codestream.
 pub(crate) const CODESTREAM_SIGNATURE: [u8; 2] = [0xff, 0x0a];
@@ -42,7 +43,7 @@ pub(crate) fn check_signature_internal(file_prefix: &[u8]) -> Result<Option<JxlS
             return if prefix_len >= len {
                 Ok(Some(st))
             } else {
-                Err(Error::OutOfBounds(len - prefix_len))
+                Err(at!(Error::OutOfBounds(len - prefix_len)))
             };
         }
     }
