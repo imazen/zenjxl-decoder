@@ -141,11 +141,12 @@ impl BoxParser {
                         let chunk_size = num.min(65536);
                         let start = jbrd.len();
                         jbrd.resize(start + chunk_size, 0);
-                        let read =
-                            input.read(&mut [std::io::IoSliceMut::new(&mut jbrd[start..])])?;
+                        let read = input
+                            .read(&mut [std::io::IoSliceMut::new(&mut jbrd[start..])])
+                            .map_err(Error::from)?;
                         if read == 0 {
                             jbrd.truncate(start);
-                            return Err(Error::OutOfBounds(num));
+                            return Err(at!(Error::OutOfBounds(num)));
                         }
                         jbrd.truncate(start + read);
                         remaining -= read as u64;
@@ -166,7 +167,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
+                        let read = input
+                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+                            .map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
                             return Err(at!(Error::OutOfBounds(num)));
                         }
@@ -191,7 +194,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
+                        let read = input
+                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+                            .map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
                             return Err(at!(Error::OutOfBounds(num)));
                         }
@@ -216,7 +221,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
+                        let read = input
+                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+                            .map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
                             return Err(at!(Error::OutOfBounds(num)));
                         }
@@ -244,7 +251,9 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])]).map_err(|e| at!(Error::from(e)))?;
+                        let read = input
+                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+                            .map_err(|e| at!(Error::from(e)))?;
                         if read == 0 {
                             return Err(at!(Error::OutOfBounds(num)));
                         }
@@ -269,9 +278,11 @@ impl BoxParser {
                     } else {
                         let old_len = buf.len();
                         buf.resize(old_len + num, 0);
-                        let read = input.read(&mut [IoSliceMut::new(&mut buf[old_len..])])?;
+                        let read = input
+                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+                            .map_err(Error::from)?;
                         if read == 0 {
-                            return Err(Error::OutOfBounds(num));
+                            return Err(at!(Error::OutOfBounds(num)));
                         }
                         buf.truncate(old_len + read);
                         remaining -= read as u64;
@@ -378,7 +389,8 @@ impl BoxParser {
                                 // error, never an `abort()` on the parser thread.
                                 self.state = ParseState::BufferingGainMap(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize)
+                                        .map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
@@ -392,7 +404,8 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingFrameIndex(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize)
+                                        .map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
@@ -406,7 +419,8 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingExif(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize)
+                                        .map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
@@ -420,7 +434,8 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingXmp(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize).map_err(|e| at!(Error::from(e)))?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize)
+                                        .map_err(|e| at!(Error::from(e)))?,
                                 );
                             }
                         }
@@ -434,7 +449,8 @@ impl BoxParser {
                             } else {
                                 self.state = ParseState::BufferingBrob(
                                     content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)?,
+                                    Vec::<u8>::new_with_capacity(content_len as usize)
+                                        .map_err(Error::from)?,
                                 );
                             }
                         }

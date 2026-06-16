@@ -10,6 +10,8 @@
 
 use std::sync::Arc;
 
+use whereat::at;
+
 use crate::api::{JxlColorEncoding, JxlColorProfile, JxlPrimaries, JxlTransferFunction};
 use crate::error::{Error, Result};
 
@@ -36,14 +38,14 @@ impl JxlCmsTransformer for MoxCmsTransformer {
     fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
         self.transform
             .transform(input, output)
-            .map_err(|e| Error::CmsError(format!("moxcms transform error: {:?}", e)))
+            .map_err(|e| at!(Error::CmsError(format!("moxcms transform error: {:?}", e))))
     }
 
     fn do_transform_inplace(&mut self, inout: &mut [f32]) -> Result<()> {
         if self.input_channels != self.output_channels {
-            return Err(Error::CmsError(
+            return Err(at!(Error::CmsError(
                 "in-place transform requires same input/output channel count".to_string(),
-            ));
+            )));
         }
 
         // moxcms doesn't support in-place transforms, so we need a temporary buffer.
@@ -51,7 +53,7 @@ impl JxlCmsTransformer for MoxCmsTransformer {
         let input_copy = inout.to_vec();
         self.transform
             .transform(&input_copy, inout)
-            .map_err(|e| Error::CmsError(format!("moxcms transform error: {:?}", e)))
+            .map_err(|e| at!(Error::CmsError(format!("moxcms transform error: {:?}", e))))
     }
 }
 
@@ -59,12 +61,12 @@ impl JxlCmsTransformer for MoxCmsTransformer {
 fn to_moxcms_profile(profile: &JxlColorProfile) -> Result<moxcms::ColorProfile> {
     match profile {
         JxlColorProfile::Icc(icc_data) => moxcms::ColorProfile::new_from_slice(icc_data)
-            .map_err(|e| Error::CmsError(format!("moxcms ICC parse error: {:?}", e))),
+            .map_err(|e| at!(Error::CmsError(format!("moxcms ICC parse error: {:?}", e)))),
         JxlColorProfile::Simple(encoding) => {
             // For simple encodings, generate an ICC profile and parse it
             if let Some(icc_data) = encoding.maybe_create_profile()? {
                 moxcms::ColorProfile::new_from_slice(&icc_data)
-                    .map_err(|e| Error::CmsError(format!("moxcms ICC parse error: {:?}", e)))
+                    .map_err(|e| at!(Error::CmsError(format!("moxcms ICC parse error: {:?}", e))))
             } else {
                 // Try to use built-in moxcms profiles for common color spaces
                 match encoding {
@@ -92,9 +94,9 @@ fn to_moxcms_profile(profile: &JxlColorProfile) -> Result<moxcms::ColorProfile> 
                         transfer_function: JxlTransferFunction::Gamma(gamma),
                         ..
                     } => Ok(moxcms::ColorProfile::new_gray_with_gamma(*gamma)),
-                    _ => Err(Error::CmsError(
+                    _ => Err(at!(Error::CmsError(
                         "Cannot create ICC profile for this color encoding".to_string(),
-                    )),
+                    ))),
                 }
             }
         }

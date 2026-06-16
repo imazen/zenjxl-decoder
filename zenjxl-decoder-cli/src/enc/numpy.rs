@@ -4,7 +4,12 @@
 // license that can be found in the LICENSE file.
 
 use crate::dec::DecodeOutput;
-use jxl::api::Result;
+use jxl::api::Error;
+
+// NumPy export only ever fails on the output `Writer`'s `io::Error`; a
+// bare-`Error` `Result` lets `?` lift those via `Error`'s `From<io::Error>`
+// without per-call `At<>` wrapping. The CLI caller re-lifts into `At<Error>`.
+type Result<T> = std::result::Result<T, Error>;
 use std::io::Write;
 
 fn numpy_header<Writer: Write>(

@@ -8,8 +8,14 @@
 //! Decodes the JBRD box to recover JPEG metadata needed for byte-exact
 //! reconstruction. This is the inverse of the encoder's `encode_jbrd()`.
 
-use crate::error::{Error, Result};
+use crate::error::Error;
 use crate::util::NewWithCapacity;
+
+// JBRD parsing is a cold reconstruction path that yields bare `Error`s (no
+// per-symbol hot loop); `reconstruct_jpeg` lifts them into `At<Error>` at the
+// public boundary via `?`. A bare-`Error` `Result` alias here keeps `?` on the
+// local helpers and fallible allocations working without per-call `At<>` wrapping.
+type Result<T> = std::result::Result<T, Error>;
 
 use super::data::*;
 

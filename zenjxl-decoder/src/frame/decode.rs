@@ -4,8 +4,8 @@
 // license that can be found in the LICENSE file.
 
 use std::collections::BTreeSet;
-use whereat::at;
 use std::sync::Arc;
+use whereat::at;
 
 use super::render::pipeline;
 use super::{
@@ -494,7 +494,7 @@ impl Frame {
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
         let tracker = &self.decoder_state.memory_tracker;
         sections.into_par_iter().try_for_each(|(group, data, len)| {
-            stop.check()?;
+            stop.check().map_err(Error::from)?;
             let mut br = BitReader::new_padded(&data, len)?;
             modular.read_stream(
                 ModularStreamId::ModularLF(group),
@@ -554,7 +554,7 @@ impl Frame {
         let results: Vec<LfGroupOutput> = sections
             .into_par_iter()
             .map(|(group, data, len)| -> Result<LfGroupOutput> {
-                stop.check()?;
+                stop.check().map_err(Error::from)?;
                 let mut br = BitReader::new_padded(&data, len)?;
                 let r = header.lf_group_rect(group);
 
@@ -834,10 +834,12 @@ impl Frame {
             tracker.try_allocate(alloc_bytes)?;
             let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
             for ch in &mut channels {
-                ch.try_reserve_exact(num_groups).map_err(|e| at!(Error::from(e)))?;
+                ch.try_reserve_exact(num_groups)
+                    .map_err(|e| at!(Error::from(e)))?;
                 for _ in 0..num_groups {
                     let mut v: Vec<i32> = Vec::new();
-                    v.try_reserve_exact(coeffs_per_group).map_err(|e| at!(Error::from(e)))?;
+                    v.try_reserve_exact(coeffs_per_group)
+                        .map_err(|e| at!(Error::from(e)))?;
                     v.resize(coeffs_per_group, 0);
                     ch.push(v);
                 }
@@ -921,7 +923,7 @@ impl Frame {
                 let results: Vec<LfGroupOutput> = lf_sections
                     .into_par_iter()
                     .map(|(group, data, len)| -> Result<LfGroupOutput> {
-                        stop.check()?;
+                        stop.check().map_err(Error::from)?;
                         let mut br = BitReader::new_padded(&data, len)?;
                         let r = header.lf_group_rect(group);
 
@@ -1101,10 +1103,10 @@ impl Frame {
                     tracker.try_allocate(alloc_bytes)?;
                     let mut channels: [Vec<Vec<i32>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
                     for ch in &mut channels {
-                        ch.try_reserve_exact(num_groups)?;
+                        ch.try_reserve_exact(num_groups).map_err(Error::from)?;
                         for _ in 0..num_groups {
                             let mut v: Vec<i32> = Vec::new();
-                            v.try_reserve_exact(coeffs_per_group)?;
+                            v.try_reserve_exact(coeffs_per_group).map_err(Error::from)?;
                             v.resize(coeffs_per_group, 0);
                             ch.push(v);
                         }

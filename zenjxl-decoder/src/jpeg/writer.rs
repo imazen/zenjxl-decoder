@@ -8,9 +8,15 @@
 //! Writes a valid JPEG file from reconstructed coefficient data and
 //! JBRD metadata (Huffman tables, quant tables, scan headers, markers).
 
-use crate::error::{Error, Result};
+use crate::error::Error;
 
 use super::data::*;
+
+// The JPEG writer is a cold reconstruction path that yields bare `Error`s;
+// `reconstruct_jpeg` lifts them into `At<Error>` at the public boundary via `?`.
+// A bare-`Error` `Result` alias here keeps `?` on the local `write_*` helpers
+// working without per-call `At<>` wrapping.
+type Result<T> = std::result::Result<T, Error>;
 
 /// JPEG zigzag scan order: maps zigzag position → natural (row-major) position.
 #[rustfmt::skip]

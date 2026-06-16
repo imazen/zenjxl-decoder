@@ -26,11 +26,11 @@ use super::{
     GainMapBundle, JxlBasicInfo, JxlColorProfile, JxlColorType, JxlDataFormat, JxlDecoder,
     JxlDecoderLimits, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
 };
-use whereat::at;
 use crate::error::{Error, Result};
 use crate::headers::extra_channels::ExtraChannel;
-use whereat::{At, at};
 use crate::image::{OwnedRawImage, Rect};
+use whereat::At;
+use whereat::at;
 
 /// A decoded JXL image with interleaved RGBA (or GrayAlpha) u8 pixel data.
 #[non_exhaustive]
@@ -103,7 +103,6 @@ pub struct JxlImageInfo {
 /// let image = zenjxl_decoder::decode(&data).unwrap();
 /// assert_eq!(image.data.len(), image.width * image.height * image.channels);
 /// ```
-#[track_caller]
 pub fn decode(data: &[u8]) -> Result<JxlImage, At<Error>> {
     decode_with(data, JxlDecoderOptions::default())
 }
@@ -112,16 +111,12 @@ pub fn decode(data: &[u8]) -> Result<JxlImage, At<Error>> {
 ///
 /// Same output format as [`decode`] (RGBA u8 or GrayAlpha u8), but allows
 /// configuring security limits, cancellation, parallel mode, and CMS.
-#[track_caller]
 pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage, At<Error>> {
-    // Capture the caller's source location ONLY at this public boundary — the
-    // internal decode path (entropy/per-block hot loops) keeps the bare `Error`
-    // and is byte-identical, so this adds no inner-loop cost. Deeper per-origin
-    // location for the cold structural parsers is tracked as a follow-up.
-    match decode_with_inner(data, options) {
-        Ok(img) => Ok(img),
-        Err(e) => Err(at!(e)),
-    }
+    // Errors already carry a `whereat` source location: the crate-wide `Result`
+    // alias is `At<Error>`, so origins are captured at the internal `at!()` sites
+    // (and where `?` first lifts a bare `Error`). The public boundary returns that
+    // located error directly — re-wrapping here would nest `At<At<Error>>`.
+    decode_with_inner(data, options)
 }
 
 fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> {
@@ -307,7 +302,7 @@ pub fn reconstruct_jpeg_with(data: &[u8], options: JxlDecoderOptions) -> Result<
     let decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut decoder = match decoder.process(&mut input)? {
         ProcessingResult::Complete { result } => result,
-        ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
+        ProcessingResult::NeedsMoreInput { .. } => return Err(at!(Error::OutOfBounds(0))),
     };
 
     let info = decoder.basic_info().clone();
@@ -350,7 +345,7 @@ pub fn reconstruct_jpeg_with(data: &[u8], options: JxlDecoderOptions) -> Result<
     // Phase 2: parse frame header.
     let decoder = match decoder.process(&mut input)? {
         ProcessingResult::Complete { result } => result,
-        ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
+        ProcessingResult::NeedsMoreInput { .. } => return Err(at!(Error::OutOfBounds(0))),
     };
 
     // Phase 3: decode the frame into throwaway buffers.
@@ -372,7 +367,7 @@ pub fn reconstruct_jpeg_with(data: &[u8], options: JxlDecoderOptions) -> Result<
 
     let mut decoder = match decoder.process(&mut input, &mut bufs)? {
         ProcessingResult::Complete { result } => result,
-        ProcessingResult::NeedsMoreInput { .. } => return Err(Error::OutOfBounds(0)),
+        ProcessingResult::NeedsMoreInput { .. } => return Err(at!(Error::OutOfBounds(0))),
     };
 
     // Phase 4: drain the remaining input so the box parser consumes the trailing

@@ -197,7 +197,10 @@ impl CodestreamParser {
                 .filter(|x| x.is_some())
                 .count();
             if output_buffers.len() != expected_len {
-                return Err(at!(Error::WrongBufferCount(output_buffers.len(), expected_len)));
+                return Err(at!(Error::WrongBufferCount(
+                    output_buffers.len(),
+                    expected_len
+                )));
             }
         }
         // If we have sections to read, read into sections; otherwise, read into the local buffer.
@@ -325,7 +328,9 @@ impl CodestreamParser {
                         }
                     }
                     if self.ready_section_data < total_size {
-                        return Err(at!(Error::OutOfBounds(total_size - self.ready_section_data)));
+                        return Err(at!(Error::OutOfBounds(
+                            total_size - self.ready_section_data
+                        )));
                     } else {
                         self.sections.clear();
                         // Finalize the skipped frame, mirroring what process_sections does
@@ -360,7 +365,8 @@ impl CodestreamParser {
                         #[cfg(feature = "jpeg")]
                         if self.jpeg_recon.is_some() {
                             match box_parser.get_more_codestream(input) {
-                                Ok(_) | Err(Error::OutOfBounds(_)) => {}
+                                Ok(_) => {}
+                                Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {}
                                 Err(e) => return Err(e),
                             }
                         }

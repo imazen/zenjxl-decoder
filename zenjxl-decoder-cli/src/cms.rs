@@ -107,7 +107,8 @@ impl JxlCmsTransformer for Lcms2Transformer {
             return Err(Error::CmsError(format!(
                 "Output buffer too small: expected {expected_output_len}, got {}",
                 output.len()
-            )));
+            ))
+            .into());
         }
 
         // Convert f32 slices to byte slices using bytemuck for safe casting
@@ -124,7 +125,8 @@ impl JxlCmsTransformer for Lcms2Transformer {
         if self.input_channels != self.output_channels {
             return Err(Error::CmsError(
                 "In-place transform requires matching channel counts".into(),
-            ));
+            )
+            .into());
         }
 
         // Convert f32 slice to byte slice

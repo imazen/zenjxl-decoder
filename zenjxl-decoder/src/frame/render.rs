@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 use crate::api::JxlCms;
-use whereat::at;
 use crate::api::JxlColorEncoding;
 use crate::api::JxlColorProfile;
 use crate::api::JxlColorType;
@@ -30,6 +29,7 @@ use crate::{
     frame::{DecoderState, Frame, LfGlobalState},
     headers::frame_header::FrameHeader,
 };
+use whereat::at;
 
 #[cfg(test)]
 macro_rules! pipeline {
@@ -675,7 +675,7 @@ impl Frame {
                 work[batch_start..batch_end]
                     .par_iter_mut()
                     .try_for_each(|gw| -> Result<()> {
-                        stop.check()?;
+                        stop.check().map_err(Error::from)?;
                         // Allocate pixel buffers on-demand from the shared pool.
                         // This runs in PARALLEL instead of the old sequential Phase 1
                         // allocation, distributing page fault cost across threads.
@@ -1155,7 +1155,7 @@ impl Frame {
                         .try_for_each_init(
                             || factory.create(1).ok(),
                             |ctx_opt, (item_idx, slot_bufs)| -> Result<()> {
-                                stop.check()?;
+                                stop.check().map_err(Error::from)?;
                                 let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
                                 let item = &all_items[item_idx];
                                 // Create rect sub-views from fragments.
@@ -1202,7 +1202,7 @@ impl Frame {
                             .map_init(
                                 || factory.create(1).ok(),
                                 |ctx_opt, (idx, item)| -> Result<Vec<buffer_splitter::OwnedLocalBuffer>> {
-                                    stop.check()?;
+                                    stop.check().map_err(Error::from)?;
                                     let ctx = ctx_opt
                                         .as_mut()
                                         .ok_or(Error::ImageOutOfMemory(0, 0))?;

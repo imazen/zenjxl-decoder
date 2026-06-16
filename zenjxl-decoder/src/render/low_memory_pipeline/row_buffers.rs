@@ -44,7 +44,9 @@ impl RowBuffer {
         let row_stride =
             (row_len * data_type.size()).div_ceil(CACHE_LINE_BYTE_SIZE) + (3 << x_shift);
         let mut buffer = Vec::<CacheLine>::new();
-        buffer.try_reserve_exact(row_stride * num_rows).map_err(|e| at!(crate::error::Error::from(e)))?;
+        buffer
+            .try_reserve_exact(row_stride * num_rows)
+            .map_err(|e| at!(crate::error::Error::from(e)))?;
         buffer.resize(row_stride * num_rows, CacheLine::default());
         let buffer = buffer.into_boxed_slice();
         Ok(Self {
@@ -58,7 +60,9 @@ impl RowBuffer {
     #[cfg(feature = "threads")]
     pub fn new_like(&self) -> Result<Self> {
         let mut buffer = Vec::<CacheLine>::new();
-        buffer.try_reserve_exact(self.buffer.len())?;
+        buffer
+            .try_reserve_exact(self.buffer.len())
+            .map_err(crate::error::Error::from)?;
         buffer.resize(self.buffer.len(), CacheLine::default());
         Ok(Self {
             buffer: buffer.into_boxed_slice(),

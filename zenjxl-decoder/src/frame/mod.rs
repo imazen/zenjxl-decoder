@@ -181,7 +181,9 @@ impl DecoderState {
 
     /// Check cancellation status and return error if cancelled.
     pub fn check_cancelled(&self) -> crate::error::Result<()> {
-        self.stop.check().map_err(|e| at!(crate::error::Error::from(e)))
+        self.stop
+            .check()
+            .map_err(|e| at!(crate::error::Error::from(e)))
     }
 
     pub fn extra_channel_info(&self) -> &Vec<ExtraChannelInfo> {
@@ -538,7 +540,8 @@ impl Frame {
             let wb = comp.width_in_blocks as usize;
             let hb = comp.height_in_blocks as usize;
             let num_blocks = wb * hb;
-            comp.coeffs = Vec::try_from_elem(0i16, num_blocks * 64)?;
+            comp.coeffs =
+                Vec::try_from_elem(0i16, num_blocks * 64).map_err(crate::error::Error::from)?;
 
             // HShift/VShift for mapping component blocks to frame-level block grid
             let hshift_c = maxhs - self.header.raw_hshift(jxl_c);
@@ -622,11 +625,7 @@ impl Frame {
 mod test {
     use std::panic;
 
-    use crate::{
-        error::Result,
-        features::spline::Point,
-        util::test::assert_almost_abs_eq,
-    };
+    use crate::{error::Result, features::spline::Point, util::test::assert_almost_abs_eq};
     use test_log::test;
 
     use super::Frame;
