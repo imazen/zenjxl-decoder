@@ -563,17 +563,27 @@ impl SymbolReader {
                 };
 
                 let num_rewind = lz77_state.num_decoded - num_decoded;
-                let rewind_window = &window[..num_rewind as usize];
 
-                let start = (num_decoded & Lz77State::WINDOW_MASK) as usize;
-                let end = ((num_decoded + num_rewind) & Lz77State::WINDOW_MASK) as usize;
-                if start < end {
-                    lz77_state.window[start..end].copy_from_slice(rewind_window);
-                } else {
-                    let window_first = &mut lz77_state.window[start..];
-                    let first_len = window_first.len();
-                    window_first.copy_from_slice(&rewind_window[..first_len]);
-                    lz77_state.window[..end].copy_from_slice(&rewind_window[first_len..]);
+                // A speculative read that advanced nothing (num_rewind == 0)
+                // leaves no window state to roll back. The wrap-around copy below
+                // assumes num_rewind > 0; with num_rewind == 0, start == end and
+                // it tries to copy `end` entries from an empty rewind window,
+                // panicking on malformed input (#43). num_rewind can never exceed
+                // the saved window (the probe reads at most N symbols), but guard
+                // it too so a corrupt checkpoint can't index out of bounds.
+                if num_rewind > 0 && (num_rewind as usize) <= window.len() {
+                    let rewind_window = &window[..num_rewind as usize];
+
+                    let start = (num_decoded & Lz77State::WINDOW_MASK) as usize;
+                    let end = ((num_decoded + num_rewind) & Lz77State::WINDOW_MASK) as usize;
+                    if start < end {
+                        lz77_state.window[start..end].copy_from_slice(rewind_window);
+                    } else {
+                        let window_first = &mut lz77_state.window[start..];
+                        let first_len = window_first.len();
+                        window_first.copy_from_slice(&rewind_window[..first_len]);
+                        lz77_state.window[..end].copy_from_slice(&rewind_window[first_len..]);
+                    }
                 }
 
                 lz77_state.num_to_copy = num_to_copy;
