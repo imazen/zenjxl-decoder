@@ -45,7 +45,34 @@ struct Expected {
     reference: &'static str,
 }
 
+/// Root of the fixture tree: the local checkout when present (the normal dev/CI
+/// case, no network), otherwise downloaded on demand via codec-corpus. The
+/// integration-test mirror of the lib's `crate::util::test::fixture_dir`;
+/// `resources/test/` is not packaged in the published crate (#8). Panics loudly
+/// on failure — a test must never pass without its data.
+fn fixture_root() -> PathBuf {
+    let local = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/test");
+    #[cfg(not(target_arch = "wasm32"))]
+    if !local.is_dir() {
+        return codec_corpus::Corpus::new()
+            .expect("initialize codec-corpus to download test fixtures")
+            .github_repo(
+                "imazen/zenjxl-decoder",
+                "zenjxl-decoder/resources/test",
+                "main",
+            )
+            .expect("download zenjxl-decoder test fixtures via codec-corpus");
+    }
+    local
+}
+
 fn resource(name: &str) -> PathBuf {
+    fixture_root().join(name)
+}
+
+/// In-checkout path for the regeneration path: writing a new reference only
+/// makes sense in the dev repo, never against the download cache.
+fn local_resource(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("resources/test")
         .join(name)
@@ -93,7 +120,7 @@ fn assert_decode_matches(e: &Expected) {
 
     // Regeneration path: write the current strided sample as the new reference.
     if std::env::var("JXL_GEN_BITID_REF").is_ok() {
-        std::fs::write(resource(e.reference), &sample).unwrap();
+        std::fs::write(local_resource(e.reference), &sample).unwrap();
         eprintln!("regenerated {} ({} bytes)", e.reference, sample.len());
         return;
     }

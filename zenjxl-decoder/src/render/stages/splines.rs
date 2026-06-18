@@ -64,7 +64,7 @@ mod test {
 
     #[test]
     fn splines_process_row_chunk() -> Result<(), test::Error> {
-        let want_image = read_pfm(include_bytes!("../../../resources/test/splines.pfm"))?;
+        let want_image = read_pfm(&crate::util::test::fixture_bytes("splines.pfm"))?;
         let target_images = [
             Image::<f32>::new((320, 320))?,
             Image::<f32>::new((320, 320))?,

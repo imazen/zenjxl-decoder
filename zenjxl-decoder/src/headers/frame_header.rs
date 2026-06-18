@@ -784,7 +784,7 @@ mod test_frame_header {
     #[test]
     fn test_basic() {
         let (_, frame_header, toc) =
-            read_headers_and_toc(include_bytes!("../../resources/test/basic.jxl")).unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
         assert_eq!(frame_header.frame_type, FrameType::RegularFrame);
         assert_eq!(frame_header.encoding, Encoding::VarDCT);
         assert_eq!(frame_header.flags, 0);
@@ -808,7 +808,7 @@ mod test_frame_header {
     #[test]
     fn test_extra_channel() {
         let frame_header =
-            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
+            read_headers_and_toc(&crate::util::test::fixture_bytes("extra_channels.jxl"))
                 .unwrap()
                 .1;
         assert_eq!(frame_header.frame_type, FrameType::RegularFrame);
@@ -830,8 +830,7 @@ mod test_frame_header {
     #[test]
     fn test_invalid_blending_alpha_channel() {
         let (file_header, mut frame_header, _) =
-            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
-                .unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("extra_channels.jxl")).unwrap();
         let nonserialized = file_header.frame_header_nonserialized();
         frame_header.blending_info.mode = BlendingMode::Blend;
         frame_header.blending_info.alpha_channel = nonserialized.extra_channel_info.len() as u32;
@@ -848,8 +847,7 @@ mod test_frame_header {
     #[test]
     fn test_invalid_ec_upsampling_after_dim_shift() {
         let (file_header, mut frame_header, _) =
-            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
-                .unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("extra_channels.jxl")).unwrap();
         let mut nonserialized = file_header.frame_header_nonserialized();
 
         // Force a dim_shift of 3 on the first extra channel and pair it
@@ -883,8 +881,7 @@ mod test_frame_header {
     #[test]
     fn test_valid_ec_upsampling_after_dim_shift() {
         let (file_header, mut frame_header, _) =
-            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
-                .unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("extra_channels.jxl")).unwrap();
         let mut nonserialized = file_header.frame_header_nonserialized();
 
         // upsampling=4, ec_upsampling=2, dim_shift=1 → effective = 2<<1 = 4
@@ -926,8 +923,7 @@ mod test_frame_header {
     #[test]
     fn test_extra_channels_file_passes_ec_upsampling_check() {
         let (file_header, frame_header, _) =
-            read_headers_and_toc(include_bytes!("../../resources/test/extra_channels.jxl"))
-                .unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("extra_channels.jxl")).unwrap();
         let nonserialized = file_header.frame_header_nonserialized();
         // The bundled file uses upsampling=1, ec_upsampling=[1] which
         // trivially satisfies the constraint.
@@ -937,8 +933,7 @@ mod test_frame_header {
     #[test]
     fn test_has_permutation() {
         let (_, frame_header, toc) =
-            read_headers_and_toc(include_bytes!("../../resources/test/has_permutation.jxl"))
-                .unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("has_permutation.jxl")).unwrap();
         assert_eq!(frame_header.frame_type, FrameType::RegularFrame);
         assert_eq!(frame_header.encoding, Encoding::VarDCT);
         assert_eq!(frame_header.flags, 0);
@@ -969,7 +964,7 @@ mod test_frame_header {
     #[test]
     fn test_frame_name() {
         let (_, frame_header, _) =
-            read_headers_and_toc(include_bytes!("../../resources/test/named_frame_test.jxl"))
+            read_headers_and_toc(&crate::util::test::fixture_bytes("named_frame_test.jxl"))
                 .unwrap();
         assert_eq!(frame_header.frame_type, FrameType::RegularFrame);
         assert_eq!(frame_header.name, "TestFrameName");

@@ -133,8 +133,14 @@ fn assert_jpeg_match(reconstructed: &[u8], reference: &[u8], label: &str) {
 /// 3x3 JPEG with 4:2:0 subsampling (Y=2x2, Cb=Cr=1x1).
 #[test]
 fn test_jpeg_reconstruction_3x3() {
-    let jxl_data = std::fs::read("resources/test/3x3_jpeg_recompression.jxl").unwrap();
-    let reference = std::fs::read("resources/test/3x3_jpeg_recompression_reference.jpg").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "3x3_jpeg_recompression.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path(
+        "3x3_jpeg_recompression_reference.jpg",
+    ))
+    .unwrap();
     let reconstructed =
         decode_jpeg_reconstruction(&jxl_data).expect("JPEG reconstruction should succeed for 3x3");
     assert_jpeg_match(&reconstructed, &reference, "3x3 (4:2:0)");
@@ -143,8 +149,11 @@ fn test_jpeg_reconstruction_3x3() {
 /// 16x16 JPEG with 4:2:0 subsampling.
 #[test]
 fn test_jpeg_reconstruction_16x16() {
-    let jxl_data = std::fs::read("resources/test/test_16x16_jpeg_recompression.jxl").unwrap();
-    let reference = std::fs::read("resources/test/test_16x16.jpg").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_16x16_jpeg_recompression.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path("test_16x16.jpg")).unwrap();
     let reconstructed = decode_jpeg_reconstruction(&jxl_data)
         .expect("JPEG reconstruction should succeed for 16x16");
     assert_jpeg_match(&reconstructed, &reference, "16x16 (4:2:0)");
@@ -153,8 +162,11 @@ fn test_jpeg_reconstruction_16x16() {
 /// 8x8 JPEG with 4:4:4 subsampling (all components 1x1).
 #[test]
 fn test_jpeg_reconstruction_8x8_444() {
-    let jxl_data = std::fs::read("resources/test/test_8x8_444_jpeg_recompression.jxl").unwrap();
-    let reference = std::fs::read("resources/test/test_8x8_444.jpg").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_8x8_444_jpeg_recompression.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path("test_8x8_444.jpg")).unwrap();
     let reconstructed = decode_jpeg_reconstruction(&jxl_data)
         .expect("JPEG reconstruction should succeed for 8x8 4:4:4");
     assert_jpeg_match(&reconstructed, &reference, "8x8 (4:4:4)");
@@ -163,8 +175,11 @@ fn test_jpeg_reconstruction_8x8_444() {
 /// 64x64 JPEG with 4:2:0 subsampling — multi-MCU image.
 #[test]
 fn test_jpeg_reconstruction_64x64_420() {
-    let jxl_data = std::fs::read("resources/test/test_64x64_420_jpeg_recompression.jxl").unwrap();
-    let reference = std::fs::read("resources/test/test_64x64_420.jpg").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_64x64_420_jpeg_recompression.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path("test_64x64_420.jpg")).unwrap();
     let reconstructed = decode_jpeg_reconstruction(&jxl_data)
         .expect("JPEG reconstruction should succeed for 64x64 4:2:0");
     assert_jpeg_match(&reconstructed, &reference, "64x64 (4:2:0)");
@@ -173,8 +188,14 @@ fn test_jpeg_reconstruction_64x64_420() {
 /// 128x128 JPEG with 4:4:4 — encoded by libjxl cjxl v0.12.0.
 #[test]
 fn test_jpeg_reconstruction_libjxl_128x128_444() {
-    let jxl_data = std::fs::read("resources/test/test_128x128_444_libjxl.jxl").unwrap();
-    let reference = std::fs::read("resources/test/test_128x128_444_libjxl.jpg").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_128x128_444_libjxl.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path(
+        "test_128x128_444_libjxl.jpg",
+    ))
+    .unwrap();
     let reconstructed = decode_jpeg_reconstruction(&jxl_data)
         .expect("JPEG reconstruction should succeed for libjxl 128x128 4:4:4");
     assert_jpeg_match(&reconstructed, &reference, "128x128 libjxl (4:4:4)");
@@ -183,8 +204,14 @@ fn test_jpeg_reconstruction_libjxl_128x128_444() {
 /// 128x128 JPEG with 4:2:0 — encoded by libjxl cjxl v0.12.0.
 #[test]
 fn test_jpeg_reconstruction_libjxl_128x128_420() {
-    let jxl_data = std::fs::read("resources/test/test_128x128_420_libjxl.jxl").unwrap();
-    let reference = std::fs::read("resources/test/test_128x128_420_libjxl.jpg").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_128x128_420_libjxl.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path(
+        "test_128x128_420_libjxl.jpg",
+    ))
+    .unwrap();
     let reconstructed = decode_jpeg_reconstruction(&jxl_data)
         .expect("JPEG reconstruction should succeed for libjxl 128x128 4:2:0");
     assert_jpeg_match(&reconstructed, &reference, "128x128 libjxl (4:2:0)");
@@ -193,7 +220,7 @@ fn test_jpeg_reconstruction_libjxl_128x128_420() {
 /// A regular JXL file without jbrd box should not produce JPEG reconstruction.
 #[test]
 fn test_no_jpeg_reconstruction_for_non_jpeg_jxl() {
-    let jxl_data = std::fs::read("resources/test/basic.jxl").unwrap();
+    let jxl_data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
     let reconstructed = decode_jpeg_reconstruction(&jxl_data);
     assert!(
         reconstructed.is_none(),

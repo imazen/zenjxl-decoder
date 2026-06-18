@@ -11,7 +11,22 @@ use std::path::PathBuf;
 use zenbench::{Suite, Throughput};
 
 fn test_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/test")
+    // Local checkout when present (the normal dev case, no network), otherwise
+    // downloaded on demand via codec-corpus. `resources/test/` is not packaged
+    // in the published crate (#8).
+    let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/test");
+    #[cfg(not(target_arch = "wasm32"))]
+    if !local.is_dir() {
+        return codec_corpus::Corpus::new()
+            .expect("initialize codec-corpus to download bench fixtures")
+            .github_repo(
+                "imazen/zenjxl-decoder",
+                "zenjxl-decoder/resources/test",
+                "main",
+            )
+            .expect("download zenjxl-decoder bench fixtures via codec-corpus");
+    }
+    local
 }
 
 /// Load a test image and return (data, pixel_count).

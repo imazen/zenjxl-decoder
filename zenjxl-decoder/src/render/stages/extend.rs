@@ -99,7 +99,7 @@ mod test {
     #[test]
     fn extend_consistency() -> Result<()> {
         let (file_header, frame_header, _) =
-            read_headers_and_toc(include_bytes!("../../../resources/test/basic.jxl")).unwrap();
+            read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
         let reference_frames = Arc::new([None, None, None, None]);
         crate::render::test::test_stage_consistency(
             || {

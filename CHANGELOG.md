@@ -67,6 +67,20 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   image area). Pure internal change — no public API or output change. (#35)
 
 ### Fixed
+- The published crate's test suite now builds. `resources/test/` (~31 MB, 155
+  fixtures) is not packaged (it exceeds the crates.io size budget), so the tests
+  no longer reference it at compile time: the 17 `include_bytes!` fixtures and the
+  `for_each_test_file!` proc macro (which read the directory during macro
+  expansion and panicked when it was absent — `cargo test` on the published crate
+  failed to compile at all) are replaced by runtime resolution. Fixtures resolve
+  to the local checkout when present (the normal dev/CI case, no network),
+  otherwise download on demand via the `codec-corpus` crate; resolution panics
+  loudly on failure, so there is no silent skip. Helpers live in
+  `crate::util::test` (`fixture_dir`/`fixture_path`/`fixture_bytes`/
+  `all_jxl_fixtures`); the four `for_each_test_file!` sweeps became runtime sweeps
+  that report every failing fixture together. The integration test
+  (`decode_bit_identical.rs`) and decode benchmark resolve fixtures the same way.
+  (#8)
 - docs: the `JxlDecoderLimits::max_pixels` field doc stated the default was
   `2^30 (~1 billion)`, but the actual default is `1 << 28` (~256 megapixels).
   Corrected the doc comment to match the code and noted that `restrictive()`

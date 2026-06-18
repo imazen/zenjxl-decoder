@@ -292,14 +292,14 @@ pub(crate) mod tests {
     use crate::api::{JxlDataFormat, JxlDecoderOptions};
     use crate::error::Error;
     use crate::image::{Image, Rect};
-    use jxl_macros::for_each_test_file;
     use std::path::Path;
 
     #[test]
     fn decode_small_chunks() {
         arbtest::arbtest(|u| {
             decode(
-                &std::fs::read("resources/test/green_queen_vardct_e3.jxl").unwrap(),
+                &std::fs::read(crate::util::test::fixture_path("green_queen_vardct_e3.jxl"))
+                    .unwrap(),
                 u.arbitrary::<u8>().unwrap() as usize + 1,
                 false,
                 false,
@@ -312,8 +312,8 @@ pub(crate) mod tests {
 
     /// Fully decode a (color-only) fixture and return the live decoder so the
     /// public `vardct_quantizer()` accessor can be exercised post-decode.
-    fn quant_of(path: &str) -> Option<VardctQuantizer> {
-        let data = std::fs::read(path).unwrap();
+    fn quant_of(name: &str) -> Option<VardctQuantizer> {
+        let data = crate::util::test::fixture_bytes(name);
         let mut input: &[u8] = &data;
         let mut options = JxlDecoderOptions::default();
         options.limits.max_memory_bytes = None;
@@ -364,8 +364,8 @@ pub(crate) mod tests {
 
     #[test]
     fn vardct_quantizer_lossy_exposed() {
-        let q = quant_of("resources/test/green_queen_vardct_e3.jxl")
-            .expect("VarDCT image should expose a quantizer");
+        let q =
+            quant_of("green_queen_vardct_e3.jxl").expect("VarDCT image should expose a quantizer");
         assert!(q.global_scale >= 1, "global_scale must be >= 1");
         assert!(q.quant_lf >= 1, "quant_lf must be >= 1");
         assert!(q.inv_global_scale() > 0.0);
@@ -374,7 +374,7 @@ pub(crate) mod tests {
     #[test]
     fn vardct_quantizer_none_for_lossless() {
         assert!(
-            quant_of("resources/test/3x3_srgb_lossless.jxl").is_none(),
+            quant_of("3x3_srgb_lossless.jxl").is_none(),
             "lossless/modular image must have no VarDCT quantizer"
         );
     }
@@ -532,7 +532,81 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    for_each_test_file!(decode_test_file);
+    /// Runs a check over every `.jxl` fixture, replacing the old
+    /// `for_each_test_file!` proc macro (which enumerated `resources/test/` at
+    /// compile time — impossible when the directory isn't packaged in the
+    /// published crate, see #8). Fixtures are checked in parallel across scoped
+    /// worker threads: the old macro emitted one `#[test]` per file, which cargo
+    /// ran in parallel, so a single sequential loop would be much slower on the
+    /// 4K fixtures. All failures are collected and reported together; asserts at
+    /// least one fixture ran, so an unresolved corpus fails loudly rather than
+    /// passing silently.
+    fn run_fixture_sweep(label: &str, check: impl Fn(&Path) -> Result<()> + Sync) {
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let fixtures = crate::util::test::all_jxl_fixtures();
+        let next = AtomicUsize::new(0);
+        let ran = AtomicUsize::new(0);
+        let failures = Mutex::new(Vec::new());
+
+        // Cap workers per sweep at 8. The four sweep `#[test]`s run concurrently
+        // under cargo, and every worker holds a full decoded image while these
+        // correctness tests disable memory limits, so uncapped `cores` workers
+        // exploded peak memory on a many-core host (4 sweeps x 27 workers = 108
+        // concurrent decodes). An absolute cap (not `cores / N`, which would
+        // collapse to a slow sequential sweep on a 2-4 core CI runner) keeps both
+        // ends sane: full parallelism on small hosts, bounded fan-out on large
+        // ones. Wall-clock is bounded by the slowest single fixture regardless.
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let workers = cores.min(8).min(fixtures.len().max(1));
+
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(path) = fixtures.get(i) else { break };
+                        // Large images decode to 100+ MB; on 32-bit the address
+                        // space can't hold several in one process. Skip >1 MB
+                        // fixtures off 64-bit (matches the old macro's
+                        // `target_pointer_width = "64"` gate).
+                        #[cfg(not(target_pointer_width = "64"))]
+                        if std::fs::metadata(path)
+                            .map(|m| m.len() > 1_000_000)
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        ran.fetch_add(1, Ordering::Relaxed);
+                        if let Err(e) = check(path) {
+                            failures
+                                .lock()
+                                .unwrap()
+                                .push(format!("{}: {e:?}", path.display()));
+                        }
+                    }
+                });
+            }
+        });
+
+        let failures = failures.into_inner().unwrap();
+        let ran = ran.load(Ordering::Relaxed);
+        assert!(ran > 0, "{label}: no .jxl fixtures found");
+        assert!(
+            failures.is_empty(),
+            "{label}: {} of {ran} fixtures failed:\n{}",
+            failures.len(),
+            failures.join("\n"),
+        );
+    }
+
+    #[test]
+    fn decode_test_file_sweep() {
+        run_fixture_sweep("decode_test_file", decode_test_file);
+    }
 
     fn decode_test_file_chunks(path: &Path) -> Result<()> {
         decode(
@@ -545,7 +619,10 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    for_each_test_file!(decode_test_file_chunks);
+    #[test]
+    fn decode_test_file_chunks_sweep() {
+        run_fixture_sweep("decode_test_file_chunks", decode_test_file_chunks);
+    }
 
     #[allow(dead_code)] // used by integration tests
     fn compare_frames(_path: &Path, fc: usize, f: &[Image<f32>], sf: &[Image<f32>]) -> Result<()> {
@@ -618,7 +695,10 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    for_each_test_file!(compare_pipelines);
+    #[test]
+    fn compare_pipelines_sweep() {
+        run_fixture_sweep("compare_pipelines", compare_pipelines);
+    }
 
     fn compare_incremental(path: &Path) -> Result<()> {
         let file = std::fs::read(path).unwrap();
@@ -639,11 +719,14 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    for_each_test_file!(compare_incremental);
+    #[test]
+    fn compare_incremental_sweep() {
+        run_fixture_sweep("compare_incremental", compare_incremental);
+    }
 
     #[test]
     fn test_preview_size_none_for_regular_files() {
-        let file = std::fs::read("resources/test/basic.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -658,7 +741,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_preview_size_some_for_preview_files() {
-        let file = std::fs::read("resources/test/with_preview.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("with_preview.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -674,7 +757,7 @@ pub(crate) mod tests {
     #[test]
     fn test_num_completed_passes() {
         use crate::image::{Image, Rect};
-        let file = std::fs::read("resources/test/basic.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -717,7 +800,7 @@ pub(crate) mod tests {
     fn test_set_pixel_format() {
         use crate::api::{JxlColorType, JxlDataFormat, JxlPixelFormat};
 
-        let file = std::fs::read("resources/test/basic.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -747,7 +830,7 @@ pub(crate) mod tests {
     fn test_set_output_color_profile() {
         use crate::api::JxlColorProfile;
 
-        let file = std::fs::read("resources/test/basic.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -774,7 +857,7 @@ pub(crate) mod tests {
         use crate::api::{JxlColorEncoding, JxlTransferFunction};
 
         // Using test image with ICC profile to trigger default transfer function path
-        let file = std::fs::read("resources/test/lossy_with_icc.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("lossy_with_icc.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -824,7 +907,7 @@ pub(crate) mod tests {
         use crate::image::{Image, Rect};
 
         // Use basic.jxl which has no alpha channel
-        let file = std::fs::read("resources/test/basic.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
 
         // Request RGBA format even though image has no alpha
         let rgba_format = JxlPixelFormat {
@@ -918,9 +1001,10 @@ pub(crate) mod tests {
         use crate::api::{JxlColorType, JxlDataFormat, JxlPixelFormat};
 
         // Use alpha_nonpremultiplied.jxl which has straight alpha (alpha_associated=false)
-        let file =
-            std::fs::read("resources/test/conformance_test_images/alpha_nonpremultiplied.jxl")
-                .unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/alpha_nonpremultiplied.jxl",
+        ))
+        .unwrap();
 
         // Alpha is included in RGBA, so we set extra_channel_format to None
         // to indicate no separate buffer for the alpha extra channel
@@ -1021,8 +1105,10 @@ pub(crate) mod tests {
         use crate::api::{JxlColorType, JxlDataFormat, JxlPixelFormat};
 
         // Use alpha_premultiplied.jxl which has alpha_associated=true
-        let file = std::fs::read("resources/test/conformance_test_images/alpha_premultiplied.jxl")
-            .unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/alpha_premultiplied.jxl",
+        ))
+        .unwrap();
 
         // Alpha is included in RGBA, so we set extra_channel_format to None
         let rgba_format = JxlPixelFormat {
@@ -1072,8 +1158,10 @@ pub(crate) mod tests {
         use crate::image::{Image, Rect};
 
         // Use animation_spline.jxl which has multiple frames with references
-        let file =
-            std::fs::read("resources/test/conformance_test_images/animation_spline.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/animation_spline.jxl",
+        ))
+        .unwrap();
 
         let options = JxlDecoderOptions::default();
         let decoder = JxlDecoder::<states::Initialized>::new(options);
@@ -1159,8 +1247,10 @@ pub(crate) mod tests {
         use crate::image::{Image, Rect};
 
         // Use animation_spline.jxl which has multiple frames
-        let file =
-            std::fs::read("resources/test/conformance_test_images/animation_spline.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/animation_spline.jxl",
+        ))
+        .unwrap();
 
         let options = JxlDecoderOptions::default();
         let decoder = JxlDecoder::<states::Initialized>::new(options);
@@ -1257,7 +1347,10 @@ pub(crate) mod tests {
         use crate::api::{JxlColorType, JxlDataFormat, JxlPixelFormat};
 
         // Use bicycles.jxl - a larger image that exercises offset calculations
-        let file = std::fs::read("resources/test/conformance_test_images/bicycles.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/bicycles.jxl",
+        ))
+        .unwrap();
 
         // Test both RGB and BGRA to catch channel reordering bugs
         for (color_type, num_samples) in [(JxlColorType::Rgb, 3), (JxlColorType::Bgra, 4)] {
@@ -1315,7 +1408,10 @@ pub(crate) mod tests {
     fn test_output_format_u16_matches_f32() {
         use crate::api::{Endianness, JxlColorType, JxlDataFormat, JxlPixelFormat};
 
-        let file = std::fs::read("resources/test/conformance_test_images/bicycles.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/bicycles.jxl",
+        ))
+        .unwrap();
 
         // Test both RGB and BGRA
         for (color_type, num_samples) in [(JxlColorType::Rgb, 3), (JxlColorType::Bgra, 4)] {
@@ -1373,7 +1469,10 @@ pub(crate) mod tests {
         use crate::api::{Endianness, JxlColorType, JxlDataFormat, JxlPixelFormat};
         use crate::util::f16;
 
-        let file = std::fs::read("resources/test/conformance_test_images/bicycles.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/bicycles.jxl",
+        ))
+        .unwrap();
 
         // Test both RGB and BGRA
         for (color_type, num_samples) in [(JxlColorType::Rgb, 3), (JxlColorType::Bgra, 4)] {
@@ -1567,8 +1666,10 @@ pub(crate) mod tests {
     #[test]
     fn test_frame_index_parsed_from_container() {
         // Read a bare animation codestream and wrap it in a container with a jxli box.
-        let codestream =
-            std::fs::read("resources/test/conformance_test_images/animation_icos4d_5.jxl").unwrap();
+        let codestream = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/animation_icos4d_5.jxl",
+        ))
+        .unwrap();
 
         // Create synthetic frame index entries (delta offsets).
         // These are synthetic -- we don't know real frame offsets, but we can verify parsing.
@@ -1612,8 +1713,10 @@ pub(crate) mod tests {
     #[test]
     fn test_frame_index_none_for_bare_codestream() {
         // A bare codestream has no container, so no frame index.
-        let data =
-            std::fs::read("resources/test/conformance_test_images/animation_icos4d_5.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/animation_icos4d_5.jxl",
+        ))
+        .unwrap();
         let options = JxlDecoderOptions::default();
         let mut dec = JxlDecoder::<states::Initialized>::new(options);
         let mut input: &[u8] = &data;
@@ -1656,7 +1759,8 @@ pub(crate) mod tests {
     #[test]
     fn test_pixel_limit_enforcement() {
         // Load a test image - green_queen is 256x256 = 65536 pixels
-        let input = std::fs::read("resources/test/green_queen_vardct_e3.jxl").unwrap();
+        let input =
+            std::fs::read(crate::util::test::fixture_path("green_queen_vardct_e3.jxl")).unwrap();
 
         // Create options with a very restrictive pixel limit (smaller than the image)
         let mut options = JxlDecoderOptions::default();
@@ -1706,7 +1810,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_extra_channel_metadata() {
-        let file = std::fs::read("resources/test/extra_channels.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("extra_channels.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -1741,7 +1845,8 @@ pub(crate) mod tests {
         use crate::headers::extra_channels::ExtraChannel;
 
         // 3x3a has alpha
-        let file = std::fs::read("resources/test/3x3a_srgb_lossless.jxl").unwrap();
+        let file =
+            std::fs::read(crate::util::test::fixture_path("3x3a_srgb_lossless.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -1764,7 +1869,7 @@ pub(crate) mod tests {
     #[test]
     fn test_preview_metadata_in_basic_info() {
         // with_preview.jxl has a preview; basic.jxl does not
-        let file = std::fs::read("resources/test/with_preview.jxl").unwrap();
+        let file = std::fs::read(crate::util::test::fixture_path("with_preview.jxl")).unwrap();
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file.as_slice();
@@ -1820,7 +1925,7 @@ pub(crate) mod tests {
     #[test]
     #[allow(clippy::field_reassign_with_default)]
     fn test_preview_recovery_preserves_decoder_options() {
-        let data = std::fs::read("resources/test/with_preview.jxl")
+        let data = std::fs::read(crate::util::test::fixture_path("with_preview.jxl"))
             .expect("with_preview.jxl test fixture should exist");
 
         // Flip every option the recovery path used to drop to a non-default
@@ -1914,9 +2019,10 @@ pub(crate) mod tests {
     /// and asserting the decoder never errors or panics on any chunk boundary.
     #[test]
     fn test_chunked_drip_decode_animation_newtons_cradle() {
-        let data =
-            std::fs::read("resources/test/conformance_test_images/animation_newtons_cradle.jxl")
-                .expect("animation_newtons_cradle.jxl test fixture should exist");
+        let data = std::fs::read(crate::util::test::fixture_path(
+            "conformance_test_images/animation_newtons_cradle.jxl",
+        ))
+        .expect("animation_newtons_cradle.jxl test fixture should exist");
 
         let options = JxlDecoderOptions::default();
         let mut decoder = JxlDecoderInner::new(options);

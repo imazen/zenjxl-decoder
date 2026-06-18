@@ -369,6 +369,75 @@ pub fn read_pfm(b: &[u8]) -> Result<Vec<Image<f32>>, Error> {
     Ok(res)
 }
 
+// ---- Test-fixture resolution (issue #8) ----------------------------------
+//
+// The `resources/test/` fixtures (~31 MB, 155 files) are intentionally NOT
+// packaged in the published crate (they exceed the crates.io size budget), so
+// they are resolved at *runtime* rather than embedded with `include_bytes!` or
+// enumerated by a directory-reading proc macro. That is what keeps the
+// published crate's test suite *buildable* — nothing reads these un-packaged
+// files at compile time. The local checkout is used when present (the normal
+// dev/CI case, no network); otherwise the tree is downloaded on demand via
+// `codec-corpus`. Resolution panics loudly on failure: a test must never pass
+// without its data, so there is deliberately no silent skip.
+
+/// Root of the test-fixture tree (`resources/test/`), resolved once per run.
+pub fn fixture_dir() -> &'static std::path::Path {
+    static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        let local = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/test");
+        #[cfg(not(target_arch = "wasm32"))]
+        if !local.is_dir() {
+            return codec_corpus::Corpus::new()
+                .expect("initialize codec-corpus to download test fixtures")
+                .github_repo(
+                    "imazen/zenjxl-decoder",
+                    "zenjxl-decoder/resources/test",
+                    "main",
+                )
+                .expect(
+                    "download zenjxl-decoder test fixtures via codec-corpus \
+                     (resources/test/ is not packaged in the published crate; \
+                     set CODEC_CORPUS_CACHE to choose a cache directory)",
+                );
+        }
+        local
+    })
+    .as_path()
+}
+
+/// Absolute path to one fixture, e.g. `fixture_path("basic.jxl")` or
+/// `fixture_path("conformance_test_images/bicycles.jxl")`.
+pub fn fixture_path(name: &str) -> std::path::PathBuf {
+    fixture_dir().join(name)
+}
+
+/// Read one fixture's bytes. Panics loudly if it can't be read.
+pub fn fixture_bytes(name: &str) -> Vec<u8> {
+    let path = fixture_path(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()))
+}
+
+/// Every `.jxl` fixture, including the `conformance_test_images/` subdirectory —
+/// the set the old `for_each_test_file!` proc macro enumerated at compile time.
+/// Sorted, for deterministic ordering.
+pub fn all_jxl_fixtures() -> Vec<std::path::PathBuf> {
+    let root = fixture_dir();
+    let mut out = Vec::new();
+    for sub in [root.to_path_buf(), root.join("conformance_test_images")] {
+        let rd = std::fs::read_dir(&sub)
+            .unwrap_or_else(|e| panic!("read fixture dir {}: {e}", sub.display()));
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "jxl") {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -47,6 +47,12 @@ jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macr
 criterion = { version = "0.8.2", features = ["html_reports"] }
 zenbench = { version = "0.1.2"}
 
+# Download-on-demand test fixtures. `resources/test/` (~31 MB) is not packaged
+# in the published crate, so its tests fetch fixtures at runtime via codec-corpus
+# (issue #8). Not needed on wasm, where the fixture tests don't run.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+codec-corpus = "1.1.0"
+
 [features]
 default = ["all-simd"]
 

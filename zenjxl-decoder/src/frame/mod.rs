@@ -690,7 +690,7 @@ mod test {
         };
         assert_eq!(
             decode(
-                include_bytes!("../../resources/test/splines.jxl"),
+                &crate::util::test::fixture_bytes("splines.jxl"),
                 verify_frame
             )?,
             1
@@ -713,7 +713,7 @@ mod test {
         };
         assert_eq!(
             decode(
-                include_bytes!("../../resources/test/8x8_noise.jxl"),
+                &crate::util::test::fixture_bytes("8x8_noise.jxl"),
                 verify_frame,
             )?,
             1
@@ -735,7 +735,7 @@ mod test {
         };
         assert_eq!(
             decode(
-                include_bytes!("../../resources/test/grayscale_patches_modular.jxl"),
+                &crate::util::test::fixture_bytes("grayscale_patches_modular.jxl"),
                 verify_frame,
             )?,
             2
@@ -767,7 +767,7 @@ mod test {
             Ok(())
         };
         decode(
-            include_bytes!("../../resources/test/multiple_lf_420.jxl"),
+            &crate::util::test::fixture_bytes("multiple_lf_420.jxl"),
             verify_frame,
         )?;
         Ok(())
@@ -794,7 +794,7 @@ mod test {
         };
         assert_eq!(
             decode(
-                include_bytes!("../../resources/test/grayscale_patches_var_dct.jxl"),
+                &crate::util::test::fixture_bytes("grayscale_patches_var_dct.jxl"),
                 verify_frame,
             )?,
             2

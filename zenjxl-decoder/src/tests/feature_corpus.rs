@@ -369,7 +369,7 @@ mod tests {
     /// in flush_output to skip channels with aliased buffer indices.
     #[test]
     fn test_gray_alpha_lossless() {
-        let path = std::path::Path::new("resources/test/gray_alpha_lossless.jxl");
-        decode_jxl(path).expect("gray_alpha_lossless.jxl should decode successfully");
+        let path = crate::util::test::fixture_path("gray_alpha_lossless.jxl");
+        decode_jxl(&path).expect("gray_alpha_lossless.jxl should decode successfully");
     }
 }

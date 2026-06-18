@@ -2565,7 +2565,7 @@ mod test {
     fn test_hdr_pq_file_icc_profile() {
         use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult};
 
-        let data = std::fs::read("resources/test/hdr_pq_test.jxl")
+        let data = std::fs::read(crate::util::test::fixture_path("hdr_pq_test.jxl"))
             .expect("Failed to read hdr_pq_test.jxl - run from jxl crate directory");
 
         let options = JxlDecoderOptions::default();
@@ -2607,7 +2607,7 @@ mod test {
     fn test_hdr_hlg_file_icc_profile() {
         use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult};
 
-        let data = std::fs::read("resources/test/hdr_hlg_test.jxl")
+        let data = std::fs::read(crate::util::test::fixture_path("hdr_hlg_test.jxl"))
             .expect("Failed to read hdr_hlg_test.jxl - run from jxl crate directory");
 
         let options = JxlDecoderOptions::default();

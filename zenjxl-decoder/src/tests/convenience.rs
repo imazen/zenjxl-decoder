@@ -11,7 +11,7 @@ mod tests {
 
     #[test]
     fn decode_basic() {
-        let data = std::fs::read("resources/test/basic.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         let image = decode(&data).unwrap();
         assert!(image.width > 0);
         assert!(image.height > 0);
@@ -22,7 +22,8 @@ mod tests {
 
     #[test]
     fn decode_grayscale() {
-        let data = std::fs::read("resources/test/gray_alpha_lossless.jxl").unwrap();
+        let data =
+            std::fs::read(crate::util::test::fixture_path("gray_alpha_lossless.jxl")).unwrap();
         let image = decode(&data).unwrap();
         assert!(image.width > 0);
         assert!(image.height > 0);
@@ -33,7 +34,7 @@ mod tests {
 
     #[test]
     fn decode_3x3_srgb_lossless() {
-        let data = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path("3x3_srgb_lossless.jxl")).unwrap();
         let image = decode(&data).unwrap();
         assert_eq!(image.width, 3);
         assert_eq!(image.height, 3);
@@ -50,7 +51,7 @@ mod tests {
 
     #[test]
     fn decode_with_icc() {
-        let data = std::fs::read("resources/test/with_icc.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path("with_icc.jxl")).unwrap();
         let image = decode(&data).unwrap();
         assert!(image.width > 0);
         assert!(image.height > 0);
@@ -62,7 +63,7 @@ mod tests {
 
     #[test]
     fn read_header_basic() {
-        let data = std::fs::read("resources/test/basic.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         let header = read_header(&data).unwrap();
         let (w, h) = header.info.size;
         assert!(w > 0);
@@ -72,7 +73,8 @@ mod tests {
     #[test]
     fn read_header_minimal_bytes() {
         // read_header should work with just the header bytes, not the whole file
-        let data = std::fs::read("resources/test/green_queen_vardct_e3.jxl").unwrap();
+        let data =
+            std::fs::read(crate::util::test::fixture_path("green_queen_vardct_e3.jxl")).unwrap();
         let full_header = read_header(&data).unwrap();
 
         // It should also work with just the first few hundred bytes
@@ -83,7 +85,7 @@ mod tests {
 
     #[test]
     fn decode_truncated_returns_error() {
-        let data = std::fs::read("resources/test/basic.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
         // Truncate to just 10 bytes — not enough for a full decode
         let result = decode(&data[..10]);
         assert!(result.is_err());
@@ -91,7 +93,7 @@ mod tests {
 
     #[test]
     fn decode_dice() {
-        let data = std::fs::read("resources/test/dice.jxl").unwrap();
+        let data = std::fs::read(crate::util::test::fixture_path("dice.jxl")).unwrap();
         let image = decode(&data).unwrap();
         assert_eq!(
             image.data.len(),
@@ -148,7 +150,8 @@ mod tests {
     /// `decode`, and the pixels must match the bare-codestream decode.
     #[test]
     fn decode_captures_trailing_boxes() {
-        let codestream = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let codestream =
+            std::fs::read(crate::util::test::fixture_path("3x3_srgb_lossless.jxl")).unwrap();
         let bundle = test_gain_map_bundle(&codestream);
         let jhgm = bundle.serialize();
         let exif = test_exif_payload();
@@ -177,7 +180,8 @@ mod tests {
     /// guard that the trailing-box drain didn't disturb that path.
     #[test]
     fn decode_captures_leading_boxes() {
-        let codestream = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let codestream =
+            std::fs::read(crate::util::test::fixture_path("3x3_srgb_lossless.jxl")).unwrap();
         let bundle = test_gain_map_bundle(&codestream);
         let jhgm = bundle.serialize();
         let exif = test_exif_payload();
@@ -202,7 +206,8 @@ mod tests {
     /// trailing-box drain only engages for containers.
     #[test]
     fn decode_bare_codestream_ignores_trailing_bytes() {
-        let mut data = std::fs::read("resources/test/3x3_srgb_lossless.jxl").unwrap();
+        let mut data =
+            std::fs::read(crate::util::test::fixture_path("3x3_srgb_lossless.jxl")).unwrap();
         let bare = decode(&data).unwrap();
         data.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
         let image = decode(&data).unwrap();
