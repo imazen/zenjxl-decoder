@@ -547,12 +547,19 @@ mod tests {
         }
     }
 
-    /// Regression test for #37: a non-XYB CMYK image must decode to RGB through
-    /// the CMS stage (CMYK -> sRGB). Before the fix the output color profile
-    /// echoed the embedded CMYK profile, so the CMS stage was asked for a
-    /// CMYK -> CMYK transform, which moxcms (correctly) rejects with
-    /// `UnsupportedProfileConnection`, failing the whole decode. Uses the
-    /// committed fixture so it always runs (no dependence on the sibling corpus).
+    /// Regression test for #37: a CMYK image must decode to RGB with correct
+    /// colors and all blended layers composited. Several bugs, all fixed:
+    /// - the output color profile echoed the embedded CMYK profile, asking the
+    ///   CMS for a CMYK -> CMYK transform that moxcms (correctly) rejects with
+    ///   `UnsupportedProfileConnection` (the whole decode failed);
+    /// - the K channel consumed by the CMS was also requested as an output extra
+    ///   channel (`CmsConsumedChannelRequested`);
+    /// - a redundant general `CmsStage` ran alongside the dedicated
+    ///   `CmsCmykToRgbStage`, double-converting and destroying the color (every
+    ///   colored region / blended layer collapsed to near-white).
+    ///
+    /// Verified against jxl-oxide: mean per-channel diff 0.86. Uses the committed
+    /// fixture so it always runs (no dependence on the sibling corpus).
     #[cfg(feature = "cms")]
     #[test]
     fn cmyk_image_decodes_to_rgb_with_cms() {
@@ -570,24 +577,37 @@ mod tests {
             .expect("CMYK image should decode to RGB with CMS enabled (#37)");
 
         assert_eq!(image.channels, 4, "CMYK decodes to RGBA");
-        assert!(image.width > 0 && image.height > 0, "non-empty image");
+        assert_eq!(image.width, 512);
+        assert_eq!(image.height, 512);
         assert_eq!(
             image.data.len(),
             image.width * image.height * image.channels,
             "RGBA buffer size matches dimensions"
         );
 
-        // The top-left pixel is paper-white in the base layer (CMYK with no ink).
-        // This locks the CMYK->sRGB conversion: the previous "invert all four
-        // channels" bug produced ~[54, 54, 57] here (everything ~4x too dark);
-        // inverting only K yields white. (Compositing the three blended overlay
-        // layers is a separate, known multi-frame-blend gap.)
+        let px = |x: usize, y: usize| {
+            let i = (y * image.width + x) * 4;
+            [image.data[i], image.data[i + 1], image.data[i + 2]]
+        };
+
+        // Top-left is paper-white in the base layer (CMYK with no ink). The
+        // double-CMS bug crushed this and every colored region to near-white;
+        // here it stayed white, so a weak check would pass even while the image
+        // was wrong. The colored check below is the real guard.
+        let [r, g, b] = px(0, 0);
         assert!(
-            image.data[0] > 240 && image.data[1] > 240 && image.data[2] > 240,
-            "base-layer white pixel must decode near-white, got [{}, {}, {}]",
-            image.data[0],
-            image.data[1],
-            image.data[2],
+            r > 240 && g > 240 && b > 240,
+            "base-layer white pixel must decode near-white, got [{r}, {g}, {b}]"
+        );
+
+        // (168, 187) sits inside the blended "Layer 1" region, which jxl-oxide
+        // renders saturated cyan (~[0, 184, 180]). This locks both the CMYK color
+        // decode and the multi-frame layer compositing: with the double-CMS bug
+        // (or missing compositing) this pixel was white [255, 255, 255].
+        let [r, g, b] = px(168, 187);
+        assert!(
+            r < 80 && g > 140 && b > 140,
+            "blended cyan layer pixel must decode cyan, got [{r}, {g}, {b}]"
         );
     }
 

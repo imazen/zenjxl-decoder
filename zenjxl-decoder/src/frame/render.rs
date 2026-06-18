@@ -1758,9 +1758,17 @@ impl Frame {
         let channel_counts_compatible =
             src_channels == dst_channels || (src_channels == 4 && dst_channels == 3);
 
+        // CMYK (a 4-channel CMS input that carries a Black extra channel) is
+        // converted by the dedicated CmsCmykToRgbStage, which inverts the K
+        // channel and — for layered images — defers the conversion until after
+        // blending in CMYK space. Running the general CmsStage here as well would
+        // double-convert and destroy the color (the first pass consumes K and
+        // outputs ~black, the second pass mangles that). (#37)
+        let cmyk_via_dedicated_stage = src_channels == 4 && black_channel.is_some();
         if !color_encoding_is_original
             && !cms_would_be_identity
             && channel_counts_compatible
+            && !cmyk_via_dedicated_stage
             && let Some(cms) = cms
             && let Some(cms_input) = cms_input_profile
         {

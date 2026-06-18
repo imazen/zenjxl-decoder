@@ -81,19 +81,14 @@ impl RenderPipelineInPlaceStage for CmsCmykToRgbStage {
         let mut cmyk_input = vec![0.0f32; xsize * 4];
         let mut rgb_output = vec![0.0f32; xsize * 3];
 
-        // Pack into the CMYK layout moxcms expects — standard ICC device values
-        // (0.0 = no ink, 1.0 = full ink). moxcms does not auto-invert CMYK input
-        // (unlike skcms in libjxl), so the values must already be in ICC
-        // convention here. The decoded C/M/Y channels are in that convention and
-        // pass through unchanged; the K (black) channel is stored complemented
-        // (1.0 = no black ink) and is inverted. Verified against jxl-oxide on the
-        // cmyk_layers conformance image (#37): also inverting C/M/Y crushes the
-        // output to ~0.24x (everything dark) — inverting K only matches the
-        // reference (mean per-channel diff 186 -> 11).
+        // The decoded CMYK channels are in JXL's reflectance convention
+        // (1.0 = no ink / full reflectance, 0.0 = full ink). moxcms expects
+        // standard ICC device values (0.0 = no ink, 1.0 = full ink) and does not
+        // auto-invert (unlike skcms in libjxl), so invert all four channels. (#37)
         for idx in 0..xsize {
-            cmyk_input[idx * 4] = row_c[idx];
-            cmyk_input[idx * 4 + 1] = row_m[idx];
-            cmyk_input[idx * 4 + 2] = row_y[idx];
+            cmyk_input[idx * 4] = 1.0 - row_c[idx];
+            cmyk_input[idx * 4 + 1] = 1.0 - row_m[idx];
+            cmyk_input[idx * 4 + 2] = 1.0 - row_y[idx];
             cmyk_input[idx * 4 + 3] = 1.0 - row_k[idx];
         }
 
