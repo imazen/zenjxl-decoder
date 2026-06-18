@@ -122,6 +122,8 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage, 
 fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> {
     let mut input: &[u8] = data;
 
+    let has_cms = options.cms.is_some();
+
     // Phase 1: Initialized → WithImageInfo (parse header + ICC)
     let decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut decoder = match decoder.process(&mut input)? {
@@ -150,6 +152,18 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
         .iter()
         .position(|ec| ec.ec_type == ExtraChannel::Alpha);
 
+    // A CMYK image's K (Black) extra channel is consumed by the CMS CMYK->RGB
+    // conversion; requesting it as an output extra channel as well is rejected
+    // by the render pipeline (CmsConsumedChannelRequested). Drop it from the
+    // output when CMS is enabled. (#37)
+    let cms_black = if has_cms {
+        info.extra_channels
+            .iter()
+            .position(|ec| ec.ec_type == ExtraChannel::Black)
+    } else {
+        None
+    };
+
     let u8_format = JxlDataFormat::U8 { bit_depth: 8 };
 
     // Set pixel format: interleave alpha into color channels, keep other extras as u8
@@ -161,8 +175,8 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
             .iter()
             .enumerate()
             .map(|(i, _)| {
-                if Some(i) == main_alpha {
-                    None // interleaved into RGBA/GrayAlpha
+                if Some(i) == main_alpha || Some(i) == cms_black {
+                    None // alpha interleaved into RGBA; black consumed by CMS
                 } else {
                     Some(u8_format)
                 }
@@ -173,8 +187,11 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
 
     let output_profile = decoder.output_color_profile().clone();
 
-    // Count non-interleaved extra channels (everything except the main alpha)
-    let extra_count = info.extra_channels.len() - usize::from(main_alpha.is_some());
+    // Count non-interleaved extra channels (everything except the main alpha
+    // and the CMS-consumed black channel)
+    let extra_count = info.extra_channels.len()
+        - usize::from(main_alpha.is_some())
+        - usize::from(cms_black.is_some());
 
     // Phase 2: WithImageInfo → WithFrameInfo (parse frame header)
     let decoder = match decoder.process(&mut input)? {

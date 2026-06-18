@@ -524,7 +524,8 @@ impl CodestreamParser {
         // - For XYB: use embedded if can_output_to(), else:
         //   - if float samples are requested: linear sRGB,
         //   - else: sRGB
-        // - For non-XYB: use embedded color profile
+        // - For non-XYB: use embedded color profile, except CMYK (which can't be
+        //   emitted as the RGB pixel format) which falls back to sRGB
         let output_color_profile = if self.xyb_encoded {
             // Use embedded if we can output to it, otherwise fall back to sRGB
             let base_encoding = if embedded_color_profile.can_output_to() {
@@ -550,6 +551,23 @@ impl CodestreamParser {
             };
 
             JxlColorProfile::Simple(base_encoding)
+        } else if embedded_color_profile.is_cmyk() {
+            // A CMYK profile can't be emitted as the RGB pixel format directly:
+            // keeping it as the output profile asks the CMS stage for a
+            // CMYK -> CMYK transform, which fails. Convert to sRGB instead so the
+            // CMS stage runs CMYK -> sRGB. (closes #37)
+            let data_format = pixel_format
+                .color_data_format
+                .unwrap_or(JxlDataFormat::U8 { bit_depth: 8 });
+            let is_float = matches!(
+                data_format,
+                JxlDataFormat::F32 { .. } | JxlDataFormat::F16 { .. }
+            );
+            JxlColorProfile::Simple(if is_float {
+                JxlColorEncoding::linear_srgb(false)
+            } else {
+                JxlColorEncoding::srgb(false)
+            })
         } else {
             embedded_color_profile.clone()
         };

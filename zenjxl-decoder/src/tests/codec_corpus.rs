@@ -547,6 +547,50 @@ mod tests {
         }
     }
 
+    /// Regression test for #37: a non-XYB CMYK image must decode to RGB through
+    /// the CMS stage (CMYK -> sRGB). Before the fix the output color profile
+    /// echoed the embedded CMYK profile, so the CMS stage was asked for a
+    /// CMYK -> CMYK transform, which moxcms (correctly) rejects with
+    /// `UnsupportedProfileConnection`, failing the whole decode. Uses the
+    /// committed fixture so it always runs (no dependence on the sibling corpus).
+    #[cfg(feature = "cms")]
+    #[test]
+    fn cmyk_image_decodes_to_rgb_with_cms() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/test/conformance_test_images/cmyk_layers.jxl"
+        );
+        let data = std::fs::read(path).expect("committed cmyk_layers.jxl fixture");
+
+        let options = JxlDecoderOptions {
+            cms: Some(Box::new(MoxCms::new())),
+            ..JxlDecoderOptions::default()
+        };
+        let image = crate::api::decode_with(&data, options)
+            .expect("CMYK image should decode to RGB with CMS enabled (#37)");
+
+        assert_eq!(image.channels, 4, "CMYK decodes to RGBA");
+        assert!(image.width > 0 && image.height > 0, "non-empty image");
+        assert_eq!(
+            image.data.len(),
+            image.width * image.height * image.channels,
+            "RGBA buffer size matches dimensions"
+        );
+
+        // The top-left pixel is paper-white in the base layer (CMYK with no ink).
+        // This locks the CMYK->sRGB conversion: the previous "invert all four
+        // channels" bug produced ~[54, 54, 57] here (everything ~4x too dark);
+        // inverting only K yields white. (Compositing the three blended overlay
+        // layers is a separate, known multi-frame-blend gap.)
+        assert!(
+            image.data[0] > 240 && image.data[1] > 240 && image.data[2] > 240,
+            "base-layer white pixel must decode near-white, got [{}, {}, {}]",
+            image.data[0],
+            image.data[1],
+            image.data[2],
+        );
+    }
+
     /// Debug test for cmyk_layers - examines what's happening with CMYK conversion
     #[test]
     fn test_debug_cmyk_layers() {
