@@ -171,6 +171,15 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
 
     let interleave_alpha = interleave_alpha && main_alpha_channel.is_some();
 
+    // The K (Black) channel of a CMYK image is consumed by the CMS CMYK->RGB
+    // conversion (the CLI always enables CMS), so it must not also be requested
+    // as an output extra channel — the render pipeline rejects that with
+    // CmsConsumedChannelRequested. Drop it from the output. (#37)
+    let black_channel = info
+        .extra_channels
+        .iter()
+        .position(|ec| ec.ec_type == ExtraChannel::Black);
+
     // Set the pixel format to the requested data type
     let current_format = decoder_with_image_info.current_pixel_format().clone();
     let new_format = JxlPixelFormat {
@@ -185,7 +194,7 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
             .iter()
             .enumerate()
             .map(|(c, f)| {
-                if interleave_alpha && Some(c) == main_alpha_channel {
+                if (interleave_alpha && Some(c) == main_alpha_channel) || Some(c) == black_channel {
                     None
                 } else {
                     f.as_ref().map(|_| output_type.to_data_format())
@@ -214,7 +223,9 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
         jxl_animation: info.animation.clone(),
     };
 
-    let extra_channels = info.extra_channels.len() - if interleave_alpha { 1 } else { 0 };
+    let extra_channels = info.extra_channels.len()
+        - if interleave_alpha { 1 } else { 0 }
+        - if black_channel.is_some() { 1 } else { 0 };
     let pixel_format = decoder_with_image_info.current_pixel_format().clone();
     let color_type = pixel_format.color_type;
     let samples_per_pixel = pixel_format.color_type.samples_per_pixel();
