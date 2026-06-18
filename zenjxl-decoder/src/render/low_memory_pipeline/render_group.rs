@@ -61,7 +61,17 @@ fn apply_x_padding(
             }
         }
         _ => {
-            unimplemented!("only 1, 2 or 4 byte data types supported");
+            // Generic fallback for any other element size (e.g. 8-byte F64).
+            // The 1/2/4 arms above are fast paths; this replaces a previous
+            // unimplemented!() that panicked. Not reachable via the public
+            // output formats (U8/U16/F16/F32 -> 1/2/2/4 bytes), but kept
+            // panic-free and correct for any size. (#9)
+            for x in to_pad {
+                let sx = mirror(x - valid_pixels.start, num_valid) as isize + valid_pixels.start;
+                let from = (x0_offset + sx * sz as isize) as usize;
+                let to = (x0_offset + x * sz as isize) as usize;
+                row.copy_within(from..from + sz, to);
+            }
         }
     }
 }
@@ -482,4 +492,53 @@ pub(super) fn render_outside(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod apply_x_padding_tests {
+    use super::apply_x_padding;
+    use crate::image::DataTypeTag;
+    use crate::render::low_memory_pipeline::row_buffers::RowBuffer;
+    use crate::util::mirror;
+
+    /// 8-byte (F64) elements aren't reachable through the public output formats,
+    /// but `apply_x_padding` must still mirror-pad any element size without
+    /// panicking — it previously hit `unimplemented!()`. (#9)
+    #[test]
+    fn apply_x_padding_handles_eight_byte_element() {
+        let x0 = RowBuffer::x0_byte_offset();
+        let sz = DataTypeTag::F64.size();
+        assert_eq!(sz, 8);
+
+        let valid = 0isize..2;
+        let num_valid = valid.clone().count();
+        let pad = 2isize..4;
+
+        // x0 padding + 4 pixels of `sz` bytes each.
+        let mut row = vec![0u8; x0 + 4 * sz];
+        for p in 0..2usize {
+            for b in 0..sz {
+                row[x0 + p * sz + b] = (p as u8) * 16 + b as u8 + 1;
+            }
+        }
+
+        // Must not panic.
+        apply_x_padding(DataTypeTag::F64, &mut row, pad.clone(), valid.clone());
+
+        // Each padded pixel must equal its mirrored source pixel, byte for byte.
+        for x in pad {
+            let sx = mirror(x - valid.start, num_valid) as isize + valid.start;
+            assert!(
+                (0..num_valid as isize).contains(&sx),
+                "mirror source in range"
+            );
+            for b in 0..sz {
+                assert_eq!(
+                    row[x0 + x as usize * sz + b],
+                    row[x0 + sx as usize * sz + b],
+                    "padded pixel {x} byte {b} must mirror valid pixel {sx}"
+                );
+            }
+        }
+    }
 }
