@@ -17,6 +17,19 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   only the frame/render/api layer carries the wrapper. (#28)
 
 ### Added
+- `Error::kind() -> ErrorClass` and the `ErrorClass` enum (re-exported from
+  `zenjxl_decoder::api`): a coarse, best-effort classification of decode errors —
+  `InvalidBitstream` / `LimitExceeded` / `OutOfMemory` / `Cancelled` / `Io` /
+  `OutputConfiguration` / `Unsupported` / `Internal`, each documented with its
+  typical HTTP status — so a server can bucket a failure without matching all
+  ~130 `Error` variants. Also documented the `Error::LimitExceeded.resource`
+  string values (`pixels`, `memory_bytes`, `icc_size`, `icc_amplification`,
+  `extra_channels`, `reference_frames`). Additive — `ErrorClass` is
+  `#[non_exhaustive]`. (#29, 2c7a68d)
+- Re-exported `enough::StopReason` from `zenjxl_decoder::api` (alongside the
+  existing `Stop` / `Unstoppable`) so a hand-rolled cancellation `impl Stop` needs
+  no direct `enough` / `almost-enough` dependency; the README now shows that
+  dep-free `AtomicBool` pattern. (#29, 2c7a68d)
 - `examples/heaptrack_decode.rs`: a reusable heaptrack/valgrind harness that
   decodes a JXL file from bytes via `zenjxl_decoder::decode(..)` in a loop, for
   profiling heap-allocation behaviour. Defaults to the committed
