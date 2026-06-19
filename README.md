@@ -145,6 +145,33 @@ A cancelled decode surfaces `Error::Cancelled` (see the matching below for how t
 inspect it through the `At<Error>` wrapper). Cancellation checks run inside the
 parallel closures too, so a cancel request is noticed mid-batch.
 
+Prefer not to add a dependency? Implement `enough::Stop` yourself over an
+`AtomicBool` — `Stop` and `StopReason` are re-exported from `zenjxl_decoder::api`,
+so no direct `enough`/`almost-enough` dependency is needed:
+
+```rust
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use zenjxl_decoder::api::{Stop, StopReason};
+
+struct CancelFlag(AtomicBool);
+
+impl Stop for CancelFlag {
+    fn check(&self) -> Result<(), StopReason> {
+        if self.0.load(Ordering::Relaxed) {
+            Err(StopReason::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+let flag = Arc::new(CancelFlag(AtomicBool::new(false)));
+let flag_clone = Arc::clone(&flag);
+// ... set `flag_clone.0.store(true, Ordering::Relaxed)` from another thread to cancel.
+let options = JxlDecoderOptions { stop: flag, ..Default::default() };
+```
+
 ### Errors
 
 `decode` / `decode_with` return `zenjxl_decoder::api::Result<JxlImage>` = `Result<JxlImage, At<Error>>`.

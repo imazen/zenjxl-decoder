@@ -294,6 +294,11 @@ pub enum Error {
     },
     #[error("CMS error: {0}")]
     CmsError(String),
+    /// A configurable security/resource limit was exceeded. `resource` is one of
+    /// the stable identifiers `"pixels"`, `"memory_bytes"`, `"icc_size"`,
+    /// `"icc_amplification"`, `"extra_channels"`, or `"reference_frames"` —
+    /// the budgets in `JxlDecoderLimits`. For coarse bucketing (e.g. to an HTTP
+    /// status) use [`Error::kind`], which maps this to [`ErrorClass::LimitExceeded`].
     #[error("Security limit exceeded: {resource} is {actual}, limit is {limit}")]
     LimitExceeded {
         resource: &'static str,
@@ -313,6 +318,106 @@ pub enum Error {
     ProgressiveRejected,
 }
 
+/// A coarse, best-effort classification of an [`Error`], for operational
+/// decisions: mapping a decode failure to an HTTP status, choosing a log level,
+/// or deciding whether a retry could help. The exact [`Error`] variant remains
+/// available for diagnostics; [`Error::kind`] exists so callers don't have to
+/// match all ~130 variants.
+///
+/// `#[non_exhaustive]`: new classes may be added, and existing errors may be
+/// reclassified, without a breaking change — always include a `_` arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ErrorClass {
+    /// The input bitstream is malformed, corrupt, truncated, or violates the
+    /// JPEG XL specification. Retrying the same bytes will not help (HTTP ~400).
+    InvalidBitstream,
+    /// A configurable decode limit was exceeded — one of `JxlDecoderLimits`'
+    /// budgets (`pixels`, `memory_bytes`, `icc_size`, `icc_amplification`,
+    /// `extra_channels`, `reference_frames`). The same input may succeed with a
+    /// higher limit (HTTP ~413).
+    LimitExceeded,
+    /// A memory allocation failed (HTTP ~500/507).
+    OutOfMemory,
+    /// The decode was cancelled or timed out via the cooperative `stop` handle
+    /// (HTTP ~499/408).
+    Cancelled,
+    /// An I/O error occurred reading the input (HTTP ~500).
+    Io,
+    /// The caller's output request or colour-management configuration is invalid
+    /// for this image (wrong output buffer size/count, grayscale mismatch, or an
+    /// ICC/CMS configuration that cannot satisfy the request). A usage error, not
+    /// an input problem (HTTP ~400/500).
+    OutputConfiguration,
+    /// The input is valid but uses a feature this decoder or the current
+    /// configuration does not support — e.g. a progressive frame when
+    /// `reject_progressive` is set (HTTP ~415).
+    Unsupported,
+    /// An internal invariant was violated (arithmetic overflow, a pipeline
+    /// inconsistency, ICC synthesis failure) — most likely a decoder bug rather
+    /// than a problem with the input (HTTP ~500).
+    Internal,
+}
+
+impl Error {
+    /// Classify this error into a coarse [`ErrorClass`] for operational
+    /// decisions (HTTP status, log level, retry). Best-effort: see the variant
+    /// itself for exact diagnostics.
+    pub fn kind(&self) -> ErrorClass {
+        match self {
+            // A configurable decode limit (see `JxlDecoderLimits`) was hit.
+            Error::LimitExceeded { .. }
+            | Error::ImageSizeTooLarge(..)
+            | Error::ImageDimensionTooLarge(..)
+            | Error::IccTooLarge => ErrorClass::LimitExceeded,
+
+            // An allocation failed.
+            Error::OutOfMemory(..) | Error::ImageOutOfMemory(..) => ErrorClass::OutOfMemory,
+
+            // Cooperative cancellation / timeout.
+            Error::Cancelled => ErrorClass::Cancelled,
+
+            // I/O reading the input.
+            Error::IOError(..) => ErrorClass::Io,
+
+            // The caller's output request or colour-management configuration is
+            // invalid for this image — a usage error, not an input problem.
+            Error::WrongBufferCount(..)
+            | Error::NotGrayscale
+            | Error::InvalidOutputBufferSize(..)
+            | Error::ICCOutputNoCMS
+            | Error::NonXybOutputNoCMS
+            | Error::CmsConsumedChannelRequested { .. }
+            | Error::CmsChannelCountIncrease { .. } => ErrorClass::OutputConfiguration,
+
+            // Valid input using a feature this decoder / configuration refuses.
+            Error::ProgressiveRejected | Error::InvalidRenderingIntent => ErrorClass::Unsupported,
+
+            // Internal invariant violations — most likely a decoder bug. Includes
+            // failures while *synthesising* an output ICC profile.
+            Error::ArithmeticOverflow
+            | Error::SizeOverflow
+            | Error::MatrixInversionFailed(..)
+            | Error::CopyOfDifferentSize(..)
+            | Error::PipelineChannelTypeMismatch(..)
+            | Error::PipelineInvalidStageAfterExtend(..)
+            | Error::IccWriteOutOfBounds
+            | Error::IccInvalidTagString(..)
+            | Error::IccMlucTextNotAscii(..)
+            | Error::IccValueOutOfRangeS15Fixed16(..)
+            | Error::IccInvalidWhitePointY(..)
+            | Error::IccInvalidWhitePoint(..)
+            | Error::IccUnsupportedTransferFunction
+            | Error::IccTableSizeExceeded(..) => ErrorClass::Internal,
+
+            // Everything else: the bitstream is malformed, corrupt, truncated, or
+            // violates the JPEG XL spec. New variants default here; revisit this
+            // when adding a variant that is a limit, config, or internal error.
+            _ => ErrorClass::InvalidBitstream,
+        }
+    }
+}
+
 impl From<enough::StopReason> for Error {
     fn from(reason: enough::StopReason) -> Self {
         match reason {
@@ -325,3 +430,32 @@ impl From<enough::StopReason> for Error {
 /// trace ([`At<Error>`]). Origins are created with `at!(Error::X)`; propagation
 /// via `?` preserves the trace through `whereat`'s blanket `From<E> for At<E>`.
 pub type Result<T, E = At<Error>> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_kind_classification() {
+        assert_eq!(
+            Error::LimitExceeded {
+                resource: "pixels",
+                actual: 9,
+                limit: 8,
+            }
+            .kind(),
+            ErrorClass::LimitExceeded,
+        );
+        assert_eq!(Error::Cancelled.kind(), ErrorClass::Cancelled);
+        assert_eq!(
+            Error::ImageOutOfMemory(4, 4).kind(),
+            ErrorClass::OutOfMemory
+        );
+        assert_eq!(Error::NotGrayscale.kind(), ErrorClass::OutputConfiguration);
+        assert_eq!(Error::ProgressiveRejected.kind(), ErrorClass::Unsupported,);
+        assert_eq!(Error::ArithmeticOverflow.kind(), ErrorClass::Internal);
+        // Malformed-bitstream variants fall into the default class.
+        assert_eq!(Error::InvalidSignature.kind(), ErrorClass::InvalidBitstream);
+        assert_eq!(Error::InvalidHuffman.kind(), ErrorClass::InvalidBitstream);
+    }
+}

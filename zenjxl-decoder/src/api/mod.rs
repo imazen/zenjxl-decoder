@@ -24,7 +24,7 @@ pub use convenience::{JxlImage, JxlImageInfo, decode, decode_with, read_header, 
 pub use convenience::{reconstruct_jpeg, reconstruct_jpeg_with};
 pub use data_types::*;
 pub use decoder::*;
-pub use enough::{Stop, Unstoppable};
+pub use enough::{Stop, StopReason, Unstoppable};
 pub use inner::*;
 pub use input::*;
 #[cfg(feature = "cms")]
@@ -33,7 +33,7 @@ pub use options::*;
 pub use signature::*;
 
 // Error types
-pub use crate::error::{Error, Result};
+pub use crate::error::{Error, ErrorClass, Result};
 
 // Image types used by CLI/fuzz for output buffer construction
 pub use crate::image::{
