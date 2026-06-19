@@ -188,18 +188,20 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                     return Ok(Some(ParseEvent::Codestream(payload)));
                 }
                 DetectState::InAuxBox {
-                    header: _,
+                    header,
                     bytes_left: None,
                 } => {
-                    let _payload = *buf;
+                    let box_type = header.box_type();
+                    let payload = *buf;
                     *buf = &[];
-                    // FIXME: emit auxiliary box event
+                    return Ok(Some(ParseEvent::AuxiliaryBox { box_type, payload }));
                 }
                 DetectState::InAuxBox {
-                    header: _,
+                    header,
                     bytes_left: Some(bytes_left),
                 } => {
-                    let _payload = if buf.len() >= *bytes_left {
+                    let box_type = header.box_type();
+                    let payload = if buf.len() >= *bytes_left {
                         let (payload, remaining) = buf.split_at(*bytes_left);
                         *state = DetectState::WaitingBoxHeader;
                         *buf = remaining;
@@ -210,7 +212,7 @@ impl<'inner, 'buf> ParseEvents<'inner, 'buf> {
                         *buf = &[];
                         payload
                     };
-                    // FIXME: emit auxiliary box event
+                    return Ok(Some(ParseEvent::AuxiliaryBox { box_type, payload }));
                 }
             }
         }
@@ -259,6 +261,20 @@ pub enum ParseEvent<'buf> {
     /// Returned data may be partial. Complete codestream can be obtained by concatenating all data
     /// of `Codestream` events.
     Codestream(&'buf [u8]),
+    /// An auxiliary (non-codestream) box was read — every box that is not
+    /// `jxlc`/`jxlp` (e.g. `ftyp`, `jxll`, `Exif`, `xml `, `jhgm`, `jbrd`,
+    /// `brob`, or an unknown box).
+    ///
+    /// Like [`Codestream`](ParseEvent::Codestream), `payload` may be partial for
+    /// a large box that spans multiple input buffers: the `payload`s of the
+    /// consecutive `AuxiliaryBox` events for one box concatenate to its full
+    /// contents.
+    AuxiliaryBox {
+        /// The four-character box type.
+        box_type: ContainerBoxType,
+        /// Payload bytes (box contents after the header); may be partial.
+        payload: &'buf [u8],
+    },
 }
 
 impl std::fmt::Debug for ParseEvent<'_> {
@@ -268,6 +284,11 @@ impl std::fmt::Debug for ParseEvent<'_> {
             Self::Codestream(buf) => f
                 .debug_tuple("Codestream")
                 .field(&format_args!("{} byte(s)", buf.len()))
+                .finish(),
+            Self::AuxiliaryBox { box_type, payload } => f
+                .debug_struct("AuxiliaryBox")
+                .field("box_type", box_type)
+                .field("payload", &format_args!("{} byte(s)", payload.len()))
                 .finish(),
         }
     }

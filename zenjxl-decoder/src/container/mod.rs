@@ -123,6 +123,7 @@ impl ContainerParser {
                 ParseEvent::Codestream(buf) => {
                     codestream.extend_from_slice(buf);
                 }
+                ParseEvent::AuxiliaryBox { .. } => {}
             }
         }
         Ok(codestream)
@@ -198,5 +199,23 @@ mod test {
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn emits_auxiliary_box_events() {
+        // `HEADER` is the container signature followed by a `ftyp` box. Parsing
+        // it must now surface that box as an `AuxiliaryBox` event rather than
+        // silently dropping it (the old `// FIXME: emit auxiliary box event`).
+        let mut parser = ContainerParser::new();
+        let mut aux: Vec<(ContainerBoxType, Vec<u8>)> = Vec::new();
+        for event in parser.process_bytes(HEADER) {
+            if let ParseEvent::AuxiliaryBox { box_type, payload } = event.unwrap() {
+                aux.push((box_type, payload.to_vec()));
+            }
+        }
+        assert_eq!(aux.len(), 1, "expected exactly one auxiliary (ftyp) box");
+        assert_eq!(aux[0].0, ContainerBoxType(*b"ftyp"));
+        // ftyp payload: brand `jxl `, minor version 0, one compatible brand `jxl `.
+        assert_eq!(aux[0].1, b"jxl \x00\x00\x00\x00jxl ".to_vec());
     }
 }
