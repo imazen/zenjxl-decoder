@@ -2,7 +2,7 @@
 name = "zenjxl-decoder"
 description = "High performance Rust implementation of a JPEG XL decoder"
 version = "0.3.10"
-readme = "../README.md"
+readme = "../README.crates.md"
 keywords = ["jpeg-xl", "decoder"]
 categories = ["multimedia::images"]
 authors = ["Luca Versari <veluca93@gmail.com>", "Lilith River <lilith@imazen.io>"]

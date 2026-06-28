@@ -109,6 +109,16 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   `enough::Unstoppable` no-op; `almost_enough::Stopper` at `0.4` is how you
   actually cancel). Found by an insulated external-developer usability test.
 
+### Docs
+- Overhauled the repo-root `README.md` to the zen crate conventions (badge row
+  gains lib.rs and drops the `branch=` pin; adds `## Quick start`; documents
+  `Error::kind`/`ErrorClass` for server-side bucketing), fixed the
+  `JxlDecoderOptions` examples to the `#[non_exhaustive]` builder form (the old
+  `JxlDecoderOptions { .. }` struct-literal examples could not compile in a
+  downstream crate), corrected the stale `JxlImageInfo::animation` reference to
+  `JxlBasicInfo::animation`, and split the crates.io README into a generated,
+  CI-badge-only `README.crates.md` (`readme = "../README.crates.md"`).
+
 ## [0.3.10] - 2026-06-11
 
 ### Added
