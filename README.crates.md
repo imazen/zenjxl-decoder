@@ -1,6 +1,6 @@
 <!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
 
-# zenjxl-decoder [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenjxl-decoder/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenjxl-decoder/actions/workflows/ci.yml)
+# zenjxl-decoder
 
 A pure-Rust **JPEG XL decoder** (ISO/IEC 18181), built for decoding untrusted bytes in a server. `#![forbid(unsafe_code)]` by default, with multi-architecture SIMD (SSE4.2/AVX2/AVX-512/NEON/WASM128) dispatched at runtime through the safe [`archmage`](https://crates.io/crates/archmage) layer.
 
