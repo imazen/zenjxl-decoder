@@ -80,6 +80,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   image area). Pure internal change — no public API or output change. (#35)
 
 ### Fixed
+- Decoding a malformed modular stream whose reference-channel pixel reaches
+  `i32::MIN` no longer panics (`attempt to negate with overflow` inside
+  `num-traits`). `precompute_references` (the MA-tree decision-property
+  precomputation in `frame/modular/decode/common.rs`) now takes `wrapping_abs()`
+  of the reference value instead of the panicking `num_traits::abs`, matching the
+  sibling neighbour properties in `frame/modular/tree.rs` and the C++ reference's
+  `std::abs(int32_t)` wrap. This is a decision property, not a pixel output, so
+  output for valid inputs is unchanged. Fuzz-found via targets `decode` (#45) and
+  `decode_with_limits` (#44); both repros gated in `fuzz/regression/`. (c239d544)
 - The published crate's test suite now builds. `resources/test/` (~31 MB, 155
   fixtures) is not packaged (it exceeds the crates.io size budget), so the tests
   no longer reference it at compile time: the 17 `include_bytes!` fixtures and the

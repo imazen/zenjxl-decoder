@@ -65,7 +65,14 @@ pub(super) fn precompute_references(
         for x in 0..buffers[chan].data.size().0 {
             let ref_row = references.row_mut(x);
             let v = ref_chan_row[x];
-            ref_row[offset] = abs(v);
+            // `wrapping_abs` (not `num_traits::abs`) so an attacker-controlled
+            // `v == i32::MIN` decodes deterministically instead of panicking on
+            // the `-i32::MIN` overflow. This is a MA-tree decision property, not a
+            // pixel output: it only selects a tree branch, so wrapping matches the
+            // C++ reference's `std::abs(int32_t)` and the sibling neighbour
+            // properties in `tree.rs` (which already use `wrapping_abs`). Valid
+            // inputs never reach `i32::MIN` here, so output is unchanged for them.
+            ref_row[offset] = v.wrapping_abs();
             ref_row[offset + 1] = v;
             let vleft = if x > 0 { ref_chan_row[x - 1] } else { 0 };
             let vtop = if y > 0 { ref_chan_prev[x] } else { vleft };
