@@ -80,6 +80,16 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   image area). Pure internal change — no public API or output change. (#35)
 
 ### Fixed
+- Decoding a malformed Squeeze transform whose output tile has both dimensions 0
+  no longer panics (`called Option::unwrap() on a None value` at
+  `frame/modular/transforms/squeeze.rs:663`). `with_buffers` legitimately skips a
+  both-dimensions-0 output tile (a degenerate channel that still participates in
+  numbering but carries no pixels), so `do_vsqueeze_step` / `do_hsqueeze_step` can
+  receive an empty `buffers` slice; both now no-op in that case (via `let Some(out)
+  = buffers.first_mut() else { return }`) instead of `.first_mut().unwrap()`,
+  matching the existing zero-size early-returns immediately below. There is no
+  output to write, so decode output for valid inputs is unchanged. Fuzz-found via
+  target `decode` (#46); repro gated in `fuzz/regression/`.
 - Decoding a malformed modular stream whose reference-channel pixel reaches
   `i32::MIN` no longer panics (`attempt to negate with overflow` inside
   `num-traits`). `precompute_references` (the MA-tree decision-property

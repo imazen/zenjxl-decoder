@@ -462,7 +462,11 @@ pub fn do_hsqueeze_step(
     buffers: &mut [&mut ModularChannel],
 ) {
     trace!("hsqueeze step in_avg: {in_avg:?} in_res: {in_res:?} in_next_avg: {in_next_avg:?}");
-    let out = buffers.first_mut().unwrap();
+    // See `do_vsqueeze_step`: `with_buffers` skips both-dimensions-0 output tiles, so
+    // `buffers` can be empty. Nothing to write — no-op, matching the zero-size guard below.
+    let Some(out) = buffers.first_mut() else {
+        return;
+    };
     // Shortcut: guarantees that row is at least 1px in the main loop
     if out.data.size().0 == 0 || out.data.size().1 == 0 {
         return;
@@ -660,7 +664,14 @@ pub fn do_vsqueeze_step(
     buffers: &mut [&mut ModularChannel],
 ) {
     trace!("vsqueeze step in_avg: {in_avg:?} in_res: {in_res:?} in_next_avg: {in_next_avg:?}");
-    let out = &mut buffers.first_mut().unwrap().data;
+    // `with_buffers` skips output tiles whose dimensions are both 0 (a legitimate
+    // degenerate channel that still participates in numbering), so `buffers` can be
+    // empty here. There is no output to write in that case — no-op, same as the
+    // zero-size early-return below.
+    let Some(out) = buffers.first_mut() else {
+        return;
+    };
+    let out = &mut out.data;
     // Shortcut: guarantees that there at least 1 output row
     if out.size().1 == 0 || out.size().0 == 0 {
         return;
