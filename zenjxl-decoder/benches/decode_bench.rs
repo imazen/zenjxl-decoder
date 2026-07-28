@@ -64,10 +64,23 @@ fn bench_decode(suite: &mut Suite) {
         bench_image!(group, "bicycles_web_q85.jxl");
     });
 
-    // Modular images — where the biggest optimization gains are
+    // Modular images — where the biggest optimization gains are.
+    //
+    // Widened 2026-07-28: a NEON-vs-scalar A/B (default features vs
+    // --no-default-features) showed modular gains almost nothing from SIMD
+    // (1.02-1.05x, vs 1.71-1.83x for VarDCT) and ONE image,
+    // grayscale_patches_modular, came out 14% SLOWER with SIMD on. Two images
+    // could not distinguish "that image" from "the mode", so every modular
+    // fixture in resources/test is now benched.
     suite.compare("modular", |group| {
         bench_image!(group, "green_queen_modular_e3.jxl");
         bench_image!(group, "issue648_palette0.jxl");
+        bench_image!(group, "grayscale_patches_modular.jxl");
+        bench_image!(group, "small_grayscale_patches_modular.jxl");
+        bench_image!(group, "small_grayscale_patches_modular_with_icc.jxl");
+        bench_image!(group, "gray_alpha_lossless.jxl");
+        bench_image!(group, "3x3_srgb_lossless.jxl");
+        bench_image!(group, "3x3a_srgb_lossless.jxl");
     });
 
     // Small images — tests overhead and fast paths

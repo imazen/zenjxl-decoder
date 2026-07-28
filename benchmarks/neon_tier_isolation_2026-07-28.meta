@@ -39,3 +39,40 @@ this image or the mode.
 Since default features include NEON, this case ships slower on ARM today. It is
 one image out of five and the VarDCT wins are much larger, so this is recorded
 as a lead rather than a reason to change defaults.
+
+
+## RESOLVED (same day) — the grayscale_patches_modular "14% regression" was not real
+
+The open item above reported `grayscale_patches_modular` at 0.86x (9.8ms NEON
+vs 8.4ms no-SIMD) and flagged it as probably real, with "widen the modular
+corpus" as the next step. That was done, and it dissolves the finding.
+
+The modular group went from 2 images to 8 (every modular fixture in
+resources/test). Re-measured, same method, same host:
+
+| image                              | NEON     | no-SIMD  | ratio |
+|------------------------------------|----------|----------|-------|
+| green_queen_modular_e3             |  16.70ms |  16.70ms | 1.00x |
+| issue648_palette0                  | 105.20ms | 111.10ms | 1.06x |
+| grayscale_patches_modular          |   7.60ms |   7.60ms | 1.00x |
+| small_grayscale_patches_modular    |   0.80ms |   0.80ms | 1.00x |
+| gray_alpha_lossless                |   0.20ms |   0.20ms | 1.00x |
+
+grayscale_patches_modular is 1.00x — no regression. Note its ABSOLUTE time also
+moved, 9.8ms -> 7.6ms, purely from being benched in the `modular` group instead
+of the `small` group. Nothing about the decoder changed between those two runs.
+
+So the 0.86x was benchmark-group context, not a NEON defect. This is the second
+false regression of the day traced to cross-group comparison (the other:
+linear-srgb's unpremultiply ~6%). Both were found by re-testing rather than by
+inspecting code, and neither would have been caught by trusting the first
+number.
+
+Standing conclusion for this crate, now on 8 modular images rather than 2:
+VarDCT gains 1.71-1.83x from NEON, modular gains 1.00-1.06x, and there is NO
+case where SIMD is slower. The modular result is expected — that path is
+predictor + entropy coded and serial by nature.
+
+METHOD NOTE: do not compare a single image across two zenbench groups. Group
+composition shifts absolute timings materially (30% here). Comparisons must be
+made WITHIN one group, which is what the widened `modular` group now permits.
