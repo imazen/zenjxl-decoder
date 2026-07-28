@@ -1,0 +1,192 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded arbtest v0.3.2
+  Downloaded matchers v0.2.0
+  Downloaded rand_chacha v0.10.0
+  Downloaded tracing-log v0.2.0
+  Downloaded test-log v0.2.21
+  Downloaded rand_xorshift v0.5.0
+  Downloaded sharded-slab v0.1.7
+  Downloaded test-log-macros v0.2.21
+  Downloaded test-log-core v0.2.21
+  Downloaded tracing-subscriber v0.3.23
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.186
+   Compiling cfg-if v1.0.4
+   Compiling bitflags v2.13.0
+   Compiling serde_core v1.0.228
+   Compiling zerocopy v0.8.52
+   Compiling utf8parse v0.2.2
+   Compiling anstyle v1.0.14
+   Compiling anstyle-parse v1.0.0
+   Compiling serde v1.0.228
+   Compiling colorchoice v1.0.5
+   Compiling zmij v1.0.21
+   Compiling rustix v1.1.4
+   Compiling crossbeam-utils v0.8.21
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstyle-query v1.1.5
+   Compiling anstream v1.0.0
+   Compiling regex-syntax v0.8.11
+   Compiling syn v2.0.117
+   Compiling errno v0.3.14
+   Compiling memchr v2.8.2
+   Compiling serde_json v1.0.150
+   Compiling autocfg v1.5.1
+   Compiling num-traits v0.2.19
+   Compiling rand_core v0.10.1
+   Compiling itoa v1.0.18
+   Compiling regex-automata v0.4.14
+   Compiling once_cell v1.21.4
+   Compiling shlex v2.0.1
+   Compiling log v0.4.32
+   Compiling find-msvc-tools v0.1.9
+   Compiling cc v1.2.64
+   Compiling tracing-core v0.1.36
+   Compiling crossbeam-epoch v0.9.18
+   Compiling rayon-core v1.13.0
+   Compiling simd-adler32 v0.3.9
+   Compiling strsim v0.11.1
+   Compiling crc32fast v1.5.0
+   Compiling either v1.16.0
+   Compiling clap_lex v1.1.0
+   Compiling paste v1.0.15
+   Compiling heck v0.5.0
+   Compiling clap_builder v4.6.0
+   Compiling alloca v0.4.0
+   Compiling crossbeam-deque v0.8.6
+   Compiling zerocopy-derive v0.8.52
+   Compiling serde_derive v1.0.228
+   Compiling archmage-macros v0.9.26
+   Compiling clap_derive v4.6.1
+   Compiling equator-macro v0.4.2
+   Compiling proc-macro-error-attr2 v2.0.0
+   Compiling objc2-core-foundation v0.3.2
+   Compiling pin-project-lite v0.2.17
+   Compiling plotters-backend v0.3.7
+   Compiling adler2 v2.0.1
+   Compiling safe_unaligned_simd v0.2.5
+   Compiling option-ext v0.2.0
+   Compiling lazy_static v1.5.0
+   Compiling ciborium-io v0.2.2
+   Compiling thiserror v2.0.18
+   Compiling getrandom v0.4.2
+   Compiling archmage v0.9.26
+   Compiling clap v4.6.1
+   Compiling objc2-io-kit v0.3.2
+   Compiling sharded-slab v0.1.7
+   Compiling dirs-sys v0.5.0
+   Compiling miniz_oxide v0.8.9
+   Compiling plotters-svg v0.3.7
+   Compiling tracing v0.1.44
+   Compiling proc-macro-error2 v2.0.1
+   Compiling equator v0.4.2
+   Compiling thiserror-impl v2.0.18
+   Compiling bytemuck_derive v1.10.2
+   Compiling matchers v0.2.0
+   Compiling itertools v0.13.0
+   Compiling test-log-core v0.2.21
+   Compiling tracing-log v0.2.0
+   Compiling half v2.7.1
+   Compiling env_filter v1.0.1
+   Compiling thread_local v1.1.9
+   Compiling ciborium-ll v0.2.2
+   Compiling same-file v1.0.6
+   Compiling cast v0.3.0
+   Compiling nu-ansi-term v0.50.3
+   Compiling enough v0.4.4
+   Compiling ciborium v0.2.2
+   Compiling walkdir v2.5.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling bytemuck v1.25.0
+   Compiling env_logger v0.11.10
+   Compiling criterion-plot v0.8.2
+   Compiling ppv-lite86 v0.2.21
+   Compiling test-log-macros v0.2.21
+   Compiling zenjxl-decoder-simd v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-simd)
+   Compiling aligned-vec v0.6.4
+   Compiling zenjxl-decoder-macros v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-macros)
+   Compiling tinytemplate v1.2.1
+   Compiling flate2 v1.1.9
+   Compiling rayon v1.12.0
+   Compiling plotters v0.3.7
+   Compiling dirs v6.0.0
+   Compiling sysinfo v0.36.1
+   Compiling num-derive v0.4.2
+   Compiling regex v1.12.4
+   Compiling fdeflate v0.3.7
+   Compiling fd-lock v4.0.4
+   Compiling terminal_size v0.4.4
+   Compiling fs4 v1.1.0
+   Compiling chacha20 v0.10.0
+   Compiling page_size v0.6.0
+   Compiling atomic_refcell v0.1.14
+   Compiling array-init v2.1.0
+   Compiling arbitrary v1.4.2
+   Compiling smallvec v1.15.2
+   Compiling byteorder v1.5.0
+   Compiling whereat v0.1.5
+   Compiling oorandom v11.1.5
+   Compiling anes v0.1.6
+   Compiling rand v0.10.1
+   Compiling zenbench v0.1.8
+   Compiling zenjxl-decoder v0.3.10 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+   Compiling criterion v0.8.2
+   Compiling png v0.18.1
+   Compiling arbtest v0.3.2
+   Compiling codec-corpus v1.1.0
+   Compiling test-log v0.2.21
+   Compiling rand_chacha v0.10.0
+   Compiling almost-enough v0.4.4
+   Compiling rand_xorshift v0.5.0
+   Compiling zenutils-fuzz v0.1.0
+    Finished `bench` profile [optimized + debuginfo] target(s) in 33.40s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running benches/decode_bench.rs (target/release/deps/decode_bench-4c2205c6057bd83e)
+[zenbench] calibration: int=0.30ns/iter mem_bw=105.6GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.22ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /var/folders/sc/m9jbk0qj0jz4w09h7gg8v3p80000gn/T/zenbench/zenbench-1785246896-874d.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1785246896-874d
+  git: 92f8ecf96a1496db127db233c9d8bfd4d93559e9
+═══════════════════════════════════════════════════════════════
+
+  vardct_4k  15 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base     pixels/s
+  ├─ portrait_4k_q75   468.4 ±3.1ms  [467.0–469.6]ms    22.0M
+  ╰─ city_4k_q75       210.3 ±1.8ms  [-55.4%–-54.8%]    49.1M
+
+  city_4k_q75      ██████████████████████████████████████████████ 49.1 Mpixels/s
+  portrait_4k_q75  █████████████████████ 22.0 Mpixels/s
+
+  vardct_web  30 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base     pixels/s
+  ├─ cafe_web_q80       42.5 ±1.4ms  [42.1–43.0]ms      15.2M
+  ╰─ bicycles_web_q85   13.8 ±0.3ms  [-69.2%–-65.9%]    46.8M
+
+  bicycles_web_q85  █████████████████████████████████████████████ 46.8 Mpixels/s
+  cafe_web_q80      ███████████████ 15.2 Mpixels/s
+
+  modular  30 rounds × 1 calls
+                              mean ±mad ms  95% CI vs base       pixels/s
+  ├─ green_queen_modular_e3    17.7 ±1.0ms  [17.4–18.1]ms        98.8M
+  ╰─ issue648_palette0        106.4 ±0.9ms  [+495.7%–+503.9%]    16.5M
+
+  green_queen_modular_e3  ███████████████████████████████████████ 98.8 Mpixels/s
+  issue648_palette0       ███████ 16.5 Mpixels/s
+
+  small  50 rounds × 1 calls
+                                mean ±mad ms  95% CI vs base     pixels/s
+  ├─ green_queen_vardct_e3       7.3 ±0.7ms  [7.1–7.5]ms        38.6M
+  ╰─ grayscale_patches_modular   9.8 ±0.7ms  [+31.7%–+38.2%]    28.6M
+
+  green_queen_vardct_e3      ████████████████████████████████████ 38.6 Mpixels/s
+  grayscale_patches_modular  ███████████████████████████ 28.6 Mpixels/s
+
+  total: 34.0s  (1 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

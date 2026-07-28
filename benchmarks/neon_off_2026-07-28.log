@@ -1,0 +1,54 @@
+   Compiling archmage-macros v0.9.26
+   Compiling safe_unaligned_simd v0.2.5
+   Compiling archmage v0.9.26
+   Compiling zenjxl-decoder-simd v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-simd)
+   Compiling zenjxl-decoder v0.3.10 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 23.23s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running benches/decode_bench.rs (target/release/deps/decode_bench-bd2cb0f80f8c511e)
+[zenbench] calibration: int=0.28ns/iter mem_bw=105.6GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.22ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /var/folders/sc/m9jbk0qj0jz4w09h7gg8v3p80000gn/T/zenbench/zenbench-1785246962-878c.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1785246962-878c
+  git: 92f8ecf96a1496db127db233c9d8bfd4d93559e9
+═══════════════════════════════════════════════════════════════
+
+  vardct_4k  7 rounds × 1 calls ⚠ only 7 rounds
+                       mean ±mad s  95% CI vs base     pixels/s
+  ├─ portrait_4k_q75   1.13 ±0.00s  [1.13–1.13]s       9.14M
+  ╰─ city_4k_q75       0.51 ±0.00s  [-55.1%–-54.3%]    20.2M [1]
+
+  city_4k_q75      ██████████████████████████████████████████████ 20.2 Mpixels/s
+  portrait_4k_q75  █████████████████████ 9.14 Mpixels/s
+  [1] drift r=0.64 — later rounds slower
+
+  vardct_web  30 rounds × 1 calls
+                       mean ±mad ms  95% CI vs base     pixels/s
+  ├─ cafe_web_q80       56.6 ±1.5ms  [56.2–57.0]ms      11.4M
+  ╰─ bicycles_web_q85   25.2 ±0.3ms  [-56.6%–-54.1%]    25.6M
+
+  bicycles_web_q85  █████████████████████████████████████████████ 25.6 Mpixels/s
+  cafe_web_q80      ████████████████████ 11.4 Mpixels/s
+
+  modular  30 rounds × 1 calls
+                              mean ±mad ms  95% CI vs base       pixels/s
+  ├─ green_queen_modular_e3    18.0 ±0.9ms  [17.5–18.5]ms        97.5M
+  ╰─ issue648_palette0        112.0 ±0.9ms  [+518.8%–+526.6%]    15.7M
+
+  green_queen_modular_e3  ███████████████████████████████████████ 97.5 Mpixels/s
+  issue648_palette0       ██████ 15.7 Mpixels/s
+
+  small  40 rounds × 1 calls
+                                mean ±mad ms  95% CI vs base     pixels/s
+  ├─ green_queen_vardct_e3       12.5 ±1.0ms  [12.3–12.8]ms      22.3M
+  ╰─ grayscale_patches_modular    8.4 ±0.4ms  [-36.1%–-30.2%]    33.4M
+
+  grayscale_patches_modular  ████████████████████████████████████ 33.4 Mpixels/s
+  green_queen_vardct_e3      ████████████████████████ 22.3 Mpixels/s
+
+  total: 35.5s
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json

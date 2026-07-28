@@ -1,0 +1,41 @@
+# zenjxl-decoder NEON vs no-SIMD — first ARM measurement
+date:    2026-07-28
+host:    Apple M4 Pro (12 core), macOS, aarch64
+build:   release, NO -C target-cpu=native
+method:  COMPILE-TIME A/B on the feature set (SIMD here is feature-gated, not
+         runtime-token-gated: `neon = ["jxl_simd/neon"]`, inside the default
+         `all-simd`):
+           cargo bench -p zenjxl-decoder --bench decode_bench                     # NEON
+           cargo bench -p zenjxl-decoder --bench decode_bench --no-default-features # scalar
+
+## Result — the split is by coding mode, not by size
+
+| image                      | mode    | NEON     | no-SIMD  | ratio |
+|----------------------------|---------|----------|----------|-------|
+| bicycles_web_q85           | VarDCT  |  13.8ms  |  25.2ms  | 1.83x |
+| green_queen_vardct_e3      | VarDCT  |   7.3ms  |  12.5ms  | 1.71x |
+| issue648_palette0          | modular | 106.4ms  | 112.0ms  | 1.05x |
+| green_queen_modular_e3     | modular |  17.7ms  |  18.0ms  | 1.02x |
+| grayscale_patches_modular  | modular |   9.8ms  |   8.4ms  | 0.86x |
+
+VarDCT (lossy, DCT + chroma-from-luma + upsampling) gains 1.7-1.8x. Modular
+(lossless, predictor + entropy coded) gains essentially nothing — consistent
+with the pattern seen elsewhere in this sweep: entropy/predictor-serial codecs
+resist vectorisation (heic ~1.00x, CABAC-bound; zenjpeg 1.3x, Huffman-bound).
+
+## The one negative: grayscale_patches_modular, 0.86x
+
+NEON 9.8ms +/-0.7 vs no-SIMD 8.4ms +/-0.4 — the error bars are close but do not
+overlap, so this is probably real rather than noise, and it is modest. Enabling
+SIMD makes this case ~14% slower.
+
+NOT DIAGNOSED. Plausibly the same shape as the ultrahdr finding recorded the
+same day (a LUT/gather-bound kernel where NEON's lack of a gather instruction
+makes the vector path lose), but that is a hypothesis — it has not been
+profiled, and one image is not enough to characterise the modular path. Anyone
+picking this up should first widen the modular corpus to see whether 0.86x is
+this image or the mode.
+
+Since default features include NEON, this case ships slower on ARM today. It is
+one image out of five and the VarDCT wins are much larger, so this is recorded
+as a lead rather than a reason to change defaults.
