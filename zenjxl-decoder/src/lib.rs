@@ -78,6 +78,14 @@ pub(crate) mod icc;
 pub(crate) mod image;
 pub(crate) mod render;
 pub(crate) mod transforms;
+
+/// Dev-only handle for `benches/kernel_tiers.rs`. Gated on `__bench_kernels`,
+/// which is never enabled in a published build, so this is not public API.
+#[cfg(feature = "__bench_kernels")]
+#[doc(hidden)]
+pub mod __bench_kernels {
+    pub use crate::transforms::*;
+}
 pub(crate) mod util;
 
 #[cfg(feature = "jpeg")]

@@ -66,7 +66,16 @@ wasm128 = ["jxl_simd/wasm128"]
 cms = ["moxcms"]
 jpeg = ["dep:brotli"]
 allow-unsafe = []
+# Dev-only: re-exports the pub(crate) transform kernels so benches/kernel_tiers.rs
+# can instantiate them against each SIMD descriptor. Never enable in a published
+# build — it is not public API.
+__bench_kernels = []
 threads = ["rayon"]
+
+[[bench]]
+name = "kernel_tiers"
+harness = false
+required-features = ["__bench_kernels"]
 
 [[bench]]
 name = "tf_bench"
