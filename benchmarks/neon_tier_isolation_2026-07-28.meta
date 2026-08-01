@@ -76,3 +76,34 @@ predictor + entropy coded and serial by nature.
 METHOD NOTE: do not compare a single image across two zenbench groups. Group
 composition shifts absolute timings materially (30% here). Comparisons must be
 made WITHIN one group, which is what the widened `modular` group now permits.
+
+## Follow-up 2026-07-31: WHY modular gains nothing (and why that is correct)
+
+The split above is real and the modular side is not a missing-SIMD gap — it is
+a dependency-bound path. Audited rather than assumed:
+
+  frame/modular/predict.rs         644 lines   0 SIMD references
+  frame/modular/mod.rs            1302 lines   0
+  frame/modular/decode/channel.rs  217 lines   0
+  entropy_coding/ans.rs            504 lines   0
+  entropy_coding/huffman.rs        626 lines   0
+  entropy_coding/decode.rs         829 lines   0
+
+Two structural blockers, both inherent to the format rather than to this port:
+
+1. **ANS / Huffman entropy decode is serial by construction** — each symbol's
+   state depends on the previous one. No lane parallelism exists at this level.
+2. **The modular predictor chains horizontally.** `PredictionContext` carries
+   `left`, `leftleft`, `topleft`, `topright` — each pixel's prediction depends
+   on the pixel decoded immediately to its left, so the x-loop cannot be
+   vectorized without changing the format's semantics.
+
+So 1.02-1.05x is close to the ceiling for this coding mode, in the same sense
+that zenraw's normalize_uniform (44 GB/s) and garb's copy kernels (55 GB/s) are
+at *their* ceilings — the limit is structural, not an un-written kernel.
+
+Where headroom would actually come from, if this is ever revisited: coarse-grain
+parallelism (per-group / per-channel), not per-pixel SIMD. VarDCT already gets
+1.71-1.83x precisely because its inverse transform has no such chain.
+
+Do not read "0 SIMD references in the modular path" as work waiting to be done.
