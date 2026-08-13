@@ -3,13 +3,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#![allow(clippy::type_complexity)]
 #![allow(clippy::erasing_op)]
 #![allow(clippy::identity_op)]
 use jxl_simd::{F32SimdVec, SimdDescriptor};
 
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::excessive_precision)]
 #[inline(always)]
 pub(super) fn reinterpreting_dct_2<D: SimdDescriptor>(
     d: D,

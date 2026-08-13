@@ -648,7 +648,6 @@ impl FullModularImage {
         self.ready_buffers.extend(dry);
     }
 
-    #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
         skip(self, frame_header, global_tree, br, memory_tracker),

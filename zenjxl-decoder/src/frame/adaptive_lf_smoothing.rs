@@ -106,7 +106,6 @@ pub fn adaptive_lf_smoothing(
                 out2[0] = rows_in[2].1[0];
                 out2[xsize - 1] = rows_in[2].1[xsize - 1];
 
-                #[allow(clippy::needless_range_loop)] // x indexes 6+ parallel arrays
                 for x in 1..xsize - 1 {
                     let gap = 0.5;
                     let (mc_x, sm_x, gap) = compute_pixel_channel(

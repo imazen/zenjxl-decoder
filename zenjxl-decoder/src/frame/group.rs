@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 // The simd_function! macro generates dispatch wrappers that inherit all params.
-#![allow(clippy::too_many_arguments)]
 
 use num_traits::Float;
 use whereat::at;
@@ -458,7 +457,6 @@ impl<'a, 'b, 'c> PassInfo<'a, 'b, 'c> {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
 pub fn decode_vardct_group(
     group: usize,
     passes: &mut [(usize, BitReader)],

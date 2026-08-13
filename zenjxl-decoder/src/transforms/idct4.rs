@@ -4,13 +4,11 @@
 // license that can be found in the LICENSE file.
 
 #![allow(unused)]
-#![allow(clippy::type_complexity)]
 #![allow(clippy::erasing_op)]
 #![allow(clippy::identity_op)]
 use super::*;
 use jxl_simd::{F32SimdVec, SimdDescriptor};
 
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::excessive_precision)]
 #[inline(always)]
 pub(super) fn idct_4<D: SimdDescriptor>(

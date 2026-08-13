@@ -20,7 +20,6 @@ impl<'first, 'second> ConcatSlice<'first, 'second> {
         }
     }
 
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.slices.0.len() + self.slices.1.len()
     }

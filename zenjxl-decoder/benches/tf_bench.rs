@@ -86,7 +86,6 @@ fn f32_to_u8_simd<D: SimdDescriptor>(d: D, input: &[f32], output: &mut [u8]) {
 // Approach 2: fast-srgb8 LUT (104-entry, scalar)
 // ============================================================================
 
-#[allow(clippy::excessive_precision)]
 const TO_SRGB8_TABLE: [u32; 104] = [
     0x0073000d, 0x007a000d, 0x0080000d, 0x0087000d, 0x008d000d, 0x0094000d, 0x009a000d, 0x00a1000d,
     0x00a7001a, 0x00b4001a, 0x00c1001a, 0x00ce001a, 0x00da001a, 0x00e7001a, 0x00f4001a, 0x0101001a,

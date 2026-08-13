@@ -288,8 +288,6 @@ const AFV4X4BASIS: [f32; 256] = [
     0.1135498731499429,
 ];
 
-#[allow(clippy::excessive_precision)]
-#[allow(clippy::approx_constant)]
 fn avfidct4x4(coeffs: &[f32], pixels: &mut [f32]) {
     for i in 0..16 {
         let mut pixel: f32 = 0.0;
