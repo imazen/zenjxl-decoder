@@ -72,3 +72,5 @@ copter-report/
 .external-cache/
 Cargo.toml.original.txt
 *.rs.local
+__pycache__/
+*.pyc
