@@ -214,6 +214,8 @@ impl Frame {
         let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
 
         modular_global.set_pipeline_used_channels(pipeline!(self, p, p.used_channel_mask()));
+        #[cfg(feature = "threads")]
+        modular_global.set_parallel(self.decoder_state.parallel);
 
         // Determine parallel vs sequential early — affects flush strategy.
         #[cfg(all(feature = "threads", not(test)))]

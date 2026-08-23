@@ -388,6 +388,186 @@ fn get_prediction_data_hoisted(
     )
 }
 
+/// Runs `f(c, slab)` over the per-channel slabs (`slab_len` output buffers
+/// each) of `buf_out`, on the rayon pool when `parallel` is set.
+///
+/// The per-channel work of a palette step is independent: channel `c` only
+/// writes its own output buffers and reads those, the shared index image and
+/// the palette. Splitting `buf_out` into disjoint slabs lets the channels run
+/// concurrently without any shared mutable state. Below
+/// `PARALLEL_MIN_PIXELS` (per channel) the rayon dispatch is not worth it.
+fn for_each_palette_channel<F>(
+    buf_out: &mut [&mut ModularChannel],
+    slab_len: usize,
+    parallel: bool,
+    pixels_per_channel: usize,
+    f: F,
+) -> Result<()>
+where
+    F: Fn(usize, &mut [&mut ModularChannel]) -> Result<()> + Sync,
+{
+    const PARALLEL_MIN_PIXELS: usize = 16 * 1024;
+    #[cfg(feature = "threads")]
+    if parallel && buf_out.len() > slab_len && pixels_per_channel >= PARALLEL_MIN_PIXELS {
+        use rayon::prelude::*;
+        return buf_out
+            .par_chunks_mut(slab_len)
+            .enumerate()
+            .try_for_each(|(c, slab)| f(c, slab));
+    }
+    #[cfg(not(feature = "threads"))]
+    let _ = (parallel, pixels_per_channel, PARALLEL_MIN_PIXELS);
+    for (c, slab) in buf_out.chunks_mut(slab_len).enumerate() {
+        f(c, slab)?;
+    }
+    Ok(())
+}
+
+/// Applies the palette to one group of one channel.
+///
+/// `buf_out` is the channel's slab: `grid_ysize x grid_xsize` output buffers
+/// around the group at `(grid_x, grid_y)` (the predictors read the left and
+/// top neighbours; `border == 0` for `Zero`).
+#[allow(clippy::too_many_arguments)]
+fn palette_one_group_channel(
+    c: usize,
+    buf_in: &ModularChannel,
+    palette: &Image<i32>,
+    buf_out: &mut [&mut ModularChannel],
+    grid_x: usize,
+    grid_y: usize,
+    grid_xsize: usize,
+    num_colors: usize,
+    num_deltas: usize,
+    predictor: Predictor,
+    bit_depth: usize,
+) {
+    let h = buf_in.data.size().1;
+    let (xsize, ysize) = buf_out[0].data.size();
+    let out_idx = grid_y * grid_xsize + grid_x;
+
+    if num_deltas == 0 && predictor == Predictor::Zero {
+        // Pure lookup: no neighbour state, no deltas. This is the shape every
+        // lossless palette image from libjxl's encoder takes, so it matters
+        // that the inner loop is a tight row-to-row map (the general loop
+        // below re-resolves the output row per pixel).
+        let palette_size = num_colors;
+        let out = &mut buf_out[out_idx].data;
+        if num_colors == 1 {
+            // Single-colour palette (e.g. a constant alpha channel): every
+            // in-range index maps to the same value.
+            let only = get_palette_value(palette, 0, c, palette_size, bit_depth);
+            for y in 0..h {
+                let idx = buf_in.data.row(y);
+                let out_row = out.row_mut(y);
+                for (o, &index) in out_row.iter_mut().zip(idx) {
+                    *o = if index == 0 {
+                        only
+                    } else {
+                        get_palette_value(palette, index as isize, c, palette_size, bit_depth)
+                    };
+                }
+            }
+            return;
+        }
+        let pal_row = palette.row(c);
+        for y in 0..h {
+            let idx = buf_in.data.row(y);
+            let out_row = out.row_mut(y);
+            for (o, &index) in out_row.iter_mut().zip(idx) {
+                *o = match pal_row.get(index as usize) {
+                    Some(&v) if index >= 0 => v,
+                    _ => get_palette_value(palette, index as isize, c, palette_size, bit_depth),
+                };
+            }
+        }
+        return;
+    }
+
+    let rect_width = buf_out[out_idx].data.size().0;
+    // Reusable buffers for pre-fetched completed rows (avoids per-pixel .row() calls)
+    let mut row_prev_buf: Vec<i32> = Vec::new();
+    let mut row_prev2_buf: Vec<i32> = Vec::new();
+
+    for y in 0..h {
+        let index_img = buf_in.data.row(y);
+
+        // Copy completed top rows — these don't change during the x-loop.
+        // row_prev2 = previous row_prev (rotate), row_prev = row just completed.
+        std::mem::swap(&mut row_prev2_buf, &mut row_prev_buf);
+        if y > 0 {
+            row_prev_buf.clear();
+            row_prev_buf.extend_from_slice(buf_out[out_idx].data.row(y - 1));
+        }
+        let row_prev = if y > 0 {
+            Some(row_prev_buf.as_slice())
+        } else {
+            None
+        };
+        let row_prev2 = if y > 1 {
+            Some(row_prev2_buf.as_slice())
+        } else {
+            None
+        };
+
+        // Track left/leftleft as running variables
+        let initial_left = if y > 0 {
+            row_prev.unwrap()[0]
+        } else if grid_y > 0 {
+            buf_out[out_idx - grid_xsize].data.row(ysize - 1)[0]
+        } else {
+            0
+        };
+        let mut last = initial_left;
+        let mut last_last = initial_left;
+
+        for (x, &index) in index_img.iter().enumerate() {
+            let palette_entry = get_palette_value(
+                palette,
+                index as isize,
+                c,
+                /*palette_size=*/ num_colors + num_deltas,
+                /*bit_depth=*/ bit_depth,
+            );
+            // Compute left/leftleft for this pixel
+            let left = if x > 0 {
+                last
+            } else if grid_x > 0 {
+                buf_out[out_idx - 1].data.row(y)[xsize - 1]
+            } else {
+                initial_left
+            };
+            let leftleft = if x > 1 {
+                last_last
+            } else if let Some(l_img) = if grid_x > 0 {
+                Some(&buf_out[out_idx - 1].data)
+            } else {
+                None
+            } {
+                l_img.row(y)[xsize + x - 2]
+            } else {
+                left
+            };
+
+            let val = if index < num_deltas as i32 {
+                let pred = predictor.predict_one(
+                    get_prediction_data_hoisted(
+                        left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx, grid_x,
+                        grid_y, grid_xsize, x, y, xsize, ysize,
+                    ),
+                    /*wp_pred=*/ 0,
+                );
+                (pred + palette_entry as i64) as i32
+            } else {
+                palette_entry
+            };
+            buf_out[out_idx].data.row_mut(y)[x] = val;
+            last_last = last;
+            last = val;
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn do_palette_step_one_group(
     buf_in: &ModularChannel,
@@ -400,145 +580,36 @@ pub fn do_palette_step_one_group(
     num_colors: usize,
     num_deltas: usize,
     predictor: Predictor,
-) {
-    let h = buf_in.data.size().1;
+    parallel: bool,
+) -> Result<()> {
     let palette = &buf_pal.data;
     let bit_depth = buf_in.bit_depth.bits_per_sample().min(24) as usize;
-    let num_c = buf_out.len() / (grid_xsize * grid_ysize);
-    let (xsize, ysize) = buf_out[0].data.size();
-
-    if num_deltas == 0 && predictor == Predictor::Zero {
-        // Pure lookup: no neighbour state, no deltas. This is the shape every
-        // lossless palette image from libjxl's encoder takes, so it matters
-        // that the inner loop is a tight row-to-row map (the general loop
-        // below re-resolves the output row per pixel).
-        let palette_size = num_colors;
-        for c in 0..num_c {
-            let out_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize + grid_x;
-            let out = &mut buf_out[out_idx].data;
-            if num_colors == 1 {
-                // Single-colour palette (e.g. a constant alpha channel): every
-                // in-range index maps to the same value.
-                let only = get_palette_value(palette, 0, c, palette_size, bit_depth);
-                for y in 0..h {
-                    let idx = buf_in.data.row(y);
-                    let out_row = out.row_mut(y);
-                    for (o, &index) in out_row.iter_mut().zip(idx) {
-                        *o = if index == 0 {
-                            only
-                        } else {
-                            get_palette_value(palette, index as isize, c, palette_size, bit_depth)
-                        };
-                    }
-                }
-                continue;
-            }
-            let pal_row = palette.row(c);
-            for y in 0..h {
-                let idx = buf_in.data.row(y);
-                let out_row = out.row_mut(y);
-                for (o, &index) in out_row.iter_mut().zip(idx) {
-                    *o = match pal_row.get(index as usize) {
-                        Some(&v) if index >= 0 => v,
-                        _ => get_palette_value(palette, index as isize, c, palette_size, bit_depth),
-                    };
-                }
-            }
-        }
-        return;
-    }
-
-    for c in 0..num_c {
-        let out_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize + grid_x;
-        let rect_width = buf_out[out_idx].data.size().0;
-        // Reusable buffers for pre-fetched completed rows (avoids per-pixel .row() calls)
-        let mut row_prev_buf: Vec<i32> = Vec::new();
-        let mut row_prev2_buf: Vec<i32> = Vec::new();
-
-        for y in 0..h {
-            let index_img = buf_in.data.row(y);
-
-            // Copy completed top rows — these don't change during the x-loop.
-            // row_prev2 = previous row_prev (rotate), row_prev = row just completed.
-            std::mem::swap(&mut row_prev2_buf, &mut row_prev_buf);
-            if y > 0 {
-                row_prev_buf.clear();
-                row_prev_buf.extend_from_slice(buf_out[out_idx].data.row(y - 1));
-            }
-            let row_prev = if y > 0 {
-                Some(row_prev_buf.as_slice())
-            } else {
-                None
-            };
-            let row_prev2 = if y > 1 {
-                Some(row_prev2_buf.as_slice())
-            } else {
-                None
-            };
-
-            // Track left/leftleft as running variables
-            let initial_left = if y > 0 {
-                row_prev.unwrap()[0]
-            } else if grid_y > 0 {
-                buf_out[out_idx - grid_xsize].data.row(ysize - 1)[0]
-            } else {
-                0
-            };
-            let mut last = initial_left;
-            let mut last_last = initial_left;
-
-            for (x, &index) in index_img.iter().enumerate() {
-                let palette_entry = get_palette_value(
-                    palette,
-                    index as isize,
-                    c,
-                    /*palette_size=*/ num_colors + num_deltas,
-                    /*bit_depth=*/ bit_depth,
-                );
-                // Compute left/leftleft for this pixel
-                let left = if x > 0 {
-                    last
-                } else if grid_x > 0 {
-                    buf_out[out_idx - 1].data.row(y)[xsize - 1]
-                } else {
-                    initial_left
-                };
-                let leftleft = if x > 1 {
-                    last_last
-                } else if let Some(l_img) = if grid_x > 0 {
-                    Some(&buf_out[out_idx - 1].data)
-                } else {
-                    None
-                } {
-                    l_img.row(y)[xsize + x - 2]
-                } else {
-                    left
-                };
-
-                let val = if index < num_deltas as i32 {
-                    let pred = predictor.predict_one(
-                        get_prediction_data_hoisted(
-                            left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx,
-                            grid_x, grid_y, grid_xsize, x, y, xsize, ysize,
-                        ),
-                        /*wp_pred=*/ 0,
-                    );
-                    (pred + palette_entry as i64) as i32
-                } else {
-                    palette_entry
-                };
-                buf_out[out_idx].data.row_mut(y)[x] = val;
-                last_last = last;
-                last = val;
-            }
-        }
-    }
+    let (w, h) = buf_in.data.size();
+    for_each_palette_channel(
+        buf_out,
+        grid_xsize * grid_ysize,
+        parallel,
+        w * h,
+        |c, slab| {
+            palette_one_group_channel(
+                c, buf_in, palette, slab, grid_x, grid_y, grid_xsize, num_colors, num_deltas,
+                predictor, bit_depth,
+            );
+            Ok(())
+        },
+    )
 }
 
+/// Applies the palette to one row of groups of one channel, for the
+/// predictors that need the whole row (`Weighted`, `NorthEast`, ...).
+///
+/// `buf_out` is the channel's slab: `(grid_y + 1) x grid_xsize` output
+/// buffers, the last row of which is the one being produced.
 #[allow(clippy::too_many_arguments)]
-pub fn do_palette_step_group_row(
+fn palette_group_row_channel(
+    c: usize,
     buf_in: &[&ModularChannel],
-    buf_pal: &ModularChannel,
+    palette: &Image<i32>,
     buf_out: &mut [&mut ModularChannel],
     grid_y: usize,
     grid_xsize: usize,
@@ -546,17 +617,15 @@ pub fn do_palette_step_group_row(
     num_deltas: usize,
     predictor: Predictor,
     wp_header: &WeightedHeader,
+    bit_depth: usize,
 ) -> Result<()> {
-    let palette = &buf_pal.data;
     let h = buf_in[0].data.size().1;
-    let bit_depth = buf_in[0].bit_depth.bits_per_sample().min(24) as usize;
-    let grid_ysize = grid_y + 1;
-    let num_c = buf_out.len() / (grid_xsize * grid_ysize);
     let total_w = buf_out[0..grid_xsize]
         .iter()
         .map(|buf| buf.data.size().0)
         .sum();
     let (xsize, ysize) = buf_out[0].data.size();
+    let out_row_idx = grid_y * grid_xsize;
 
     // Helper closure: compute initial "left" value for x=0 of a grid block
     let initial_left_for = |buf_out: &[&mut ModularChannel],
@@ -582,175 +651,206 @@ pub fn do_palette_step_group_row(
     let mut row_prev2_bufs: Vec<Vec<i32>> = (0..grid_xsize).map(|_| Vec::new()).collect();
 
     if predictor == Predictor::Weighted {
-        for c in 0..num_c {
-            let mut wp_state = WeightedPredictorState::new(wp_header, total_w)?;
-            let out_row_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize;
-            if grid_y > 0 {
-                let prev_row_idx = out_row_idx - grid_y * grid_xsize;
-                wp_state.restore_state(
-                    buf_out[prev_row_idx].auxiliary_data.as_ref().unwrap(),
-                    total_w,
-                );
-            }
-            for y in 0..h {
-                for (grid_x, index_buf) in buf_in.iter().enumerate().take(grid_xsize) {
-                    let index_img = index_buf.data.row(y);
-                    let out_idx = out_row_idx + grid_x;
-                    let rect_width = buf_out[out_idx].data.size().0;
+        let mut wp_state = WeightedPredictorState::new(wp_header, total_w)?;
+        if grid_y > 0 {
+            let prev_row_idx = out_row_idx - grid_xsize;
+            wp_state.restore_state(
+                buf_out[prev_row_idx].auxiliary_data.as_ref().unwrap(),
+                total_w,
+            );
+        }
+        for y in 0..h {
+            for (grid_x, index_buf) in buf_in.iter().enumerate().take(grid_xsize) {
+                let index_img = index_buf.data.row(y);
+                let out_idx = out_row_idx + grid_x;
+                let rect_width = buf_out[out_idx].data.size().0;
 
-                    // Pre-fetch completed top rows for THIS grid block
-                    std::mem::swap(&mut row_prev2_bufs[grid_x], &mut row_prev_bufs[grid_x]);
-                    if y > 0 {
-                        row_prev_bufs[grid_x].clear();
-                        row_prev_bufs[grid_x].extend_from_slice(buf_out[out_idx].data.row(y - 1));
-                    }
-                    let row_prev = if y > 0 {
-                        Some(row_prev_bufs[grid_x].as_slice())
+                // Pre-fetch completed top rows for THIS grid block
+                std::mem::swap(&mut row_prev2_bufs[grid_x], &mut row_prev_bufs[grid_x]);
+                if y > 0 {
+                    row_prev_bufs[grid_x].clear();
+                    row_prev_bufs[grid_x].extend_from_slice(buf_out[out_idx].data.row(y - 1));
+                }
+                let row_prev = if y > 0 {
+                    Some(row_prev_bufs[grid_x].as_slice())
+                } else {
+                    None
+                };
+                let row_prev2 = if y > 1 {
+                    Some(row_prev2_bufs[grid_x].as_slice())
+                } else {
+                    None
+                };
+
+                let initial_left =
+                    initial_left_for(buf_out, out_idx, grid_y, grid_xsize, row_prev, ysize);
+                let mut last = initial_left;
+                let mut last_last = initial_left;
+
+                for (x, &index) in index_img.iter().enumerate() {
+                    let palette_entry = get_palette_value(
+                        palette,
+                        index as isize,
+                        c,
+                        /*palette_size=*/ num_colors + num_deltas,
+                        /*bit_depth=*/ bit_depth,
+                    );
+                    let left = if x > 0 {
+                        last
+                    } else if grid_x > 0 {
+                        buf_out[out_idx - 1].data.row(y)[xsize - 1]
+                    } else {
+                        initial_left
+                    };
+                    let leftleft = if x > 1 {
+                        last_last
+                    } else if let Some(l_img) = if grid_x > 0 {
+                        Some(&buf_out[out_idx - 1].data)
                     } else {
                         None
-                    };
-                    let row_prev2 = if y > 1 {
-                        Some(row_prev2_bufs[grid_x].as_slice())
+                    } {
+                        l_img.row(y)[xsize + x - 2]
                     } else {
-                        None
+                        left
                     };
 
-                    let initial_left =
-                        initial_left_for(buf_out, out_idx, grid_y, grid_xsize, row_prev, ysize);
-                    let mut last = initial_left;
-                    let mut last_last = initial_left;
-
-                    for (x, &index) in index_img.iter().enumerate() {
-                        let palette_entry = get_palette_value(
-                            palette,
-                            index as isize,
-                            c,
-                            /*palette_size=*/ num_colors + num_deltas,
-                            /*bit_depth=*/ bit_depth,
-                        );
-                        let left = if x > 0 {
-                            last
-                        } else if grid_x > 0 {
-                            buf_out[out_idx - 1].data.row(y)[xsize - 1]
-                        } else {
-                            initial_left
-                        };
-                        let leftleft = if x > 1 {
-                            last_last
-                        } else if let Some(l_img) = if grid_x > 0 {
-                            Some(&buf_out[out_idx - 1].data)
-                        } else {
-                            None
-                        } {
-                            l_img.row(y)[xsize + x - 2]
-                        } else {
-                            left
-                        };
-
-                        // Predict for every pixel (see do_palette_step_general).
-                        let prediction_data = get_prediction_data_hoisted(
-                            left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx,
-                            grid_x, grid_y, grid_xsize, x, y, xsize, ysize,
-                        );
-                        let (pred, _) = wp_state.predict_and_property(
-                            (grid_x * xsize + x, y & 1),
-                            total_w,
-                            &prediction_data,
-                        );
-                        let val = if index < num_deltas as i32 {
-                            (pred + palette_entry as i64) as i32
-                        } else {
-                            palette_entry
-                        };
-                        buf_out[out_idx].data.row_mut(y)[x] = val;
-                        wp_state.update_errors(val, (grid_x * xsize + x, y & 1), total_w);
-                        last_last = last;
-                        last = val;
-                    }
+                    // Predict for every pixel (see do_palette_step_general).
+                    let prediction_data = get_prediction_data_hoisted(
+                        left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx, grid_x,
+                        grid_y, grid_xsize, x, y, xsize, ysize,
+                    );
+                    let (pred, _) = wp_state.predict_and_property(
+                        (grid_x * xsize + x, y & 1),
+                        total_w,
+                        &prediction_data,
+                    );
+                    let val = if index < num_deltas as i32 {
+                        (pred + palette_entry as i64) as i32
+                    } else {
+                        palette_entry
+                    };
+                    buf_out[out_idx].data.row_mut(y)[x] = val;
+                    wp_state.update_errors(val, (grid_x * xsize + x, y & 1), total_w);
+                    last_last = last;
+                    last = val;
                 }
             }
-            // Row 0: the previous-row error slot; rows 1..5: the per-predictor
-            // error slot, see WeightedPredictorState::save_state.
-            let mut wp_image = Image::<i32>::new((total_w + 2, 1 + NUM_PREDICTORS))?;
-            wp_state.save_state(&mut wp_image, total_w);
-            buf_out[out_row_idx].auxiliary_data = Some(wp_image);
         }
+        // Row 0: the previous-row error slot; rows 1..5: the per-predictor
+        // error slot, see WeightedPredictorState::save_state.
+        let mut wp_image = Image::<i32>::new((total_w + 2, 1 + NUM_PREDICTORS))?;
+        wp_state.save_state(&mut wp_image, total_w);
+        buf_out[out_row_idx].auxiliary_data = Some(wp_image);
     } else {
-        for c in 0..num_c {
-            for y in 0..h {
-                for (grid_x, index_buf) in buf_in.iter().enumerate().take(grid_xsize) {
-                    let index_img = index_buf.data.row(y);
-                    let out_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize + grid_x;
-                    let rect_width = buf_out[out_idx].data.size().0;
+        for y in 0..h {
+            for (grid_x, index_buf) in buf_in.iter().enumerate().take(grid_xsize) {
+                let index_img = index_buf.data.row(y);
+                let out_idx = out_row_idx + grid_x;
+                let rect_width = buf_out[out_idx].data.size().0;
 
-                    // Pre-fetch completed top rows for THIS grid block
-                    std::mem::swap(&mut row_prev2_bufs[grid_x], &mut row_prev_bufs[grid_x]);
-                    if y > 0 {
-                        row_prev_bufs[grid_x].clear();
-                        row_prev_bufs[grid_x].extend_from_slice(buf_out[out_idx].data.row(y - 1));
-                    }
-                    let row_prev = if y > 0 {
-                        Some(row_prev_bufs[grid_x].as_slice())
+                // Pre-fetch completed top rows for THIS grid block
+                std::mem::swap(&mut row_prev2_bufs[grid_x], &mut row_prev_bufs[grid_x]);
+                if y > 0 {
+                    row_prev_bufs[grid_x].clear();
+                    row_prev_bufs[grid_x].extend_from_slice(buf_out[out_idx].data.row(y - 1));
+                }
+                let row_prev = if y > 0 {
+                    Some(row_prev_bufs[grid_x].as_slice())
+                } else {
+                    None
+                };
+                let row_prev2 = if y > 1 {
+                    Some(row_prev2_bufs[grid_x].as_slice())
+                } else {
+                    None
+                };
+
+                let initial_left =
+                    initial_left_for(buf_out, out_idx, grid_y, grid_xsize, row_prev, ysize);
+                let mut last = initial_left;
+                let mut last_last = initial_left;
+
+                for (x, &index) in index_img.iter().enumerate() {
+                    let palette_entry = get_palette_value(
+                        palette,
+                        index as isize,
+                        c,
+                        /*palette_size=*/ num_colors + num_deltas,
+                        /*bit_depth=*/ bit_depth,
+                    );
+                    let left = if x > 0 {
+                        last
+                    } else if grid_x > 0 {
+                        buf_out[out_idx - 1].data.row(y)[xsize - 1]
+                    } else {
+                        initial_left
+                    };
+                    let leftleft = if x > 1 {
+                        last_last
+                    } else if let Some(l_img) = if grid_x > 0 {
+                        Some(&buf_out[out_idx - 1].data)
                     } else {
                         None
-                    };
-                    let row_prev2 = if y > 1 {
-                        Some(row_prev2_bufs[grid_x].as_slice())
+                    } {
+                        l_img.row(y)[xsize + x - 2]
                     } else {
-                        None
+                        left
                     };
 
-                    let initial_left =
-                        initial_left_for(buf_out, out_idx, grid_y, grid_xsize, row_prev, ysize);
-                    let mut last = initial_left;
-                    let mut last_last = initial_left;
-
-                    for (x, &index) in index_img.iter().enumerate() {
-                        let palette_entry = get_palette_value(
-                            palette,
-                            index as isize,
-                            c,
-                            /*palette_size=*/ num_colors + num_deltas,
-                            /*bit_depth=*/ bit_depth,
+                    let val = if index < num_deltas as i32 {
+                        let pred = predictor.predict_one(
+                            get_prediction_data_hoisted(
+                                left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx,
+                                grid_x, grid_y, grid_xsize, x, y, xsize, ysize,
+                            ),
+                            /*wp_pred=*/ 0,
                         );
-                        let left = if x > 0 {
-                            last
-                        } else if grid_x > 0 {
-                            buf_out[out_idx - 1].data.row(y)[xsize - 1]
-                        } else {
-                            initial_left
-                        };
-                        let leftleft = if x > 1 {
-                            last_last
-                        } else if let Some(l_img) = if grid_x > 0 {
-                            Some(&buf_out[out_idx - 1].data)
-                        } else {
-                            None
-                        } {
-                            l_img.row(y)[xsize + x - 2]
-                        } else {
-                            left
-                        };
-
-                        let val = if index < num_deltas as i32 {
-                            let pred = predictor.predict_one(
-                                get_prediction_data_hoisted(
-                                    left, leftleft, row_prev, row_prev2, rect_width, buf_out,
-                                    out_idx, grid_x, grid_y, grid_xsize, x, y, xsize, ysize,
-                                ),
-                                /*wp_pred=*/ 0,
-                            );
-                            (pred + palette_entry as i64) as i32
-                        } else {
-                            palette_entry
-                        };
-                        buf_out[out_idx].data.row_mut(y)[x] = val;
-                        last_last = last;
-                        last = val;
-                    }
+                        (pred + palette_entry as i64) as i32
+                    } else {
+                        palette_entry
+                    };
+                    buf_out[out_idx].data.row_mut(y)[x] = val;
+                    last_last = last;
+                    last = val;
                 }
             }
         }
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn do_palette_step_group_row(
+    buf_in: &[&ModularChannel],
+    buf_pal: &ModularChannel,
+    buf_out: &mut [&mut ModularChannel],
+    grid_y: usize,
+    grid_xsize: usize,
+    num_colors: usize,
+    num_deltas: usize,
+    predictor: Predictor,
+    wp_header: &WeightedHeader,
+    parallel: bool,
+) -> Result<()> {
+    let palette = &buf_pal.data;
+    let bit_depth = buf_in[0].bit_depth.bits_per_sample().min(24) as usize;
+    let grid_ysize = grid_y + 1;
+    let h = buf_in[0].data.size().1;
+    let total_w: usize = buf_in
+        .iter()
+        .take(grid_xsize)
+        .map(|buf| buf.data.size().0)
+        .sum();
+    for_each_palette_channel(
+        buf_out,
+        grid_xsize * grid_ysize,
+        parallel,
+        total_w * h,
+        |c, slab| {
+            palette_group_row_channel(
+                c, buf_in, palette, slab, grid_y, grid_xsize, num_colors, num_deltas, predictor,
+                wp_header, bit_depth,
+            )
+        },
+    )
 }

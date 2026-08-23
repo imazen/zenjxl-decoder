@@ -340,6 +340,62 @@ mod tests {
             );
         }
     }
+    /// Modular palette transforms are applied after all groups are decoded,
+    /// one channel at a time across a whole group row (`AverageAll` /
+    /// `Weighted` predictors) or group (the other predictors). The per-channel
+    /// work is independent and runs on the rayon pool when `parallel` is set,
+    /// so the result must not depend on the pool size.
+    ///
+    /// - `delta_palette.jxl`: implicit delta palette, `AverageAll` predictor
+    ///   (full-row path), 555x751 = 3x3 groups;
+    /// - the same bitstream with the predictor patched to `Weighted` (the
+    ///   weighted-predictor full-row path with state carried across group
+    ///   rows, see `modular_palette.rs`);
+    /// - `issue648_palette0.jxl`, `sunset_logo.jxl`, `lz77_flower.jxl`:
+    ///   regular (non-delta) palettes.
+    #[test]
+    fn serial_parallel_parity_palette_across_thread_counts() {
+        let cases = [
+            (
+                "delta_palette",
+                test_image("conformance_test_images/delta_palette.jxl"),
+            ),
+            (
+                "delta_palette+weighted",
+                crate::tests::modular_palette::delta_palette_with_weighted_predictor(),
+            ),
+            ("issue648_palette0", test_image("issue648_palette0.jxl")),
+            (
+                "sunset_logo",
+                test_image("conformance_test_images/sunset_logo.jxl"),
+            ),
+            (
+                "lz77_flower",
+                test_image("conformance_test_images/lz77_flower.jxl"),
+            ),
+        ];
+        for (name, data) in &cases {
+            let (w, h, c, serial) = decode_with_parallel(data, false).unwrap();
+            for threads in [1usize, 2, 3, 4, 8] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                let (w2, h2, c2, parallel) =
+                    pool.install(|| decode_with_parallel(data, true)).unwrap();
+                assert_eq!((w, h, c), (w2, h2, c2), "{name}: dimension mismatch");
+                let diff = serial.iter().zip(&parallel).filter(|(a, b)| a != b).count();
+                assert_eq!(
+                    diff,
+                    0,
+                    "{name}, {threads}-thread pool: {diff} of {} samples differ from the \
+                     serial decode",
+                    serial.len()
+                );
+            }
+        }
+    }
+
     /// Parallel decode with a CMS stage must not depend on the thread count.
     ///
     /// `CmsStage` hands one transformer to every render context. Contexts

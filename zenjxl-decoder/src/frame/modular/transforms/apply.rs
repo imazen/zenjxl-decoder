@@ -93,6 +93,7 @@ impl TransformStepChunk {
         frame_header: &FrameHeader,
         buffers: &[ModularBufferInfo],
         is_final: bool,
+        parallel: bool,
     ) -> Result<()> {
         let buf_out = self.buf_out();
         let out_grid_kind = buffers[buf_out[0]].grid_kind;
@@ -192,7 +193,8 @@ impl TransformStepChunk {
                         *num_colors,
                         *num_deltas,
                         *predictor,
-                    );
+                        parallel,
+                    )?;
                 }
                 buffers[*buf_in].buffer_grid[out_grid].mark_used(is_final);
                 buffers[*buf_pal].buffer_grid[0].mark_used(is_final);
@@ -255,6 +257,7 @@ impl TransformStepChunk {
                         *num_deltas,
                         *predictor,
                         wp_header,
+                        parallel,
                     )?;
                 }
                 buffers[*buf_pal].buffer_grid[0].mark_used(is_final);

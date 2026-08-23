@@ -18,7 +18,7 @@ for f in "$@"; do
   b=$(basename "$f" .jxl)
   r=()
   for pass in 1 2; do
-    r+=($(nice -n 19 "$FORK" --num-threads 1 --speedtest -n 5 --warmup-reps 1 "$f" 2>&1 | grep -o '[0-9.]* MP/s' | awk '{print $1}'))
+    r+=($(nice -n 19 "$FORK" --no-cms --num-threads 1 --speedtest -n 5 --warmup-reps 1 "$f" 2>&1 | grep -o '[0-9.]* MP/s' | awk '{print $1}'))
     r+=($(RAYON_NUM_THREADS=1 nice -n 19 "$UP" --speedtest -n 5 --warmup-reps 1 "$f" 2>&1 | grep -o '[0-9.]* MP/s' | awk '{print $1}'))
   done
   printf "%s\t%s\t%s\t%s\t%s\n" "$b" "$r[1]" "$r[2]" "$r[3]" "$r[4]"

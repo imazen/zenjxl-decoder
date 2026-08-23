@@ -372,6 +372,9 @@ pub struct FullModularImage {
     /// When true, flush_output clones buffers instead of consuming them.
     /// Used during incremental decode to preserve data for the final re-render.
     preserve_buffers: bool,
+    /// Whether transform steps may use the rayon pool (per-channel palette
+    /// application). Set from the decoder's `parallel` option.
+    parallel: bool,
     log_group_dim: usize,
     num_groups: (usize, usize),
 }
@@ -382,6 +385,11 @@ impl FullModularImage {
     }
 
     /// When true, flush_output clones buffers instead of consuming them.
+    #[cfg(feature = "threads")]
+    pub fn set_parallel(&mut self, parallel: bool) {
+        self.parallel = parallel;
+    }
+
     pub fn set_preserve_buffers(&mut self, preserve: bool) {
         self.preserve_buffers = preserve;
     }
@@ -451,6 +459,7 @@ impl FullModularImage {
                 ready_buffers: BTreeSet::new(),
                 pipeline_used_channels: vec![],
                 preserve_buffers: false,
+                parallel: false,
                 log_group_dim: frame_header.log_group_dim(),
                 num_groups: frame_header.size_groups(),
             });
@@ -625,6 +634,7 @@ impl FullModularImage {
             ready_buffers: BTreeSet::new(),
             pipeline_used_channels: vec![],
             preserve_buffers: false,
+            parallel: false,
             log_group_dim: frame_header.log_group_dim(),
             num_groups: frame_header.size_groups(),
         })
@@ -863,7 +873,7 @@ impl FullModularImage {
                 let previous_output_status = previous_output_status.unwrap();
 
                 if !dry_run {
-                    tfm.do_run(frame_header, &self.buffer_info, is_final)?;
+                    tfm.do_run(frame_header, &self.buffer_info, is_final, self.parallel)?;
                 }
 
                 // If this was the first _or_ the last render, trigger a re-render across weak edges

@@ -108,7 +108,7 @@ fn write_bits_lsb(data: &mut [u8], bit_offset: usize, n: usize, value: u32) {
 }
 
 /// `delta_palette.jxl` with its palette predictor rewritten to `Weighted`.
-fn delta_palette_with_weighted_predictor() -> Vec<u8> {
+pub(crate) fn delta_palette_with_weighted_predictor() -> Vec<u8> {
     let file = crate::util::test::fixture_bytes("conformance_test_images/delta_palette.jxl");
     let mut codestream = ContainerParser::collect_codestream(&file).unwrap();
     let (bit, predictor) = palette_predictor_bit_offset(&codestream);
