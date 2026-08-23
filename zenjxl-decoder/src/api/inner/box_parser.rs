@@ -106,10 +106,20 @@ impl BoxParser {
                         }
                     }
                 }
+                ParseState::CodestreamBox(0) => {
+                    // An empty codestream box (e.g. a `jxlp` with an index but no
+                    // payload) contributes nothing; look for the next box.
+                    self.state = ParseState::BoxNeeded;
+                }
                 ParseState::CodestreamBox(b) => {
                     return Ok(b);
                 }
                 ParseState::SkippableBox(mut s) => {
+                    if s == 0 {
+                        // Empty box (size == header size): nothing to skip.
+                        self.state = ParseState::BoxNeeded;
+                        continue;
+                    }
                     let num = s.min(usize::MAX as u64) as usize;
                     let skipped = if !self.box_buffer.is_empty() {
                         self.box_buffer.consume(num)
@@ -327,11 +337,16 @@ impl BoxParser {
                         }
                         _ => u32::from_be_bytes(self.box_buffer[0..4].try_into().unwrap()) as u64,
                     };
-                    // Per JXL spec: jxlc box with length 0 has special meaning "extends to EOF"
-                    let content_len = if box_len == 0 && (&ty == b"jxlp" || &ty == b"jxlc") {
+                    // ISOBMFF: a box size of 0 means "extends to the end of the
+                    // file" -- for any box type, as libjxl handles it (decode.cc);
+                    // every consumer below treats u64::MAX as "until EOF". A box
+                    // whose size equals its header size is a legal empty box
+                    // (libjxl only rejects `box_size < header_size`); the fork used
+                    // to reject both with InvalidBox. (jxl-rs #828)
+                    let content_len = if box_len == 0 {
                         u64::MAX
                     } else {
-                        if box_len <= (min_len + extra_len) as u64 {
+                        if box_len < (min_len + extra_len) as u64 {
                             return Err(at!(Error::InvalidBox));
                         }
                         box_len - min_len as u64 - extra_len as u64
