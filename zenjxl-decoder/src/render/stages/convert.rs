@@ -111,7 +111,9 @@ impl RenderPipelineInOutStage for ConvertModularXYBToF32Stage {
         for i in 0..xsize {
             output_x[0][i] = input_x[0][i] as f32 * scale_x;
             output_y[0][i] = input_y[0][i] as f32 * scale_y;
-            output_b[0][i] = (input_b[0][i] + input_y[0][i]) as f32 * scale_b;
+            // Add in f32: the two i32 samples are attacker-controlled and their
+            // sum can exceed i32::MAX (found by ClusterFuzzLite; jxl-rs #833).
+            output_b[0][i] = (input_b[0][i] as f32 + input_y[0][i] as f32) * scale_b;
         }
     }
 }
