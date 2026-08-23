@@ -47,16 +47,24 @@ perf pursued until within 8 % of upstream.
 | 5 | `728fc6e`, `d588318` | perf: modular palette applied one channel per thread (fork-only; closes the 1.25× MT gap on `delta_palette`); parallel render renders every group once (tiled full-readiness rectangles), pool lock scope, render-context pool |
 | 6 | `9b1998f`, `0038580`, `15ccc9e` | perf: f94cc26 `BufferFiller`; **fix** two pre-existing streamed-decode panics (fragment-path band split with overlapping columns; STEP 5 flush of an undecoded neighbour group), parallel/sequential path chosen per frame; fixtures #728 #734 #772, #875 LF-group colour test, e12b99b flush test, `decode_parallel` fuzz target, large-chunk incremental sweep, corpus-wide thread-count / chunked-parallel parity tests |
 
-Perf after batch 6 (CLI `--speedtest`, M4 Pro, fork / upstream `088ec7f`,
-`scripts/upstream-audit/speed_compare.sh`): 12 threads — every fixture of
-the 16-file set within 8 % (fork ahead on 11 of them, e.g. `patches` 1.8×,
-`bike` 1.45×, `green_queen_vardct_e3` 1.48×, `delta_palette` 1.21×;
-`cafe` 1.10× behind is the one exception, 1T 1.07×). 1 thread — all within
-8 % except `multiple_lf_420` at 1.085–1.10× (remaining gap is spread over
-the VarDCT coefficient loop codegen, ~1 ms/decode, and per-row render glue;
-see the batch-5/6 commit messages for the measurements; `mimalloc` in the
-CLI, out-of-line coefficient decode, bulk coefficient zeroing and
-force-inlined context helpers were all measured and gave nothing).
+Perf at the end of the sweep (fork `ceacc3b` vs upstream `088ec7f`, CLI
+`--speedtest`, M4 Pro 8P+4E, idle machine, `just speed-compare`; full table
+in `benchmarks/upstream_speed_compare_2026-08-23.tsv`). 12 threads, 17
+fixtures: fork ahead on 10 (`patches` 1.84×, `bike` 1.41×,
+`green_queen_vardct_e3` 1.49×, `delta_palette` 1.26×, `cafe_web_q80` 1.12×),
+at parity on 5, behind by 10 % on `cafe` (conformance) and `blendmodes` (a
+15 MP/s animation where threads barely matter). 1 thread: within 8 % on 14,
+behind by 9–12 % on `multiple_lf_420` (1.10×), `cafe` (1.09×) and the
+4:2:2 JPEG transcode `test_600x600_422_libjxl` (1.12×). Where the 1-thread
+gap sits (measured by elimination on `multiple_lf_420`, see the batch-5/6
+commit messages): the VarDCT coefficient entropy loop (~1.1 ms of 30 ms per
+decode; identical source, the fork's `decode_vardct_group` compiles to a
+larger function with more spills), and the per-row render glue (save stage,
+`run_stage_on` setup; the stage kernels themselves compile to the same inner
+loops). Tried and measured as no gain on aarch64: `mimalloc` in the CLI,
+an out-of-line coefficient decoder, bulk instead of per-block coefficient
+zeroing, force-inlined context helpers, inlining the NEON kernel into the
+`simd_function!` dispatcher.
 
 Still open from the audit: #716 flat-tree enum (measured slower on
 aarch64, reverted), #793/#797 reader-generic trees, #812 scratch cap and
