@@ -38,6 +38,7 @@ fn scale<const DENOM: usize>(value: usize, bit_depth: usize) -> i32 {
 // palette indices to implicit values. If index < nb_deltas, indicating that the
 // result is a delta palette entry, it is the responsibility of the caller to
 // treat it as such.
+#[inline(always)]
 fn get_palette_value(
     palette: &Image<i32>,
     index: isize,
@@ -45,6 +46,11 @@ fn get_palette_value(
     palette_size: usize,
     bit_depth: usize,
 ) -> i32 {
+    // Explicit palette entry: by far the common case, keep it a plain lookup
+    // ahead of the implicit-palette arithmetic.
+    if (index as usize) < palette_size {
+        return palette.row(c)[index as usize];
+    }
     if index < 0 {
         const DELTA_PALETTE: [[i32; 3]; 72] = [
             [0, 0, 0],
@@ -400,6 +406,47 @@ pub fn do_palette_step_one_group(
     let bit_depth = buf_in.bit_depth.bits_per_sample().min(24) as usize;
     let num_c = buf_out.len() / (grid_xsize * grid_ysize);
     let (xsize, ysize) = buf_out[0].data.size();
+
+    if num_deltas == 0 && predictor == Predictor::Zero {
+        // Pure lookup: no neighbour state, no deltas. This is the shape every
+        // lossless palette image from libjxl's encoder takes, so it matters
+        // that the inner loop is a tight row-to-row map (the general loop
+        // below re-resolves the output row per pixel).
+        let palette_size = num_colors;
+        for c in 0..num_c {
+            let out_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize + grid_x;
+            let out = &mut buf_out[out_idx].data;
+            if num_colors == 1 {
+                // Single-colour palette (e.g. a constant alpha channel): every
+                // in-range index maps to the same value.
+                let only = get_palette_value(palette, 0, c, palette_size, bit_depth);
+                for y in 0..h {
+                    let idx = buf_in.data.row(y);
+                    let out_row = out.row_mut(y);
+                    for (o, &index) in out_row.iter_mut().zip(idx) {
+                        *o = if index == 0 {
+                            only
+                        } else {
+                            get_palette_value(palette, index as isize, c, palette_size, bit_depth)
+                        };
+                    }
+                }
+                continue;
+            }
+            let pal_row = palette.row(c);
+            for y in 0..h {
+                let idx = buf_in.data.row(y);
+                let out_row = out.row_mut(y);
+                for (o, &index) in out_row.iter_mut().zip(idx) {
+                    *o = match pal_row.get(index as usize) {
+                        Some(&v) if index >= 0 => v,
+                        _ => get_palette_value(palette, index as isize, c, palette_size, bit_depth),
+                    };
+                }
+            }
+        }
+        return;
+    }
 
     for c in 0..num_c {
         let out_idx = c * grid_ysize * grid_xsize + grid_y * grid_xsize + grid_x;
