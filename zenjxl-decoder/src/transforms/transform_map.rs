@@ -7,6 +7,9 @@ pub const MAX_COEFF_BLOCKS: usize = 32;
 pub const MAX_BLOCK_DIM: usize = 8 * MAX_COEFF_BLOCKS;
 pub const MAX_COEFF_AREA: usize = MAX_BLOCK_DIM * MAX_BLOCK_DIM;
 
+// Variant names follow the spec / libjxl (`DCT`, `IDENTITY`, ...). The lint only
+// fires in the `--no-default-features` build, which is why affc97f dropped it.
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum HfTransformType {
     // Update HfTransformType::VALUES when changing this!

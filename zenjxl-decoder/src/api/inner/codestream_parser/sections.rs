@@ -171,7 +171,7 @@ impl CodestreamParser {
                 if use_overlap {
                     #[cfg(feature = "threads")]
                     {
-                        let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
+                        let lf_sections: Vec<_> = std::mem::take(&mut self.lf_sections);
                         let count = lf_sections.len();
                         let sections: Vec<(usize, Vec<u8>, usize)> = lf_sections
                             .into_iter()
@@ -195,7 +195,7 @@ impl CodestreamParser {
                 } else if use_parallel_lf {
                     #[cfg(feature = "threads")]
                     {
-                        let lf_sections: Vec<_> = self.lf_sections.drain(..).collect();
+                        let lf_sections: Vec<_> = std::mem::take(&mut self.lf_sections);
                         let count = lf_sections.len();
                         let sections: Vec<(usize, Vec<u8>, usize)> = lf_sections
                             .into_iter()

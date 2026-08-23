@@ -820,15 +820,14 @@ fn encode_block_progressive(
             r += 1;
             continue;
         }
-        let t2;
-        if temp < 0 {
+        let t2 = if temp < 0 {
             temp = -temp;
             temp >>= al;
-            t2 = !temp;
+            !temp
         } else {
             temp >>= al;
-            t2 = temp;
-        }
+            temp
+        };
         if temp == 0 {
             // Coefficient quantized to 0 at this bit-plane → still a zero run.
             r += 1;
