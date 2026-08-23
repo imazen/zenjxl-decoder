@@ -164,6 +164,56 @@ mod tests {
     /// - <https://github.com/libjxl/jxl-rs/issues/765>
     /// - <https://github.com/libjxl/jxl-rs/pull/766>
     /// - <https://github.com/imazen/zenjxl-decoder/issues/15>
+    /// jxl-rs #858 / libjxl conformance PR #48: a `Mul` blending frame in an
+    /// image with **no** extra channels.
+    ///
+    /// The frame header serialises the `clamp` bit for `Mul` blending even
+    /// when `num_extra_channels == 0` (libjxl `frame_header.cc`,
+    /// `BlendingInfo::VisitFields`). The fork only read it when extra channels
+    /// were present, so every field after it was shifted by one bit and the
+    /// decode failed with `Source file truncated`.
+    ///
+    /// The fixture is the 32-byte codestream from
+    /// <https://github.com/libjxl/conformance/pull/48>
+    /// (`testcases/mul_no_extra_channels/input.jxl`): an 8x8 Modular image
+    /// whose two frames multiply to a flat 0.25198 (16513/65535, as decoded
+    /// by djxl 0.12 and jxl-rs 0.6).
+    #[test]
+    fn jxlrs_858_mul_blend_without_extra_channels() {
+        let path = testdata_dir().join("jxlrs-858/mul_no_extra_channels.jxl");
+        let data = std::fs::read(&path).unwrap();
+
+        // Float pixels: the multiply must have happened (flat 0.25198, not the
+        // 0.5-ish single-frame value and not garbage).
+        let (_, frames) = crate::api::decoder::tests::decode(&data, usize::MAX, false, false, None)
+            .unwrap_or_else(|e| panic!("decode of {} failed: {e:?}", path.display()));
+        assert_eq!(frames.len(), 1, "expected exactly one visible frame");
+        let image = &frames[0][0];
+        assert_eq!(image.size(), (8 * 3, 8));
+        let expected = 16513.0 / 65535.0;
+        for y in 0..8 {
+            for (x, &v) in image.row(y).iter().enumerate() {
+                assert!(
+                    (v - expected).abs() < 1.5 / 65535.0,
+                    "pixel ({x}, {y}) = {v}, expected {expected}"
+                );
+            }
+        }
+
+        // Public u8 API: 0.25198 * 255 = 64.25 -> 64, or 65 once output
+        // dithering is applied. Alpha is synthesized opaque.
+        let img = crate::decode(&data).unwrap();
+        assert_eq!((img.width, img.height, img.channels), (8, 8, 4));
+        for px in img.data.chunks_exact(4) {
+            assert!(
+                px[..3].iter().all(|&c| c == 64 || c == 65),
+                "unexpected rgb {:?}",
+                &px[..3]
+            );
+            assert_eq!(px[3], 255);
+        }
+    }
+
     #[test]
     fn issue_15_lz77_distance_cluster_after_pad() {
         let path = testdata_dir().join("issue-15/akfcrc022_e9_d3.0.jxl");

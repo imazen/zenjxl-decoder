@@ -123,9 +123,14 @@ pub struct BlendingInfo {
         (mode == BlendingMode::Blend || mode == BlendingMode::AlphaWeightedAdd))]
     pub alpha_channel: u32,
 
+    // Spec / libjxl (frame_header.cc, BlendingInfo::VisitFields): the clamp
+    // bit is present for Blend/AlphaWeightedAdd when there are extra channels,
+    // and for Mul ALWAYS -- even with zero extra channels. Skipping it for Mul
+    // shifted every following field by one bit (jxl-rs #858).
     #[default(false)]
-    #[condition(nonserialized.num_extra_channels > 0 &&
-        (mode == BlendingMode::Blend || mode == BlendingMode::AlphaWeightedAdd || mode == BlendingMode::Mul))]
+    #[condition((nonserialized.num_extra_channels > 0 &&
+        (mode == BlendingMode::Blend || mode == BlendingMode::AlphaWeightedAdd)) ||
+        mode == BlendingMode::Mul)]
     pub clamp: bool,
 
     #[coder(u2S(0, 1, 2, 3))]

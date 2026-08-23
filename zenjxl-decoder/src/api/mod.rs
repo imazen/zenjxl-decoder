@@ -8,7 +8,12 @@
 mod color;
 mod convenience;
 mod data_types;
+#[cfg(not(test))]
 mod decoder;
+// Visible crate-wide under `cfg(test)` so other test modules can reuse the
+// `decoder::tests::decode` f32 helper (not public API either way).
+#[cfg(test)]
+pub(crate) mod decoder;
 mod inner;
 mod input;
 #[cfg(feature = "cms")]
