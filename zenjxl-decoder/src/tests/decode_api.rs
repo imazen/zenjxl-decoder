@@ -425,3 +425,27 @@ mod slow_probe_regression {
         );
     }
 }
+
+/// `JxlDecoderLimits::restrictive()` must admit real-world ICC profiles.
+/// Press CMYK profiles (GRACoL, SWOP, ISO Coated) are 1.8-3.5 MB; the old
+/// 1 MB cap rejected them with `LimitExceeded { resource: "icc_size" }`.
+/// The fixture is an 8x8 lossless image carrying a 1.1 MB profile (a real
+/// ACEScg profile plus a large private tag), 2.2 KB on disk.
+#[test]
+fn restrictive_limits_admit_multi_megabyte_icc_profile() {
+    use crate::api::{JxlDecoderLimits, JxlDecoderOptions};
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata/icc-limit/icc_1100kb_8x8.jxl");
+    let data = std::fs::read(&path).unwrap();
+    let options = JxlDecoderOptions::default().with_limits(JxlDecoderLimits::restrictive());
+    let img = crate::decode_with(&data, options)
+        .unwrap_or_else(|e| panic!("restrictive() rejected a 1.1 MB ICC profile: {e:?}"));
+    assert_eq!((img.width, img.height), (8, 8));
+    assert!(
+        matches!(&img.embedded_profile, crate::api::JxlColorProfile::Icc(icc) if icc.len() > 1 << 20)
+    );
+    // The cap is still a cap: a lower explicit limit rejects the same file.
+    let tight = JxlDecoderOptions::default()
+        .with_limits(JxlDecoderLimits::restrictive().with_max_icc_size(1 << 20));
+    assert!(crate::decode_with(&data, tight).is_err());
+}

@@ -105,12 +105,15 @@ impl JxlDecoderLimits {
         Self {
             max_pixels: Some(120_000_000), // 120 megapixels (admits common ~108 MP camera photos)
             max_extra_channels: Some(16),  // 16 extra channels
-            max_icc_size: Some(1 << 20),   // 1 MB
-            max_tree_size: Some(1 << 20),  // 1M nodes
-            max_patches: Some(1 << 16),    // 64K patches
+            // 16 MB: real press CMYK profiles run 1.8-3.5 MB (GRACoL, SWOP, ISO
+            // Coated), which the old 1 MB cap rejected. Same value upstream jxl-rs
+            // settled on (#813).
+            max_icc_size: Some(16 << 20),
+            max_tree_size: Some(1 << 20),     // 1M nodes
+            max_patches: Some(1 << 16),       // 64K patches
             max_spline_points: Some(1 << 16), // 64K points
-            max_reference_frames: Some(2), // 2 reference frames
-            max_memory_bytes: Some(1 << 30), // 1 GB total memory
+            max_reference_frames: Some(2),    // 2 reference frames
+            max_memory_bytes: Some(1 << 30),  // 1 GB total memory
         }
     }
 

@@ -61,7 +61,7 @@ let image = decode_with(&data, options)?;
 |-------|---------|-------------|
 | `max_pixels` | 2^28 (~256M) | 120M |
 | `max_extra_channels` | 256 | 16 |
-| `max_icc_size` | 256 MB | 1 MB |
+| `max_icc_size` | 256 MB | 16 MB |
 | `max_tree_size` | 4M nodes | 1M nodes |
 | `max_patches` | (derived from image size) | 64K |
 | `max_spline_points` | 1M | 64K |
