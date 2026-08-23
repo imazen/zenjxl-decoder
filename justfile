@@ -22,3 +22,20 @@ heaptrack-decode *ARGS:
     cargo build -p zenjxl-decoder --release --example heaptrack_decode
     rm -f /tmp/zenjxl-ht.zst
     heaptrack --output /tmp/zenjxl-ht ./target/release/examples/heaptrack_decode {{ARGS}}
+
+# The local version of the CI gate (.github/workflows/ci.yml): fmt, clippy
+# with all and with no features, tests with all features, with none, and
+# with `threads` but without `allow-unsafe`. Run before every push.
+ci:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+    cargo test --release --all --no-fail-fast --all-features
+    cargo test --release --all --no-fail-fast --no-default-features
+    cargo test --release --all --no-fail-fast --no-default-features --features threads,all-simd
+
+# Speed smoke test against an upstream jxl-rs build (see
+# scripts/upstream-audit/speed_compare.sh for the env vars; THREADS=12 for
+# the multi-threaded comparison).
+speed-compare *ARGS:
+    scripts/upstream-audit/speed_compare.sh {{ARGS}}
