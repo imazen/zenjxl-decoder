@@ -368,13 +368,25 @@ mod slow_probe_regression {
     /// took 100+ms.
     const MAX_PROBE_US: u128 = 10_000;
 
+    /// The probe is timed as the best of a few runs: the test binary runs
+    /// its tests in parallel and the fixture sweeps keep every core busy,
+    /// so a single wall-clock sample of a microsecond-scale probe can be
+    /// preempted past the limit (10.6 ms once on the ubuntu-24.04-arm
+    /// runner). A real O(n^2) regression is slow on every run.
+    const PROBE_RUNS: usize = 5;
+
     fn assert_fast_probe(name: &str, data: &[u8]) {
-        let start = Instant::now();
-        let _ = process_to_image_info(data);
-        let us = start.elapsed().as_micros();
+        let us = (0..PROBE_RUNS)
+            .map(|_| {
+                let start = Instant::now();
+                let _ = process_to_image_info(data);
+                start.elapsed().as_micros()
+            })
+            .min()
+            .unwrap();
         assert!(
             us <= MAX_PROBE_US,
-            "{name} probe took {us}us, limit is {MAX_PROBE_US}us"
+            "{name} probe took {us}us (best of {PROBE_RUNS}), limit is {MAX_PROBE_US}us"
         );
     }
 
