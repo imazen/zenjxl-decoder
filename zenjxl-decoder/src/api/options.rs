@@ -214,6 +214,20 @@ pub struct JxlDecoderOptions {
     ///
     /// Default: `false` (progressive content is decoded normally).
     pub reject_progressive: bool,
+    /// Apply blue-noise dithering when quantising to 8-bit output.
+    ///
+    /// libjxl dithers every `u8` output sample with a fixed 32x32 blue-noise
+    /// pattern (`stage_write.cc`), which breaks the banding that plain
+    /// rounding leaves in smooth gradients; jxl-rs does the same since 0.6.
+    /// The pattern is indexed by absolute pixel position, so output is
+    /// deterministic, identical for streamed and one-shot decodes, and
+    /// matches `djxl` bit-for-bit wherever the float pipelines agree. Exact
+    /// 8-bit values (lossless 8-bit content) are never changed; a lossy
+    /// sample moves by at most one code relative to plain rounding. Only
+    /// `U8` output is affected; `U16`/`F16`/`F32` are never dithered.
+    ///
+    /// Default: `true`. Set to `false` for plain round-to-nearest.
+    pub dither_u8: bool,
     pub render_spot_colors: bool,
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
@@ -253,6 +267,7 @@ impl Default for JxlDecoderOptions {
         Self {
             adjust_orientation: true,
             reject_progressive: false,
+            dither_u8: true,
             render_spot_colors: true,
             coalescing: true,
             skip_preview: true,
@@ -280,6 +295,14 @@ impl JxlDecoderOptions {
     #[must_use]
     pub fn with_reject_progressive(mut self, v: bool) -> Self {
         self.reject_progressive = v;
+        self
+    }
+
+    /// Enable or disable blue-noise dithering of 8-bit output (see
+    /// [`JxlDecoderOptions::dither_u8`]; default on).
+    #[must_use]
+    pub fn with_dither_u8(mut self, v: bool) -> Self {
+        self.dither_u8 = v;
         self
     }
 

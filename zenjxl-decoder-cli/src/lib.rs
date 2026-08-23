@@ -110,7 +110,8 @@ mod tests {
             let f32_pixels = extract_f32_frames(&f32_output);
 
             for (data_type, tolerance, name, clamps_values) in [
-                (OutputDataType::U8, 0.003, "u8", true),
+                // u8 is dithered: ±0.5/255 rounding plus ±0.49219/255 noise.
+                (OutputDataType::U8, 0.004, "u8", true),
                 (OutputDataType::U16, 0.0001, "u16", true),
                 (OutputDataType::F16, 0.001, "f16", false),
             ] {

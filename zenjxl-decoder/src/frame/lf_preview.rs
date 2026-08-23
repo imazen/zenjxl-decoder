@@ -58,7 +58,10 @@ impl Frame {
         }
         let (converter, constant_alpha) = match data_format {
             JxlDataFormat::U8 { bit_depth } => (
-                DataFormatConverter::U8(ConvertF32ToU8Stage::new(0, bit_depth)),
+                // The transient LF preview converts every channel through one
+                // stage at a fixed (0, 0) position, so the position-indexed
+                // dither would be misplaced here; the final frame is dithered.
+                DataFormatConverter::U8(ConvertF32ToU8Stage::new(0, bit_depth, false)),
                 RowBuffer::new_filled(
                     DataTypeTag::U8,
                     ulen,

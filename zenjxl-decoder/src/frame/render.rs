@@ -73,6 +73,7 @@ impl Frame {
         channels: &[usize],
         data_format: JxlDataFormat,
         clamp_range_for_f16: Option<(f32, f32)>,
+        dither: bool,
     ) -> RenderPipelineBuilder<P> {
         use crate::render::stages::{
             ConvertF32ToF16Stage, ConvertF32ToU8Stage, ConvertF32ToU16Stage,
@@ -81,8 +82,8 @@ impl Frame {
         match data_format {
             JxlDataFormat::U8 { bit_depth } => {
                 for &channel in channels {
-                    pipeline =
-                        pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
+                    pipeline = pipeline
+                        .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth, dither));
                 }
             }
             JxlDataFormat::U16 { bit_depth, .. } => {
@@ -2048,6 +2049,10 @@ impl Frame {
             // (`None`, e.g. alpha folded into color) or color itself was absent,
             // indexing past the end of `buffers` — the spot-colour decode panic.
             let mut output_buffer_index = 0usize;
+            // Blue-noise dither for every u8 conversion stage below (see
+            // render::stages::dither); a decoder-wide option so that every
+            // u8-producing stage agrees.
+            let dither = decoder_state.dither_u8;
             if let Some(df) = &pixel_format.color_data_format {
                 // Add premultiply stage if needed (before conversion to output format)
                 if should_premultiply && let Some(alpha_channel) = alpha_in_color {
@@ -2068,19 +2073,21 @@ impl Frame {
                         output_color_info.clone(),
                         bit_depth,
                         tf.clone(),
+                        dither,
                     ));
                     // Alpha channel still needs plain f32→u8 conversion (no TF/XYB)
                     for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
-                        pipeline =
-                            pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
+                        pipeline = pipeline
+                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth, dither));
                     }
                 } else if let Some(bit_depth) = fuse_srgb_to_u8_bit_depth {
                     use crate::render::stages::{ConvertF32ToU8Stage, FromLinearSrgbToU8Stage};
-                    pipeline = pipeline.add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth));
+                    pipeline = pipeline
+                        .add_inout_stage(FromLinearSrgbToU8Stage::new(0, bit_depth, dither));
                     // Alpha channel still needs plain f32→u8 conversion (no TF)
                     for &channel in color_source_channels.iter().filter(|&&c| c >= 3) {
-                        pipeline =
-                            pipeline.add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth));
+                        pipeline = pipeline
+                            .add_inout_stage(ConvertF32ToU8Stage::new(channel, bit_depth, dither));
                     }
                 } else {
                     pipeline = Self::add_conversion_stages(
@@ -2088,6 +2095,7 @@ impl Frame {
                         color_source_channels,
                         *df,
                         clamp_range_for_f16,
+                        dither,
                     );
                 }
                 pipeline = pipeline.add_save_stage(
@@ -2103,7 +2111,7 @@ impl Frame {
             for i in 0..frame_header.num_extra_channels as usize {
                 if let Some(df) = &pixel_format.extra_channel_format[i] {
                     // Add conversion stages for non-float output formats
-                    pipeline = Self::add_conversion_stages(pipeline, &[3 + i], *df, None);
+                    pipeline = Self::add_conversion_stages(pipeline, &[3 + i], *df, None, dither);
                     pipeline = pipeline.add_save_stage(
                         &[3 + i],
                         save_orientation,

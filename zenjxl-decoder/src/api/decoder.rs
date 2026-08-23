@@ -1373,8 +1373,11 @@ pub(crate) mod tests {
                     decode_with_format::<u8>(&file, &u8_format, use_simple, false);
 
                 // Compare values: u8 / 255.0 should match f32
-                // Tolerance: quantization error of ±0.5/255 ≈ 0.00196 plus small rounding
-                let tolerance = 0.003;
+                // Tolerance: quantization error of ±0.5/255 plus the blue-noise
+                // dither of up to ±0.49219/255 applied before rounding
+                // (render::stages::dither), i.e. (0.5 + 0.49219) / 255 = 0.00389,
+                // plus a little f32 rounding slack.
+                let tolerance = 0.004;
                 let mut max_error: f32 = 0.0;
 
                 for y in 0..height {

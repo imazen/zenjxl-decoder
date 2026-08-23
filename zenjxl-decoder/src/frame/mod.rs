@@ -124,6 +124,8 @@ pub struct DecoderState {
     pub nonvisible_frame_index: usize,
     pub high_precision: bool,
     pub premultiply_output: bool,
+    /// Blue-noise dither on u8 output (see `JxlDecoderOptions::dither_u8`).
+    pub dither_u8: bool,
     /// Whether to bake the image's stored EXIF/container orientation into the
     /// output pixels (the save stage applies the orientation transform so the
     /// emitted image is upright). When `false`, the orientation transform is
@@ -168,6 +170,7 @@ impl DecoderState {
             nonvisible_frame_index: 0,
             high_precision: false,
             premultiply_output: false,
+            dither_u8: true,
             adjust_orientation: true,
             desired_intensity_target: None,
             embedded_color_profile: None,
@@ -208,6 +211,7 @@ impl std::fmt::Debug for DecoderState {
             .field("visible_frame_index", &self.visible_frame_index)
             .field("nonvisible_frame_index", &self.nonvisible_frame_index)
             .field("high_precision", &self.high_precision)
+            .field("dither_u8", &self.dither_u8)
             .field("parallel", &self.parallel)
             .finish_non_exhaustive()
     }

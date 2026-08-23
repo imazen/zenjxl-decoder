@@ -17,6 +17,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   only the frame/render/api layer carries the wrapper. (#28)
 
 ### Added
+- **Blue-noise dithering of 8-bit output, on by default** (port of libjxl
+  `stage_write.cc` / jxl-rs #841). Every `U8` conversion stage (plain, fused
+  XYB→sRGB/gamma, fused linear→sRGB) adds the 32×32 pattern, indexed by
+  absolute position and channel, before rounding. `djxl`'s RGB8 output is now
+  reproduced byte-for-byte on `with_preview.jxl` (was 25 % of samples ±1);
+  lossless 8-bit content is unchanged; `U16`/`F16`/`F32` output is never
+  dithered. New `JxlDecoderOptions::dither_u8` / `with_dither_u8(false)`
+  restores plain rounding. The u8-vs-f32 consistency tests' tolerance moves
+  from 0.003 to 0.004 = (0.5 + 0.49219) / 255, the derived bound.
 - `Error::kind() -> ErrorClass` and the `ErrorClass` enum (re-exported from
   `zenjxl_decoder::api`): a coarse, best-effort classification of decode errors —
   `InvalidBitstream` / `LimitExceeded` / `OutOfMemory` / `Cancelled` / `Io` /

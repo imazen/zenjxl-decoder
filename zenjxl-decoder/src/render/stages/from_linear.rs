@@ -209,13 +209,16 @@ impl TryFrom<CustomTransferFunction> for TransferFunction {
 pub struct FromLinearSrgbToU8Stage {
     first_channel: usize,
     bit_depth: u8,
+    /// Blue-noise dither before the u8 rounding (see [`super::dither`]).
+    dither: bool,
 }
 
 impl FromLinearSrgbToU8Stage {
-    pub fn new(first_channel: usize, bit_depth: u8) -> Self {
+    pub fn new(first_channel: usize, bit_depth: u8, dither: bool) -> Self {
         Self {
             first_channel,
             bit_depth,
+            dither,
         }
     }
 }
@@ -246,14 +249,21 @@ impl RenderPipelineInOutStage for FromLinearSrgbToU8Stage {
 
     fn process_row_chunk(
         &self,
-        _position: (usize, usize),
+        position: (usize, usize),
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let max_val = ((1u32 << self.bit_depth) - 1) as f32;
-        fused_srgb_to_u8_channel_dispatch(max_val, xsize, input_rows, output_rows);
+        fused_srgb_to_u8_channel_dispatch(
+            max_val,
+            xsize,
+            input_rows,
+            output_rows,
+            position,
+            self.dither,
+        );
     }
 }
 
@@ -265,6 +275,8 @@ simd_function!(
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
+        position: (usize, usize),
+        dither: bool,
     ) {
         #[allow(clippy::excessive_precision)]
         const P: [f32; 5] = [
@@ -298,9 +310,10 @@ simd_function!(
             let input = input_rows[c][0];
             let output = &mut output_rows[c][0];
 
-            for (in_chunk, out_chunk) in input[..end]
+            for (i, (in_chunk, out_chunk)) in input[..end]
                 .chunks_exact(D::F32Vec::LEN)
                 .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
+                .enumerate()
             {
                 let v = D::F32Vec::load(d, in_chunk);
                 // Clamp to [0, 1]
@@ -312,8 +325,20 @@ simd_function!(
                         a * linear_scale,
                         eval_rational_poly_simd(d, a.sqrt(), P, Q),
                     );
-                // Scale and convert to u8
-                (srgb * scale).round_store_u8(out_chunk);
+                // Scale (+ dither, like libjxl's MakeUnsigned) and convert to u8
+                if dither {
+                    let noise = super::dither::dither_vec(
+                        d,
+                        (position.0 + i * D::F32Vec::LEN, position.1),
+                        c,
+                    );
+                    (srgb * scale + noise)
+                        .max(zero)
+                        .min(scale)
+                        .round_store_u8(out_chunk);
+                } else {
+                    (srgb * scale).round_store_u8(out_chunk);
+                }
             }
         }
     }

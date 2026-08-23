@@ -318,15 +318,21 @@ impl RenderPipelineInOutStage for ConvertModularToF32Stage {
     }
 }
 
-/// Stage that converts f32 values in [0, 1] range to u8 values.
+/// Stage that converts f32 values in [0, 1] range to u8 values, with
+/// optional blue-noise dithering (see [`super::dither`]).
 pub struct ConvertF32ToU8Stage {
     channel: usize,
     bit_depth: u8,
+    dither: bool,
 }
 
 impl ConvertF32ToU8Stage {
-    pub fn new(channel: usize, bit_depth: u8) -> ConvertF32ToU8Stage {
-        ConvertF32ToU8Stage { channel, bit_depth }
+    pub fn new(channel: usize, bit_depth: u8, dither: bool) -> ConvertF32ToU8Stage {
+        ConvertF32ToU8Stage {
+            channel,
+            bit_depth,
+            dither,
+        }
     }
 }
 
@@ -340,26 +346,52 @@ impl std::fmt::Display for ConvertF32ToU8Stage {
     }
 }
 
-// SIMD F32 to U8 conversion
+/// Dither selector for the f32 -> u8 kernels: the output channel whose table
+/// offset to use, or `None` for plain rounding.
+type DitherChannel = Option<usize>;
+
+// SIMD F32 to U8 conversion, optionally dithered. Matches libjxl's
+// MakeUnsigned: v * max (+ dither), clamp to [0, max], round to nearest.
 simd_function!(
     f32_to_u8_simd_dispatch,
     d: D,
-    fn f32_to_u8_simd(input: &[f32], output: &mut [u8], max: f32, xsize: usize) {
+    fn f32_to_u8_simd(
+        input: &[f32],
+        output: &mut [u8],
+        max: f32,
+        xsize: usize,
+        position: (usize, usize),
+        dither: DitherChannel,
+    ) {
         let zero = D::F32Vec::splat(d, 0.0);
-        let one = D::F32Vec::splat(d, 1.0);
         let scale = D::F32Vec::splat(d, max);
 
         // Pre-slice to avoid .take() iterator adapter overhead (buffers are padded).
         let end = xsize.next_multiple_of(D::F32Vec::LEN);
-        for (input_chunk, output_chunk) in input[..end]
-            .chunks_exact(D::F32Vec::LEN)
-            .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
-        {
-            let val = D::F32Vec::load(d, input_chunk);
-            // Clamp to [0, 1] and scale
-            let clamped = val.max(zero).min(one);
-            let scaled = clamped * scale;
-            scaled.round_store_u8(output_chunk);
+        if let Some(channel) = dither {
+            for (i, (input_chunk, output_chunk)) in input[..end]
+                .chunks_exact(D::F32Vec::LEN)
+                .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
+                .enumerate()
+            {
+                let val = D::F32Vec::load(d, input_chunk);
+                let noise = super::dither::dither_vec(
+                    d,
+                    (position.0 + i * D::F32Vec::LEN, position.1),
+                    channel,
+                );
+                let scaled = (val * scale + noise).max(zero).min(scale);
+                scaled.round_store_u8(output_chunk);
+            }
+        } else {
+            for (input_chunk, output_chunk) in input[..end]
+                .chunks_exact(D::F32Vec::LEN)
+                .zip(output[..end].chunks_exact_mut(D::F32Vec::LEN))
+            {
+                let val = D::F32Vec::load(d, input_chunk);
+                let scaled = (val * scale).max(zero).min(scale);
+                scaled.round_store_u8(output_chunk);
+            }
         }
     }
 );
@@ -376,7 +408,7 @@ impl RenderPipelineInOutStage for ConvertF32ToU8Stage {
 
     fn process_row_chunk(
         &self,
-        _position: (usize, usize),
+        position: (usize, usize),
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
@@ -385,7 +417,14 @@ impl RenderPipelineInOutStage for ConvertF32ToU8Stage {
         let input = input_rows[0][0];
         let output = &mut output_rows[0][0];
         let max = ((1u32 << self.bit_depth) - 1) as f32;
-        f32_to_u8_simd_dispatch(input, output, max, xsize);
+        f32_to_u8_simd_dispatch(
+            input,
+            output,
+            max,
+            xsize,
+            position,
+            self.dither.then_some(self.channel),
+        );
     }
 
     fn is_special_case(&self) -> Option<StageSpecialCase> {
@@ -616,7 +655,7 @@ mod test {
     #[test]
     fn f32_to_u8_consistency() -> Result<()> {
         crate::render::test::test_stage_consistency(
-            || ConvertF32ToU8Stage::new(0, 8),
+            || ConvertF32ToU8Stage::new(0, 8, false),
             (500, 500),
             1,
         )

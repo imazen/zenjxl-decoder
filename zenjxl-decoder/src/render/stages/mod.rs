@@ -10,6 +10,7 @@ mod cms;
 #[cfg(feature = "cms")]
 mod cms_cmyk;
 mod convert;
+pub(crate) mod dither;
 mod epf;
 mod extend;
 mod from_linear;

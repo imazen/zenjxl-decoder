@@ -270,6 +270,8 @@ pub struct XybToU8Stage {
     output_color_info: OutputColorInfo,
     bit_depth: u8,
     tf: super::from_linear::TransferFunction,
+    /// Blue-noise dither before the u8 rounding (see [`super::dither`]).
+    dither: bool,
 }
 
 impl XybToU8Stage {
@@ -278,12 +280,14 @@ impl XybToU8Stage {
         output_color_info: OutputColorInfo,
         bit_depth: u8,
         tf: super::from_linear::TransferFunction,
+        dither: bool,
     ) -> Self {
         Self {
             first_channel,
             output_color_info,
             bit_depth,
             tf,
+            dither,
         }
     }
 }
@@ -342,12 +346,15 @@ simd_function!(
     d: D,
     fn xyb_to_srgb_u8_process(
         opsin: &OpsinInverseMatrix,
-        intensity_target: f32,
-        max_val: f32,
+        // [intensity_target, max_val]
+        params: &[f32; 2],
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
+        // Absolute position of this chunk when dithering, `None` for plain rounding.
+        dither_at: Option<(usize, usize)>,
     ) {
+        let [intensity_target, max_val] = *params;
         let OpsinInverseMatrix {
             inverse_matrix: mat,
             opsin_biases: bias,
@@ -405,27 +412,45 @@ simd_function!(
                 d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
             );
 
-            // sRGB TF + u8 quantize
+            // sRGB TF + u8 quantize (optionally dithered, like libjxl's
+            // MakeUnsigned: v * max + noise, clamp [0, max], round).
             let r_c = r_lin.max(zero).min(one);
             let r_srgb = threshold.gt(r_c).if_then_else_f32(
                 r_c * linear_scale,
                 eval_rational_poly_simd(d, r_c.sqrt(), P, Q),
             );
-            (r_srgb * scale).round_store_u8(&mut out_r[0][idx..]);
-
             let g_c = g_lin.max(zero).min(one);
             let g_srgb = threshold.gt(g_c).if_then_else_f32(
                 g_c * linear_scale,
                 eval_rational_poly_simd(d, g_c.sqrt(), P, Q),
             );
-            (g_srgb * scale).round_store_u8(&mut out_g[0][idx..]);
-
             let b_c = b_lin.max(zero).min(one);
             let b_srgb = threshold.gt(b_c).if_then_else_f32(
                 b_c * linear_scale,
                 eval_rational_poly_simd(d, b_c.sqrt(), P, Q),
             );
-            (b_srgb * scale).round_store_u8(&mut out_b[0][idx..]);
+            if let Some(position) = dither_at {
+                let pos = (position.0 + idx, position.1);
+                let nr = super::dither::dither_vec(d, pos, 0);
+                let ng = super::dither::dither_vec(d, pos, 1);
+                let nb = super::dither::dither_vec(d, pos, 2);
+                (r_srgb * scale + nr)
+                    .max(zero)
+                    .min(scale)
+                    .round_store_u8(&mut out_r[0][idx..]);
+                (g_srgb * scale + ng)
+                    .max(zero)
+                    .min(scale)
+                    .round_store_u8(&mut out_g[0][idx..]);
+                (b_srgb * scale + nb)
+                    .max(zero)
+                    .min(scale)
+                    .round_store_u8(&mut out_b[0][idx..]);
+            } else {
+                (r_srgb * scale).round_store_u8(&mut out_r[0][idx..]);
+                (g_srgb * scale).round_store_u8(&mut out_g[0][idx..]);
+                (b_srgb * scale).round_store_u8(&mut out_b[0][idx..]);
+            }
         }
     }
 );
@@ -439,6 +464,8 @@ simd_function!(
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
+        // Absolute position of this chunk when dithering, `None` for plain rounding.
+        dither_at: Option<(usize, usize)>,
     ) {
         let [intensity_target, gamma, max_val] = *gamma_params;
         let OpsinInverseMatrix {
@@ -483,15 +510,32 @@ simd_function!(
             // Gamma TF + u8 quantize: powf(abs(x), gamma) * copysign(1, x)
             let r_abs = r_lin.abs().max(zero);
             let r_tf = crate::util::fast_powf_simd(d, r_abs, gamma_vec).copysign(r_lin);
-            (r_tf * scale).round_store_u8(&mut out_r[0][idx..]);
-
             let g_abs = g_lin.abs().max(zero);
             let g_tf = crate::util::fast_powf_simd(d, g_abs, gamma_vec).copysign(g_lin);
-            (g_tf * scale).round_store_u8(&mut out_g[0][idx..]);
-
             let b_abs = b_lin.abs().max(zero);
             let b_tf = crate::util::fast_powf_simd(d, b_abs, gamma_vec).copysign(b_lin);
-            (b_tf * scale).round_store_u8(&mut out_b[0][idx..]);
+            if let Some(position) = dither_at {
+                let pos = (position.0 + idx, position.1);
+                let nr = super::dither::dither_vec(d, pos, 0);
+                let ng = super::dither::dither_vec(d, pos, 1);
+                let nb = super::dither::dither_vec(d, pos, 2);
+                (r_tf * scale + nr)
+                    .max(zero)
+                    .min(scale)
+                    .round_store_u8(&mut out_r[0][idx..]);
+                (g_tf * scale + ng)
+                    .max(zero)
+                    .min(scale)
+                    .round_store_u8(&mut out_g[0][idx..]);
+                (b_tf * scale + nb)
+                    .max(zero)
+                    .min(scale)
+                    .round_store_u8(&mut out_b[0][idx..]);
+            } else {
+                (r_tf * scale).round_store_u8(&mut out_r[0][idx..]);
+                (g_tf * scale).round_store_u8(&mut out_g[0][idx..]);
+                (b_tf * scale).round_store_u8(&mut out_b[0][idx..]);
+            }
         }
     }
 );
@@ -508,7 +552,7 @@ impl RenderPipelineInOutStage for XybToU8Stage {
 
     fn process_row_chunk(
         &self,
-        _position: (usize, usize),
+        position: (usize, usize),
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<u8>,
@@ -519,11 +563,11 @@ impl RenderPipelineInOutStage for XybToU8Stage {
             super::from_linear::TransferFunction::Srgb => {
                 xyb_to_srgb_u8_dispatch(
                     &self.output_color_info.opsin,
-                    self.output_color_info.intensity_target,
-                    max_val,
+                    &[self.output_color_info.intensity_target, max_val],
                     xsize,
                     input_rows,
                     output_rows,
+                    self.dither.then_some(position),
                 );
             }
             super::from_linear::TransferFunction::Gamma(gamma) => {
@@ -533,6 +577,7 @@ impl RenderPipelineInOutStage for XybToU8Stage {
                     xsize,
                     input_rows,
                     output_rows,
+                    self.dither.then_some(position),
                 );
             }
             _ => unreachable!("XybToU8Stage only supports Srgb and Gamma TFs"),
@@ -658,6 +703,7 @@ mod test {
                     OutputColorInfo::default(),
                     8,
                     super::super::from_linear::TransferFunction::Srgb,
+                    true,
                 )
             },
             (500, 500),
@@ -674,6 +720,7 @@ mod test {
                     OutputColorInfo::default(),
                     8,
                     super::super::from_linear::TransferFunction::Gamma(0.454545),
+                    true,
                 )
             },
             (500, 500),

@@ -48,6 +48,7 @@ pub(super) fn apply_decoder_options(
     state.render_spotcolors = decode_options.render_spot_colors;
     state.high_precision = decode_options.high_precision;
     state.premultiply_output = decode_options.premultiply_output;
+    state.dither_u8 = decode_options.dither_u8;
     state.adjust_orientation = decode_options.adjust_orientation;
     state.desired_intensity_target = decode_options.desired_intensity_target;
     state.embedded_color_profile = embedded_color_profile.clone();

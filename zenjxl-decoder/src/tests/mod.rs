@@ -17,6 +17,7 @@ pub mod container_boxes;
 pub mod convenience;
 pub mod coverage_boost;
 pub mod decode_api;
+pub mod dither;
 pub mod entropy;
 pub mod feature_corpus;
 pub mod feature_tests;
