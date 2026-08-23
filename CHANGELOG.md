@@ -26,6 +26,14 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   dithered. New `JxlDecoderOptions::dither_u8` / `with_dither_u8(false)`
   restores plain rounding. The u8-vs-f32 consistency tests' tolerance moves
   from 0.003 to 0.004 = (0.5 + 0.49219) / 255, the derived bound.
+- **Out-of-order `jxlp` boxes** (ISO/IEC 18181-2 with `ftyp` minor version 1,
+  as written by `cjxl --output_mode 2`; port of jxl-rs #752/#777). A `jxlp`
+  box ahead of the next expected index is buffered (bounded: 1024 boxes,
+  growth in 64 KB steps with fallible allocation, no upfront allocation of
+  the declared size) and spliced in when its turn comes. Version-0 files
+  with out-of-order boxes, duplicate indices and size-0 out-of-order boxes
+  are rejected as before. `ftyp` is now required to be the second box,
+  exactly once, as in libjxl.
 - `Error::kind() -> ErrorClass` and the `ErrorClass` enum (re-exported from
   `zenjxl_decoder::api`): a coarse, best-effort classification of decode errors —
   `InvalidBitstream` / `LimitExceeded` / `OutOfMemory` / `Cancelled` / `Io` /
