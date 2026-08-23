@@ -70,6 +70,13 @@ jobs:
             features: avx512
           - os: ubuntu-24.04-arm
             features: neon
+          # The parallel decode path under `#![forbid(unsafe_code)]`: `threads`
+          # without `allow-unsafe` (the `all` run has both), one x86 and one
+          # aarch64 runner.
+          - os: ubuntu-latest
+            features: threads-safe
+          - os: ubuntu-24.04-arm
+            features: threads-safe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,8 +96,12 @@ jobs:
         if: matrix.features == 'none'
         run: cargo test --release --all --no-fail-fast --no-default-features
 
+      - name: Test (threads, no allow-unsafe)
+        if: matrix.features == 'threads-safe'
+        run: cargo test --release --all --no-fail-fast --no-default-features --features threads,all-simd
+
       - name: Test (SIMD ${{ matrix.features }})
-        if: matrix.features != 'all' && matrix.features != 'none'
+        if: matrix.features != 'all' && matrix.features != 'none' && matrix.features != 'threads-safe'
         run: cargo test --release --all --no-fail-fast --no-default-features --features ${{ matrix.features }}
 
   test-i686:
