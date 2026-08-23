@@ -208,6 +208,9 @@ pub(super) fn decode_modular_channel(
         TreeSpecialCase::NoWp(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
+        TreeSpecialCase::NoWp420(t) => {
+            decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+        }
         TreeSpecialCase::WpOnlyConfig420(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
@@ -218,6 +221,9 @@ pub(super) fn decode_modular_channel(
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::General(t) => {
+            decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+        }
+        TreeSpecialCase::General420(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
     }

@@ -25,7 +25,10 @@ use crate::{
     image::Image,
 };
 
-pub struct NoWpTree {
+/// `C420`: every cluster uses hybrid-uint config 420 and LZ77 is off, so the
+/// specialised `read_*_config_420` reader can be used (no reader-state
+/// dispatch, no per-cluster config lookup per pixel).
+pub struct NoWpTree<const C420: bool> {
     flat_nodes: Vec<FlatTreeNode>,
     references: Image<i32>,
     property_buffer: Vec<i32>,
@@ -36,7 +39,7 @@ pub struct NoWpTree {
     single_value: Option<i32>,
 }
 
-impl NoWpTree {
+impl<const C420: bool> NoWpTree<C420> {
     fn new(
         nodes: Vec<TreeNode>,
         max_property_count: usize,
@@ -68,7 +71,7 @@ impl NoWpTree {
     }
 }
 
-impl ModularChannelDecoder for NoWpTree {
+impl<const C420: bool> ModularChannelDecoder for NoWpTree<C420> {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = true;
 
@@ -102,6 +105,12 @@ impl ModularChannelDecoder for NoWpTree {
         );
         let dec = if let Some(sv) = self.single_value {
             sv
+        } else if C420 {
+            reader.read_signed_clustered_config_420(
+                histograms,
+                br,
+                prediction_result.context as usize,
+            )
         } else {
             reader.read_signed_clustered_inline(histograms, br, prediction_result.context as usize)
         };
@@ -109,12 +118,12 @@ impl ModularChannelDecoder for NoWpTree {
     }
 }
 
-pub struct GeneralTree {
-    no_wp_tree: NoWpTree,
+pub struct GeneralTree<const C420: bool> {
+    no_wp_tree: NoWpTree<C420>,
     wp_state: WeightedPredictorState,
 }
 
-impl GeneralTree {
+impl<const C420: bool> GeneralTree<C420> {
     fn new(
         nodes: Vec<TreeNode>,
         max_property_count: usize,
@@ -139,7 +148,7 @@ impl GeneralTree {
     }
 }
 
-impl ModularChannelDecoder for GeneralTree {
+impl<const C420: bool> ModularChannelDecoder for GeneralTree<C420> {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = true;
 
@@ -170,6 +179,12 @@ impl ModularChannelDecoder for GeneralTree {
         );
         let dec = if let Some(sv) = self.no_wp_tree.single_value {
             sv
+        } else if C420 {
+            reader.read_signed_clustered_config_420(
+                histograms,
+                br,
+                prediction_result.context as usize,
+            )
         } else {
             reader.read_signed_clustered_inline(histograms, br, prediction_result.context as usize)
         };
@@ -443,11 +458,13 @@ impl ModularChannelDecoder for NoTree {
 
 pub enum TreeSpecialCase {
     NoTree(NoTree),
-    NoWp(NoWpTree),
+    NoWp(NoWpTree<false>),
+    NoWp420(NoWpTree<true>),
     WpOnlyConfig420(WpOnlyLookupConfig420),
     GradientLookupConfig420(GradientLookupConfig420),
     SingleGradientOnly(SingleGradientOnly),
-    General(GeneralTree),
+    General(GeneralTree<false>),
+    General420(GeneralTree<true>),
 }
 
 pub fn specialize_tree(
@@ -537,6 +554,9 @@ pub fn specialize_tree(
     if !is_single_symbol {
         single_symbol = None;
     }
+    // Whether the specialised config-420 entropy reader may be used for the
+    // remaining tree shapes (its preconditions: no LZ77, all configs 420).
+    let config_420 = tree.histograms.can_use_config_420_fast_path();
 
     if let [
         TreeNode::Leaf {
@@ -582,23 +602,46 @@ pub fn specialize_tree(
         if let Some(gl) = make_gradient_lut_config_420(&pruned_tree, &tree.histograms) {
             return Ok(TreeSpecialCase::GradientLookupConfig420(gl));
         }
-        return Ok(TreeSpecialCase::NoWp(NoWpTree::new(
+        return Ok(if config_420 {
+            TreeSpecialCase::NoWp420(NoWpTree::new(
+                pruned_tree,
+                tree.max_property_count(),
+                channel,
+                stream,
+                xsize,
+                single_symbol,
+            )?)
+        } else {
+            TreeSpecialCase::NoWp(NoWpTree::new(
+                pruned_tree,
+                tree.max_property_count(),
+                channel,
+                stream,
+                xsize,
+                single_symbol,
+            )?)
+        });
+    }
+
+    Ok(if config_420 {
+        TreeSpecialCase::General420(GeneralTree::new(
             pruned_tree,
             tree.max_property_count(),
+            header,
             channel,
             stream,
             xsize,
             single_symbol,
-        )?));
-    }
-
-    Ok(TreeSpecialCase::General(GeneralTree::new(
-        pruned_tree,
-        tree.max_property_count(),
-        header,
-        channel,
-        stream,
-        xsize,
-        single_symbol,
-    )?))
+        )?)
+    } else {
+        TreeSpecialCase::General(GeneralTree::new(
+            pruned_tree,
+            tree.max_property_count(),
+            header,
+            channel,
+            stream,
+            xsize,
+            single_symbol,
+        )?)
+    })
 }
