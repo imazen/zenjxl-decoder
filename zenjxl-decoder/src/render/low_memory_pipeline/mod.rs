@@ -15,7 +15,7 @@ use crate::image::{DataTypeTag, Image, ImageDataType, OwnedRawImage, Rect};
 use crate::render::MAX_BORDER;
 use crate::render::buffer_splitter::{BufferSplitter, SaveStageBufferInfo};
 use crate::render::internal::Stage;
-use crate::render::low_memory_pipeline::group_scheduler::InputBuffer;
+use crate::render::low_memory_pipeline::group_scheduler::{FullReadiness, InputBuffer};
 use crate::util::{ShiftRightCeil, tracing_wrappers::*};
 
 use super::RenderPipeline;
@@ -644,7 +644,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                 &is_ready,
                 &self.shared,
                 self.border_size,
-                true,
+                FullReadiness::Some(true),
             )?;
             if items.is_empty() {
                 continue;
@@ -820,11 +820,17 @@ impl LowMemoryRenderPipeline {
             let mut group_has_items = Vec::with_capacity(extracted_groups.len());
             // Full readiness is common in one-shot mode.
             let full_readiness = self.input_buffers.iter().all(|b| b.is_ready);
+            let whole_image = extracted_groups.len() == self.input_buffers.len();
             if full_readiness {
                 for &g in &extracted_groups {
                     let empty_ready = []; // unused with full_readiness=true
-                    let group_items =
-                        group_scheduler::compute_work_items(g, &empty_ready, shared, bs, true)?;
+                    let group_items = group_scheduler::compute_work_items(
+                        g,
+                        &empty_ready,
+                        shared,
+                        bs,
+                        FullReadiness::Some(whole_image),
+                    )?;
                     let has = !group_items.is_empty();
                     items.extend(group_items);
                     group_has_items.push((g, has));
@@ -832,8 +838,13 @@ impl LowMemoryRenderPipeline {
             } else {
                 let is_ready: Vec<bool> = self.input_buffers.iter().map(|b| b.is_ready).collect();
                 for &g in &extracted_groups {
-                    let group_items =
-                        group_scheduler::compute_work_items(g, &is_ready, shared, bs, false)?;
+                    let group_items = group_scheduler::compute_work_items(
+                        g,
+                        &is_ready,
+                        shared,
+                        bs,
+                        FullReadiness::No,
+                    )?;
                     let has = !group_items.is_empty();
                     items.extend(group_items);
                     group_has_items.push((g, has));
@@ -868,10 +879,16 @@ impl LowMemoryRenderPipeline {
         let bs = self.border_size;
         let mut items = Vec::with_capacity(extracted_groups.len());
         let mut group_has_items = Vec::with_capacity(extracted_groups.len());
+        let whole_image = extracted_groups.len() == self.input_buffers.len();
         if full_readiness {
             for &g in &extracted_groups {
-                let group_items =
-                    group_scheduler::compute_work_items(g, &is_ready, shared, bs, true)?;
+                let group_items = group_scheduler::compute_work_items(
+                    g,
+                    &is_ready,
+                    shared,
+                    bs,
+                    FullReadiness::Some(whole_image),
+                )?;
                 let has = !group_items.is_empty();
                 items.extend(group_items);
                 group_has_items.push((g, has));
@@ -880,8 +897,13 @@ impl LowMemoryRenderPipeline {
             let results: Vec<(usize, Vec<group_scheduler::RenderWorkItem>)> = extracted_groups
                 .par_iter()
                 .map(|&g| {
-                    let items =
-                        group_scheduler::compute_work_items(g, &is_ready, shared, bs, false)?;
+                    let items = group_scheduler::compute_work_items(
+                        g,
+                        &is_ready,
+                        shared,
+                        bs,
+                        FullReadiness::No,
+                    )?;
                     Ok((g, items))
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -952,11 +974,17 @@ impl LowMemoryRenderPipeline {
             let mut items = Vec::with_capacity(extracted_groups.len());
             let mut group_has_items = Vec::with_capacity(extracted_groups.len());
             let full_readiness = self.input_buffers.iter().all(|b| b.is_ready);
+            let whole_image = extracted_groups.len() == self.input_buffers.len();
             if full_readiness {
                 for &g in &extracted_groups {
                     let empty_ready = [];
-                    let group_items =
-                        group_scheduler::compute_work_items(g, &empty_ready, shared, bs, true)?;
+                    let group_items = group_scheduler::compute_work_items(
+                        g,
+                        &empty_ready,
+                        shared,
+                        bs,
+                        FullReadiness::Some(whole_image),
+                    )?;
                     let has = !group_items.is_empty();
                     items.extend(group_items);
                     group_has_items.push((g, has));
@@ -964,8 +992,13 @@ impl LowMemoryRenderPipeline {
             } else {
                 let is_ready: Vec<bool> = self.input_buffers.iter().map(|b| b.is_ready).collect();
                 for &g in &extracted_groups {
-                    let group_items =
-                        group_scheduler::compute_work_items(g, &is_ready, shared, bs, false)?;
+                    let group_items = group_scheduler::compute_work_items(
+                        g,
+                        &is_ready,
+                        shared,
+                        bs,
+                        FullReadiness::No,
+                    )?;
                     let has = !group_items.is_empty();
                     items.extend(group_items);
                     group_has_items.push((g, has));
@@ -1008,10 +1041,16 @@ impl LowMemoryRenderPipeline {
         let bs = self.border_size;
         let mut items = Vec::with_capacity(extracted_groups.len());
         let mut group_has_items = Vec::with_capacity(extracted_groups.len());
+        let whole_image = extracted_groups.len() == self.input_buffers.len();
         if full_readiness {
             for &g in &extracted_groups {
-                let group_items =
-                    group_scheduler::compute_work_items(g, &is_ready, shared, bs, true)?;
+                let group_items = group_scheduler::compute_work_items(
+                    g,
+                    &is_ready,
+                    shared,
+                    bs,
+                    FullReadiness::Some(whole_image),
+                )?;
                 let has = !group_items.is_empty();
                 items.extend(group_items);
                 group_has_items.push((g, has));
@@ -1020,8 +1059,13 @@ impl LowMemoryRenderPipeline {
             let results: Vec<(usize, Vec<group_scheduler::RenderWorkItem>)> = extracted_groups
                 .par_iter()
                 .map(|&g| {
-                    let items =
-                        group_scheduler::compute_work_items(g, &is_ready, shared, bs, false)?;
+                    let items = group_scheduler::compute_work_items(
+                        g,
+                        &is_ready,
+                        shared,
+                        bs,
+                        FullReadiness::No,
+                    )?;
                     Ok((g, items))
                 })
                 .collect::<Result<Vec<_>>>()?;

@@ -9,11 +9,15 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+rayon = "1.12.0"
 
 [dependencies.zenjxl-decoder]
 path = "../zenjxl-decoder"
 default-features = false
-features = []
+# `threads` for the decode_parallel target; the other targets set
+# `parallel = false` (decode_with_limits) or use the convenience API, whose
+# default `parallel = true` now also runs on the rayon pool.
+features = ["threads"]
 
 # Prevent this from interfering with workspace resolution
 [workspace]
@@ -36,4 +40,9 @@ doc = false
 [[bin]]
 name = "decode_with_limits"
 path = "fuzz_targets/decode_with_limits.rs"
+doc = false
+
+[[bin]]
+name = "decode_parallel"
+path = "fuzz_targets/decode_parallel.rs"
 doc = false

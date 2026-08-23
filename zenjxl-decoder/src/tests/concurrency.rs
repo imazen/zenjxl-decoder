@@ -22,7 +22,33 @@ mod tests {
         data: &[u8],
         parallel: bool,
     ) -> Result<(usize, usize, usize, Vec<u8>), String> {
+        decode_with_parallel_chunked(data, parallel, usize::MAX)
+    }
+
+    /// Like [`decode_with_parallel`], but hands the decoder at most
+    /// `chunk` bytes per `process` call, so a parallel decode goes through
+    /// the incremental path (groups arrive in several batches; cross-batch
+    /// borders and the final re-render are exercised).
+    fn decode_with_parallel_chunked(
+        data: &[u8],
+        parallel: bool,
+        chunk: usize,
+    ) -> Result<(usize, usize, usize, Vec<u8>), String> {
+        // `input` is the not-yet-consumed remainder; `window` is what the
+        // decoder may see in the current call.
         let mut input = data;
+        macro_rules! window {
+            () => {
+                &input[..chunk.min(input.len())]
+            };
+        }
+        macro_rules! consumed {
+            ($w:expr) => {{
+                let left = $w.len();
+                let before = chunk.min(input.len());
+                input = &input[before - left..];
+            }};
+        }
 
         #[cfg(feature = "cms")]
         let options = JxlDecoderOptions {
@@ -40,7 +66,10 @@ mod tests {
 
         // Advance to image info
         let mut decoder = loop {
-            match decoder.process(&mut input) {
+            let mut w = window!();
+            let r = decoder.process(&mut w);
+            consumed!(w);
+            match r {
                 Ok(ProcessingResult::Complete { result }) => break result,
                 Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
                     if input.is_empty() {
@@ -86,7 +115,10 @@ mod tests {
 
         // Advance to frame info
         let mut decoder = loop {
-            match decoder.process(&mut input) {
+            let mut w = window!();
+            let r = decoder.process(&mut w);
+            consumed!(w);
+            match r {
                 Ok(ProcessingResult::Complete { result }) => break result,
                 Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
                     if input.is_empty() {
@@ -113,7 +145,10 @@ mod tests {
 
         // Decode frame pixels
         loop {
-            match decoder.process(&mut input, &mut buffers) {
+            let mut w = window!();
+            let r = decoder.process(&mut w, &mut buffers);
+            consumed!(w);
+            match r {
                 Ok(ProcessingResult::Complete { .. }) => break,
                 Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
                     if input.is_empty() {
@@ -340,6 +375,106 @@ mod tests {
             );
         }
     }
+    /// Fixtures with the features whose parallel rendering has cross-group
+    /// state: EPF/gaborish borders, chroma subsampling with several LF
+    /// groups, noise, patches, splines, upsampling, blending / extra
+    /// channels, orientation, spot colours, and the modular transforms.
+    /// The 4K fixtures are left to the default-pool parity tests above.
+    fn thread_sweep_corpus() -> Vec<(&'static str, Vec<u8>)> {
+        [
+            "multiple_lf_420.jxl",
+            "bike_web_q85.jxl",
+            "cafe_web_q80.jxl",
+            "green_queen_vardct_e3.jxl",
+            "green_queen_modular_e3.jxl",
+            "issue772_blendbug.jxl",
+            "oddsize_ups.jxl",
+            "squeeze_edge.jxl",
+            "squeeze_alpha.jxl",
+            "upsampled_alpha.jxl",
+            "splines.jxl",
+            "8x8_noise.jxl",
+            "multiple_layers_noise_spline.jxl",
+            "grayscale_patches_var_dct.jxl",
+            "grayscale_patches_modular.jxl",
+            "conformance_test_images/patches.jxl",
+            "conformance_test_images/upsampling.jxl",
+            "conformance_test_images/noise.jxl",
+            "conformance_test_images/spot.jxl",
+            "conformance_test_images/alpha_triangles.jxl",
+            "conformance_test_images/cmyk_layers.jxl",
+            "conformance_test_images/bench_oriented_brg.jxl",
+            "conformance_test_images/grayscale_public_university.jxl",
+            "conformance_test_images/lossless_pfm.jxl",
+        ]
+        .into_iter()
+        .map(|name| (name, test_image(name)))
+        .collect()
+    }
+
+    /// Parallel decode must not depend on the rayon pool size: each size
+    /// changes how groups are split into leaves (and so which thread renders
+    /// which group, how many render contexts exist, ...).
+    #[test]
+    fn serial_parallel_parity_across_thread_counts_corpus() {
+        let pools: Vec<_> = [1usize, 2, 3, 5, 8]
+            .into_iter()
+            .map(|n| {
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(n)
+                    .build()
+                    .unwrap()
+            })
+            .collect();
+        for (name, data) in &thread_sweep_corpus() {
+            let (w, h, c, serial) =
+                decode_with_parallel(data, false).unwrap_or_else(|e| panic!("{name} serial: {e}"));
+            for pool in &pools {
+                let (w2, h2, c2, parallel) = pool
+                    .install(|| decode_with_parallel(data, true))
+                    .unwrap_or_else(|e| panic!("{name} parallel: {e}"));
+                assert_eq!((w, h, c), (w2, h2, c2), "{name}: dimension mismatch");
+                let diff = serial.iter().zip(&parallel).filter(|(a, b)| a != b).count();
+                assert_eq!(
+                    diff,
+                    0,
+                    "{name}, {}-thread pool: {diff} of {} samples differ from the serial decode",
+                    pool.current_num_threads(),
+                    serial.len()
+                );
+            }
+        }
+    }
+
+    /// Parallel decode with the input arriving in pieces takes the
+    /// incremental path of `decode_groups_parallel`: groups are decoded in
+    /// several batches, borders at batch boundaries are only partially
+    /// ready, and a final full-readiness re-render corrects them. Every
+    /// chunk size must give the one-shot serial pixels.
+    #[test]
+    fn chunked_parallel_decode_matches_serial() {
+        for (name, data) in &thread_sweep_corpus() {
+            let (w, h, c, serial) =
+                decode_with_parallel(data, false).unwrap_or_else(|e| panic!("{name} serial: {e}"));
+            for chunk in [777usize, 4096, 30_000] {
+                if chunk >= data.len() {
+                    continue;
+                }
+                let (w2, h2, c2, parallel) = decode_with_parallel_chunked(data, true, chunk)
+                    .unwrap_or_else(|e| panic!("{name} parallel chunk {chunk}: {e}"));
+                assert_eq!((w, h, c), (w2, h2, c2), "{name}: dimension mismatch");
+                let diff = serial.iter().zip(&parallel).filter(|(a, b)| a != b).count();
+                assert_eq!(
+                    diff,
+                    0,
+                    "{name}, chunk {chunk}: {diff} of {} samples differ from the one-shot \
+                     serial decode",
+                    serial.len()
+                );
+            }
+        }
+    }
+
     /// Modular palette transforms are applied after all groups are decoded,
     /// one channel at a time across a whole group row (`AverageAll` /
     /// `Weighted` predictors) or group (the other predictors). The per-channel

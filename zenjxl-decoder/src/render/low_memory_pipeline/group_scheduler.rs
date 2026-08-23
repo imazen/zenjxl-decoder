@@ -121,6 +121,20 @@ fn full_readiness_area(
     )
 }
 
+/// How `compute_work_items` is being called when every group is ready.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FullReadiness {
+    /// Not every group is ready: use the readiness masks. (Only the
+    /// parallel path asks for work items with partial readiness; the
+    /// sequential path walks the mask itself in `render_with_new_group`.)
+    #[cfg_attr(not(feature = "threads"), allow(dead_code))]
+    No,
+    /// Every group is ready. The payload says whether *every* group is
+    /// rendered in this pass (`true`: one-shot decode, or the final
+    /// re-render) or only the groups of the last incremental batch.
+    Some(bool),
+}
+
 /// All `is_ready` flags must be set before calling. No mutation needed.
 ///
 /// When `full_readiness` is true, skips readiness mask computation and
@@ -131,7 +145,7 @@ pub(super) fn compute_work_items(
     is_ready: &[bool],
     shared: &RenderPipelineShared<RowBuffer>,
     border_size: (usize, usize),
-    full_readiness: bool,
+    full_readiness: FullReadiness,
 ) -> Result<Vec<RenderWorkItem>> {
     let (gx, gy) = shared.group_position(g);
     let gsz = 1 << shared.log_group_size;
@@ -143,19 +157,45 @@ pub(super) fn compute_work_items(
     let group_count = shared.group_count;
 
     // Fast path: when all groups are ready, every group gets a single work
-    // item, and the items tile the image (see `full_readiness_area`). Skip
-    // readiness mask computation and foreach_ready_rect entirely.
-    if full_readiness {
-        return Ok(full_readiness_area(
-            group_rect,
-            (gx, gy),
-            group_count,
-            shared.input_size,
-            border_size,
-        )
-        .map(|image_area| RenderWorkItem { gx, gy, image_area })
-        .into_iter()
-        .collect());
+    // item. Skip readiness mask computation and foreach_ready_rect entirely.
+    //
+    // When every group is rendered in this pass the items tile the image
+    // (see `full_readiness_area`). When only the groups of the last
+    // incremental batch are rendered, a group must also produce the strips
+    // straddling its right/bottom boundaries: the neighbour there may have
+    // arrived in an earlier batch, when this group was not ready, so nobody
+    // else rendered that strip (jxlrs-845 fixture streamed in small chunks
+    // had an unwritten band at x = 254..258). That is the all-true mask
+    // rectangle -- the group rectangle extended by the border on every
+    // side, overlapping its neighbours' rectangles.
+    match full_readiness {
+        FullReadiness::Some(true) => {
+            return Ok(full_readiness_area(
+                group_rect,
+                (gx, gy),
+                group_count,
+                shared.input_size,
+                border_size,
+            )
+            .map(|image_area| RenderWorkItem { gx, gy, image_area })
+            .into_iter()
+            .collect());
+        }
+        FullReadiness::Some(false) => {
+            return Ok(ready_image_area(
+                group_rect,
+                (gx, gy),
+                group_count,
+                shared.input_size,
+                border_size,
+                0..3,
+                0..3,
+            )
+            .map(|image_area| RenderWorkItem { gx, gy, image_area })
+            .into_iter()
+            .collect());
+        }
+        FullReadiness::No => {}
     }
 
     let gxm1 = gx.saturating_sub(1);

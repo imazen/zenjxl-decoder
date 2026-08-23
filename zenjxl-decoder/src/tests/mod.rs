@@ -24,6 +24,7 @@ pub mod feature_tests;
 pub mod hdr;
 #[cfg(feature = "jpeg")]
 pub mod jpeg_reconstruction;
+pub mod jxlrs_regressions;
 pub mod modular_palette;
 pub mod oom_regression;
 pub mod orientation_preserve;

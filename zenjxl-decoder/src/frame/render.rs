@@ -218,11 +218,21 @@ impl Frame {
         modular_global.set_parallel(self.decoder_state.parallel);
 
         // Determine parallel vs sequential early — affects flush strategy.
+        //
+        // Decided per *frame* (does the frame have more than one group?),
+        // not per call (did *this* call bring more than one group?). The
+        // two paths keep different pipeline state -- the sequential one
+        // renders as groups arrive and recycles their buffers, the parallel
+        // one stores a batch and asserts a group's pixels are stored once --
+        // and a streamed decode whose calls alternate between one and
+        // several new groups used to switch paths mid-frame and trip that
+        // assert (tirr_photo.jxl in 30000-byte chunks with flushes).
         #[cfg(all(feature = "threads", not(test)))]
-        let use_parallel = self.decoder_state.parallel && groups.len() > 1;
+        let use_parallel = self.decoder_state.parallel && self.header.num_groups() > 1;
         #[cfg(all(feature = "threads", test))]
-        let use_parallel =
-            self.decoder_state.parallel && groups.len() > 1 && !self.use_simple_pipeline;
+        let use_parallel = self.decoder_state.parallel
+            && self.header.num_groups() > 1
+            && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
 
@@ -278,8 +288,10 @@ impl Frame {
 
         let hf_start = std::time::Instant::now();
         if use_parallel {
+            // A flush-only call brings no new groups; there is nothing to
+            // batch (and `decode_groups_parallel` would step by zero).
             #[cfg(feature = "threads")]
-            {
+            if !groups.is_empty() {
                 self.decode_groups_parallel(groups, &mut buffer_splitter, do_flush)?;
                 // Track incremental parallel decode: if groups remain incomplete
                 // after this batch, a final re-render will be needed to correct
@@ -352,6 +364,7 @@ impl Frame {
             // updated in those groups.
             let step5_groups: std::collections::BTreeSet<usize> =
                 std::mem::take(&mut self.groups_to_flush);
+
             for g in step5_groups {
                 if self
                     .changed_since_last_flush
@@ -1037,15 +1050,42 @@ impl Frame {
                 }
 
                 // Verify non-overlapping bands for each active slot.
-                let can_band_split = num_bands > 1
-                    && slot_band_ranges.iter().all(|ranges| {
-                        ranges.windows(2).all(|w| {
-                            let (_, end_a) = w[0];
-                            let (start_b, _) = w[1];
-                            // Empty bands (usize::MAX, 0) never overlap.
-                            end_a == 0 || start_b == usize::MAX || end_a <= start_b
+                let bands_disjoint = slot_band_ranges.iter().all(|ranges| {
+                    ranges.windows(2).all(|w| {
+                        let (_, end_a) = w[0];
+                        let (start_b, _) = w[1];
+                        // Empty bands (usize::MAX, 0) never overlap.
+                        end_a == 0 || start_b == usize::MAX || end_a <= start_b
+                    })
+                });
+                // ... and non-overlapping columns within each band: the tile
+                // grid below cuts every band at the column starts of its
+                // items, so an item must end before the next one starts or
+                // its fragment is too narrow for its rectangle. Readiness-mask
+                // rectangles of an incremental batch can overlap in x
+                // (neighbouring groups that both became all-ready render the
+                // strip between them) while their bands do not overlap in y,
+                // which used to trip the `rect()` bounds assert in the
+                // fragment path; such batches take the copy-back fallback.
+                let columns_disjoint = gy_items.iter().all(|item_indices| {
+                    (0..num_buffer_slots).all(|slot| {
+                        let mut prev_end = 0usize;
+                        item_indices.iter().all(|&item_idx| {
+                            match all_layouts[item_idx]
+                                .iter()
+                                .find(|&&(s, _, _, _)| s == slot)
+                            {
+                                Some(&(_, _, _, cr)) => {
+                                    let ok = cr.origin.0 >= prev_end;
+                                    prev_end = cr.origin.0 + cr.size.0;
+                                    ok
+                                }
+                                None => true,
+                            }
                         })
-                    });
+                    })
+                });
+                let can_band_split = num_bands > 1 && bands_disjoint && columns_disjoint;
 
                 // Fragment path: split each slot's buffer into a tile grid,
                 // then process all tiles in parallel with direct writes.

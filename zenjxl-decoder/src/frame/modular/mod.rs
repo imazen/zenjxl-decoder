@@ -747,6 +747,21 @@ impl FullModularImage {
             } else {
                 debug!("Rendering channel {chan:?}, grid position {grid}");
 
+                // Nothing to pass on when the buffer holds no data: either its
+                // group has not been decoded yet -- `Frame::decode_and_render_hf_groups`
+                // flushes (STEP 5) every group the dry run reported, and a
+                // transform with neighbour dependencies reports the whole
+                // neighbourhood of a newly decoded group, including groups whose
+                // own sections have not arrived -- or its last use already consumed
+                // it, in which case the pipeline has it. Used to unwrap `None`
+                // here (tirr_photo.jxl streamed in 30000-byte chunks with flushes).
+                if self.buffer_info[buf].buffer_grid[grid_idx]
+                    .data
+                    .borrow()
+                    .is_none()
+                {
+                    return Ok(());
+                }
                 let modular_buf = self.buffer_info[buf].buffer_grid[grid_idx]
                     .get_buffer(all_final && !grid_is_none)?;
                 let mut image = modular_buf.data;

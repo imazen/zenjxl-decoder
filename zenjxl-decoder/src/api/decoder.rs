@@ -724,6 +724,41 @@ pub(crate) mod tests {
         run_fixture_sweep("compare_incremental", compare_incremental);
     }
 
+    /// Like `compare_incremental`, with chunk sizes that deliver several
+    /// groups per call: the parallel path then decodes in batches, and the
+    /// sequential path sees calls that bring one or several new groups.
+    /// 30000-byte chunks found two panics (a fragment narrower than its
+    /// rectangle in the parallel render, and a flush of a not-yet-decoded
+    /// neighbour group) that 123-byte chunks never reached.
+    fn compare_incremental_large_chunks(path: &Path) -> Result<()> {
+        let file = std::fs::read(path).unwrap();
+        let (_, one_shot_frames) = decode(&file, usize::MAX, false, false, None)?;
+        let reference_hashes = hash_frames(&one_shot_frames);
+        drop(one_shot_frames);
+        for chunk in [4096usize, 30_000] {
+            if chunk >= file.len() {
+                continue;
+            }
+            let (_, frames) = decode(&file, chunk, false, true, None)?;
+            let frame_hashes = hash_frames(&frames);
+            assert_eq!(
+                reference_hashes,
+                frame_hashes,
+                "{}: incremental ({chunk}-byte chunks) vs one-shot outputs differ",
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn compare_incremental_large_chunks_sweep() {
+        run_fixture_sweep(
+            "compare_incremental_large_chunks",
+            compare_incremental_large_chunks,
+        );
+    }
+
     #[test]
     fn test_preview_size_none_for_regular_files() {
         let file = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
