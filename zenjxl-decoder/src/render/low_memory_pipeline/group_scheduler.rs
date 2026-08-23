@@ -24,6 +24,62 @@ pub(crate) struct RenderWorkItem {
 }
 
 /// Pure computation of renderable work items for a single group.
+/// Image-space rectangle rendered by group `(gx, gy)` for the readiness
+/// sub-range `xrange x yrange` (0..3 each: left/top border strip, centre,
+/// right/bottom border strip), or `None` when the rectangle is empty.
+///
+/// Every coordinate is clamped to `input_size`: a last group column narrower
+/// than the border (image width = k * group_dim + 1..border) would otherwise
+/// make the *second-to-last* group's rectangle extend past the image, so its
+/// stages ran over phantom columns without edge padding (the padding used to
+/// be keyed on the group index, see render_group.rs) and, for a tiny last
+/// group, `x1 - x0` underflowed into an absurd rectangle that sent
+/// `mirror()` into an endless loop. Upstream jxl-rs #845 / #873.
+fn ready_image_area(
+    group_rect: Rect,
+    (gx, gy): (usize, usize),
+    group_count: (usize, usize),
+    input_size: (usize, usize),
+    border_size: (usize, usize),
+    xrange: Range<u8>,
+    yrange: Range<u8>,
+) -> Option<Rect> {
+    let y0 = match (gy == 0, yrange.start) {
+        (true, 0) => group_rect.origin.1,
+        (false, 0) => group_rect.origin.1 - border_size.1,
+        (_, 1) => group_rect.origin.1 + border_size.1,
+        // (_, 2)
+        _ => group_rect.end().1.saturating_sub(border_size.1),
+    };
+    let x0 = match (gx == 0, xrange.start) {
+        (true, 0) => group_rect.origin.0,
+        (false, 0) => group_rect.origin.0 - border_size.0,
+        (_, 1) => group_rect.origin.0 + border_size.0,
+        // (_, 2)
+        _ => group_rect.end().0.saturating_sub(border_size.0),
+    };
+    let y1 = match (gy + 1 == group_count.1, yrange.end) {
+        (true, 3) => group_rect.end().1,
+        (false, 3) => group_rect.end().1 + border_size.1,
+        (_, 2) => group_rect.end().1 - border_size.1,
+        // (_, 1)
+        _ => group_rect.origin.1 + border_size.1,
+    }
+    .min(input_size.1);
+    let x1 = match (gx + 1 == group_count.0, xrange.end) {
+        (true, 3) => group_rect.end().0,
+        (false, 3) => group_rect.end().0 + border_size.0,
+        (_, 2) => group_rect.end().0 - border_size.0,
+        // (_, 1)
+        _ => group_rect.origin.0 + border_size.0,
+    }
+    .min(input_size.0);
+    (x1 > x0 && y1 > y0).then_some(Rect {
+        origin: (x0, y0),
+        size: (x1 - x0, y1 - y0),
+    })
+}
+
 /// All `is_ready` flags must be set before calling. No mutation needed.
 ///
 /// When `full_readiness` is true, skips readiness mask computation and
@@ -49,34 +105,18 @@ pub(super) fn compute_work_items(
     // full-rect work item (xrange=0..3, yrange=0..3). Skip readiness
     // mask computation and foreach_ready_rect entirely.
     if full_readiness {
-        let y0 = if gy == 0 {
-            group_rect.origin.1
-        } else {
-            group_rect.origin.1 - border_size.1
-        };
-        let x0 = if gx == 0 {
-            group_rect.origin.0
-        } else {
-            group_rect.origin.0 - border_size.0
-        };
-        let y1 = if gy + 1 == group_count.1 {
-            group_rect.end().1
-        } else {
-            group_rect.end().1 + border_size.1
-        };
-        let x1 = if gx + 1 == group_count.0 {
-            group_rect.end().0
-        } else {
-            group_rect.end().0 + border_size.0
-        };
-        return Ok(vec![RenderWorkItem {
-            gx,
-            gy,
-            image_area: Rect {
-                origin: (x0, y0),
-                size: (x1 - x0, y1 - y0),
-            },
-        }]);
+        return Ok(ready_image_area(
+            group_rect,
+            (gx, gy),
+            group_count,
+            shared.input_size,
+            border_size,
+            0..3,
+            0..3,
+        )
+        .map(|image_area| RenderWorkItem { gx, gy, image_area })
+        .into_iter()
+        .collect());
     }
 
     let gxm1 = gx.saturating_sub(1);
@@ -106,38 +146,17 @@ pub(super) fn compute_work_items(
 
     let mut items = Vec::new();
     foreach_ready_rect(ready_mask, |xrange, yrange| {
-        let y0 = match (gy == 0, yrange.start) {
-            (true, 0) => group_rect.origin.1,
-            (false, 0) => group_rect.origin.1 - border_size.1,
-            (_, 1) => group_rect.origin.1 + border_size.1,
-            _ => group_rect.end().1 - border_size.1,
-        };
-        let x0 = match (gx == 0, xrange.start) {
-            (true, 0) => group_rect.origin.0,
-            (false, 0) => group_rect.origin.0 - border_size.0,
-            (_, 1) => group_rect.origin.0 + border_size.0,
-            _ => group_rect.end().0 - border_size.0,
-        };
-        let y1 = match (gy + 1 == group_count.1, yrange.end) {
-            (true, 3) => group_rect.end().1,
-            (false, 3) => group_rect.end().1 + border_size.1,
-            (_, 2) => group_rect.end().1 - border_size.1,
-            _ => group_rect.origin.1 + border_size.1,
-        };
-        let x1 = match (gx + 1 == group_count.0, xrange.end) {
-            (true, 3) => group_rect.end().0,
-            (false, 3) => group_rect.end().0 + border_size.0,
-            (_, 2) => group_rect.end().0 - border_size.0,
-            _ => group_rect.origin.0 + border_size.0,
-        };
-        items.push(RenderWorkItem {
-            gx,
-            gy,
-            image_area: Rect {
-                origin: (x0, y0),
-                size: (x1 - x0, y1 - y0),
-            },
-        });
+        if let Some(image_area) = ready_image_area(
+            group_rect,
+            (gx, gy),
+            group_count,
+            shared.input_size,
+            border_size,
+            xrange,
+            yrange,
+        ) {
+            items.push(RenderWorkItem { gx, gy, image_area });
+        }
         Ok(())
     })?;
     Ok(items)
@@ -362,45 +381,17 @@ impl LowMemoryRenderPipeline {
         let group_count = self.shared.group_count;
         let mut items = Vec::new();
         foreach_ready_rect(ready_mask, |xrange, yrange| {
-            let y0 = match (gy == 0, yrange.start) {
-                (true, 0) => group_rect.origin.1,
-                (false, 0) => group_rect.origin.1 - border_size.1,
-                (_, 1) => group_rect.origin.1 + border_size.1,
-                // (_, 2)
-                _ => group_rect.end().1 - border_size.1,
-            };
-            let x0 = match (gx == 0, xrange.start) {
-                (true, 0) => group_rect.origin.0,
-                (false, 0) => group_rect.origin.0 - border_size.0,
-                (_, 1) => group_rect.origin.0 + border_size.0,
-                // (_, 2)
-                _ => group_rect.end().0 - border_size.0,
-            };
-
-            let y1 = match (gy + 1 == group_count.1, yrange.end) {
-                (true, 3) => group_rect.end().1,
-                (false, 3) => group_rect.end().1 + border_size.1,
-                (_, 2) => group_rect.end().1 - border_size.1,
-                // (_, 1)
-                _ => group_rect.origin.1 + border_size.1,
-            };
-
-            let x1 = match (gx + 1 == group_count.0, xrange.end) {
-                (true, 3) => group_rect.end().0,
-                (false, 3) => group_rect.end().0 + border_size.0,
-                (_, 2) => group_rect.end().0 - border_size.0,
-                // (_, 1)
-                _ => group_rect.origin.0 + border_size.0,
-            };
-
-            items.push(RenderWorkItem {
-                gx,
-                gy,
-                image_area: Rect {
-                    origin: (x0, y0),
-                    size: (x1 - x0, y1 - y0),
-                },
-            });
+            if let Some(image_area) = ready_image_area(
+                group_rect,
+                (gx, gy),
+                group_count,
+                self.shared.input_size,
+                border_size,
+                xrange,
+                yrange,
+            ) {
+                items.push(RenderWorkItem { gx, gy, image_area });
+            }
             Ok(())
         })?;
 
@@ -538,38 +529,17 @@ impl LowMemoryRenderPipeline {
         let group_count = self.shared.group_count;
         let mut items = Vec::new();
         foreach_ready_rect(ready_mask, |xrange, yrange| {
-            let y0 = match (gy == 0, yrange.start) {
-                (true, 0) => group_rect.origin.1,
-                (false, 0) => group_rect.origin.1 - border_size.1,
-                (_, 1) => group_rect.origin.1 + border_size.1,
-                _ => group_rect.end().1 - border_size.1,
-            };
-            let x0 = match (gx == 0, xrange.start) {
-                (true, 0) => group_rect.origin.0,
-                (false, 0) => group_rect.origin.0 - border_size.0,
-                (_, 1) => group_rect.origin.0 + border_size.0,
-                _ => group_rect.end().0 - border_size.0,
-            };
-            let y1 = match (gy + 1 == group_count.1, yrange.end) {
-                (true, 3) => group_rect.end().1,
-                (false, 3) => group_rect.end().1 + border_size.1,
-                (_, 2) => group_rect.end().1 - border_size.1,
-                _ => group_rect.origin.1 + border_size.1,
-            };
-            let x1 = match (gx + 1 == group_count.0, xrange.end) {
-                (true, 3) => group_rect.end().0,
-                (false, 3) => group_rect.end().0 + border_size.0,
-                (_, 2) => group_rect.end().0 - border_size.0,
-                _ => group_rect.origin.0 + border_size.0,
-            };
-            items.push(RenderWorkItem {
-                gx,
-                gy,
-                image_area: Rect {
-                    origin: (x0, y0),
-                    size: (x1 - x0, y1 - y0),
-                },
-            });
+            if let Some(image_area) = ready_image_area(
+                group_rect,
+                (gx, gy),
+                group_count,
+                self.shared.input_size,
+                border_size,
+                xrange,
+                yrange,
+            ) {
+                items.push(RenderWorkItem { gx, gy, image_area });
+            }
             Ok(())
         })?;
 
@@ -774,5 +744,70 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Upstream jxl-rs #873: an 8-px last group with an 18-px border in a
+    /// 520-px image. The `(_, 1)` arms alone would put `x1`/`y1` at
+    /// 512 + 18 = 530, past the image.
+    #[test]
+    fn ready_image_area_clips_tiny_edge_group() {
+        let area = ready_image_area(
+            Rect {
+                origin: (512, 512),
+                size: (8, 8),
+            },
+            (1, 1),
+            (2, 2),
+            (520, 520),
+            (18, 18),
+            0..1,
+            0..1,
+        );
+        let area = area.unwrap();
+        assert_eq!((area.origin, area.size), ((494, 494), (26, 26)));
+    }
+
+    /// The second-to-last group's right strip must stop at the image edge
+    /// when the last column is narrower than the border (jxl-rs #845):
+    /// 515-px image, groups 0..256, 256..512, 512..515, border 7.
+    #[test]
+    fn ready_image_area_second_to_last_group_stops_at_image_edge() {
+        let area = ready_image_area(
+            Rect {
+                origin: (256, 0),
+                size: (256, 72),
+            },
+            (1, 0),
+            (3, 1),
+            (515, 72),
+            (7, 7),
+            0..3,
+            0..3,
+        )
+        .unwrap();
+        assert_eq!(area.origin, (249, 0));
+        assert_eq!(area.end(), (515, 72));
+    }
+
+    /// A tiny last group whose right strip starts past the (clamped) end is
+    /// dropped instead of producing an underflowed width.
+    #[test]
+    fn ready_image_area_drops_empty_rects() {
+        let area = ready_image_area(
+            Rect {
+                origin: (512, 0),
+                size: (3, 72),
+            },
+            (2, 0),
+            (3, 1),
+            (515, 72),
+            (7, 7),
+            1..2,
+            0..3,
+        );
+        assert!(
+            area.is_none(),
+            "centre strip of a 3-px group inside a 7-px border is empty"
+        );
     }
 }

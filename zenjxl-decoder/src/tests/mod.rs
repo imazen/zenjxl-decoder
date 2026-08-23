@@ -28,5 +28,6 @@ pub mod orientation_preserve;
 pub mod parity;
 pub mod regression_known_bugs;
 pub mod reject_progressive;
+pub mod render_edges;
 pub mod streaming;
 pub mod synthetic;

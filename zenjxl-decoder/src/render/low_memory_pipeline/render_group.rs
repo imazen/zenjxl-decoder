@@ -334,8 +334,14 @@ pub(crate) fn render(
                 Stage::InOut(s) => {
                     let borderx = s.border().0 as usize;
                     let bordery = s.border().1 as isize;
-                    // Apply x padding.
-                    if gx == 0 && borderx != 0 {
+                    // Apply x padding where the rectangle being rendered touches
+                    // the image edge. Keying this on the group index (gx == 0,
+                    // gx + 1 == count) was wrong for the second-to-last group when
+                    // its rectangle reached the right edge because the last column
+                    // is narrower than the border (jxl-rs #845), and would be wrong
+                    // under any scheduler that hands a group a rectangle it does
+                    // not start (jxl-rs 43e2db6).
+                    if start_of_row && borderx != 0 {
                         for (si, ci) in view.stage_input_buffer_index[i].iter() {
                             for iy in -bordery..=bordery {
                                 let y = mirror(y as isize + iy, shifted_ysize);
@@ -350,7 +356,7 @@ pub(crate) fn render(
                             }
                         }
                     }
-                    if gx + 1 == view.shared.group_count.0 && borderx != 0 {
+                    if end_of_row && borderx != 0 {
                         for (si, ci) in view.stage_input_buffer_index[i].iter() {
                             for iy in -bordery..=bordery {
                                 let y = mirror(y as isize + iy, shifted_ysize);
