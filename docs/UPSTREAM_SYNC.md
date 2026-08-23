@@ -62,10 +62,11 @@ Still open from the audit: #716 flat-tree enum (measured slower on
 aarch64, reverted), #793/#797 reader-generic trees, #812 scratch cap and
 the depth-first modular transform engine, #888 padding removal, #722
 inline sites, the `issue865_large_toc` fixture (28 MP; decodes bit-identical
-to upstream, left out of the in-tree corpus for 32-bit CI memory), a CI job
-for `threads` without `allow-unsafe`, wasm32-wasip1 CI, the breaking-change
-batch (`flush_pixels -> bool`, `progressive_mode`/`unconsume`, `rgba*`
-extra-channel semantics).
+to upstream, left out of the in-tree corpus for 32-bit CI memory), the
+breaking-change batch (`flush_pixels -> bool`, `progressive_mode`/`unconsume`,
+`rgba*` extra-channel semantics). CI now also runs `threads` without
+`allow-unsafe` (`8b58423`) and wasm32-wasip1 under wasmtime with and
+without simd128 (`6051605`, `.cargo/config.toml` + `.cargo/wasm-runner.sh`).
 
 ## What upstream did since the fork point (by theme)
 

@@ -22,7 +22,12 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   (#772 clipped blending), the #875 `multiple_lf_420` LF-group colour check and
   the e12b99b `squeeze_empty_residual` chunk-1..16 flush check; a
   `decode_parallel` fuzz target (threads on, chunked input, 3-thread pool).
-  (0038580)
+  (0038580) A 600x600 4:2:2 JPEG-transcoded fixture (3x3 groups) with a
+  byte-exact reconstruction test. (6051605)
+- CI: the `threads` feature is tested without `allow-unsafe`, and the crate's
+  tests run on `wasm32-wasip1` under wasmtime with and without `simd128`
+  (`.cargo/config.toml` carries the runner and target features). (8b58423,
+  6051605, and the wasm job commit)
 - **Blue-noise dithering of 8-bit output, on by default** (port of libjxl
   `stage_write.cc` / jxl-rs #841). Every `U8` conversion stage (plain, fused
   XYB→sRGB/gamma, fused linear→sRGB) adds the 32×32 pattern, indexed by

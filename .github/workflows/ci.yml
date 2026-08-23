@@ -104,6 +104,38 @@ jobs:
         if: matrix.features != 'all' && matrix.features != 'none' && matrix.features != 'threads-safe'
         run: cargo test --release --all --no-fail-fast --no-default-features --features ${{ matrix.features }}
 
+  # wasm32-wasip1 under wasmtime, SIMD on (the `wasm128` tier) and off.
+  # `.cargo/config.toml` sets the runner (a wrapper mapping the crate
+  # directory into the guest) and the simd128 target features.
+  test-wasm:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [wasm128, none]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - uses: bytecodealliance/actions/wasmtime/setup@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: wasm32-wasip1-test-${{ matrix.features }}
+
+      - name: Test (wasm32-wasip1, ${{ matrix.features }})
+        run: |
+          if [ "${{ matrix.features }}" = "none" ]; then
+            cargo test --release -p zenjxl-decoder --no-fail-fast --no-default-features --target wasm32-wasip1
+          else
+            cargo test --release -p zenjxl-decoder --no-fail-fast --no-default-features --features ${{ matrix.features }} --target wasm32-wasip1
+          fi
+
   test-i686:
     runs-on: ubuntu-latest
     steps:
