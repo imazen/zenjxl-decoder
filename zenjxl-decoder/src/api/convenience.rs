@@ -123,6 +123,8 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
     let mut input: &[u8] = data;
 
     let has_cms = options.cms.is_some();
+    #[cfg(feature = "threads")]
+    let parallel = options.parallel;
 
     // Phase 1: Initialized → WithImageInfo (parse header + ICC)
     let decoder = JxlDecoder::<states::Initialized>::new(options);
@@ -205,7 +207,7 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
     let row_bytes = width * channels; // 1 byte per sample for u8
     let mut output = OwnedRawImage::new_uninit((row_bytes, height))?;
     #[cfg(feature = "threads")]
-    output.prefault_parallel();
+    output.prefault_parallel(parallel);
 
     let mut extra_outputs: Vec<OwnedRawImage> = (0..extra_count)
         .map(|_| OwnedRawImage::new_uninit((width, height)))

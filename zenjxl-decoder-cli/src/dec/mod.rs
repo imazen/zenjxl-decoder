@@ -139,6 +139,8 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
     let cli_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
     let start = Instant::now();
 
+    #[cfg(feature = "threads")]
+    let parallel = decoder_options.parallel;
     let mut decoder_with_image_info = decode_header(input, decoder_options)?;
 
     let header_dur = start.elapsed();
@@ -261,7 +263,7 @@ pub fn decode_frames<In: JxlBitstreamInputExt>(
         // instead of hitting them under lock during the hot render loop.
         #[cfg(feature = "threads")]
         for output in &mut outputs {
-            output.prefault_parallel();
+            output.prefault_parallel(parallel);
         }
 
         let mut partial_renders = vec![];

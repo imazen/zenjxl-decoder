@@ -141,15 +141,27 @@ impl OwnedRawImage {
         self.padding
     }
 
+    /// Output buffers below this size are not pre-faulted: spreading a few
+    /// hundred page faults over the thread pool costs more in wake-ups than
+    /// it saves (measured -38 % on a 0.26 MP decode at 16 threads, and a net
+    /// loss at any size with a single thread -- see
+    /// `benchmarks/uninit_buffer_measurement_2026-06-01.md`).
+    pub const PREFAULT_MIN_BYTES: usize = 4 << 20;
+
     /// Pre-fault all virtual memory pages by touching one byte per page in parallel.
     /// This avoids page fault contention during rendering by spreading fault handling
     /// across rayon worker threads before the hot rendering loop begins.
+    ///
+    /// Only worth it when the render itself is parallel and the buffer is
+    /// large (`PREFAULT_MIN_BYTES`); callers pass the decoder's `parallel`
+    /// flag and the function is a no-op otherwise, leaving the pages to be
+    /// faulted lazily by the (then single) rendering thread.
     #[cfg(feature = "threads")]
-    pub fn prefault_parallel(&mut self) {
+    pub fn prefault_parallel(&mut self, parallel: bool) {
         use rayon::prelude::*;
         const PAGE_SIZE: usize = 4096;
         let data = self.data.data_slice_mut();
-        if data.is_empty() {
+        if !parallel || data.len() < Self::PREFAULT_MIN_BYTES || rayon::current_num_threads() < 2 {
             return;
         }
         data.par_chunks_mut(PAGE_SIZE).for_each(|chunk| {
