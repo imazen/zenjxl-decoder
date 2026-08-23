@@ -17,6 +17,12 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   only the frame/render/api layer carries the wrapper. (#28)
 
 ### Added
+- Regression fixtures and tests ported from jxl-rs: `issue728_minimal.jxl`,
+  `strategic_solid_blue.jxl` (#728/#734 squeeze boundaries), `issue772_blendbug.jxl`
+  (#772 clipped blending), the #875 `multiple_lf_420` LF-group colour check and
+  the e12b99b `squeeze_empty_residual` chunk-1..16 flush check; a
+  `decode_parallel` fuzz target (threads on, chunked input, 3-thread pool).
+  (0038580)
 - **Blue-noise dithering of 8-bit output, on by default** (port of libjxl
   `stage_write.cc` / jxl-rs #841). Every `U8` conversion stage (plain, fused
   XYB→sRGB/gamma, fused linear→sRGB) adds the 32×32 pattern, indexed by
@@ -72,6 +78,27 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   surfaced on the probe. (966f9c5)
 
 ### Changed
+- **Multi-threaded decode is faster on modular palette images and on
+  VarDCT images with many groups.** The inverse palette transform runs one
+  channel per rayon thread (`delta_palette` 43.6 → 67 MP/s at 12 threads,
+  `issue648_palette0` 21 → 24 MP/s); the one-shot parallel render gives every
+  group a disjoint tile of the output and writes it directly instead of
+  rendering overlapping rectangles into temporaries and copying the whole
+  image back on one thread (`multiple_lf_420` 540 → 670 MP/s, `portrait_4k_q90`
+  347 → 378 MP/s at 12 threads); the first group on each thread no longer
+  allocates its scratch buffers while holding the buffer-pool mutex; render
+  contexts are pooled across rayon leaves instead of created per leaf. The
+  per-row input-copy plan of the low-memory pipeline is computed once per
+  rendered rectangle (jxl-rs f94cc26). Output is pixel-identical. (728fc6e,
+  d588318, 9b1998f)
+- Single-threaded VarDCT decode is 4–12 % faster from the single-symbol
+  entropy fast path (jxl-rs #787/#817), a config-420 reader specialisation and
+  allocation-free, vectorised, in-place blending (jxl-rs #709/#818/#821);
+  against upstream jxl-rs 0.6 every fixture of the audit set is within 8 % at
+  12 threads and all but `multiple_lf_420` (1.09×) at 1 thread. (cddf926)
+- The parallel-vs-sequential decode path is chosen per frame (more than one
+  group) instead of per `process` call, so a streamed decode no longer
+  switches paths mid-frame. (0038580)
 - VarDCT decode no longer makes per-block / per-pass scratch heap allocations on
   the `frame::group::dequant_and_transform_to_pixels` hot path. The AFV transform
   arms allocated three transient `Vec<f32>`s per AFV block (a 64-element input
@@ -97,6 +124,18 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   image area). Pure internal change — no public API or output change. (#35)
 
 ### Fixed
+- **Two panics when streaming input in pieces with `parallel = true`** (the
+  default): (1) in the parallel render's fragment path, an incremental batch
+  whose group rectangles overlapped in x but not in y cut a fragment narrower
+  than its rectangle (`JxlOutputBuffer::rect` assertion; `cafe_web_q80.jxl`
+  in 30000-byte chunks); band splitting now requires disjoint columns too.
+  (2) with a flush after every chunk, the flush re-sent the extra channels of
+  every group the modular dry run reported, including not-yet-decoded
+  neighbours of a newly decoded group, and unwrapped their missing data
+  (`tirr_photo.jxl` in 30000-byte chunks); buffers without data are skipped.
+  Every fixture now also decodes pixel-identically to one-shot in 4096- and
+  30000-byte chunks with flushes, and in parallel with 777/4096/30000-byte
+  chunks and with 1/2/3/5/8-thread pools. (0038580)
 - Decoding a malformed Squeeze transform whose output tile has both dimensions 0
   no longer panics (`called Option::unwrap() on a None value` at
   `frame/modular/transforms/squeeze.rs:663`). `with_buffers` legitimately skips a

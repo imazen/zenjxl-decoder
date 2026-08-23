@@ -15,7 +15,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 | | |
 |---|---|
 | Fork point (merge-base) | upstream `da89c6c` — "Make feature `all-simd` enabled by default", 2026-03-07 (jxl-rs 0.3.0 line, pre-0.4.0) |
-| Last port sweep | **2026-06-01** (fork commits `7c7ee08`..`f8b3e85`), covering upstream through `841842a` (#784, 2026-05-31). Nothing from jxl-rs 0.5.1 or 0.6.0 has been ported. |
+| Last port sweep | **2026-08-23** (fork commits `784a545`..`15ccc9e`, see "Port log 2026-08-22/23" below). Before that: 2026-06-01 (`7c7ee08`..`f8b3e85`, upstream through `841842a` / #784). |
 | Upstream HEAD audited | `088ec7f` — "Remove support and use of internal image padding. (#888)", 2026-08-21; release **v0.6.0** (2026-08-18) |
 | Upstream commits since fork point | **161** (verified with `git merge-base` on a scratch clone) |
 | Already ported (cherry-ported, re-implemented) | 24 of them, plus 5 perf items from the never-merged upstream draft PR #705 |
@@ -30,6 +30,42 @@ Upstream versions vs fork releases:
 | 0.3.6 – 0.3.8 | 2026-04-10 → 04-17 | 0.4.2: #745, subset of #743 |
 | 0.3.9 – 0.3.10 | 2026-06-09 → 06-11 | 0.5.0-era fixes: #738 #749 #756 #757 #766 #774 #775 #776 #784, c60408d (spline SIMD consistency), 83db36f/#751 (PQ/HLG F16 clamp). #758 (drop uninit buffers) benchmarked, **decision still open** (`benchmarks/uninit_buffer_measurement_2026-06-01.md`). |
 | main (unreleased) | — | nothing from 0.5.1 / 0.6.0 |
+
+## Port log 2026-08-22/23
+
+What landed from this audit, in push order (all on `main`, CI green unless
+noted). Decisions taken with the user: dithering on by default, out-of-order
+`jxlp` supported, uninit output buffers kept (#758 not adopted), no `unsafe`,
+perf pursued until within 8 % of upstream.
+
+| batch | fork commits | contents |
+|---|---|---|
+| 1 | `784a545` | CI green: `kernel_tiers.rs` aarch64 gate, #887 `chunks_exact_to_as_chunks` allow; f16 subnormal encode fix (#706 hunk) with IEEE-sweep tests; #858 `Mul` blend without extra channels; #833 modular-XYB overflow; #791 weighted-predictor delta palette (bit-patched `delta_palette.jxl` fixture, hash cross-checked with djxl 0.12 and jxl-rs 0.6); #822–#825 / cflite POCs as `fuzz/regression/` seeds |
+| 2 | `1cbb414` | #856 section buffers grown from available input (was a 1 GB allocation on a truncated huge-TOC file), #845 + #873 + 43e2db6 render-edge padding keyed on the rectangle, TOC `check_for_error`, #828 empty/size-0 box acceptance, `restrictive()` ICC cap 16 MiB, `Lz77Params` |
+| 3 | `29c6dd4` | parallel-CMS fix (pool-with-return transformers, fail loud on exhaustion; fe3b3c9 idea) + thread-count parity test; #752/#777 out-of-order `jxlp`; blue-noise u8 dithering (#841) on by default, `with_dither_u8(false)`; proc-macro-error2 dropped (#799); benchmark-comment workflow removed |
+| 4 | `cddf926` | perf: single-symbol entropy path (#787 + #817), config-420 reader specialisation, `prefault_parallel` gate, `--no-cms` CLI flag, blending bundle (#709 #818 #821: vectorised, allocation-free, in-place) |
+| 5 | `728fc6e`, `d588318` | perf: modular palette applied one channel per thread (fork-only; closes the 1.25× MT gap on `delta_palette`); parallel render renders every group once (tiled full-readiness rectangles), pool lock scope, render-context pool |
+| 6 | `9b1998f`, `0038580`, `15ccc9e` | perf: f94cc26 `BufferFiller`; **fix** two pre-existing streamed-decode panics (fragment-path band split with overlapping columns; STEP 5 flush of an undecoded neighbour group), parallel/sequential path chosen per frame; fixtures #728 #734 #772, #875 LF-group colour test, e12b99b flush test, `decode_parallel` fuzz target, large-chunk incremental sweep, corpus-wide thread-count / chunked-parallel parity tests |
+
+Perf after batch 6 (CLI `--speedtest`, M4 Pro, fork / upstream `088ec7f`,
+`scripts/upstream-audit/speed_compare.sh`): 12 threads — every fixture of
+the 16-file set within 8 % (fork ahead on 11 of them, e.g. `patches` 1.8×,
+`bike` 1.45×, `green_queen_vardct_e3` 1.48×, `delta_palette` 1.21×;
+`cafe` 1.10× behind is the one exception, 1T 1.07×). 1 thread — all within
+8 % except `multiple_lf_420` at 1.085–1.10× (remaining gap is spread over
+the VarDCT coefficient loop codegen, ~1 ms/decode, and per-row render glue;
+see the batch-5/6 commit messages for the measurements; `mimalloc` in the
+CLI, out-of-line coefficient decode, bulk coefficient zeroing and
+force-inlined context helpers were all measured and gave nothing).
+
+Still open from the audit: #716 flat-tree enum (measured slower on
+aarch64, reverted), #793/#797 reader-generic trees, #812 scratch cap and
+the depth-first modular transform engine, #888 padding removal, #722
+inline sites, the `issue865_large_toc` fixture (28 MP; decodes bit-identical
+to upstream, left out of the in-tree corpus for 32-bit CI memory), a CI job
+for `threads` without `allow-unsafe`, wasm32-wasip1 CI, the breaking-change
+batch (`flush_pixels -> bool`, `progressive_mode`/`unconsume`, `rgba*`
+extra-channel semantics).
 
 ## What upstream did since the fork point (by theme)
 
@@ -124,8 +160,8 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 | 43e2db6 | x-padding keyed on rect position, not group index | **TAKE now** (trivial, provably equivalent today, protects a future sector-ownership change) |
 | 57e515e #868 | floor semantics for vertically subsampled border rows | **LATER** (mismatch present, no reachable repro found; bundle with #845) |
 | 35fb0ad #829, e749ffd #780, 67cb896 #831, eb60b47 #846, e025e92 #830, 24db91e #832, 452f35e #749, 28ddaeb #745, f1514f1 #743 (non-seek part), 33864e8 #757, 2a6f9ec #774, f20f7d1 #775, c184321 #776, 841842a #784, 81dc81e #766, 0664c90 #756, 159c60b #731, 3d1d0c2 #735, 8de0b29 #740, 1e909aa #741, 226f47e #742, a47d786 #725, 371f033 #738, 83db36f #751, c60408d, a737779 #699 | previously ported or independently fixed | **PORTED** — each re-verified at file:line in the audit file |
-| ebeed75 #773 | clipped blending with missing references (copy_from_slice length) | **N/A** — fork's flat-buffer blending (7468a2e) is immune; copy the fixture |
-| 365eb80 #875 + 6401d6e | subsampled-frame LF rect | **N/A — do not port**: fixes a bug upstream introduced in 85f23a1; our packed LF layout is self-consistent (bit-identical on `multiple_lf_420`). Port only the pixel test |
+| ebeed75 #773 | clipped blending with missing references (copy_from_slice length) | **N/A** — fork's blending is immune; fixture + block-mean test **PORTED** (`0038580`) |
+| 365eb80 #875 + 6401d6e | subsampled-frame LF rect | **N/A — do not port**: fixes a bug upstream introduced in 85f23a1; our packed LF layout is self-consistent (bit-identical on `multiple_lf_420`). Pixel test **PORTED** (`0038580`) |
 | 57e29ed #861 | allow adaptive LF smoothing on subsampled frames | **N/A** (libjxl still rejects such files; spec clarification pending; would also need a JPEG-reconstruction guard) |
 | 3c4f224 #777, 4413527 #866, 4aa221f #834, 2ccf6af #867, 4fde1db #869, 5a689fc, c4d102d #876, b9bb475 #870, 600f977 #863 | fixes to upstream-only code (OOO-jxlp state, #828 parser, MT locks) | **N/A** (verified the fork has no analogous state); the `squeeze_empty_residual` chunk-1..16 flush test from e12b99b is worth adding |
 
@@ -146,18 +182,18 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 
 | upstream | what | disposition |
 |---|---|---|
-| 654a985 #787 + 8e8769b #817 | single-symbol fast path (must ship together) | **TAKE (perf batch)** — upstream 1.4× on sunset_logo; our 1T measurement shows upstream 1.63× there |
-| ad5ead5 #716 | enum flat tree + `Box<[i32;256]>` property buffer | **TAKE (perf batch)** — ~10 % upstream |
+| 654a985 #787 + 8e8769b #817 | single-symbol fast path (must ship together) | **PORTED** (`cddf926`, batch 4) — sunset_logo 1T now 1.07× behind, 12T at parity |
+| ad5ead5 #716 | enum flat tree + `Box<[i32;256]>` property buffer | **N/A (measured)** — ported and measured slower on aarch64 (2026-08-22), reverted; re-measure on x86 before retrying |
 | 4fcfb24 #793 | weighted predictor layout/unrolling | **LATER**, safe-Rust adaptation only (upstream relies on `get_unchecked`) |
 | afd41c9 #797 | reader-generic flat trees, fast-lossless path | **LATER** (medium–large); `Tree::num_properties` piece is trivial |
 | 7f8ee4f #812 (scratch cap only) | `group_scratch_buffers_limit = Some(0)` for modular frames | **TAKE** — the fork's low-memory pipeline caches every rendered modular tile forever (`group_scheduler.rs:250-257,416-423`); measure with `examples/heaptrack_decode.rs` |
 | 7f8ee4f #812 (rest), 2d0b720, c066ee2, 07cb870, abf9c4f, 4495876, f76be0c | depth-first transform engine, border buffers, eager dealloc, parallel modular transforms | **LATER** as one project; this is where upstream's 2× MT modular win comes from |
 | 088ec7f #888 | remove internal image padding | **TAKE** (small; ~7 % less per-tile memory by the fork's own row-rounding formula) |
-| f1388c4 #709, 012a292 #818, 7b223de #821, a76e651 #819 | allocation-free → in-place → SIMD blending + bench | **TAKE (bundle)** — bit-identical; upstream −61…−74 % time on Blend modes; our `perform_blending` still allocates per call (`features/blending.rs:31`) and `slice!` collects per chunk; write the bench in zenbench |
-| fe3b3c9 | pool-with-return `PerThreadStorage` | **TAKE** — as the fix vehicle for the parallel-CMS bug |
+| f1388c4 #709, 012a292 #818, 7b223de #821, a76e651 #819 | allocation-free → in-place → SIMD blending + bench | **PORTED** (`cddf926`, batch 4; `blendmodes` 1T 1.07×, 12T 1.04×). Bench not ported (criterion); a zenbench bench is still to do |
+| fe3b3c9 | pool-with-return `PerThreadStorage` | **PORTED** (`29c6dd4`, batch 3: CMS transformer pool; `d588318`, batch 5: render-context pool) |
 | 9d64f77 #722 | 20 `#[inline(always)]` sites (`shrc`, `mirror`, cmap, …) | **LATER**, measure |
-| 0196204 #720 | `assert!(permutation.len() >= num_coeffs)` before the coefficient loop | **TAKE** opportunistically (scratch-zeroing half already absent) |
-| 36c9c3b #801, da96606 #710, 6c44dc3 #805 | XYB param precompute (≤0.5 %), SmallVec inlining, LF-image copy removal | **LATER** |
+| 0196204 #720 | `assert!(permutation.len() >= num_coeffs)` before the coefficient loop | **N/A (measured)** — tried inside an out-of-line coefficient decoder on 2026-08-23, no gain on aarch64 |
+| 36c9c3b #801, da96606 #710, 6c44dc3 #805 | XYB param precompute (≤0.5 %), SmallVec inlining, LF-image copy removal | **LATER** (the fork uses the `smallvec` crate; `f94cc26` BufferFiller, the bigger per-row item, is **PORTED** in `9b1998f`) |
 | bf17fa7 #717, de77265 #721 | property-buffer assert, small inlines | **PORTED** (fork additionally keeps a used-mask gate upstream dropped — A/B it) |
 | 625af01, c17fcf3 #872, 032d101 | small-image parallelism limiter | **LATER** — measure tiny/small MT vs ST first |
 | 462454f #723, 065f477 #855, 8d16561 #826 | release profile, mimalloc in CLI, reciprocal in dead `ToLinearStage` | **N/A** / skip |
@@ -168,11 +204,13 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 caller-supplied `JxlParallelRunner` (and re-introduced `unsafe` in its buffer
 splitter); the fork's rayon design is bulk-synchronous over owned buffers and
 stays `#![forbid(unsafe_code)]`. Nothing in the upstream race-fix series has
-analogous state here. Worth borrowing as ideas: pool-with-return storage
-(fixes the CMS bug), single-owner sector emission (would remove double
-rendering of border strips and the sequential final re-render in incremental
-parallel decodes), a `decode_parallel` fuzz target, thread-count-sweep parity
-tests, and a CI job for `threads` without `allow-unsafe`.
+analogous state here. Borrowed as ideas (2026-08-23): pool-with-return
+storage (`29c6dd4`, `d588318`), single-owner rendering of the full-readiness
+pass (`d588318`: tiled rectangles when every group renders in one pass —
+not for the last batch of an incremental decode, see `0038580`), the
+`decode_parallel` fuzz target and the thread-count / chunked-input parity
+sweeps (`0038580`). Still to do: a CI job for `threads` without
+`allow-unsafe`.
 
 ### Infra / deps / CI
 
