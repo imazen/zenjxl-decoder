@@ -44,7 +44,6 @@ almost-enough = { version = "0.4", features = ["std"] }
 serde_json = "1.0"
 test-log = { version = "0.2.16", features = ["trace"] }
 jxl_macros = { package = "zenjxl-decoder-macros", path = "../zenjxl-decoder-macros", version = "=0.3.9", features = ["test"] }
-criterion = { version = "0.8.2", features = ["html_reports"] }
 zenbench = { version = "0.1.2"}
 
 # Download-on-demand test fixtures. `resources/test/` (~31 MB) is not packaged
@@ -52,6 +51,9 @@ zenbench = { version = "0.1.2"}
 # (issue #8). Not needed on wasm, where the fixture tests don't run.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 codec-corpus = "1.1.0"
+# criterion pulls in rayon, which does not build for wasm32-wasip1; only
+# `tf_bench` uses it (the other benches are zenbench).
+criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [features]
 default = ["all-simd"]

@@ -217,6 +217,25 @@ fn test_jpeg_reconstruction_libjxl_128x128_420() {
     assert_jpeg_match(&reconstructed, &reference, "128x128 libjxl (4:2:0)");
 }
 
+/// 600x600 JPEG with 4:2:2 subsampling (`cjpeg -sample 2x1`), transcoded by
+/// libjxl cjxl v0.12.0: 3x3 groups, so the reconstruction and the pixel
+/// output both cross group boundaries with horizontally subsampled chroma
+/// (the other fixtures are single-group).
+#[test]
+fn test_jpeg_reconstruction_libjxl_600x600_422() {
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_600x600_422_libjxl.jxl",
+    ))
+    .unwrap();
+    let reference = std::fs::read(crate::util::test::fixture_path(
+        "test_600x600_422_libjxl.jpg",
+    ))
+    .unwrap();
+    let reconstructed = decode_jpeg_reconstruction(&jxl_data)
+        .expect("JPEG reconstruction should succeed for libjxl 600x600 4:2:2");
+    assert_jpeg_match(&reconstructed, &reference, "600x600 libjxl (4:2:2)");
+}
+
 /// A regular JXL file without jbrd box should not produce JPEG reconstruction.
 #[test]
 fn test_no_jpeg_reconstruction_for_non_jpeg_jxl() {

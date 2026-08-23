@@ -1,0 +1,5 @@
+# wasm32-wasip1 test binaries run under wasmtime through the wrapper (the CI
+# `wasm` job); see the script for the directory mapping the fixtures need.
+[target.wasm32-wasip1]
+runner = "./.cargo/wasm-runner.sh"
+rustflags = ["-C", "target-feature=+simd128,+relaxed-simd"]

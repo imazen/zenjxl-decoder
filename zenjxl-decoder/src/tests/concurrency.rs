@@ -383,6 +383,7 @@ mod tests {
     fn thread_sweep_corpus() -> Vec<(&'static str, Vec<u8>)> {
         [
             "multiple_lf_420.jxl",
+            "test_600x600_422_libjxl.jxl",
             "bike_web_q85.jxl",
             "cafe_web_q80.jxl",
             "green_queen_vardct_e3.jxl",

@@ -29,8 +29,12 @@ use crate::headers::Orientation;
 fn transpose_fixture() -> Vec<u8> {
     // src/tests/ lives under CARGO_MANIFEST_DIR (the `zenjxl-decoder` crate);
     // the committed seed corpus is one level up at <repo>/fuzz/seed_corpus.
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../fuzz/seed_corpus/decode/orientation5_transpose.jxl");
+    // (`parent()` rather than `..`: under wasmtime a `..` component would
+    // leave the pre-opened crate directory and be rejected.)
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crate directory has a parent")
+        .join("fuzz/seed_corpus/decode/orientation5_transpose.jxl");
     std::fs::read(&path)
         .unwrap_or_else(|e| panic!("missing committed fixture {}: {e}", path.display()))
 }

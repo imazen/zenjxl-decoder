@@ -563,32 +563,41 @@ pub(crate) mod tests {
             .unwrap_or(4);
         let workers = cores.min(8).min(fixtures.len().max(1));
 
+        let worker = || {
+            loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(path) = fixtures.get(i) else { break };
+                // Large images decode to 100+ MB; on 32-bit the address
+                // space can't hold several in one process. Skip >1 MB
+                // fixtures off 64-bit (matches the old macro's
+                // `target_pointer_width = "64"` gate).
+                #[cfg(not(target_pointer_width = "64"))]
+                if std::fs::metadata(path)
+                    .map(|m| m.len() > 1_000_000)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                ran.fetch_add(1, Ordering::Relaxed);
+                if let Err(e) = check(path) {
+                    failures
+                        .lock()
+                        .unwrap()
+                        .push(format!("{}: {e:?}", path.display()));
+                }
+            }
+        };
+
+        // wasm32-wasip1 has no threads (spawning traps): run the sweep inline.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = workers;
+            worker();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         std::thread::scope(|scope| {
             for _ in 0..workers {
-                scope.spawn(|| {
-                    loop {
-                        let i = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(path) = fixtures.get(i) else { break };
-                        // Large images decode to 100+ MB; on 32-bit the address
-                        // space can't hold several in one process. Skip >1 MB
-                        // fixtures off 64-bit (matches the old macro's
-                        // `target_pointer_width = "64"` gate).
-                        #[cfg(not(target_pointer_width = "64"))]
-                        if std::fs::metadata(path)
-                            .map(|m| m.len() > 1_000_000)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        ran.fetch_add(1, Ordering::Relaxed);
-                        if let Err(e) = check(path) {
-                            failures
-                                .lock()
-                                .unwrap()
-                                .push(format!("{}: {e:?}", path.display()));
-                        }
-                    }
-                });
+                scope.spawn(worker);
             }
         });
 
@@ -1637,6 +1646,9 @@ pub(crate) mod tests {
 
     /// Regression test for ClusterFuzz issue 5342436251336704
     /// Tests that malformed JXL files with overflow-inducing data don't panic
+    // The test tolerates the helper's end-of-input panic through
+    // `catch_unwind`, which needs unwinding; wasm32-wasip1 aborts on panic.
+    #[cfg(panic = "unwind")]
     #[test]
     fn test_fuzzer_smallbuffer_overflow() {
         use std::panic;
