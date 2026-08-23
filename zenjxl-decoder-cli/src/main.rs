@@ -88,6 +88,12 @@ struct Opt {
     /// Only effective when compiled with the `threads` feature.
     #[clap(long)]
     num_threads: Option<usize>,
+
+    /// Do not run a colour management system inside the decoder (output stays
+    /// in the embedded profile's colour space). Useful to benchmark the decoder
+    /// itself; the default installs lcms2 like libjxl's djxl.
+    #[clap(long)]
+    no_cms: bool,
 }
 
 fn save_icc(icc_bytes: &[u8], icc_filename: Option<&PathBuf>) -> Result<()> {
@@ -137,7 +143,9 @@ fn main() -> Result<()> {
         options.render_spot_colors = !matches!(output_format, Some(OutputFormat::Npy));
         options.skip_preview = skip_preview;
         options.high_precision = high_precision;
-        options.cms = Some(Box::new(Lcms2Cms));
+        if !opt.no_cms {
+            options.cms = Some(Box::new(Lcms2Cms));
+        }
         if let Some(0 | 1) = num_threads {
             options.parallel = false;
         }
