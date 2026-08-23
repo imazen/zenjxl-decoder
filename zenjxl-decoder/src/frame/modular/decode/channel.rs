@@ -195,6 +195,14 @@ pub(super) fn decode_modular_channel(
     let special_tree = specialize_tree(tree, chan, stream_id, size.0, header)?;
     match special_tree {
         TreeSpecialCase::NoTree(t) => {
+            if let Some(v) = t.single_value_for_fill() {
+                // Constant channel: no bits to read (jxl-rs #787).
+                let img = &mut buffers[chan].data;
+                for y in 0..size.1 {
+                    img.row_mut(y).fill(v);
+                }
+                return Ok(());
+            }
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::NoWp(t) => {

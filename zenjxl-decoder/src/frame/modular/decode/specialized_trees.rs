@@ -8,7 +8,7 @@ use whereat::at;
 
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, SymbolReader},
+    entropy_coding::decode::{Histograms, SymbolReader, unpack_signed},
     error::Result,
     frame::modular::{
         ModularChannel, Predictor, Tree,
@@ -30,6 +30,10 @@ pub struct NoWpTree {
     references: Image<i32>,
     property_buffer: Vec<i32>,
     used_mask: u32,
+    /// The decoded residual every leaf of this tree produces, when every
+    /// reachable cluster is a single-symbol distribution (see
+    /// `Histograms::single_symbol_value`): the entropy read is skipped.
+    single_value: Option<i32>,
 }
 
 impl NoWpTree {
@@ -39,6 +43,7 @@ impl NoWpTree {
         channel: usize,
         stream: usize,
         xsize: usize,
+        single_symbol: Option<u32>,
     ) -> Result<Self> {
         let num_ref_props = max_property_count
             .saturating_sub(NUM_NONREF_PROPERTIES)
@@ -58,6 +63,7 @@ impl NoWpTree {
             references,
             property_buffer,
             used_mask,
+            single_value: single_symbol.map(unpack_signed),
         })
     }
 }
@@ -73,6 +79,7 @@ impl ModularChannelDecoder for NoWpTree {
         self.property_buffer[9] = 0;
     }
 
+    #[inline(always)]
     fn decode_one(
         &mut self,
         prediction_data: PredictionData,
@@ -93,7 +100,11 @@ impl ModularChannelDecoder for NoWpTree {
             &mut self.property_buffer,
             self.used_mask,
         );
-        let dec = reader.read_signed_clustered(histograms, br, prediction_result.context as usize);
+        let dec = if let Some(sv) = self.single_value {
+            sv
+        } else {
+            reader.read_signed_clustered_inline(histograms, br, prediction_result.context as usize)
+        };
         make_pixel(dec, prediction_result.multiplier, prediction_result.guess)
     }
 }
@@ -111,10 +122,18 @@ impl GeneralTree {
         channel: usize,
         stream: usize,
         xsize: usize,
+        single_symbol: Option<u32>,
     ) -> Result<Self> {
         let wp_state = WeightedPredictorState::new(&header.wp_header, xsize)?;
         Ok(Self {
-            no_wp_tree: NoWpTree::new(nodes, max_property_count, channel, stream, xsize)?,
+            no_wp_tree: NoWpTree::new(
+                nodes,
+                max_property_count,
+                channel,
+                stream,
+                xsize,
+                single_symbol,
+            )?,
             wp_state,
         })
     }
@@ -128,6 +147,7 @@ impl ModularChannelDecoder for GeneralTree {
         self.no_wp_tree.init_row(buffers, chan, y);
     }
 
+    #[inline(always)]
     fn decode_one(
         &mut self,
         prediction_data: PredictionData,
@@ -148,7 +168,11 @@ impl ModularChannelDecoder for GeneralTree {
             &mut self.no_wp_tree.property_buffer,
             self.no_wp_tree.used_mask,
         );
-        let dec = reader.read_signed_clustered(histograms, br, prediction_result.context as usize);
+        let dec = if let Some(sv) = self.no_wp_tree.single_value {
+            sv
+        } else {
+            reader.read_signed_clustered_inline(histograms, br, prediction_result.context as usize)
+        };
         let val = make_pixel(dec, prediction_result.multiplier, prediction_result.guess);
         self.wp_state.update_errors(val, pos, xsize);
         val
@@ -338,6 +362,7 @@ impl ModularChannelDecoder for GradientLookupConfig420 {
 
 pub struct SingleGradientOnly {
     clustered_ctx: usize,
+    single_value: Option<i32>,
 }
 
 impl ModularChannelDecoder for SingleGradientOnly {
@@ -366,13 +391,29 @@ impl ModularChannelDecoder for SingleGradientOnly {
             prediction_data.top as i64,
             prediction_data.topleft as i64,
         );
-        let dec = reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx);
+        let dec = if let Some(sv) = self.single_value {
+            sv
+        } else {
+            reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx)
+        };
         dec.wrapping_add(pred as i32)
     }
 }
 
 pub struct NoTree {
     clustered_ctx: usize,
+    /// Single-symbol cluster: the whole channel is this constant (see
+    /// `single_value_for_fill`).
+    single_value: Option<i32>,
+}
+
+impl NoTree {
+    /// When the tree is a single zero-predictor leaf on a single-symbol
+    /// cluster, every pixel of the channel is this value and no bits are
+    /// read at all; the caller fills the channel instead of decoding it.
+    pub fn single_value_for_fill(&self) -> Option<i32> {
+        self.single_value
+    }
 }
 
 impl ModularChannelDecoder for NoTree {
@@ -391,7 +432,11 @@ impl ModularChannelDecoder for NoTree {
         br: &mut BitReader,
         histograms: &Histograms,
     ) -> i32 {
-        let dec = reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx);
+        let dec = if let Some(sv) = self.single_value {
+            sv
+        } else {
+            reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx)
+        };
         make_pixel(dec, 1, 0)
     }
 }
@@ -425,6 +470,12 @@ pub fn specialize_tree(
 
     let mut uses_wp = false;
     let mut uses_non_wp = false;
+    // If, after pruning, every leaf decodes the same single symbol that reads
+    // no bits, the entropy read can be skipped for the whole channel (jxl-rs
+    // #787; the LZ77 / extra-bits exclusions of #817 live in
+    // `Histograms::single_symbol_value`).
+    let mut is_single_symbol = true;
+    let mut single_symbol: Option<u32> = None;
 
     // Obtain a pruned tree without nodes that are not relevant in the current channel and stream.
     // Proceed in BFS order, so that we know that the children of a node will be adjacent.
@@ -469,9 +520,22 @@ pub fn specialize_tree(
                     unreachable!()
                 };
                 *id = tree.histograms.map_context_to_cluster(*id as usize) as u32;
+                // Single-symbol tracking: every reachable leaf must sit on a
+                // single-symbol cluster, all with the same symbol.
+                if is_single_symbol {
+                    match tree.histograms.single_symbol_value(*id as usize) {
+                        Some(sym) if single_symbol.is_none_or(|s| s == sym) => {
+                            single_symbol = Some(sym);
+                        }
+                        _ => is_single_symbol = false,
+                    }
+                }
                 pruned_tree.push(node);
             }
         }
+    }
+    if !is_single_symbol {
+        single_symbol = None;
     }
 
     if let [
@@ -485,6 +549,7 @@ pub fn specialize_tree(
     {
         return Ok(TreeSpecialCase::NoTree(NoTree {
             clustered_ctx: *id as usize,
+            single_value: single_symbol.map(unpack_signed),
         }));
     }
 
@@ -499,6 +564,7 @@ pub fn specialize_tree(
     {
         return Ok(TreeSpecialCase::SingleGradientOnly(SingleGradientOnly {
             clustered_ctx: *id as usize,
+            single_value: single_symbol.map(unpack_signed),
         }));
     }
 
@@ -522,6 +588,7 @@ pub fn specialize_tree(
             channel,
             stream,
             xsize,
+            single_symbol,
         )?));
     }
 
@@ -532,5 +599,6 @@ pub fn specialize_tree(
         channel,
         stream,
         xsize,
+        single_symbol,
     )?))
 }

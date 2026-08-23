@@ -21,6 +21,11 @@ impl HybridUint {
         self.split_exponent == 0
     }
 
+    /// Tokens below this value encode themselves with no extra bits.
+    pub fn split_token(&self) -> u32 {
+        self.split_token
+    }
+
     pub fn decode(log_alpha_size: usize, br: &mut BitReader) -> Result<HybridUint, Error> {
         let split_exponent = br.read((log_alpha_size + 1).ceil_log2())? as u32;
         let split_token = 1u32 << split_exponent;

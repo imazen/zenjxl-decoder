@@ -452,16 +452,6 @@ impl SymbolReader {
         unpack_signed(unsigned)
     }
 
-    #[inline(never)]
-    pub fn read_signed_clustered(
-        &mut self,
-        histograms: &Histograms,
-        br: &mut BitReader,
-        cluster: usize,
-    ) -> i32 {
-        self.read_signed_clustered_inline(histograms, br, cluster)
-    }
-
     /// Specialized fast path for when all HybridUint configs are 420.
     ///
     /// # Preconditions
@@ -687,6 +677,19 @@ impl Histograms {
 
     pub fn resize(&mut self, num_contexts: usize) {
         self.context_map.resize(num_contexts, 0);
+    }
+
+    /// The only *value* `cluster` can ever decode, if its histogram has a
+    /// single symbol, that symbol needs no extra bits (it is below the
+    /// cluster's hybrid-uint split token) and LZ77 is off -- i.e. reading it
+    /// consumes no bits and leaves the entropy decoder state untouched, so a
+    /// caller may skip the read entirely. (Upstream jxl-rs #787 / #817.)
+    pub fn single_symbol_value(&self, cluster: usize) -> Option<u32> {
+        if self.lz77_params.enabled {
+            return None;
+        }
+        let sym = self.codes.single_symbol(cluster)?;
+        (sym < self.uint_config(cluster).split_token()).then_some(sym)
     }
 
     /// Returns true if the config 420 fast path can be safely used.
