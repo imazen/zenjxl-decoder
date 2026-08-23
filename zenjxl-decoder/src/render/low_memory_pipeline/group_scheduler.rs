@@ -80,6 +80,47 @@ fn ready_image_area(
     })
 }
 
+/// Output rectangle of group `(gx, gy)` when every group is ready.
+///
+/// The readiness-mask rectangles of a group straddle its boundaries: the
+/// strip `xrange == 0..1` is `[origin - border, origin + border)` and
+/// `2..3` is `[end - border, end + border)`, so the strip between two
+/// neighbours belongs to both of them. With all nine neighbours ready the
+/// mask is all-true and `ready_image_area(.., 0..3, 0..3)` covers the
+/// group *plus* every straddling strip, which rendered those strips twice
+/// (~3% extra work for a 2-px border) and, worse, made the per-group output
+/// rectangles overlap, so `Frame::decode_groups_parallel` could not hand
+/// each group a disjoint fragment of the output and fell back to rendering
+/// into temporary buffers plus a sequential copy of the whole output.
+///
+/// Instead each group owns the strips straddling its *left* and *top*
+/// boundaries (`xrange`/`yrange` starting at 0) and leaves the ones at its
+/// right and bottom to the next group (`..2`), except for the last column /
+/// row which reaches the image edge (`..3`). These rectangles tile the
+/// image exactly, and each one only reads `border` pixels past its end,
+/// i.e. data that belongs to a neighbour that is present, or is padded
+/// because the rectangle touches the image edge -- the same geometry as
+/// the mask path, so no render-time padding rule changes.
+fn full_readiness_area(
+    group_rect: Rect,
+    (gx, gy): (usize, usize),
+    group_count: (usize, usize),
+    input_size: (usize, usize),
+    border_size: (usize, usize),
+) -> Option<Rect> {
+    let xrange = 0..if gx + 1 == group_count.0 { 3 } else { 2 };
+    let yrange = 0..if gy + 1 == group_count.1 { 3 } else { 2 };
+    ready_image_area(
+        group_rect,
+        (gx, gy),
+        group_count,
+        input_size,
+        border_size,
+        xrange,
+        yrange,
+    )
+}
+
 /// All `is_ready` flags must be set before calling. No mutation needed.
 ///
 /// When `full_readiness` is true, skips readiness mask computation and
@@ -101,18 +142,16 @@ pub(super) fn compute_work_items(
     .clip(shared.input_size);
     let group_count = shared.group_count;
 
-    // Fast path: when all groups are ready, every group gets a single
-    // full-rect work item (xrange=0..3, yrange=0..3). Skip readiness
-    // mask computation and foreach_ready_rect entirely.
+    // Fast path: when all groups are ready, every group gets a single work
+    // item, and the items tile the image (see `full_readiness_area`). Skip
+    // readiness mask computation and foreach_ready_rect entirely.
     if full_readiness {
-        return Ok(ready_image_area(
+        return Ok(full_readiness_area(
             group_rect,
             (gx, gy),
             group_count,
             shared.input_size,
             border_size,
-            0..3,
-            0..3,
         )
         .map(|image_area| RenderWorkItem { gx, gy, image_area })
         .into_iter()
@@ -743,6 +782,81 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// With every group ready, the per-group output rectangles must tile the
+    /// image exactly: no pixel rendered twice (overlapping writes force the
+    /// parallel render into its copy-back fallback) and none missed. The
+    /// all-true readiness-mask rectangle does *not* have this property -- it
+    /// extends into every neighbour -- which is why the fast path stopped
+    /// using it. Each rectangle may also only reach `border` pixels past its
+    /// own edges, and only into a neighbour or past the image edge.
+    #[test]
+    fn full_readiness_areas_tile_the_image() {
+        for &(w, h, log_group_size, border) in &[
+            (2333usize, 2333usize, 8usize, 2usize),
+            (515, 72, 8, 7),
+            (520, 520, 8, 18),
+            (256, 256, 8, 3),
+            (257, 1, 8, 3),
+            (1000, 700, 7, 8),
+            (2333, 2333, 8, 0),
+        ] {
+            let gsz = 1 << log_group_size;
+            let (gw, gh) = (w.div_ceil(gsz), h.div_ceil(gsz));
+            let mut covered = vec![0u8; w * h];
+            let mut old_overlaps = false;
+            for gy in 0..gh {
+                for gx in 0..gw {
+                    let group_rect = Rect {
+                        size: (gsz, gsz),
+                        origin: (gsz * gx, gsz * gy),
+                    }
+                    .clip((w, h));
+                    let area = full_readiness_area(
+                        group_rect,
+                        (gx, gy),
+                        (gw, gh),
+                        (w, h),
+                        (border, border),
+                    )
+                    .unwrap();
+                    assert!(area.size.0 > 0 && area.size.1 > 0);
+                    for y in area.origin.1..area.end().1 {
+                        for x in area.origin.0..area.end().0 {
+                            covered[y * w + x] += 1;
+                        }
+                    }
+                    // Reach: at most `border` past the group's own rectangle
+                    // on the left/top (into the previous group), and never
+                    // past the group's end on the right/bottom.
+                    assert!(area.origin.0 + border >= group_rect.origin.0);
+                    assert!(area.origin.1 + border >= group_rect.origin.1);
+                    assert!(area.end().0 <= group_rect.end().0);
+                    assert!(area.end().1 <= group_rect.end().1);
+                    // The all-ready mask rectangle reaches into the neighbours.
+                    let old = ready_image_area(
+                        group_rect,
+                        (gx, gy),
+                        (gw, gh),
+                        (w, h),
+                        (border, border),
+                        0..3,
+                        0..3,
+                    )
+                    .unwrap();
+                    old_overlaps |= old.size.0 * old.size.1 > area.size.0 * area.size.1;
+                }
+            }
+            assert!(
+                covered.iter().all(|&c| c == 1),
+                "{w}x{h} log_group_size {log_group_size} border {border}: {} pixels missed, \
+                 {} rendered twice",
+                covered.iter().filter(|&&c| c == 0).count(),
+                covered.iter().filter(|&&c| c > 1).count()
+            );
+            assert_eq!(old_overlaps, gw * gh > 1 && border > 0, "{w}x{h}");
         }
     }
 

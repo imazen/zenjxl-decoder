@@ -683,7 +683,12 @@ impl Frame {
                         // This runs in PARALLEL instead of the old sequential Phase 1
                         // allocation, distributing page fault cost across threads.
                         if is_vardct && gw.do_render {
-                            gw.pixels = Some(match pixel_pool.lock().unwrap().pop() {
+                            // Pop under the lock, allocate outside it: a `match`
+                            // on `pool.lock().pop()` would keep the guard alive
+                            // for the whole match, serialising the (large,
+                            // page-faulting) allocations of every thread.
+                            let pooled = pixel_pool.lock().unwrap().pop();
+                            gw.pixels = Some(match pooled {
                                 Some(bufs) => bufs,
                                 None => [
                                     Image::<f32>::new_uninit(pixel_sizes[0])?,
@@ -695,7 +700,8 @@ impl Frame {
                         if is_vardct && !gw.passes.is_empty() {
                             let hf_global = hf_global.unwrap();
                             let hf_meta = hf_meta.unwrap();
-                            let mut buffers = match buffer_pool.lock().unwrap().pop() {
+                            let pooled = buffer_pool.lock().unwrap().pop();
+                            let mut buffers = match pooled {
                                 Some(b) => b,
                                 None => VarDctBuffers::new()?,
                             };
@@ -978,7 +984,8 @@ impl Frame {
                 let (frame_origin, full_image_size) = p.extend_origin_size();
                 let sbi = p.save_buffer_info();
                 let input_size = p.input_size();
-                let factory = p.context_factory();
+                let ctx_pool =
+                    crate::render::low_memory_pipeline::ContextPool::new(p.context_factory());
                 let num_buffer_slots = buffer_splitter.get_full_buffers().len();
 
                 // Pre-compute channel_rects for all items.
@@ -1156,10 +1163,13 @@ impl Frame {
                         .par_iter_mut()
                         .enumerate()
                         .try_for_each_init(
-                            || factory.create(1).ok(),
+                            || ctx_pool.take().ok(),
                             |ctx_opt, (item_idx, slot_bufs)| -> Result<()> {
                                 stop.check().map_err(Error::from)?;
-                                let ctx = ctx_opt.as_mut().ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                let ctx = ctx_opt
+                                    .as_mut()
+                                    .ok_or(Error::ImageOutOfMemory(0, 0))?
+                                    .get_mut();
                                 let item = &all_items[item_idx];
                                 // Create rect sub-views from fragments.
                                 // Fragments cover the full band; rect() narrows
@@ -1203,12 +1213,13 @@ impl Frame {
                             .par_iter()
                             .enumerate()
                             .map_init(
-                                || factory.create(1).ok(),
+                                || ctx_pool.take().ok(),
                                 |ctx_opt, (idx, item)| -> Result<Vec<buffer_splitter::OwnedLocalBuffer>> {
                                     stop.check().map_err(Error::from)?;
                                     let ctx = ctx_opt
                                         .as_mut()
-                                        .ok_or(Error::ImageOutOfMemory(0, 0))?;
+                                        .ok_or(Error::ImageOutOfMemory(0, 0))?
+                                        .get_mut();
                                     let layouts = &all_layouts[idx];
                                     let mut owned: Vec<buffer_splitter::OwnedLocalBuffer> =
                                         layouts

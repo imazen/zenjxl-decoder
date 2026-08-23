@@ -44,6 +44,65 @@ pub(crate) struct ContextFactory<'a> {
     shared: &'a RenderPipelineShared<RowBuffer>,
 }
 
+/// A pool of `GroupRenderContext`s shared by the rayon leaves of one render
+/// phase: a leaf takes one context (creating it only when the pool is empty)
+/// and hands it back when it finishes, so at most one context per
+/// concurrently running leaf is ever allocated instead of one per leaf.
+/// rayon's `*_init` adapters run their init closure once per leaf, and with
+/// work stealing a 100-group image can produce ~100 leaves, i.e. ~100
+/// freshly allocated (and page-faulted) sets of row buffers per decode.
+#[cfg(feature = "threads")]
+pub(crate) struct ContextPool<'a> {
+    factory: ContextFactory<'a>,
+    pool: std::sync::Mutex<Vec<GroupRenderContext>>,
+}
+
+#[cfg(feature = "threads")]
+impl<'a> ContextPool<'a> {
+    pub(crate) fn new(factory: ContextFactory<'a>) -> Self {
+        Self {
+            factory,
+            pool: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Takes a context from the pool, creating one if none is idle.
+    pub(crate) fn take(&self) -> Result<PooledContext<'_>> {
+        let idle = self.pool.lock().unwrap().pop();
+        let ctx = match idle {
+            Some(ctx) => ctx,
+            None => self.factory.create(1)?,
+        };
+        Ok(PooledContext {
+            ctx: Some(ctx),
+            pool: &self.pool,
+        })
+    }
+}
+
+/// A context borrowed from a [`ContextPool`]; returned on drop.
+#[cfg(feature = "threads")]
+pub(crate) struct PooledContext<'p> {
+    ctx: Option<GroupRenderContext>,
+    pool: &'p std::sync::Mutex<Vec<GroupRenderContext>>,
+}
+
+#[cfg(feature = "threads")]
+impl PooledContext<'_> {
+    pub(crate) fn get_mut(&mut self) -> &mut GroupRenderContext {
+        self.ctx.as_mut().expect("context present until drop")
+    }
+}
+
+#[cfg(feature = "threads")]
+impl Drop for PooledContext<'_> {
+    fn drop(&mut self) {
+        if let Some(ctx) = self.ctx.take() {
+            self.pool.lock().unwrap().push(ctx);
+        }
+    }
+}
+
 #[cfg(feature = "threads")]
 impl ContextFactory<'_> {
     pub(crate) fn create(&self, thread_index: usize) -> Result<GroupRenderContext> {
