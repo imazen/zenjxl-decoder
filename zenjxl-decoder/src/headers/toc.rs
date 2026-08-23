@@ -86,7 +86,10 @@ impl IncrementalTocReader {
         );
         let entry = u32::read_unconditional(&entry_coder, br, &Empty {})?;
         self.entries.push(entry);
-        Ok(())
+        // Entries may have been read optimistically past the end of the
+        // buffered input; surface that so the incremental parser retries with
+        // more data instead of committing a misaligned position (jxl-rs #811).
+        br.check_for_error().map_err(|e| at!(e))
     }
 
     fn read_permutation(&mut self, br: &mut BitReader) -> Result<()> {
@@ -99,7 +102,8 @@ impl IncrementalTocReader {
             },
         )?;
         self.permutation = Some(permutation);
-        Ok(())
+        // The permutation's entropy-coded symbols are read optimistically.
+        br.check_for_error().map_err(|e| at!(e))
     }
 
     pub fn finalize(self) -> Toc {
