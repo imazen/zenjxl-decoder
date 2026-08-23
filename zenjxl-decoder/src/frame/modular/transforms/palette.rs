@@ -7,7 +7,7 @@ use crate::{
     error::Result,
     frame::modular::{
         ModularChannel, Predictor,
-        predict::{PredictionData, WeightedPredictorState},
+        predict::{NUM_PREDICTORS, PredictionData, WeightedPredictorState},
     },
     headers::modular::WeightedHeader,
     image::Image,
@@ -239,13 +239,18 @@ pub fn do_palette_step_general(
                     );
                     let left = last;
                     let leftleft = if x > 1 { last_last } else { left };
+                    // The weighted predictor must be evaluated for EVERY pixel,
+                    // not only for delta indices: `update_errors` below consumes
+                    // the per-predictor predictions made here, so skipping the
+                    // prediction for a non-delta pixel would feed it stale
+                    // values (libjxl palette.cc calls PredictNoTreeWP
+                    // unconditionally; jxl-rs #791).
+                    let prediction_data = PredictionData::from_hoisted_neighbors(
+                        left, leftleft, row_prev, row_prev2, w, None, None, None, None, None, x, y,
+                        w, h,
+                    );
+                    let (wp_pred, _) = wp_state.predict_and_property((x, y), w, &prediction_data);
                     let val = if index < num_deltas as i32 {
-                        let prediction_data = PredictionData::from_hoisted_neighbors(
-                            left, leftleft, row_prev, row_prev2, w, None, None, None, None, None,
-                            x, y, w, h,
-                        );
-                        let (wp_pred, _) =
-                            wp_state.predict_and_property((x, y), w, &prediction_data);
                         let pred = predictor.predict_one(prediction_data, wp_pred);
                         (pred + palette_entry as i64) as i32
                     } else {
@@ -595,16 +600,17 @@ pub fn do_palette_step_group_row(
                             left
                         };
 
+                        // Predict for every pixel (see do_palette_step_general).
+                        let prediction_data = get_prediction_data_hoisted(
+                            left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx,
+                            grid_x, grid_y, grid_xsize, x, y, xsize, ysize,
+                        );
+                        let (pred, _) = wp_state.predict_and_property(
+                            (grid_x * xsize + x, y & 1),
+                            total_w,
+                            &prediction_data,
+                        );
                         let val = if index < num_deltas as i32 {
-                            let prediction_data = get_prediction_data_hoisted(
-                                left, leftleft, row_prev, row_prev2, rect_width, buf_out, out_idx,
-                                grid_x, grid_y, grid_xsize, x, y, xsize, ysize,
-                            );
-                            let (pred, _) = wp_state.predict_and_property(
-                                (grid_x * xsize + x, y & 1),
-                                total_w,
-                                &prediction_data,
-                            );
                             (pred + palette_entry as i64) as i32
                         } else {
                             palette_entry
@@ -616,7 +622,9 @@ pub fn do_palette_step_group_row(
                     }
                 }
             }
-            let mut wp_image = Image::<i32>::new((total_w + 2, 1))?;
+            // Row 0: the previous-row error slot; rows 1..5: the per-predictor
+            // error slot, see WeightedPredictorState::save_state.
+            let mut wp_image = Image::<i32>::new((total_w + 2, 1 + NUM_PREDICTORS))?;
             wp_state.save_state(&mut wp_image, total_w);
             buf_out[out_row_idx].auxiliary_data = Some(wp_image);
         }

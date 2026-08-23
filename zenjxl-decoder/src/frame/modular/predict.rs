@@ -361,7 +361,9 @@ impl Predictor {
     }
 }
 
-const NUM_PREDICTORS: usize = 4;
+/// Number of sub-predictors blended by the weighted predictor (also the
+/// number of per-predictor error rows persisted across group rows).
+pub(crate) const NUM_PREDICTORS: usize = 4;
 const PRED_EXTRA_BITS: i64 = 3;
 const PREDICTION_ROUND: i64 = ((1 << PRED_EXTRA_BITS) >> 1) - 1;
 // Allows to approximate division by a number from 1 to 64.
@@ -453,14 +455,42 @@ impl WeightedPredictorState {
             .unwrap()
     }
 
+    /// Persist the state needed to continue prediction on the next group
+    /// row. The next group row starts at `y == 0` (even parity), which reads
+    /// its "previous row" from slot 0 of both `error` and
+    /// `pred_errors_buffer`; group rows have an even number of rows (the
+    /// group dimension), so the last row processed here was odd and wrote
+    /// exactly that slot. `wp_image` is `(xsize + 2) x (1 + NUM_PREDICTORS)`:
+    /// row 0 holds `error`, rows 1.. hold one predictor's errors each
+    /// (transposed out of the position-major buffer).
+    ///
+    /// Before jxl-rs #791 this saved the *other* error slot and none of the
+    /// predictor errors, so every delta pixel in a later group row was
+    /// predicted from garbage.
     pub fn save_state(&self, wp_image: &mut Image<i32>, xsize: usize) {
+        let row_stride = xsize + 2;
+        assert_eq!(wp_image.size(), (row_stride, 1 + NUM_PREDICTORS));
         wp_image
             .row_mut(0)
-            .copy_from_slice(&self.error[xsize + 2..]);
+            .copy_from_slice(&self.error[0..row_stride]);
+        for p in 0..NUM_PREDICTORS {
+            let dst = wp_image.row_mut(1 + p);
+            for (x, d) in dst.iter_mut().enumerate() {
+                *d = self.get_errors_at_pos(x)[p] as i32;
+            }
+        }
     }
 
     pub fn restore_state(&mut self, wp_image: &Image<i32>, xsize: usize) {
-        self.error[xsize + 2..].copy_from_slice(wp_image.row(0));
+        let row_stride = xsize + 2;
+        assert_eq!(wp_image.size(), (row_stride, 1 + NUM_PREDICTORS));
+        self.error[0..row_stride].copy_from_slice(wp_image.row(0));
+        for p in 0..NUM_PREDICTORS {
+            let src = wp_image.row(1 + p);
+            for (x, &s) in src.iter().enumerate() {
+                self.get_errors_at_pos_mut(x)[p] = s as u32;
+            }
+        }
     }
 
     #[inline(always)]
