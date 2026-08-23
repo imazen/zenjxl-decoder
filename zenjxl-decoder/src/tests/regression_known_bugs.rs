@@ -142,30 +142,8 @@ fn decode_jxl(path: &std::path::Path) -> Result<(usize, usize, usize, Vec<u8>), 
 mod tests {
     use super::*;
 
-    /// Issue #15: LZ77 distance-cluster after context_map padding.
-    ///
-    /// PR #671's context_map padding (in `Frame::decode`) appended 16 zero
-    /// entries past the original `context_map.last()`, where the LZ77
-    /// distance cluster lived. Subsequent `context_map.last()` reads in
-    /// the AC reader returned a zero pad byte, routing LZ77 distance ANS
-    /// reads through the wrong histogram and corrupting state.
-    ///
-    /// Fix: capture `lz_dist_cluster` in `Histograms` at decode time,
-    /// before any external `resize`. Mirrors libjxl's
-    /// `ANSCode::lz77.nonserialized_distance_context` (dec_ans.cc:362).
-    ///
-    /// Triggered by VarDCT bitstreams with `Optimal` or `Greedy` LZ77
-    /// backward references — libjxl never emits these for VarDCT (only
-    /// `RLE`), so libjxl's reference test corpora don't catch this.
-    /// Smallest reproducer attached: `akfcrc022_e9_d3.0.jxl` (22 KB,
-    /// produced by jxl-encoder at `-e 9 -d 3.0` on screen content).
-    ///
-    /// See:
-    /// - <https://github.com/libjxl/jxl-rs/issues/765>
-    /// - <https://github.com/libjxl/jxl-rs/pull/766>
-    /// - <https://github.com/imazen/zenjxl-decoder/issues/15>
     /// jxl-rs #858 / libjxl conformance PR #48: a `Mul` blending frame in an
-    /// image with **no** extra channels.
+    /// image with no extra channels.
     ///
     /// The frame header serialises the `clamp` bit for `Mul` blending even
     /// when `num_extra_channels == 0` (libjxl `frame_header.cc`,
@@ -214,6 +192,28 @@ mod tests {
         }
     }
 
+    /// Issue #15: LZ77 distance-cluster after context_map padding.
+    ///
+    /// PR #671's context_map padding (in `Frame::decode`) appended 16 zero
+    /// entries past the original `context_map.last()`, where the LZ77
+    /// distance cluster lived. Subsequent `context_map.last()` reads in
+    /// the AC reader returned a zero pad byte, routing LZ77 distance ANS
+    /// reads through the wrong histogram and corrupting state.
+    ///
+    /// Fix: capture `lz_dist_cluster` in `Histograms` at decode time,
+    /// before any external `resize`. Mirrors libjxl's
+    /// `ANSCode::lz77.nonserialized_distance_context` (dec_ans.cc:362).
+    ///
+    /// Triggered by VarDCT bitstreams with `Optimal` or `Greedy` LZ77
+    /// backward references — libjxl never emits these for VarDCT (only
+    /// `RLE`), so libjxl's reference test corpora don't catch this.
+    /// Smallest reproducer attached: `akfcrc022_e9_d3.0.jxl` (22 KB,
+    /// produced by jxl-encoder at `-e 9 -d 3.0` on screen content).
+    ///
+    /// See:
+    /// - <https://github.com/libjxl/jxl-rs/issues/765>
+    /// - <https://github.com/libjxl/jxl-rs/pull/766>
+    /// - <https://github.com/imazen/zenjxl-decoder/issues/15>
     #[test]
     fn issue_15_lz77_distance_cluster_after_pad() {
         let path = testdata_dir().join("issue-15/akfcrc022_e9_d3.0.jxl");

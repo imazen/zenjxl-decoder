@@ -349,7 +349,7 @@ mod tests {
         if shift >= 32 {
             return sign; // far below the smallest subnormal
         }
-        let m = (full >> shift) as u32;
+        let m = full >> shift;
         let round_bit = (full >> (shift - 1)) & 1;
         let sticky = full & ((1u32 << (shift - 1)) - 1);
         let m = if round_bit == 1 && (sticky != 0 || (m & 1) == 1) {
