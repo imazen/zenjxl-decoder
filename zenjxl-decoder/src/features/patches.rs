@@ -705,6 +705,7 @@ impl PatchesDictionary {
         patches_for_row_result.sort();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_one_row(
         &self,
         row: &mut [&mut [f32]],
@@ -713,6 +714,7 @@ impl PatchesDictionary {
         extra_channel_info: &[ExtraChannelInfo],
         reference_frames: &[Option<ReferenceFrame>],
         patches_for_row_result: &mut Vec<usize>,
+        blending_scratch: &mut Vec<f32>,
     ) {
         let num_ec = extra_channel_info.len();
         assert!(num_ec + 1 == self.blendings_stride);
@@ -769,6 +771,7 @@ impl PatchesDictionary {
                 &self.blendings[blending_idx],
                 &self.blendings[blending_idx + 1..],
                 extra_channel_info,
+                blending_scratch,
             );
         }
     }
@@ -1570,6 +1573,7 @@ mod tests {
                 &extra_channel_info,
                 &ref_frames, // Pass the Vec<ReferenceFrame>
                 &mut vec![],
+                &mut vec![],
             );
 
             assert_all_almost_abs_eq(&r_data, &expected_r, MAX_ABS_DELTA);
@@ -1631,6 +1635,7 @@ mod tests {
                 xsize,
                 &extra_channel_info,
                 &ref_frames,
+                &mut vec![],
                 &mut vec![],
             );
 
@@ -1716,6 +1721,7 @@ mod tests {
                 xsize,
                 &extra_channel_info,
                 &ref_frames,
+                &mut vec![],
                 &mut vec![],
             );
 
@@ -1830,6 +1836,7 @@ mod tests {
                 &ec_info,
                 &ref_frames,
                 &mut vec![],
+                &mut vec![],
             );
 
             assert_all_almost_abs_eq(&r_data, &vec![expected_color], MAX_ABS_DELTA);
@@ -1927,6 +1934,7 @@ mod tests {
                 &ec_info,
                 &ref_frames,
                 &mut vec![],
+                &mut vec![],
             );
 
             assert_all_almost_abs_eq(&ec0_data, &vec![expected_ec0], MAX_ABS_DELTA);
@@ -1993,6 +2001,7 @@ mod tests {
                 &extra_channel_info,
                 &ref_frames,
                 &mut vec![],
+                &mut vec![],
             );
 
             let expected_vals = [0.5 * 0.8, 2.0 * 0.7]; // [0.4, 1.4]
@@ -2057,6 +2066,7 @@ mod tests {
                 xsize,
                 &extra_channel_info,
                 &ref_frames,
+                &mut vec![],
                 &mut vec![],
             );
 

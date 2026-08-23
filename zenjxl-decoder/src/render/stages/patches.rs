@@ -38,14 +38,15 @@ impl RenderPipelineInPlaceStage for PatchesStage {
         row: &mut [&mut [f32]],
         state: Option<&mut (dyn Any + Send)>,
     ) {
-        let state: &mut Vec<usize> = state.unwrap().downcast_mut().unwrap();
+        let state: &mut PatchesLocalState = state.unwrap().downcast_mut().unwrap();
         self.patches.add_one_row(
             row,
             position,
             xsize,
             &self.extra_channels,
             &self.decoder_state[..],
-            state,
+            &mut state.patches_for_row,
+            &mut state.blending_scratch,
         );
     }
 
@@ -53,10 +54,21 @@ impl RenderPipelineInPlaceStage for PatchesStage {
         &self,
         _thread_index: usize,
     ) -> crate::error::Result<Option<Box<dyn Any + Send>>> {
-        let patches_for_row_result = Vec::<usize>::new_with_capacity(self.patches.positions.len())
+        let patches_for_row = Vec::<usize>::new_with_capacity(self.patches.positions.len())
             .map_err(|e| at!(crate::error::Error::from(e)))?;
-        Ok(Some(Box::new(patches_for_row_result) as Box<dyn Any + Send>))
+        Ok(Some(Box::new(PatchesLocalState {
+            patches_for_row,
+            blending_scratch: Vec::new(),
+        }) as Box<dyn Any + Send>))
     }
+}
+
+/// Per-render-context state: the patch list for the current row and the
+/// blending kernels' scratch (previous extra-channel values), both reused
+/// across rows instead of allocated per patch row.
+struct PatchesLocalState {
+    patches_for_row: Vec<usize>,
+    blending_scratch: Vec<f32>,
 }
 
 #[cfg(test)]

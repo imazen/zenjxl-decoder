@@ -16,7 +16,6 @@ mod linalg;
 mod log2;
 mod memory_tracker;
 mod mirror;
-pub mod ndarray;
 pub mod profiling;
 mod rational_poly;
 mod shift_right_ceil;
@@ -34,7 +33,6 @@ pub use linalg::*;
 pub use log2::*;
 pub use memory_tracker::*;
 pub use mirror::*;
-pub(crate) use ndarray::*;
 #[allow(unused_imports)]
 pub use profiling::*;
 pub use rational_poly::*;

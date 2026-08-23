@@ -16,7 +16,6 @@ use crate::{
     frame::ReferenceFrame,
     headers::{FileHeader, extra_channels::ExtraChannelInfo, frame_header::*},
     render::RenderPipelineInPlaceStage,
-    util::slice,
 };
 
 pub struct BlendingStage {
@@ -24,9 +23,17 @@ pub struct BlendingStage {
     pub image_size: (isize, isize),
     pub blending_info: BlendingInfo,
     pub ec_blending_info: Vec<BlendingInfo>,
+    /// `ec_blending_info` converted once (it used to be rebuilt per row chunk).
+    ec_patch_blending: Vec<PatchBlending>,
     pub extra_channels: Vec<ExtraChannelInfo>,
     pub reference_frames: Arc<[Option<ReferenceFrame>; 4]>,
     pub zeros: Vec<f32>,
+}
+
+/// Per-render-context scratch for the stage: the blending kernels snapshot
+/// the previous extra-channel values here instead of allocating per row.
+struct BlendingScratch {
+    tmp: Vec<f32>,
 }
 
 impl From<&BlendingInfo> for PatchBlending {
@@ -53,11 +60,17 @@ impl BlendingStage {
         reference_frames: Arc<[Option<ReferenceFrame>; 4]>,
     ) -> Result<BlendingStage> {
         let xsize = file_header.size.xsize();
+        let ec_patch_blending = frame_header
+            .ec_blending_info
+            .iter()
+            .map(PatchBlending::from)
+            .collect();
         Ok(BlendingStage {
             frame_origin: (frame_header.x0 as isize, frame_header.y0 as isize),
             image_size: (xsize as isize, file_header.size.ysize() as isize),
             blending_info: frame_header.blending_info.clone(),
             ec_blending_info: frame_header.ec_blending_info.clone(),
+            ec_patch_blending,
             extra_channels: file_header.image_metadata.extra_channel_info.clone(),
             reference_frames,
             zeros: vec![0f32; xsize as usize],
@@ -78,12 +91,19 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         c < 3 + self.extra_channels.len()
     }
 
+    fn init_local_state(
+        &self,
+        _thread_index: usize,
+    ) -> Result<Option<Box<dyn std::any::Any + Send>>> {
+        Ok(Some(Box::new(BlendingScratch { tmp: Vec::new() })))
+    }
+
     fn process_row_chunk(
         &self,
         position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut (dyn std::any::Any + Send)>,
+        state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
         let num_ec = self.extra_channels.len();
         let fg_y0 = self.frame_origin.1 + position.1 as isize;
@@ -135,18 +155,24 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         }
 
         let blending_info = PatchBlending::from(&self.blending_info);
-        let ec_blending_info: Vec<PatchBlending> = self
-            .ec_blending_info
-            .iter()
-            .map(PatchBlending::from)
-            .collect();
 
+        // The scratch lives in the per-context state (allocated once per
+        // render context); a missing state only happens in unit tests that
+        // drive the stage directly, so fall back to a local buffer there.
+        let mut local_tmp = Vec::new();
+        let tmp = match state {
+            Some(state) => &mut state.downcast_mut::<BlendingScratch>().unwrap().tmp,
+            None => &mut local_tmp,
+        };
+        let mut bg: SmallVec<[&mut [f32]; 8]> =
+            out.iter_mut().map(|s| &mut s[bg_x0..bg_x1]).collect();
         perform_blending(
-            &mut slice!(&mut out, .., bg_x0..bg_x1),
+            &mut bg,
             &fg,
             &blending_info,
-            &ec_blending_info,
+            &self.ec_patch_blending,
             &self.extra_channels,
+            tmp,
         );
     }
 }
