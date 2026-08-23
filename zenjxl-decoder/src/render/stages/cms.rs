@@ -4,10 +4,12 @@
 // license that can be found in the LICENSE file.
 
 use std::any::Any;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use whereat::at;
 
 use crate::api::JxlCmsTransformer;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::render::RenderPipelineInPlaceStage;
 
 use crate::render::simd_utils::{
@@ -15,14 +17,34 @@ use crate::render::simd_utils::{
     interleave_2_dispatch, interleave_3_dispatch, interleave_4_dispatch,
 };
 
-/// Thread-local state for CMS transform.
-/// Each thread exclusively owns its transformer — no shared mutable state.
+type TransformerPool = Arc<Mutex<Vec<Box<dyn JxlCmsTransformer + Send + Sync>>>>;
+
+/// Per-render-context state for the CMS transform.
+///
+/// The context exclusively owns its transformer while it is alive and hands
+/// it back to the stage's pool when dropped. Contexts are created once per
+/// rayon leaf (not once per thread), so without the hand-back a large image
+/// ran the pool dry after a handful of leaves and every later tile was
+/// rendered *without* the colour transform -- silently wrong pixels that
+/// depended on the thread count.
 struct CmsLocalState {
-    transformer: Box<dyn JxlCmsTransformer + Send + Sync>,
+    /// Always `Some` between construction and `Drop`.
+    transformer: Option<Box<dyn JxlCmsTransformer + Send + Sync>>,
+    pool: TransformerPool,
     /// Buffer for interleaved input pixels (always used).
     input_buffer: Vec<f32>,
     /// Buffer for interleaved output pixels (only used when in_channels != out_channels).
     output_buffer: Vec<f32>,
+}
+
+impl Drop for CmsLocalState {
+    fn drop(&mut self) {
+        if let Some(t) = self.transformer.take() {
+            // A poisoned lock only means another context panicked while
+            // returning its transformer; the Vec itself is still valid.
+            self.pool.lock().unwrap_or_else(|e| e.into_inner()).push(t);
+        }
+    }
 }
 
 /// Applies CMS color transform between color profiles.
@@ -33,9 +55,11 @@ struct CmsLocalState {
 ///
 /// Output is written to row[0..out_channels].
 pub struct CmsStage {
-    /// Pool of transformers dispensed to threads via `init_local_state`.
-    /// Each `init_local_state` call pops one; the thread then owns it exclusively.
-    transformer_pool: Mutex<Vec<Box<dyn JxlCmsTransformer + Send + Sync>>>,
+    /// Pool of transformers dispensed to render contexts via
+    /// `init_local_state` and returned when the context is dropped. It must
+    /// hold at least as many transformers as there are render contexts alive
+    /// at once (one per worker thread plus the pipeline's own context).
+    transformer_pool: TransformerPool,
     /// Number of input channels (3 for RGB, 4 for CMYK).
     in_channels: usize,
     /// Number of output channels (typically 3 for RGB output).
@@ -95,7 +119,7 @@ impl CmsStage {
         // Pad buffer to SIMD alignment (max vector length is 16)
         let padded_pixels = max_pixels.next_multiple_of(16);
         Self {
-            transformer_pool: Mutex::new(transformers),
+            transformer_pool: Arc::new(Mutex::new(transformers)),
             in_channels,
             out_channels,
             black_channel,
@@ -136,14 +160,27 @@ impl RenderPipelineInPlaceStage for CmsStage {
     }
 
     fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
-        let transformer = self.transformer_pool.lock().unwrap().pop();
+        let transformer = self
+            .transformer_pool
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop();
         let Some(transformer) = transformer else {
-            // Pool exhausted — no transformer available for this thread.
-            return Ok(None);
+            // More render contexts alive than transformers were created for
+            // (the pool is sized from the thread count at pipeline-build time).
+            // Fail loudly: a context without a transformer would emit
+            // untransformed pixels.
+            return Err(at!(Error::CmsError(
+                "CMS transformer pool exhausted: more concurrent render contexts than \
+                 transformers (was the rayon pool changed between pipeline construction \
+                 and rendering?)"
+                    .into()
+            )));
         };
 
         Ok(Some(Box::new(CmsLocalState {
-            transformer,
+            transformer: Some(transformer),
+            pool: Arc::clone(&self.transformer_pool),
             input_buffer: vec![0.0f32; self.input_buffer_size],
             output_buffer: vec![0.0f32; self.output_buffer_size],
         })))
@@ -156,9 +193,10 @@ impl RenderPipelineInPlaceStage for CmsStage {
         row: &mut [&mut [f32]],
         state: Option<&mut (dyn Any + Send)>,
     ) {
-        let Some(state) = state else {
-            return;
-        };
+        // `init_local_state` never yields `None` for this stage (it errors
+        // instead), so a missing state is a pipeline bug, not a condition to
+        // paper over by passing pixels through untransformed.
+        let state = state.expect("CmsStage rendered without its local state");
         let state: &mut CmsLocalState = state.downcast_mut().unwrap();
 
         debug_assert!(
@@ -169,15 +207,19 @@ impl RenderPipelineInPlaceStage for CmsStage {
 
         // Single channel: use separate buffers to avoid per-call allocations
         if self.in_channels == 1 && self.out_channels == 1 {
-            state.input_buffer[..xsize].copy_from_slice(&row[0][..xsize]);
-            state
-                .transformer
-                .do_transform(
-                    &state.input_buffer[..xsize],
-                    &mut state.output_buffer[..xsize],
-                )
+            let CmsLocalState {
+                transformer,
+                input_buffer,
+                output_buffer,
+                ..
+            } = state;
+            input_buffer[..xsize].copy_from_slice(&row[0][..xsize]);
+            transformer
+                .as_deref_mut()
+                .expect("CMS transformer is present until drop")
+                .do_transform(&input_buffer[..xsize], &mut output_buffer[..xsize])
                 .expect("CMS transform failed");
-            row[0][..xsize].copy_from_slice(&state.output_buffer[..xsize]);
+            row[0][..xsize].copy_from_slice(&output_buffer[..xsize]);
             return;
         }
 
@@ -216,11 +258,18 @@ impl RenderPipelineInPlaceStage for CmsStage {
 
         // Apply transform using separate buffers (avoids per-call allocations
         // in CMS backends that don't support true in-place transforms).
-        state
-            .transformer
+        let CmsLocalState {
+            transformer,
+            input_buffer,
+            output_buffer,
+            ..
+        } = state;
+        transformer
+            .as_deref_mut()
+            .expect("CMS transformer is present until drop")
             .do_transform(
-                &state.input_buffer[..xsize * self.in_channels],
-                &mut state.output_buffer[..xsize * self.out_channels],
+                &input_buffer[..xsize * self.in_channels],
+                &mut output_buffer[..xsize * self.out_channels],
             )
             .expect("CMS transform failed");
 
@@ -419,25 +468,29 @@ mod tests {
     }
 
     #[test]
-    fn test_cms_stage_no_transformers() {
-        // Test with empty transformers - should do nothing
+    fn test_cms_stage_pool_exhausted_is_an_error() {
+        // An exhausted pool must fail loudly, never hand out a state-less
+        // context that would pass pixels through untransformed.
         let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = vec![];
         let stage = CmsStage::new(transformers, 3, 3, None, 16);
+        let Err(err) = stage.init_local_state(0) else {
+            panic!("empty pool must error");
+        };
+        assert!(matches!(err.error(), Error::CmsError(_)), "{err:?}");
+    }
 
-        // init_local_state should return None when no transformers
-        let state = stage.init_local_state(0).unwrap();
-        assert!(state.is_none());
-
-        // process_row_chunk should be a no-op with None state
-        let mut ch0 = vec![1.0, 2.0, 3.0, 4.0];
-        ch0.resize(16, 0.0);
-        let original = ch0.clone();
-
-        let mut rows: Vec<&mut [f32]> = vec![&mut ch0];
-        stage.process_row_chunk((0, 0), 4, &mut rows, None);
-
-        // Values should be unchanged
-        assert_eq!(ch0, original);
+    #[test]
+    fn test_cms_stage_returns_transformer_to_pool_on_drop() {
+        let transformers: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> =
+            vec![Box::new(IdentityTransformer)];
+        let stage = CmsStage::new(transformers, 3, 3, None, 16);
+        let first = stage.init_local_state(0).unwrap();
+        assert!(first.is_some());
+        // Pool is empty while the first context is alive...
+        assert!(stage.init_local_state(1).is_err());
+        drop(first);
+        // ...and usable again once it is dropped.
+        assert!(stage.init_local_state(1).unwrap().is_some());
     }
 
     #[test]

@@ -340,4 +340,45 @@ mod tests {
             );
         }
     }
+    /// Parallel decode with a CMS stage must not depend on the thread count.
+    ///
+    /// `CmsStage` hands one transformer to every render context. Contexts
+    /// were created once per rayon *leaf* (`try_for_each_init` /
+    /// `map_init`), and transformers were popped from a pool sized
+    /// `current_num_threads() + 2` and never returned; with more leaves than
+    /// that, the extra contexts had no transformer and `process_row_chunk`
+    /// silently passed pixels through untransformed. A 4096x2519 ACEScg-tagged
+    /// photo decoded with 2 threads had 157 of 160 groups wrong.
+    ///
+    /// The fixture is 520x280 (3x2 groups) with an ICC-only (ACEScg) profile,
+    /// so the pipeline contains a real ICC -> sRGB CMS stage. Each pool size
+    /// gets its own rayon pool so the leaf count is reproducible.
+    #[cfg(feature = "cms")]
+    #[test]
+    fn serial_parallel_parity_icc_cms_across_thread_counts() {
+        let path = format!(
+            "{}/tests/testdata/parallel-cms/icc_aces_520x280_d5.jxl",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let data = std::fs::read(&path).unwrap();
+        let (w, h, c, serial) = decode_with_parallel(&data, false).unwrap();
+        assert_eq!((w, h), (520, 280));
+        for threads in [1usize, 2, 3, 4, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let (w2, h2, c2, parallel) =
+                pool.install(|| decode_with_parallel(&data, true)).unwrap();
+            assert_eq!((w, h, c), (w2, h2, c2));
+            let diff = serial.iter().zip(&parallel).filter(|(a, b)| a != b).count();
+            assert_eq!(
+                diff,
+                0,
+                "{threads}-thread pool: {diff} of {} samples differ from the serial decode \
+                 (CMS transform skipped on some tiles)",
+                serial.len()
+            );
+        }
+    }
 }
