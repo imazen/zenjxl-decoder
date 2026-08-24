@@ -9,6 +9,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
+- `JxlDecoder::flush_pixels` will return `bool` (whether anything was
+  rendered), as upstream jxl-rs d782c19 (#755) does.
+- The no-op `JxlDecoderOptions::progressive_mode` will be removed (upstream
+  0977812, #880).
+- The dead `unconsume` API will be removed and `file_length` added in its
+  place (upstream 1cc9ab7, #820).
+- The `JxlPixelFormat::rgba*` constructors will stop requesting planar extra
+  channels alongside the interleaved alpha (upstream c5528f6, #767); code
+  that relied on receiving both gets only the interleaved output.
 - The public `Error` is now wrapped as [`whereat::At<Error>`](https://docs.rs/whereat)
   via the `Result` alias, so decode errors carry a `file:line` source location for
   server-side stack traces. Match on the cause with `e.error()` (borrow) or
@@ -17,6 +26,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   only the frame/render/api layer carries the wrapper. (#28)
 
 ### Added
+- `tests/testdata/jxlrs-865/issue865_large_toc.jxl` (5249x5377, 462-group
+  TOC) with a streamed-equals-one-shot regression test (jxl-rs #865's
+  incremental-parser stall; 64-bit only — the decode is 28 MP). (325cf98)
 - Regression fixtures and tests ported from jxl-rs: `issue728_minimal.jxl`,
   `strategic_solid_blue.jxl` (#728/#734 squeeze boundaries), `issue772_blendbug.jxl`
   (#772 clipped blending), the #875 `multiple_lf_420` LF-group colour check and
@@ -83,6 +95,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   surfaced on the probe. (966f9c5)
 
 ### Changed
+- Modular decode no longer caches one rendered tile per channel per group
+  for the whole frame (78 MB on a 2333x2333 lossless decode): the
+  low-memory pipeline's group-sized scratch cache is capped at zero for
+  modular frames, as upstream's #812 does. (15f332f)
 - **Multi-threaded decode is faster on modular palette images and on
   VarDCT images with many groups.** The inverse palette transform runs one
   channel per rayon thread (`delta_palette` 43.6 → 67 MP/s at 12 threads,

@@ -66,15 +66,41 @@ an out-of-line coefficient decoder, bulk instead of per-block coefficient
 zeroing, force-inlined context helpers, inlining the NEON kernel into the
 `simd_function!` dispatcher.
 
+Follow-up sweep 2026-08-23 (`15f332f`, `325cf98` + this docs commit): the
+#812 scratch cap is ported; `issue865_large_toc.jxl` lives in `tests/testdata/jxlrs-865/`
+with a 64-bit-gated streamed-equals-one-shot test (it stays out of
+`resources/test/` so the fixture sweeps do not decode 28 MP on 32-bit CI).
+Measured and NOT taken, on top of the earlier list: the #722
+`#[inline(always)]` sites (applied 1:1, within measurement noise on the
+M4 Pro, reverted); LPT-sorting Phase 2's groups by coded size (no change:
+the phase's wall clock is bounded by the densest single group, not by
+imbalance); and a full fused decode+render pass for one-shot VarDCT
+(per-group `OnceLock` plane publication + atomic 3x3-neighbourhood
+counters triggering each group's render on whichever thread completes it,
+raster-order work queue, pre-split disjoint output fragments — implemented,
+pixel-exact, and **no faster**: the wall stays bounded by the densest
+group's decode, the per-group synchronisation costs about what the barrier
+did, and a 9-group image paid 1.36x for the setup; reverted, negative
+result recorded here so it is not re-attempted without new evidence).
+
 Still open from the audit: #716 flat-tree enum (measured slower on
-aarch64, reverted), #793/#797 reader-generic trees, #812 scratch cap and
-the depth-first modular transform engine, #888 padding removal, #722
-inline sites, the `issue865_large_toc` fixture (28 MP; decodes bit-identical
-to upstream, left out of the in-tree corpus for 32-bit CI memory), the
-breaking-change batch (`flush_pixels -> bool`, `progressive_mode`/`unconsume`,
-`rgba*` extra-channel semantics). CI now also runs `threads` without
-`allow-unsafe` (`8b58423`) and wasm32-wasip1 under wasmtime with and
-without simd128 (`6051605`, `.cargo/config.toml` + `.cargo/wasm-runner.sh`).
+aarch64, reverted; re-measure on x86 — no x86 box in this environment),
+#793 weighted-predictor layout (skipped: the fork's WP decode paths
+measure *faster* than upstream's where WP dominates, e.g. cafe's
+`WpOnlyLookupConfig420` 0.6 vs 0.73 ms/decode, and upstream's version
+needs `get_unchecked`), #797 reader-generic trees (the remaining candidate
+for the ~9 % single-thread entropy-decode gap), #888 padding removal
+(deferred behind #797: the fork's specialised tree decoders rely on the
+padded rows for branch-free `row_top[x + 2]` loads, so removing padding
+without the #797 restructure would put edge branches in the hottest loop
+for ~3 % of modular-buffer memory), the depth-first modular transform
+engine, the additive API items marked TAKE (`new_with_stride`, `rgb*`
+helpers — awaiting public-API approval), and the breaking-change batch
+(`flush_pixels -> bool`, `progressive_mode`/`unconsume`, `rgba*`
+extra-channel semantics — now queued in the CHANGELOG). CI also runs
+`threads` without `allow-unsafe` (`8b58423`) and wasm32-wasip1 under
+wasmtime with and without simd128 (`6051605`,
+`.cargo/config.toml` + `.cargo/wasm-runner.sh`).
 
 ## What upstream did since the fork point (by theme)
 
@@ -193,14 +219,14 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 |---|---|---|
 | 654a985 #787 + 8e8769b #817 | single-symbol fast path (must ship together) | **PORTED** (`cddf926`, batch 4) — sunset_logo 1T now 1.07× behind, 12T at parity |
 | ad5ead5 #716 | enum flat tree + `Box<[i32;256]>` property buffer | **N/A (measured)** — ported and measured slower on aarch64 (2026-08-22), reverted; re-measure on x86 before retrying |
-| 4fcfb24 #793 | weighted predictor layout/unrolling | **LATER**, safe-Rust adaptation only (upstream relies on `get_unchecked`) |
+| 4fcfb24 #793 | weighted predictor layout/unrolling | **N/A (measured)** — the fork's WP paths already measure faster than upstream's (2026-08-23), and the upstream version relies on `get_unchecked` |
 | afd41c9 #797 | reader-generic flat trees, fast-lossless path | **LATER** (medium–large); `Tree::num_properties` piece is trivial |
-| 7f8ee4f #812 (scratch cap only) | `group_scratch_buffers_limit = Some(0)` for modular frames | **TAKE** — the fork's low-memory pipeline caches every rendered modular tile forever (`group_scheduler.rs:250-257,416-423`); measure with `examples/heaptrack_decode.rs` |
+| 7f8ee4f #812 (scratch cap only) | `group_scratch_buffers_limit = Some(0)` for modular frames | **PORTED** (`15f332f`) — 300 cached tiles / 78 MB dropped on a 2333x2333 lossless decode, speed unchanged |
 | 7f8ee4f #812 (rest), 2d0b720, c066ee2, 07cb870, abf9c4f, 4495876, f76be0c | depth-first transform engine, border buffers, eager dealloc, parallel modular transforms | **LATER** as one project; this is where upstream's 2× MT modular win comes from |
-| 088ec7f #888 | remove internal image padding | **TAKE** (small; ~7 % less per-tile memory by the fork's own row-rounding formula) |
+| 088ec7f #888 | remove internal image padding | **LATER, behind #797** — the fork's specialised tree decoders use the padded rows for branch-free `row_top[x + 2]` loads; port only together with the #797 loop restructure |
 | f1388c4 #709, 012a292 #818, 7b223de #821, a76e651 #819 | allocation-free → in-place → SIMD blending + bench | **PORTED** (`cddf926`, batch 4; `blendmodes` 1T 1.07×, 12T 1.04×). Bench not ported (criterion); a zenbench bench is still to do |
 | fe3b3c9 | pool-with-return `PerThreadStorage` | **PORTED** (`29c6dd4`, batch 3: CMS transformer pool; `d588318`, batch 5: render-context pool) |
-| 9d64f77 #722 | 20 `#[inline(always)]` sites (`shrc`, `mirror`, cmap, …) | **LATER**, measure |
+| 9d64f77 #722 | 20 `#[inline(always)]` sites (`shrc`, `mirror`, cmap, …) | **N/A (measured)** — applied 1:1 on 2026-08-23, within noise on aarch64 (codegen-units=1 + thin LTO already inline these), reverted |
 | 0196204 #720 | `assert!(permutation.len() >= num_coeffs)` before the coefficient loop | **N/A (measured)** — tried inside an out-of-line coefficient decoder on 2026-08-23, no gain on aarch64 |
 | 36c9c3b #801, da96606 #710, 6c44dc3 #805 | XYB param precompute (≤0.5 %), SmallVec inlining, LF-image copy removal | **LATER** (the fork uses the `smallvec` crate; `f94cc26` BufferFiller, the bigger per-row item, is **PORTED** in `9b1998f`) |
 | bf17fa7 #717, de77265 #721 | property-buffer assert, small inlines | **PORTED** (fork additionally keeps a used-mask gate upstream dropped — A/B it) |
