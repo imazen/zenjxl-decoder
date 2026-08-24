@@ -115,6 +115,13 @@ pub struct RenderPipelineShared<Buffer> {
     pub extend_stage_index: Option<usize>,
     pub memory_tracker: MemoryTracker,
     pub channel_is_used: Vec<bool>,
+    /// Cap on cached group-sized scratch buffers per channel in the
+    /// low-memory pipeline (`None`: unbounded). `Some(0)` for modular
+    /// frames, whose per-group tiles otherwise all end up cached: rendered
+    /// modular data is stored once and recycled once, so nothing reuses
+    /// them within the frame (jxl-rs #812's cap; the depth-first transform
+    /// engine from the rest of that PR is not ported).
+    pub group_scratch_buffers_limit: Option<usize>,
 }
 
 impl<Buffer> RenderPipelineShared<Buffer> {

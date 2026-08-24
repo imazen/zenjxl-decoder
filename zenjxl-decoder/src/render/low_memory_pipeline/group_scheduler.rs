@@ -351,6 +351,16 @@ impl LowMemoryRenderPipeline {
         kind: usize,
         image: OwnedRawImage,
     ) {
+        // Group-sized buffers (kind 0) can be capped: in modular mode a
+        // rendered tile is recycled here once and never taken back, so an
+        // unbounded cache holds one tile per channel per group until the
+        // frame ends (jxl-rs #812).
+        if kind == 0
+            && let Some(limit) = self.shared.group_scratch_buffers_limit
+            && self.scratch_channel_buffers[channel * 3].len() >= limit
+        {
+            return;
+        }
         self.scratch_channel_buffers[channel * 3 + kind].push(image)
     }
 

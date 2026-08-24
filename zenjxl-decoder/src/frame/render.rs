@@ -1472,13 +1472,21 @@ impl Frame {
         } else {
             Orientation::Identity
         };
+        let scratch_limit = if frame_header.encoding == Encoding::Modular {
+            // TODO(veluca, upstream #812): have modular mode participate in
+            // buffer reuse instead.
+            Some(0)
+        } else {
+            None
+        };
         let mut pipeline = RenderPipelineBuilder::<T>::new(
             num_channels + num_temp_channels,
             frame_header.size_upsampled(),
             frame_header.upsampling.ilog2() as usize,
             frame_header.log_group_dim(),
         )
-        .with_memory_tracker(decoder_state.memory_tracker.clone());
+        .with_memory_tracker(decoder_state.memory_tracker.clone())
+        .with_group_scratch_buffers_limit(scratch_limit);
 
         if frame_header.encoding == Encoding::Modular {
             if decoder_state.file_header.image_metadata.xyb_encoded {

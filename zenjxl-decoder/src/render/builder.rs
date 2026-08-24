@@ -64,12 +64,19 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                 extend_stage_index: None,
                 memory_tracker: MemoryTracker::default(),
                 channel_is_used: vec![false; num_channels],
+                group_scratch_buffers_limit: None,
             },
         }
     }
 
     pub fn with_memory_tracker(mut self, tracker: MemoryTracker) -> Self {
         self.shared.memory_tracker = tracker;
+        self
+    }
+
+    /// See [`RenderPipelineShared::group_scratch_buffers_limit`].
+    pub fn with_group_scratch_buffers_limit(mut self, limit: Option<usize>) -> Self {
+        self.shared.group_scratch_buffers_limit = limit;
         self
     }
 
