@@ -245,3 +245,32 @@ fn streamed_flush_of_undecoded_neighbour_groups() {
         }
     }
 }
+
+/// jxl-rs #865 (fixed in 4413527): the incremental parser stopped refilling
+/// its buffer after making progress inside a section, stalling on files
+/// whose TOC alone is bigger than one refill (5249x5377 = 462 groups). The
+/// fork's parser refills from the available input (see the huge-toc test in
+/// `tests/section_buffer_alloc.rs`); this pins the file end-to-end: the
+/// streamed decode must finish and match the one-shot decode exactly.
+#[cfg(target_pointer_width = "64")] // 28 MP x 2 decodes
+#[test]
+fn issue865_large_toc_streams_and_matches_one_shot() {
+    let data = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/testdata/jxlrs-865/issue865_large_toc.jxl"),
+    )
+    .unwrap();
+    let (_, one_shot) = decode(&data, usize::MAX, false, false, None).unwrap();
+    assert_eq!(one_shot.len(), 1);
+    assert_eq!(one_shot[0][0].size(), (5249 * 3, 5377));
+    let (_, streamed) = decode(&data, 123, false, true, None).unwrap();
+    for (c, (ia, ib)) in one_shot[0].iter().zip(&streamed[0]).enumerate() {
+        assert_eq!(ia.size(), ib.size(), "channel {c}");
+        for y in 0..ia.size().1 {
+            assert!(
+                ia.row(y) == ib.row(y),
+                "channel {c} row {y}: streamed decode differs from one-shot"
+            );
+        }
+    }
+}
