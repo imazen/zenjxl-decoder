@@ -184,15 +184,15 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 
 | upstream | what | disposition |
 |---|---|---|
-| aed4e9e #858 | parse `Mul` blend `clamp` bit when there are no extra channels | **TAKE now** — fork fails valid files (`headers/frame_header.rs:126-129`) |
-| 814612d #791 | DeltaPalette + Weighted predictor: call WP for every pixel, save/restore full WP state across group rows | **TAKE now** — pre-fix code is byte-for-byte in `transforms/palette.rs:242-255,598-620`, `predict.rs:456-464`; silent wrong pixels; needs a fixture (libjxl's encoder never emits Weighted delta palettes, jxl-art/other encoders do) |
-| 204c0d0 #833 | `(b as f32 + y as f32) * scale` in modular-XYB conversion | **TAKE now** — confirmed by our own fuzzer (`render/stages/convert.rs:114`) |
-| b78c54a #706 (float16 hunk only) | correct f16 subnormal conversion with RNE | **TAKE now** — both `float16.rs` copies; bring upstream's tests |
-| 7809f88 #856 | grow section buffers from available input, `try_reserve` | **TAKE now** — `codestream_parser/mod.rs:243` does an infallible `resize` to the TOC-declared size (≤ ~1.07 GB per entry, untracked by the memory budget; abort on i686); keep the fork's 8-byte `SECTION_PADDING` |
-| 5c6d8d6 #845 + a608c0b #873 | clip ready rects to the image, edge padding keyed on `start_of_row/end_of_row`, guard `x1<x0` | **TAKE now** — `group_scheduler.rs:65,70,123,129,382,390,555,561`, `render_group.rs:338,353`; wrong right-edge pixels for permuted-TOC streaming + latent usize underflow |
-| 6430786 #813 | ICC size cap 1 MiB → 16 MiB | **TAKE now** for `JxlDecoderLimits::restrictive()` (`options.rs:108`); real CMYK press profiles are 1.8–3.5 MiB. Default is already 256 MiB. Also flag zenjxl's 1 MiB probe cap (other repo) |
-| d5c1f17 #828 (items only) | accept empty boxes / size-0-to-EOF for any box type; `br.check_for_error()` after TOC `read_step`/`read_permutation` | **TAKE now** (two trivial pieces of a large rewrite we otherwise skip) — `box_parser.rs:331-338`, `headers/toc.rs:89,102` |
-| 43e2db6 | x-padding keyed on rect position, not group index | **TAKE now** (trivial, provably equivalent today, protects a future sector-ownership change) |
+| aed4e9e #858 | parse `Mul` blend `clamp` bit when there are no extra channels | **PORTED** (`784a545`, batch 1; `mul_no_extra_channels.jxl` test) |
+| 814612d #791 | DeltaPalette + Weighted predictor: call WP for every pixel, save/restore full WP state across group rows | **PORTED** (`784a545`, batch 1; bit-patched `delta_palette.jxl` fixture, hash cross-checked with djxl 0.12 and jxl-rs 0.6) |
+| 204c0d0 #833 | `(b as f32 + y as f32) * scale` in modular-XYB conversion | **PORTED** (`784a545`, batch 1; fuzz seed `modular-xyb-convert-add-overflow-833`) |
+| b78c54a #706 (float16 hunk only) | correct f16 subnormal conversion with RNE | **PORTED** (`784a545`, batch 1; both `float16.rs` copies, IEEE sweep tests) |
+| 7809f88 #856 | grow section buffers from available input, `try_reserve` | **PORTED** (`1cbb414`, batch 2; `tests/section_buffer_alloc.rs` pins the 1 GB allocation) |
+| 5c6d8d6 #845 + a608c0b #873 | clip ready rects to the image, edge padding keyed on `start_of_row/end_of_row`, guard `x1<x0` | **PORTED** (`1cbb414`, batch 2; `jxlrs-845` fixture + `render_edges` tests) |
+| 6430786 #813 | ICC size cap 1 MiB → 16 MiB | **PORTED** (`1cbb414`, batch 2) for `restrictive()`. Still to flag: zenjxl's 1 MiB probe cap (other repo) |
+| d5c1f17 #828 (items only) | accept empty boxes / size-0-to-EOF for any box type; `br.check_for_error()` after TOC `read_step`/`read_permutation` | **PORTED** (`1cbb414`, batch 2; `container_boxes` tests) |
+| 43e2db6 | x-padding keyed on rect position, not group index | **PORTED** (`1cbb414`, batch 2) |
 | 57e515e #868 | floor semantics for vertically subsampled border rows | **LATER** (mismatch present, no reachable repro found; bundle with #845) |
 | 35fb0ad #829, e749ffd #780, 67cb896 #831, eb60b47 #846, e025e92 #830, 24db91e #832, 452f35e #749, 28ddaeb #745, f1514f1 #743 (non-seek part), 33864e8 #757, 2a6f9ec #774, f20f7d1 #775, c184321 #776, 841842a #784, 81dc81e #766, 0664c90 #756, 159c60b #731, 3d1d0c2 #735, 8de0b29 #740, 1e909aa #741, 226f47e #742, a47d786 #725, 371f033 #738, 83db36f #751, c60408d, a737779 #699 | previously ported or independently fixed | **PORTED** — each re-verified at file:line in the audit file |
 | ebeed75 #773 | clipped blending with missing references (copy_from_slice length) | **N/A** — fork's blending is immune; fixture + block-mean test **PORTED** (`0038580`) |
@@ -205,9 +205,9 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 | upstream | what | disposition |
 |---|---|---|
 | f694be5 #841 | blue-noise dithering of u8 output (libjxl behaviour, always on upstream) | **DECISION NEEDED** — changes every lossy u8 pixel by ≤1 (lossless 8-bit unchanged); brings `decode()` in line with djxl (fork vs djxl: 25 % of pixels ±1 today, upstream vs djxl: 7 %). Three fork stages need the term (`convert.rs`, `xyb.rs` fused kernels, `from_linear.rs`); recommend a `dither_u8` option — default is the user's call |
-| e7405e0 #752 (+3c4f224 #777) | out-of-order `jxlp` boxes (ftyp minor version 1; `cjxl --output_mode 2`) | **TAKE** — fork returns `InvalidBox` on valid files (`box_parser.rs:363`); keep #752's permissive semantics, not #828's seek-oriented restriction |
-| e883140 | safe `JxlOutputBuffer::new_with_stride` | **TAKE** (trivial, additive; matches our stride rule) |
-| c5528f6 #767 | `JxlPixelFormat::rgb*` helpers; `rgba*` stop requesting planar extra channels | **TAKE** rgb* now; rgba* semantic change → queued breaking |
+| e7405e0 #752 (+3c4f224 #777) | out-of-order `jxlp` boxes (ftyp minor version 1; `cjxl --output_mode 2`) | **PORTED** (`29c6dd4`, batch 3; bounded buffering, `container_boxes` + `jxlrs-752` tests) |
+| e883140 | safe `JxlOutputBuffer::new_with_stride` | **TAKE, needs public-API approval** (trivial, additive; matches our stride rule) |
+| c5528f6 #767 | `JxlPixelFormat::rgb*` helpers; `rgba*` stop requesting planar extra channels | rgb* helpers: **TAKE, needs public-API approval**; rgba* semantic change: queued in CHANGELOG breaking batch |
 | d782c19 #755, 0977812 #880, 1cc9ab7 #820 | `flush_pixels -> bool`, drop no-op `progressive_mode`, drop dead `unconsume` / add `file_length` | **LATER** — all breaking; add to CHANGELOG "QUEUED BREAKING CHANGES" |
 | 035477c #678, 2cddd90 #702 | animation scan/seek API | **LATER**, only if a consumer needs seeking; port the post-#828 design, not these commits |
 | 2556ead #732 | 16-bit PPM/PGM in the CLI | **LATER** (cherry-pick) |
@@ -251,9 +251,9 @@ sweeps (`0038580`). Still to do: a CI job for `threads` without
 
 | upstream | what | disposition |
 |---|---|---|
-| e7436b8 #799 | drop `proc-macro-error2` (RUSTSEC-2026-0173) | **TAKE** — near-cherry-pickable into `zenjxl-decoder-macros` |
-| ae13a2d #887 | `clippy::chunks_exact_to_as_chunks = "allow"` | **TAKE** (CI on stable 1.98) |
-| 9bd5b83 #748 | delete benchmark-comment workflow, pin actions, `persist-credentials: false` | **TAKE** the workflow deletion (token-abuse vector); pin later |
+| e7436b8 #799 | drop `proc-macro-error2` (RUSTSEC-2026-0173) | **PORTED** (`29c6dd4`, batch 3) |
+| ae13a2d #887 | `clippy::chunks_exact_to_as_chunks = "allow"` | **PORTED** (`784a545`, batch 1) |
+| 9bd5b83 #748 | delete benchmark-comment workflow, pin actions, `persist-credentials: false` | workflow deletion **PORTED** (`29c6dd4`, batch 3); action pinning still open |
 | c588001 #882 | rustfmt import grouping (146-file churn) | **skip**; strip `use`-block hunks when porting later commits |
 | version bumps, nix flake, cflite timeout, README, clippy/fmt fixups, #694/#727/#790 (jxl_cms crate) | — | **INFRA / N/A** |
 
