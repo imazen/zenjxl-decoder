@@ -45,11 +45,24 @@ impl<'a> JxlOutputBuffer<'a> {
 
     /// Creates a new JxlOutputBuffer from a mutable byte slice.
     pub fn new(buf: &'a mut [u8], num_rows: usize, bytes_per_row: usize) -> Self {
-        RawImageBuffer::check_vals(num_rows, bytes_per_row, bytes_per_row);
+        Self::new_with_stride(buf, num_rows, bytes_per_row, bytes_per_row)
+    }
+
+    /// Creates a new JxlOutputBuffer from a mutable byte slice whose rows are
+    /// `byte_stride` bytes apart (`byte_stride >= bytes_per_row`), e.g. a
+    /// sub-rectangle of a larger buffer. Only the first `bytes_per_row` bytes
+    /// of each row are written; the stride padding is never touched.
+    pub fn new_with_stride(
+        buf: &'a mut [u8],
+        num_rows: usize,
+        bytes_per_row: usize,
+        byte_stride: usize,
+    ) -> Self {
+        RawImageBuffer::check_vals(num_rows, bytes_per_row, byte_stride);
         let expected_len = if num_rows == 0 {
             0
         } else {
-            (num_rows - 1) * bytes_per_row + bytes_per_row
+            (num_rows - 1) * byte_stride + bytes_per_row
         };
         assert!(buf.len() >= expected_len);
         Self {
@@ -59,7 +72,7 @@ impl<'a> JxlOutputBuffer<'a> {
                 } else {
                     &mut buf[..expected_len]
                 },
-                bytes_between_rows: bytes_per_row,
+                bytes_between_rows: byte_stride,
             },
             bytes_per_row,
             num_rows,
@@ -551,5 +564,57 @@ impl Debug for JxlOutputBuffer<'_> {
             "JxlOutputBuffer {}x{}",
             self.bytes_per_row, self.num_rows
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::JxlOutputBuffer;
+
+    #[test]
+    fn new_with_stride_addresses_rows_by_stride_and_leaves_padding() {
+        // 3 rows of 4 bytes, stride 6: last row needs no trailing padding.
+        let mut buf = [0xAAu8; 6 * 2 + 4];
+        {
+            let mut out = JxlOutputBuffer::new_with_stride(&mut buf, 3, 4, 6);
+            for r in 0..3 {
+                out.row_mut(r).copy_from_slice(&[r as u8; 4]);
+            }
+        }
+        #[rustfmt::skip]
+        assert_eq!(buf, [
+            0, 0, 0, 0, 0xAA, 0xAA,
+            1, 1, 1, 1, 0xAA, 0xAA,
+            2, 2, 2, 2,
+        ]);
+    }
+
+    #[test]
+    fn new_is_new_with_stride_tight() {
+        let mut a = [0u8; 12];
+        let mut b = [0u8; 12];
+        {
+            let mut oa = JxlOutputBuffer::new(&mut a, 3, 4);
+            let mut ob = JxlOutputBuffer::new_with_stride(&mut b, 3, 4, 4);
+            for r in 0..3 {
+                oa.row_mut(r).copy_from_slice(&[r as u8 + 1; 4]);
+                ob.row_mut(r).copy_from_slice(&[r as u8 + 1; 4]);
+            }
+        }
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    #[should_panic]
+    fn new_with_stride_rejects_stride_smaller_than_row() {
+        let mut buf = [0u8; 64];
+        let _ = JxlOutputBuffer::new_with_stride(&mut buf, 4, 8, 4);
+    }
+
+    #[test]
+    #[should_panic]
+    fn new_with_stride_rejects_short_buffer() {
+        let mut buf = [0u8; 6 * 2 + 3]; // one byte short of the last row
+        let _ = JxlOutputBuffer::new_with_stride(&mut buf, 3, 4, 6);
     }
 }
