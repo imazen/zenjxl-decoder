@@ -110,6 +110,12 @@ pub(super) struct CodestreamParser {
     // group indices that *might* have new renderable data.
     candidate_hf_sections: HashSet<usize>,
 
+    /// Total length of the file, in bytes, once known: set when the last
+    /// frame finishes decoding, as the count of input bytes actually consumed
+    /// by the file (excluding bytes over-read into internal buffers). `None`
+    /// until decoding is finished.
+    pub(super) file_length: Option<u64>,
+
     /// Set when `decode_and_render_hf_groups` / `maybe_preview_lf_frame`
     /// actually write to the output buffers. Read and cleared by
     /// `flush_pixels` via [`Self::get_and_clear_pixels_dirty`].
@@ -141,6 +147,23 @@ pub(super) struct CodestreamParser {
 }
 
 impl CodestreamParser {
+    /// Once the last frame has finished decoding, computes the number of
+    /// input bytes the file actually used: everything pulled from the input so
+    /// far minus what still sits unconsumed in internal buffers (box buffer,
+    /// buffered out-of-order `jxlp` payloads, the non-section buffer, and
+    /// ready-but-unparsed section bytes).
+    fn record_file_length(&mut self, box_parser: &BoxParser) {
+        if !self.has_more_frames && self.file_length.is_none() {
+            self.file_length = Some(
+                box_parser
+                    .total_file_read
+                    .saturating_sub(box_parser.buffered_leftover())
+                    .saturating_sub(self.non_section_buf.len() as u64)
+                    .saturating_sub(self.ready_section_data as u64),
+            );
+        }
+    }
+
     /// Returns whether any pixels were rendered since the last call, and
     /// clears the flag.
     pub(super) fn get_and_clear_pixels_dirty(&mut self) -> bool {
@@ -180,6 +203,7 @@ impl CodestreamParser {
             hf_global_section: None,
             hf_sections: vec![],
             candidate_hf_sections: HashSet::new(),
+            file_length: None,
             pixels_dirty: false,
             has_more_frames: true,
             header_needed_bytes: None,
@@ -314,7 +338,9 @@ impl CodestreamParser {
                         let num = if !box_parser.box_buffer.is_empty() {
                             box_parser.box_buffer.take(buffers)
                         } else {
-                            input.read(buffers).map_err(|e| at!(Error::from(e)))?
+                            let num = input.read(buffers).map_err(|e| at!(Error::from(e)))?;
+                            box_parser.total_file_read += num as u64;
+                            num
                         };
                         self.ready_section_data += num;
                         box_parser.consume_codestream(num as u64);
@@ -331,6 +357,7 @@ impl CodestreamParser {
                         }
                         Err(err) => Err(err),
                     }?;
+                    self.record_file_length(box_parser);
                     // If no section data was read and sections are still pending,
                     // the input is truncated — return an error instead of looping
                     // forever waiting for data that will never arrive.
@@ -356,7 +383,9 @@ impl CodestreamParser {
                         let skipped = if !box_parser.box_buffer.is_empty() {
                             box_parser.box_buffer.consume(to_skip)
                         } else {
-                            input.skip(to_skip).map_err(|e| at!(Error::from(e)))?
+                            let skipped = input.skip(to_skip).map_err(|e| at!(Error::from(e)))?;
+                            box_parser.total_file_read += skipped as u64;
+                            skipped
                         };
                         box_parser.consume_codestream(skipped as u64);
                         self.ready_section_data += skipped;
@@ -380,6 +409,7 @@ impl CodestreamParser {
                         } else {
                             self.has_more_frames = false;
                         }
+                        self.record_file_length(box_parser);
                         self.skip_sections = false;
                     }
                 }
@@ -451,7 +481,9 @@ impl CodestreamParser {
                             if !box_parser.box_buffer.is_empty() {
                                 Ok(box_parser.box_buffer.take(buf))
                             } else {
-                                input.read(buf)
+                                let num = input.read(buf)?;
+                                box_parser.total_file_read += num as u64;
+                                Ok(num)
                             }
                         },
                         Some(available_codestream),

@@ -181,6 +181,13 @@ impl JxlDecoderInner {
         self.codestream_parser.has_more_frames
     }
 
+    /// Returns the total length of the JPEG XL file, once decoding is
+    /// finished. This is needed because the decoder might over-consume bytes
+    /// from the provided input stream in some cases.
+    pub fn file_length(&self) -> Option<u64> {
+        self.codestream_parser.file_length
+    }
+
     /// Returns the reconstructed JPEG bytes if the file contained a JBRD box.
     ///
     /// The reconstruction `JpegData` is built when the frame decodes, but the

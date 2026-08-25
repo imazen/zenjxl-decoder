@@ -88,8 +88,39 @@ impl OooJxlp {
     const GROW_STEP: usize = 64 * 1024;
 }
 
+/// Counts the bytes pulled from the wrapped input, so the box parser can
+/// account for every byte of the file it consumed (see `total_file_read`).
+struct CountingInput<'a> {
+    inner: &'a mut dyn JxlBitstreamInput,
+    count: u64,
+}
+
+impl JxlBitstreamInput for CountingInput<'_> {
+    fn available_bytes(&mut self) -> Result<usize, std::io::Error> {
+        self.inner.available_bytes()
+    }
+
+    fn read(&mut self, bufs: &mut [std::io::IoSliceMut]) -> Result<usize, std::io::Error> {
+        let num = self.inner.read(bufs)?;
+        self.count += num as u64;
+        Ok(num)
+    }
+
+    fn skip(&mut self, bytes: usize) -> Result<usize, std::io::Error> {
+        let num = self.inner.skip(bytes)?;
+        self.count += num as u64;
+        Ok(num)
+    }
+}
+
 pub(super) struct BoxParser {
     pub(super) box_buffer: SmallBuffer,
+    /// Total bytes ever pulled from the caller's input (through
+    /// `get_more_codestream` or counted explicitly by the codestream parser's
+    /// direct section reads). Some of them may still sit unconsumed in
+    /// [`Self::box_buffer`] or in buffered out-of-order `jxlp` payloads; see
+    /// [`Self::buffered_leftover`].
+    pub(super) total_file_read: u64,
     state: ParseState,
     box_type: CodestreamBoxType,
     #[cfg(feature = "jpeg")]
@@ -109,6 +140,7 @@ impl BoxParser {
     pub(super) fn new() -> Self {
         BoxParser {
             box_buffer: SmallBuffer::new(128),
+            total_file_read: 0,
             state: ParseState::SignatureNeeded,
             box_type: CodestreamBoxType::None,
             #[cfg(feature = "jpeg")]
@@ -166,6 +198,30 @@ impl BoxParser {
     // including any bytes in self.box_buffer.
     // Might return `u64::MAX`, indicating that the rest of the file is codestream.
     pub(super) fn get_more_codestream(&mut self, input: &mut dyn JxlBitstreamInput) -> Result<u64> {
+        let mut counting = CountingInput {
+            inner: input,
+            count: 0,
+        };
+        let result = self.get_more_codestream_impl(&mut counting);
+        self.total_file_read += counting.count;
+        result
+    }
+
+    /// Bytes read from the input that are still buffered (not yet part of any
+    /// parsed structure): the box buffer plus buffered out-of-order `jxlp`
+    /// payloads.
+    pub(super) fn buffered_leftover(&self) -> u64 {
+        self.box_buffer.len() as u64
+            + self.ooo_jxlp.pending.len() as u64
+            + self
+                .ooo_jxlp
+                .buffered
+                .values()
+                .map(|(data, _)| data.len() as u64)
+                .sum::<u64>()
+    }
+
+    fn get_more_codestream_impl(&mut self, input: &mut dyn JxlBitstreamInput) -> Result<u64> {
         loop {
             match self.state.clone() {
                 ParseState::SignatureNeeded => {

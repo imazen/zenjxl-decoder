@@ -240,6 +240,15 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.has_more_frames()
     }
 
+    /// Returns the total length of the JPEG XL file, once decoding is
+    /// finished; `None` while decoding is still in progress. This is needed
+    /// because the decoder might over-consume bytes from the provided input
+    /// stream in some cases: once the image completes, bytes the caller fed
+    /// past the reported length were not part of the file.
+    pub fn file_length(&self) -> Option<u64> {
+        self.inner.file_length()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.inner.set_use_simple_pipeline(u);
@@ -1587,6 +1596,90 @@ pub(crate) mod tests {
     }
 
     /// Helper function to decode an image with a specific format.
+    /// Decode `data` fully (feeding at most `chunk` bytes at a time) and
+    /// return `file_length()` from the final decoder.
+    fn decode_and_get_file_length(data: &[u8], chunk: usize) -> Option<u64> {
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_memory_bytes = None;
+        let mut initialized = JxlDecoder::<states::Initialized>::new(options);
+
+        let mut input: &[u8] = data;
+        let mut chunk_input = &input[0..0];
+
+        macro_rules! feed {
+            ($decoder:ident $(, $extra:expr)?) => {
+                loop {
+                    chunk_input =
+                        &input[..(chunk_input.len().saturating_add(chunk)).min(input.len())];
+                    let before = chunk_input.len();
+                    let process_result = $decoder.process(&mut chunk_input $(, $extra)?);
+                    input = &input[(before - chunk_input.len())..];
+                    match process_result.unwrap() {
+                        ProcessingResult::Complete { result } => break result,
+                        ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                            assert!(!input.is_empty(), "unexpected end of input");
+                            $decoder = fallback;
+                        }
+                    }
+                }
+            };
+        }
+
+        let mut with_image_info = feed!(initialized);
+        assert_eq!(with_image_info.file_length(), None);
+        let num_extra_channels = with_image_info
+            .current_pixel_format()
+            .extra_channel_format
+            .len();
+        with_image_info.set_pixel_format(JxlPixelFormat::rgb8(num_extra_channels));
+        let (width, height) = with_image_info.basic_info().size;
+        let mut pixels = Image::<u8>::new((width * 3, height)).unwrap();
+
+        let mut decoder = with_image_info;
+        loop {
+            let mut with_frame_info = feed!(decoder);
+            let size = pixels.size();
+            let mut bufs = [JxlOutputBuffer::from_image_rect_mut(
+                pixels
+                    .get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size,
+                    })
+                    .into_raw(),
+            )];
+            let with_image_info = feed!(with_frame_info, &mut bufs);
+            decoder = with_image_info;
+            if !decoder.has_more_frames() {
+                break;
+            }
+        }
+        decoder.file_length()
+    }
+
+    /// `file_length` reports how many of the fed bytes were actually part of
+    /// the JPEG XL file, once decoding finishes (upstream jxl-rs #820, which
+    /// replaced `JxlBitstreamInput::unconsume` with this accessor). Trailing
+    /// garbage past the file end must not be counted, whether the file is fed
+    /// in one shot or in small chunks.
+    #[test]
+    fn file_length_reports_actual_file_end() {
+        for fixture in ["green_queen_vardct_e3.jxl", "candle.jxl"] {
+            let file = crate::util::test::fixture_bytes(fixture);
+            for garbage in [0usize, 1000] {
+                for chunk in [usize::MAX, 1024] {
+                    let mut data = file.clone();
+                    data.extend(std::iter::repeat_n(0xAB, garbage));
+                    let flen = decode_and_get_file_length(&data, chunk);
+                    assert_eq!(
+                        flen,
+                        Some(file.len() as u64),
+                        "{fixture} garbage={garbage} chunk={chunk}"
+                    );
+                }
+            }
+        }
+    }
+
     /// `flush_pixels` returns `true` only when new pixels were rendered since
     /// the previous call (upstream jxl-rs #755): a second back-to-back flush
     /// with no new input must report `false`, and a chunked decode of a
@@ -1757,8 +1850,8 @@ pub(crate) mod tests {
     #[test]
     fn test_cmyk_pixel_format_requires_cmyk_image() {
         let file = crate::util::test::fixture_bytes("basic.jxl");
-        let err = decode_with_format::<u8>(&file, &JxlPixelFormat::cmyk8(0), false, false)
-            .unwrap_err();
+        let err =
+            decode_with_format::<u8>(&file, &JxlPixelFormat::cmyk8(0), false, false).unwrap_err();
         assert!(
             matches!(err.error(), Error::NotCmyk),
             "expected NotCmyk, got {err:?}"
