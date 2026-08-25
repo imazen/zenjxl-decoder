@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 
+use whereat::at;
+
 use crate::{
-    error::Result,
+    error::{Error, Result},
     features::{
         blending::perform_blending,
         patches::{PatchBlendMode, PatchBlending},
@@ -59,7 +61,23 @@ impl BlendingStage {
         file_header: &FileHeader,
         reference_frames: Arc<[Option<ReferenceFrame>; 4]>,
     ) -> Result<BlendingStage> {
-        let xsize = file_header.size.xsize();
+        let image_size = (
+            file_header.size.xsize() as usize,
+            file_header.size.ysize() as usize,
+        );
+        for info in
+            std::iter::once(&frame_header.blending_info).chain(frame_header.ec_blending_info.iter())
+        {
+            let source = info.source as usize;
+            let Some(frame) = reference_frames[source].as_ref() else {
+                continue;
+            };
+            if frame.saved_before_color_transform {
+                return Err(at!(Error::BlendingPreColorTransform(source)));
+            }
+            assert_eq!(frame.frame[0].size(), image_size);
+        }
+
         let ec_patch_blending = frame_header
             .ec_blending_info
             .iter()
@@ -67,13 +85,13 @@ impl BlendingStage {
             .collect();
         Ok(BlendingStage {
             frame_origin: (frame_header.x0 as isize, frame_header.y0 as isize),
-            image_size: (xsize as isize, file_header.size.ysize() as isize),
+            image_size: (image_size.0 as isize, image_size.1 as isize),
             blending_info: frame_header.blending_info.clone(),
             ec_blending_info: frame_header.ec_blending_info.clone(),
             ec_patch_blending,
             extra_channels: file_header.image_metadata.extra_channel_info.clone(),
             reference_frames,
-            zeros: vec![0f32; xsize as usize],
+            zeros: vec![0f32; image_size.0],
         })
     }
 }
@@ -190,17 +208,73 @@ mod test {
     fn blending_consistency() -> Result<()> {
         let (file_header, frame_header, _) =
             read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
+        let image_size = (
+            file_header.size.xsize() as usize,
+            file_header.size.ysize() as usize,
+        );
         let mut rng = rand_xorshift::XorShiftRng::seed_from_u64(0);
+        let mut reference_frame =
+            || ReferenceFrame::random(&mut rng, image_size.0, image_size.1, 4, false);
         let reference_frames = Arc::new([
-            Some(ReferenceFrame::random(&mut rng, 500, 500, 4, false)?),
-            Some(ReferenceFrame::random(&mut rng, 500, 500, 4, false)?),
-            Some(ReferenceFrame::random(&mut rng, 500, 500, 4, false)?),
-            Some(ReferenceFrame::random(&mut rng, 500, 500, 4, false)?),
+            Some(reference_frame()?),
+            Some(reference_frame()?),
+            Some(reference_frame()?),
+            Some(reference_frame()?),
         ]);
         crate::render::test::test_stage_consistency(
             || BlendingStage::new(&frame_header, &file_header, reference_frames.clone()).unwrap(),
             (500, 500),
             4,
         )
+    }
+
+    #[test]
+    fn reject_blending_with_pre_color_transform_reference() -> Result<()> {
+        let (file_header, mut frame_header, _) =
+            read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
+        frame_header.blending_info.source = 3;
+        let image_size = (
+            file_header.size.xsize() as usize,
+            file_header.size.ysize() as usize,
+        );
+        let reference_frames = Arc::new([
+            None,
+            None,
+            None,
+            Some(ReferenceFrame::blank(image_size.0, image_size.1, 4, true)?),
+        ]);
+
+        let result = BlendingStage::new(&frame_header, &file_header, reference_frames);
+        assert!(
+            matches!(&result, Err(e) if matches!(e.error(), Error::BlendingPreColorTransform(3))),
+            "expected BlendingPreColorTransform(3)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reject_extra_channel_blending_with_pre_color_transform_reference() -> Result<()> {
+        let (file_header, mut frame_header, _) =
+            read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
+        let mut ec_blending_info = frame_header.blending_info.clone();
+        ec_blending_info.source = 2;
+        frame_header.ec_blending_info.push(ec_blending_info);
+        let image_size = (
+            file_header.size.xsize() as usize,
+            file_header.size.ysize() as usize,
+        );
+        let reference_frames = Arc::new([
+            None,
+            None,
+            Some(ReferenceFrame::blank(image_size.0, image_size.1, 4, true)?),
+            None,
+        ]);
+
+        let result = BlendingStage::new(&frame_header, &file_header, reference_frames);
+        assert!(
+            matches!(&result, Err(e) if matches!(e.error(), Error::BlendingPreColorTransform(2))),
+            "expected BlendingPreColorTransform(2)"
+        );
+        Ok(())
     }
 }
