@@ -1581,6 +1581,24 @@ pub(crate) mod tests {
     }
 
     /// Helper function to decode an image with a specific format.
+    /// Premultiplied RGBA output from a grayscale image remains gray.
+    /// (upstream jxl-rs #903)
+    #[test]
+    fn test_premultiply_output_grayscale_as_rgba() {
+        let file = crate::util::test::fixture_bytes("gray_alpha_lossless.jxl");
+        let (buffers, width, height) =
+            decode_with_format::<f32>(&file, &JxlPixelFormat::rgba_f32(1), false, true).unwrap();
+        let rgba = &buffers[0];
+
+        for y in 0..height {
+            let row = rgba.row(y);
+            for x in 0..width {
+                assert_eq!(row[x * 4], row[x * 4 + 1], "R!=G at ({x},{y})");
+                assert_eq!(row[x * 4 + 1], row[x * 4 + 2], "G!=B at ({x},{y})");
+            }
+        }
+    }
+
     /// CMYK interleaved output matches the RGB color channels for C, M and Y,
     /// and the Black extra channel plane for K. (upstream jxl-rs #891)
     #[test]
