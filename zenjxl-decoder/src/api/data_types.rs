@@ -184,14 +184,14 @@ pub struct JxlPixelFormat {
 
 impl JxlPixelFormat {
     /// Creates an RGBA 8-bit pixel format.
+    ///
+    /// The `num_extra_channels` extra channels are declared but not requested
+    /// (their formats are `None`); pass buffers only for color data.
     pub fn rgba8(num_extra_channels: usize) -> Self {
         Self {
             color_type: JxlColorType::Rgba,
             color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
-            extra_channel_format: vec![
-                Some(JxlDataFormat::U8 { bit_depth: 8 });
-                num_extra_channels
-            ],
+            extra_channel_format: vec![None; num_extra_channels],
         }
     }
 
@@ -203,13 +203,7 @@ impl JxlPixelFormat {
                 endianness: Endianness::native(),
                 bit_depth: 16,
             }),
-            extra_channel_format: vec![
-                Some(JxlDataFormat::U16 {
-                    endianness: Endianness::native(),
-                    bit_depth: 16,
-                });
-                num_extra_channels
-            ],
+            extra_channel_format: vec![None; num_extra_channels],
         }
     }
 
@@ -220,12 +214,7 @@ impl JxlPixelFormat {
             color_data_format: Some(JxlDataFormat::F16 {
                 endianness: Endianness::native(),
             }),
-            extra_channel_format: vec![
-                Some(JxlDataFormat::F16 {
-                    endianness: Endianness::native(),
-                });
-                num_extra_channels
-            ],
+            extra_channel_format: vec![None; num_extra_channels],
         }
     }
 
@@ -236,12 +225,50 @@ impl JxlPixelFormat {
             color_data_format: Some(JxlDataFormat::F32 {
                 endianness: Endianness::native(),
             }),
-            extra_channel_format: vec![
-                Some(JxlDataFormat::F32 {
-                    endianness: Endianness::native(),
-                });
-                num_extra_channels
-            ],
+            extra_channel_format: vec![None; num_extra_channels],
+        }
+    }
+
+    /// Creates an RGB 8-bit pixel format.
+    pub fn rgb8(num_extra_channels: usize) -> Self {
+        Self {
+            color_type: JxlColorType::Rgb,
+            color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
+            extra_channel_format: vec![None; num_extra_channels],
+        }
+    }
+
+    /// Creates an RGB 16-bit pixel format.
+    pub fn rgb16(num_extra_channels: usize) -> Self {
+        Self {
+            color_type: JxlColorType::Rgb,
+            color_data_format: Some(JxlDataFormat::U16 {
+                endianness: Endianness::native(),
+                bit_depth: 16,
+            }),
+            extra_channel_format: vec![None; num_extra_channels],
+        }
+    }
+
+    /// Creates an RGB f16 pixel format.
+    pub fn rgb_f16(num_extra_channels: usize) -> Self {
+        Self {
+            color_type: JxlColorType::Rgb,
+            color_data_format: Some(JxlDataFormat::F16 {
+                endianness: Endianness::native(),
+            }),
+            extra_channel_format: vec![None; num_extra_channels],
+        }
+    }
+
+    /// Creates an RGB f32 pixel format.
+    pub fn rgb_f32(num_extra_channels: usize) -> Self {
+        Self {
+            color_type: JxlColorType::Rgb,
+            color_data_format: Some(JxlDataFormat::F32 {
+                endianness: Endianness::native(),
+            }),
+            extra_channel_format: vec![None; num_extra_channels],
         }
     }
 }
@@ -294,4 +321,32 @@ pub struct JxlFrameHeader {
     pub duration: Option<f64>,
     /// Frame size (width, height)
     pub size: (usize, usize),
+}
+
+#[cfg(test)]
+mod test {
+    use super::{JxlColorType, JxlPixelFormat};
+
+    /// The `rgba*` / `rgb*` constructors declare `num_extra_channels` extra
+    /// channels but do not request them: every entry is `None` (upstream
+    /// jxl-rs #767). Callers that want extra-channel planes fill the entries
+    /// in explicitly.
+    #[test]
+    fn pixel_format_helpers_do_not_request_extra_channels() {
+        for (fmt, color_type, samples) in [
+            (JxlPixelFormat::rgba8(2), JxlColorType::Rgba, 4),
+            (JxlPixelFormat::rgba16(2), JxlColorType::Rgba, 4),
+            (JxlPixelFormat::rgba_f16(2), JxlColorType::Rgba, 4),
+            (JxlPixelFormat::rgba_f32(2), JxlColorType::Rgba, 4),
+            (JxlPixelFormat::rgb8(2), JxlColorType::Rgb, 3),
+            (JxlPixelFormat::rgb16(2), JxlColorType::Rgb, 3),
+            (JxlPixelFormat::rgb_f16(2), JxlColorType::Rgb, 3),
+            (JxlPixelFormat::rgb_f32(2), JxlColorType::Rgb, 3),
+        ] {
+            assert_eq!(fmt.color_type, color_type);
+            assert_eq!(fmt.color_type.samples_per_pixel(), samples);
+            assert!(fmt.color_data_format.is_some());
+            assert_eq!(fmt.extra_channel_format, vec![None, None]);
+        }
+    }
 }
