@@ -174,15 +174,6 @@ impl JxlDecoderLimits {
     }
 }
 
-pub enum JxlProgressiveMode {
-    /// Renders all pixels in every call to Process.
-    Eager,
-    /// Renders pixels once passes are completed.
-    Pass,
-    /// Renders pixels only once the final frame is ready.
-    FullFrame,
-}
-
 /// Decoder configuration.
 ///
 /// This struct is `#[non_exhaustive]`, so downstream crates **cannot** build it
@@ -232,7 +223,6 @@ pub struct JxlDecoderOptions {
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
     pub skip_preview: bool,
-    pub progressive_mode: JxlProgressiveMode,
     pub cms: Option<Box<dyn JxlCms>>,
     /// Use high precision mode for decoding.
     /// When false (default), uses lower precision settings that match libjxl's default.
@@ -272,7 +262,6 @@ impl Default for JxlDecoderOptions {
             coalescing: true,
             skip_preview: true,
             desired_intensity_target: None,
-            progressive_mode: JxlProgressiveMode::Pass,
             cms: None,
             high_precision: false,
             premultiply_output: false,
@@ -331,13 +320,6 @@ impl JxlDecoderOptions {
     #[must_use]
     pub fn with_skip_preview(mut self, v: bool) -> Self {
         self.skip_preview = v;
-        self
-    }
-
-    /// Set the progressive rendering mode.
-    #[must_use]
-    pub fn with_progressive_mode(mut self, mode: JxlProgressiveMode) -> Self {
-        self.progressive_mode = mode;
         self
     }
 
