@@ -127,6 +127,13 @@ impl Frame {
                     channel_type: "Black".to_string(),
                 }));
             }
+            // CMYK interleaved output needs the K plane too.
+            if pixel_format.color_type == JxlColorType::Cmyk {
+                return Err(at!(Error::CmsConsumedChannelRequested {
+                    channel_index: k_ec_idx,
+                    channel_type: "Black".to_string(),
+                }));
+            }
         }
         Ok(())
     }
@@ -2094,13 +2101,35 @@ impl Frame {
             // unless explicitly requested otherwise via premultiply_output=false + cms option.
             // This matches libjxl's JxlDecoderSetUnpremultiplyAlpha default of false.
 
-            let color_source_channels: &[usize] =
+            // For CMYK output, interleave the Black extra channel as the
+            // fourth channel. This requires a color image with a Black extra
+            // channel.
+            let black_in_color = if pixel_format.color_type == JxlColorType::Cmyk {
+                let black_channel = decoder_state
+                    .file_header
+                    .image_metadata
+                    .extra_channel_info
+                    .iter()
+                    .position(|info| info.ec_type == ExtraChannel::Black);
+                match (num_color_channels, black_channel) {
+                    (3, Some(index)) => Some(index + 3),
+                    _ => return Err(at!(Error::NotCmyk)),
+                }
+            } else {
+                None
+            };
+            let cmyk_channels;
+            let color_source_channels: &[usize] = if let Some(black) = black_in_color {
+                cmyk_channels = [0, 1, 2, black];
+                &cmyk_channels
+            } else {
                 match (pixel_format.color_type.is_grayscale(), alpha_in_color) {
                     (true, None) => &[0],
                     (true, Some(c)) => &[0, c],
                     (false, None) => &[0, 1, 2],
                     (false, Some(c)) => &[0, 1, 2, c],
-                };
+                }
+            };
             // `output_buffer_index` walks the PACKED position in the caller's
             // api buffer list — color first (if requested), then each
             // *requested* (`Some`) extra channel in order. This must match

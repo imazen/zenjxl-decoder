@@ -270,6 +270,8 @@ pub enum Error {
     WrongBufferCount(usize, usize),
     #[error("Image is not grayscale, but grayscale output was requested")]
     NotGrayscale,
+    #[error("Image is not CMYK, but CMYK output was requested")]
+    NotCmyk,
     #[error("Invalid output buffer byte size {0}x{1} for {2}x{3} image with type {4:?} {5:?}")]
     InvalidOutputBufferSize(usize, usize, usize, usize, JxlColorType, JxlDataFormat),
     #[error("Attempting to save channels with different downsample amounts: {0:?} and {1:?}")]
@@ -384,6 +386,7 @@ impl Error {
             // invalid for this image — a usage error, not an input problem.
             Error::WrongBufferCount(..)
             | Error::NotGrayscale
+            | Error::NotCmyk
             | Error::InvalidOutputBufferSize(..)
             | Error::ICCOutputNoCMS
             | Error::NonXybOutputNoCMS
@@ -452,6 +455,7 @@ mod tests {
             ErrorClass::OutOfMemory
         );
         assert_eq!(Error::NotGrayscale.kind(), ErrorClass::OutputConfiguration);
+        assert_eq!(Error::NotCmyk.kind(), ErrorClass::OutputConfiguration);
         assert_eq!(Error::ProgressiveRejected.kind(), ErrorClass::Unsupported,);
         assert_eq!(Error::ArithmeticOverflow.kind(), ErrorClass::Internal);
         // Malformed-bitstream variants fall into the default class.

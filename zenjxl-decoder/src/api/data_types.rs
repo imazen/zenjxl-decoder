@@ -13,6 +13,10 @@ pub enum JxlColorType {
     Rgba,
     Bgr,
     Bgra,
+    /// Four interleaved channels: C, M, Y and K, where K is taken from the
+    /// image's Black extra channel. Only valid for color images with a Black
+    /// extra channel.
+    Cmyk,
 }
 
 impl JxlColorType {
@@ -22,6 +26,7 @@ impl JxlColorType {
             Self::GrayscaleAlpha => true,
             Self::Rgb | Self::Bgr => false,
             Self::Rgba | Self::Bgra => true,
+            Self::Cmyk => false,
         }
     }
     pub fn samples_per_pixel(&self) -> usize {
@@ -29,7 +34,7 @@ impl JxlColorType {
             Self::Grayscale => 1,
             Self::GrayscaleAlpha => 2,
             Self::Rgb | Self::Bgr => 3,
-            Self::Rgba | Self::Bgra => 4,
+            Self::Rgba | Self::Bgra | Self::Cmyk => 4,
         }
     }
     pub fn is_grayscale(&self) -> bool {
@@ -38,13 +43,17 @@ impl JxlColorType {
             Self::GrayscaleAlpha => true,
             Self::Rgb | Self::Bgr => false,
             Self::Rgba | Self::Bgra => false,
+            Self::Cmyk => false,
         }
     }
-    pub fn add_alpha(&self) -> Self {
+    /// The alpha-carrying variant of this color type, or `None` if it has no
+    /// alpha-carrying counterpart (CMYK).
+    pub fn add_alpha(&self) -> Option<Self> {
         match self {
-            Self::Grayscale | Self::GrayscaleAlpha => Self::GrayscaleAlpha,
-            Self::Rgb | Self::Rgba => Self::Rgba,
-            Self::Bgr | Self::Bgra => Self::Bgra,
+            Self::Grayscale | Self::GrayscaleAlpha => Some(Self::GrayscaleAlpha),
+            Self::Rgb | Self::Rgba => Some(Self::Rgba),
+            Self::Bgr | Self::Bgra => Some(Self::Bgra),
+            Self::Cmyk => None,
         }
     }
 }
@@ -271,6 +280,15 @@ impl JxlPixelFormat {
             extra_channel_format: vec![None; num_extra_channels],
         }
     }
+
+    /// Creates a CMYK 8-bit pixel format.
+    pub fn cmyk8(num_extra_channels: usize) -> Self {
+        Self {
+            color_type: JxlColorType::Cmyk,
+            color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
+            extra_channel_format: vec![None; num_extra_channels],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -348,5 +366,33 @@ mod test {
             assert!(fmt.color_data_format.is_some());
             assert_eq!(fmt.extra_channel_format, vec![None, None]);
         }
+    }
+
+    #[test]
+    fn add_alpha() {
+        for (color_type, expected) in [
+            (JxlColorType::Grayscale, Some(JxlColorType::GrayscaleAlpha)),
+            (
+                JxlColorType::GrayscaleAlpha,
+                Some(JxlColorType::GrayscaleAlpha),
+            ),
+            (JxlColorType::Rgb, Some(JxlColorType::Rgba)),
+            (JxlColorType::Rgba, Some(JxlColorType::Rgba)),
+            (JxlColorType::Bgr, Some(JxlColorType::Bgra)),
+            (JxlColorType::Bgra, Some(JxlColorType::Bgra)),
+            (JxlColorType::Cmyk, None),
+        ] {
+            assert_eq!(color_type.add_alpha(), expected);
+        }
+    }
+
+    #[test]
+    fn cmyk8_shape() {
+        let fmt = JxlPixelFormat::cmyk8(1);
+        assert_eq!(fmt.color_type, JxlColorType::Cmyk);
+        assert_eq!(fmt.color_type.samples_per_pixel(), 4);
+        assert!(!fmt.color_type.has_alpha());
+        assert!(!fmt.color_type.is_grayscale());
+        assert_eq!(fmt.extra_channel_format, vec![None]);
     }
 }
