@@ -110,6 +110,11 @@ pub(super) struct CodestreamParser {
     // group indices that *might* have new renderable data.
     candidate_hf_sections: HashSet<usize>,
 
+    /// Set when `decode_and_render_hf_groups` / `maybe_preview_lf_frame`
+    /// actually write to the output buffers. Read and cleared by
+    /// `flush_pixels` via [`Self::get_and_clear_pixels_dirty`].
+    pixels_dirty: bool,
+
     pub(super) has_more_frames: bool,
 
     /// `(global_scale, quant_lf)` of the first regular VarDCT frame, captured
@@ -136,6 +141,14 @@ pub(super) struct CodestreamParser {
 }
 
 impl CodestreamParser {
+    /// Returns whether any pixels were rendered since the last call, and
+    /// clears the flag.
+    pub(super) fn get_and_clear_pixels_dirty(&mut self) -> bool {
+        let r = self.pixels_dirty;
+        self.pixels_dirty = false;
+        r
+    }
+
     pub(super) fn new() -> Self {
         Self {
             file_header: None,
@@ -167,6 +180,7 @@ impl CodestreamParser {
             hf_global_section: None,
             hf_sections: vec![],
             candidate_hf_sections: HashSet::new(),
+            pixels_dirty: false,
             has_more_frames: true,
             header_needed_bytes: None,
             #[cfg(test)]

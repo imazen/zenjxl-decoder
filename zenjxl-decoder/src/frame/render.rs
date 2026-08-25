@@ -138,6 +138,9 @@ impl Frame {
         Ok(())
     }
 
+    /// Returns `true` if any pixels were written to the output buffers during
+    /// this call, `false` if the call was a no-op for the buffers (e.g. no new
+    /// HF groups, no flush work, or the render pipeline was not yet ready).
     pub fn decode_and_render_hf_groups(
         &mut self,
         api_buffers: &mut Option<&mut [JxlOutputBuffer<'_>]>,
@@ -145,12 +148,12 @@ impl Frame {
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
         do_flush: bool,
         output_profile: &JxlColorProfile,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if self.render_pipeline.is_none() {
             assert_eq!(groups.iter().map(|x| x.1.len()).sum::<usize>(), 0);
             // We don't yet have any output ready (as the pipeline would be initialized otherwise),
             // so exit without doing anything.
-            return Ok(());
+            return Ok(false);
         }
 
         let mut buffers: Vec<Option<JxlOutputBuffer>> = Vec::new();
@@ -293,13 +296,16 @@ impl Frame {
 
         // STEP 3: decode the groups, eagerly rendering VarDCT channels and noise.
 
+        #[cfg_attr(not(feature = "threads"), allow(unused_mut))]
+        let mut parallel_rendered = false;
         let hf_start = std::time::Instant::now();
         if use_parallel {
             // A flush-only call brings no new groups; there is nothing to
             // batch (and `decode_groups_parallel` would step by zero).
             #[cfg(feature = "threads")]
             if !groups.is_empty() {
-                self.decode_groups_parallel(groups, &mut buffer_splitter, do_flush)?;
+                parallel_rendered =
+                    self.decode_groups_parallel(groups, &mut buffer_splitter, do_flush)?;
                 // Track incremental parallel decode: if groups remain incomplete
                 // after this batch, a final re-render will be needed to correct
                 // cross-batch border readiness.
@@ -412,6 +418,8 @@ impl Frame {
         let flush_dur = flush_start.elapsed();
 
         let regions = buffer_splitter.into_changed_regions();
+        let rendered = (!regions.is_empty() || parallel_rendered)
+            && self.header.frame_type == FrameType::RegularFrame;
 
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
@@ -433,12 +441,12 @@ impl Frame {
 
         if self.header.frame_type == FrameType::LFFrame && self.header.lf_level == 1 {
             if do_flush && let Some(buffers) = api_buffers {
-                self.maybe_preview_lf_frame(
+                return self.maybe_preview_lf_frame(
                     pixel_format,
                     buffers,
                     Some(&regions[..]),
                     output_profile,
-                )?;
+                );
             } else if self.incomplete_groups == 0 {
                 // If we are not requesting another flush at the end of the LF frame, we
                 // probably have a partial render. Ensure we re-render the LF frame when
@@ -447,7 +455,7 @@ impl Frame {
             }
         }
 
-        Ok(())
+        Ok(rendered)
     }
 
     /// Parallel decode + render path for both VarDCT and Modular frames.
@@ -466,13 +474,16 @@ impl Frame {
     ///
     /// Requirements:
     /// - More than 1 group
+    ///
+    /// Returns `true` if any work items were rendered to present output
+    /// buffers during this call.
     #[cfg(feature = "threads")]
     fn decode_groups_parallel(
         &mut self,
         groups: Vec<(usize, Vec<(usize, BitReader)>)>,
         buffer_splitter: &mut BufferSplitter,
         do_flush: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
         use crate::image::{Image, OwnedRawImage};
@@ -518,6 +529,15 @@ impl Frame {
         }
 
         let phase_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+
+        // The parallel path writes to output through `get_full_buffers`, which
+        // bypasses the BufferSplitter's changed-region tracking; report writes
+        // explicitly instead (pixels_dirty / flush_pixels return value).
+        let has_output = buffer_splitter
+            .get_full_buffers()
+            .iter()
+            .any(|b| b.is_some());
+        let mut any_rendered = false;
 
         let last_pass_in_file = self.header.passes.num_passes as usize - 1;
         let is_vardct = self.header.encoding == Encoding::VarDCT;
@@ -999,6 +1019,7 @@ impl Frame {
             // splitting isn't possible (single gy band with overlapping rows).
             let phase3b_start = std::time::Instant::now();
             if !all_items.is_empty() {
+                any_rendered |= has_output;
                 let p = lmp_ref!();
                 let view = p.read_view();
                 let (frame_origin, full_image_size) = p.extend_origin_size();
@@ -1390,7 +1411,7 @@ impl Frame {
             );
         }
 
-        Ok(())
+        Ok(any_rendered)
     }
 
     /// Helper function to detect CMYK ICC profile from bytes.

@@ -65,7 +65,7 @@ impl CodestreamParser {
             .expect("output_color_profile should be set before pipeline preparation");
 
         if do_flush && let Some(buf) = output_buffers {
-            frame.maybe_preview_lf_frame(
+            self.pixels_dirty |= frame.maybe_preview_lf_frame(
                 self.pixel_format.as_ref().unwrap(),
                 buf,
                 None,
@@ -124,7 +124,7 @@ impl CodestreamParser {
                     output_profile,
                 )?;
                 frame.finalize_lf()?;
-                frame.decode_and_render_hf_groups(
+                self.pixels_dirty |= frame.decode_and_render_hf_groups(
                     output_buffers,
                     pixel_format,
                     vec![(0, vec![(0, br)])],
@@ -358,7 +358,7 @@ impl CodestreamParser {
                     );
                 }
 
-                frame.decode_and_render_hf_groups(
+                self.pixels_dirty |= frame.decode_and_render_hf_groups(
                     output_buffers,
                     pixel_format,
                     group_readers,

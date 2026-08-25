@@ -228,8 +228,11 @@ impl JxlDecoder<WithImageInfo> {
 
     /// Draws all the pixels we have data for. This is useful for i.e. previewing LF frames.
     ///
+    /// Returns `true` if any new pixels were written to `buffers` since the
+    /// previous call to `flush_pixels`; `false` if nothing new was rendered.
+    ///
     /// Note: see `process` for alignment requirements for the buffer data.
-    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer<'_>]) -> Result<()> {
+    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer<'_>]) -> Result<bool> {
         self.inner.flush_pixels(buffers)
     }
 
@@ -264,8 +267,11 @@ impl JxlDecoder<WithFrameInfo> {
 
     /// Draws all the pixels we have data for.
     ///
+    /// Returns `true` if any new pixels were written to `buffers` since the
+    /// previous call to `flush_pixels`; `false` if nothing new was rendered.
+    ///
     /// Note: see `process` for alignment requirements for the buffer data.
-    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer<'_>]) -> Result<()> {
+    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer<'_>]) -> Result<bool> {
         self.inner.flush_pixels(buffers)
     }
 
@@ -1581,6 +1587,108 @@ pub(crate) mod tests {
     }
 
     /// Helper function to decode an image with a specific format.
+    /// `flush_pixels` returns `true` only when new pixels were rendered since
+    /// the previous call (upstream jxl-rs #755): a second back-to-back flush
+    /// with no new input must report `false`, and a chunked decode of a
+    /// multi-group image must report `true` at least once mid-stream.
+    #[test]
+    fn flush_pixels_reports_new_rendering() {
+        const CHUNK: usize = 4096;
+        let file = crate::util::test::fixture_bytes("bicycles_web_q85.jxl");
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_memory_bytes = None;
+        let mut initialized = JxlDecoder::<states::Initialized>::new(options);
+
+        let mut input: &[u8] = &file;
+        let mut chunk_input = &input[0..0];
+
+        macro_rules! feed {
+            ($decoder:ident $(, $extra:expr)? ; $on_needs_more:expr) => {
+                loop {
+                    chunk_input =
+                        &input[..(chunk_input.len().saturating_add(CHUNK)).min(input.len())];
+                    let before = chunk_input.len();
+                    let process_result = $decoder.process(&mut chunk_input $(, $extra)?);
+                    input = &input[(before - chunk_input.len())..];
+                    match process_result.unwrap() {
+                        ProcessingResult::Complete { result } => break Some(result),
+                        ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                            let mut fallback = fallback;
+                            #[allow(clippy::redundant_closure_call)]
+                            ($on_needs_more)(&mut fallback);
+                            if input.is_empty() {
+                                break None;
+                            }
+                            $decoder = fallback;
+                        }
+                    }
+                }
+            };
+        }
+
+        let mut with_image_info = feed!(initialized; |_f: &mut _| {}).unwrap();
+
+        let num_extra_channels = with_image_info
+            .current_pixel_format()
+            .extra_channel_format
+            .len();
+        with_image_info.set_pixel_format(JxlPixelFormat::rgb8(num_extra_channels));
+        let (width, height) = with_image_info.basic_info().size;
+        let num_samples = with_image_info
+            .current_pixel_format()
+            .color_type
+            .samples_per_pixel();
+        let mut pixels = Image::<u8>::new((width * num_samples, height)).unwrap();
+
+        // Nothing has been decoded yet: a flush now must report false.
+        {
+            let size = pixels.size();
+            let mut bufs = [JxlOutputBuffer::from_image_rect_mut(
+                pixels
+                    .get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size,
+                    })
+                    .into_raw(),
+            )];
+            assert!(
+                !with_image_info.flush_pixels(&mut bufs).unwrap(),
+                "flush before any frame data must report false"
+            );
+        }
+
+        let mut with_frame_info = feed!(with_image_info; |_f: &mut _| {}).unwrap();
+
+        let mut saw_render_on_flush = false;
+        let mut double_flushes = 0usize;
+        {
+            let size = pixels.size();
+            let mut bufs = [JxlOutputBuffer::from_image_rect_mut(
+                pixels
+                    .get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size,
+                    })
+                    .into_raw(),
+            )];
+            let complete = feed!(with_frame_info, &mut bufs; |f: &mut JxlDecoder<
+                WithFrameInfo,
+            >| {
+                let first = f.flush_pixels(&mut bufs).unwrap();
+                let second = f.flush_pixels(&mut bufs).unwrap();
+                assert!(!second, "second flush with no new data must report false");
+                saw_render_on_flush |= first;
+                double_flushes += 1;
+            });
+            assert!(complete.is_some(), "unexpected end of input");
+        }
+        assert!(double_flushes > 4, "expected a chunked multi-chunk decode");
+        assert!(
+            saw_render_on_flush,
+            "expected at least one flush to report newly rendered pixels"
+        );
+    }
+
     /// Premultiplied RGBA output from a grayscale image remains gray.
     /// (upstream jxl-rs #903)
     #[test]

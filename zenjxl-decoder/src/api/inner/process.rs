@@ -151,8 +151,19 @@ impl JxlDecoderInner {
         ))
     }
 
-    /// Draws all the pixels we have data for.
-    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer]) -> Result<()> {
+    /// Draws all the pixels we have data for. Returns `true` if any new pixels
+    /// were written to `buffers` since the previous call to `flush_pixels`;
+    /// returns `false` if no new rendering has happened, in which case the
+    /// contents of `buffers` are unchanged from the caller's perspective.
+    pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer]) -> Result<bool> {
+        if self.codestream_parser.frame.is_none() {
+            // No frame is being decoded yet (or the previous frame completed):
+            // nothing can possibly be rendered. Returning early also keeps the
+            // empty-input flush from running the header state machine, which
+            // records header_needed_bytes/staging state for input that is not
+            // there and derails the next real process() call.
+            return Ok(false);
+        }
         let mut input: &[u8] = &[];
         match self.codestream_parser.process(
             &mut self.box_parser,
@@ -161,8 +172,10 @@ impl JxlDecoderInner {
             Some(buffers),
             true,
         ) {
-            Ok(()) => Ok(()),
-            Err(e) if matches!(e.error(), crate::error::Error::OutOfBounds(_)) => Ok(()),
+            Ok(()) => Ok(self.codestream_parser.get_and_clear_pixels_dirty()),
+            Err(e) if matches!(e.error(), crate::error::Error::OutOfBounds(_)) => {
+                Ok(self.codestream_parser.get_and_clear_pixels_dirty())
+            }
             Err(e) => Err(e),
         }
     }
