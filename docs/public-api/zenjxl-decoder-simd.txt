@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder-simd.txt 137 lines (supported surface) | zenjxl-decoder-simd.features.txt 15 added (features: all-simd,avx,avx512,neon,sse42,wasm128) | zenjxl-decoder-simd.internal.txt 18 lines (18 hidden + 0 excluded-feature)
+# files: zenjxl-decoder-simd.txt 137 lines (supported surface) | zenjxl-decoder-simd.features.txt 5 added (features: all-simd,avx,avx512,neon,sse42,wasm128) | zenjxl-decoder-simd.internal.txt 10 lines (10 hidden + 0 excluded-feature)
 
 ## summary
 #

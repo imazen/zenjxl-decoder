@@ -9,35 +9,27 @@
 
 ## summary
 #
-#   pub macros                                  6
+#   pub macros                                  2
 #   free functions                              1
-#   re-exports                                  6
-#   trait roster entries (type × trait)         5
+#   re-exports                                  4
+#   trait roster entries (type × trait)         3
 #
 # per-module pub lines:
-#   (root)                           12
+#   (root)                            6
 #   float16                           1
 
-## items (13 lines)
+## items (7 lines)
 
 pub fn float16::f16::assert_fields_are_eq(&self)
-pub macro bench_avx!
-pub macro bench_avx512!
-pub macro bench_sse42!
-pub macro test_avx!
-pub macro test_avx512!
-pub macro test_sse42!
+pub macro bench_neon!
+pub macro test_neon!
+pub use NeonToken
 pub use ScalarToken
-pub use X64V2Token
-pub use X64V3Token
-pub use X64V4Token
 pub use __SimdToken
 pub use __arcane
 
-## trait impls (5 types)
+## trait impls (3 types)
 
-Avx512Descriptor: TrivialClone
-AvxDescriptor: TrivialClone
-Sse42Descriptor: TrivialClone
+NeonDescriptor: TrivialClone
 float16::f16: TrivialClone
 scalar::ScalarDescriptor: TrivialClone

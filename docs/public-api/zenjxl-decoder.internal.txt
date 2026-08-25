@@ -1,5 +1,5 @@
 # zenjxl-decoder public API — doc(hidden) items and excluded-feature surface
-# excluded features: (none)
+# excluded features: __bench_kernels
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,16 +9,79 @@
 
 ## summary
 #
-#   inherent methods                           11
-#   trait roster entries (type × trait)        11
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)         1
+#   pub consts/statics                          6
+#   free functions                             43
+#   inherent methods                           16
+#   enum variants                              27
+#   trait roster entries (type × trait)        17
+#   auto-trait-complete types                   1
 #
 # per-module pub lines:
-#   api                              11
+#   (root)                            1
+#   __bench_kernels                  83
+#   api                              12
 
-## items (11 lines)
+## items (96 lines)
 
+pub const __bench_kernels::transform_map::HfTransformType::CARDINALITY: usize
+pub const __bench_kernels::transform_map::HfTransformType::INVALID_TRANSFORM: u8
+pub const __bench_kernels::transform_map::HfTransformType::VALUES: [__bench_kernels::transform_map::HfTransformType; 27]
+pub const __bench_kernels::transform_map::MAX_BLOCK_DIM: usize
+pub const __bench_kernels::transform_map::MAX_COEFF_AREA: usize
+pub const __bench_kernels::transform_map::MAX_COEFF_BLOCKS: usize
+pub enum __bench_kernels::transform_map::HfTransformType
+pub fn __bench_kernels::idct2d_128_128<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_128_256<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_128_64<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_16_16<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_16_32<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_16_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_256_128<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_256_256<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_2_2<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_32_16<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_32_32<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_32_64<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_32_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_4_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_4_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_64_128<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_64_32<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_64_64<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_8_16<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_8_32<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_8_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::idct2d_8_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_16_16<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_16_32<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_16_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_1_2<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_1_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_2_1<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_2_2<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_2_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_32_16<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_32_32<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_4_1<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_4_2<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_4_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_4_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_8_16<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_8_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::reinterpreting_dct2d_8_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
+pub fn __bench_kernels::transform::transform_to_pixels_impl<D: zenjxl_decoder_simd::SimdDescriptor>(D, __bench_kernels::transform_map::HfTransformType, &mut [f32], &mut [f32])
+pub fn __bench_kernels::transform_map::HfTransformType::clone(&self) -> __bench_kernels::transform_map::HfTransformType
+pub fn __bench_kernels::transform_map::HfTransformType::eq(&self, &__bench_kernels::transform_map::HfTransformType) -> bool
+pub fn __bench_kernels::transform_map::HfTransformType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn __bench_kernels::transform_map::HfTransformType::from_usize(usize) -> core::option::Option<__bench_kernels::transform_map::HfTransformType>
+pub fn __bench_kernels::transform_map::block_shape_id(__bench_kernels::transform_map::HfTransformType) -> u32
+pub fn __bench_kernels::transform_map::covered_blocks_x(__bench_kernels::transform_map::HfTransformType) -> u32
+pub fn __bench_kernels::transform_map::covered_blocks_y(__bench_kernels::transform_map::HfTransformType) -> u32
 pub fn api::DataTypeTag::assert_fields_are_eq(&self)
 pub fn api::Endianness::assert_fields_are_eq(&self)
+pub fn api::ErrorClass::assert_fields_are_eq(&self)
 pub fn api::ExtraChannel::assert_fields_are_eq(&self)
 pub fn api::GainMapBundle::assert_fields_are_eq(&self)
 pub fn api::JxlAnimation::assert_fields_are_eq(&self)
@@ -28,11 +91,43 @@ pub fn api::JxlDataFormat::assert_fields_are_eq(&self)
 pub fn api::JxlExtraChannel::assert_fields_are_eq(&self)
 pub fn api::JxlPixelFormat::assert_fields_are_eq(&self)
 pub fn api::VardctQuantizer::assert_fields_are_eq(&self)
+pub mod __bench_kernels
+pub mod __bench_kernels::transform
+pub mod __bench_kernels::transform_map
+pub __bench_kernels::transform_map::HfTransformType::AFV0 = 14
+pub __bench_kernels::transform_map::HfTransformType::AFV1 = 15
+pub __bench_kernels::transform_map::HfTransformType::AFV2 = 16
+pub __bench_kernels::transform_map::HfTransformType::AFV3 = 17
+pub __bench_kernels::transform_map::HfTransformType::DCT = 0
+pub __bench_kernels::transform_map::HfTransformType::DCT128X128 = 21
+pub __bench_kernels::transform_map::HfTransformType::DCT128X256 = 26
+pub __bench_kernels::transform_map::HfTransformType::DCT128X64 = 22
+pub __bench_kernels::transform_map::HfTransformType::DCT16X16 = 4
+pub __bench_kernels::transform_map::HfTransformType::DCT16X32 = 11
+pub __bench_kernels::transform_map::HfTransformType::DCT16X8 = 6
+pub __bench_kernels::transform_map::HfTransformType::DCT256X128 = 25
+pub __bench_kernels::transform_map::HfTransformType::DCT256X256 = 24
+pub __bench_kernels::transform_map::HfTransformType::DCT2X2 = 2
+pub __bench_kernels::transform_map::HfTransformType::DCT32X16 = 10
+pub __bench_kernels::transform_map::HfTransformType::DCT32X32 = 5
+pub __bench_kernels::transform_map::HfTransformType::DCT32X64 = 20
+pub __bench_kernels::transform_map::HfTransformType::DCT32X8 = 8
+pub __bench_kernels::transform_map::HfTransformType::DCT4X4 = 3
+pub __bench_kernels::transform_map::HfTransformType::DCT4X8 = 12
+pub __bench_kernels::transform_map::HfTransformType::DCT64X128 = 23
+pub __bench_kernels::transform_map::HfTransformType::DCT64X32 = 19
+pub __bench_kernels::transform_map::HfTransformType::DCT64X64 = 18
+pub __bench_kernels::transform_map::HfTransformType::DCT8X16 = 7
+pub __bench_kernels::transform_map::HfTransformType::DCT8X32 = 9
+pub __bench_kernels::transform_map::HfTransformType::DCT8X4 = 13
+pub __bench_kernels::transform_map::HfTransformType::IDENTITY = 1
 
-## trait impls (11 types)
+## trait impls (13 types)
 
+__bench_kernels::transform_map::HfTransformType: Clone, Copy, Debug, PartialEq, TrivialClone
 api::DataTypeTag: TrivialClone
 api::Endianness: TrivialClone
+api::ErrorClass: TrivialClone
 api::ExtraChannel: TrivialClone
 api::JxlColorType: TrivialClone
 api::JxlDataFormat: TrivialClone
@@ -42,3 +137,7 @@ api::RawImageRect<'a>: TrivialClone
 api::Rect: TrivialClone
 api::RenderingIntent: TrivialClone
 api::VardctQuantizer: TrivialClone
+
+## auto traits
+
+1 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

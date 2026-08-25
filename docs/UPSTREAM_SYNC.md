@@ -16,7 +16,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 |---|---|
 | Fork point (merge-base) | upstream `da89c6c` — "Make feature `all-simd` enabled by default", 2026-03-07 (jxl-rs 0.3.0 line, pre-0.4.0) |
 | Last port sweep | **2026-08-23** (fork commits `784a545`..`15ccc9e`, see "Port log 2026-08-22/23" below). Before that: 2026-06-01 (`7c7ee08`..`f8b3e85`, upstream through `841842a` / #784). |
-| Upstream HEAD audited | `088ec7f` — "Remove support and use of internal image padding. (#888)", 2026-08-21; release **v0.6.0** (2026-08-18) |
+| Upstream HEAD audited | `2fab17c` — "Make number of worker threads configurable in cli (#904)", 2026-08-25; release **v0.6.0** (2026-08-18). Perf comparisons below were measured against `088ec7f`. |
 | Upstream commits since fork point | **161** (verified with `git merge-base` on a scratch clone) |
 | Already ported (cherry-ported, re-implemented) | 24 of them, plus 5 perf items from the never-merged upstream draft PR #705 |
 | Fork output vs upstream HEAD | **bit-identical** on all 116 fixtures that both decode (58 small + 22 large + 36 conformance, 16-bit output, 1 thread) — see "Verification" |
@@ -93,11 +93,11 @@ for the ~9 % single-thread entropy-decode gap), #888 padding removal
 (deferred behind #797: the fork's specialised tree decoders rely on the
 padded rows for branch-free `row_top[x + 2]` loads, so removing padding
 without the #797 restructure would put edge branches in the hottest loop
-for ~3 % of modular-buffer memory), the depth-first modular transform
-engine, the additive API items marked TAKE (`new_with_stride`, `rgb*`
-helpers — awaiting public-API approval), and the breaking-change batch
-(`flush_pixels -> bool`, `progressive_mode`/`unconsume`, `rgba*`
-extra-channel semantics — now queued in the CHANGELOG). CI also runs
+for ~3 % of modular-buffer memory), and the depth-first modular transform
+engine. The additive API items (`new_with_stride`, `rgb*` helpers) and the
+breaking-change batch (`flush_pixels -> bool`, `progressive_mode`/`unconsume`
+removal, `rgba*` extra-channel semantics, CMYK output) shipped in the 0.4.0
+batch on 2026-08-25. CI also runs
 `threads` without `allow-unsafe` (`8b58423`) and wasm32-wasip1 under
 wasmtime with and without simd128 (`6051605`,
 `.cargo/config.toml` + `.cargo/wasm-runner.sh`).
@@ -206,12 +206,23 @@ applicable (feature absent, design differs, or upstream-only regression fix) ·
 |---|---|---|
 | f694be5 #841 | blue-noise dithering of u8 output (libjxl behaviour, always on upstream) | **DECISION NEEDED** — changes every lossy u8 pixel by ≤1 (lossless 8-bit unchanged); brings `decode()` in line with djxl (fork vs djxl: 25 % of pixels ±1 today, upstream vs djxl: 7 %). Three fork stages need the term (`convert.rs`, `xyb.rs` fused kernels, `from_linear.rs`); recommend a `dither_u8` option — default is the user's call |
 | e7405e0 #752 (+3c4f224 #777) | out-of-order `jxlp` boxes (ftyp minor version 1; `cjxl --output_mode 2`) | **PORTED** (`29c6dd4`, batch 3; bounded buffering, `container_boxes` + `jxlrs-752` tests) |
-| e883140 | safe `JxlOutputBuffer::new_with_stride` | **TAKE, needs public-API approval** (trivial, additive; matches our stride rule) |
-| c5528f6 #767 | `JxlPixelFormat::rgb*` helpers; `rgba*` stop requesting planar extra channels | rgb* helpers: **TAKE, needs public-API approval**; rgba* semantic change: queued in CHANGELOG breaking batch |
-| d782c19 #755, 0977812 #880, 1cc9ab7 #820 | `flush_pixels -> bool`, drop no-op `progressive_mode`, drop dead `unconsume` / add `file_length` | **LATER** — all breaking; add to CHANGELOG "QUEUED BREAKING CHANGES" |
+| e883140 | safe `JxlOutputBuffer::new_with_stride` | **PORTED** (`b45bec6`, batch 8; safe slice version, stride tests) |
+| c5528f6 #767 | `JxlPixelFormat::rgb*` helpers; `rgba*` stop requesting planar extra channels | **PORTED** (`c0c66bd`, batch 8 / 0.4.0 breaking batch) |
+| d782c19 #755, 0977812 #880, 1cc9ab7 #820 | `flush_pixels -> bool`, drop no-op `progressive_mode`, drop dead `unconsume` / add `file_length` | **PORTED** (`617ee66`, `f273a2a`, `f8039de`; batch 8 / 0.4.0 breaking batch). The fork keeps the jxli frame-index support that 1cc9ab7 removed upstream (functional and tested here); `file_length` is computed from a `total_file_read` counter on the box parser minus buffered leftovers, since the fork's input plumbing predates upstream's restructure. |
 | 035477c #678, 2cddd90 #702 | animation scan/seek API | **LATER**, only if a consumer needs seeking; port the post-#828 design, not these commits |
 | 2556ead #732 | 16-bit PPM/PGM in the CLI | **LATER** (cherry-pick) |
 | 8b8dd57, 0d75b8f, d8359cf, 6e82649 #779, 6fa7f5c #785, e1fc42e #781, 6cb5810 #788, 245728e #800, c41cbfa #760, 4e43b32 #763, 1f92de5 #764, 3bddd4f #816, f39af49 #835, 15a1e01 #837, 5ad6a8c #883, ad7cbd4 #885, 85aa6ee/d05edc9 #871 | progressive-preview rendering (partial LF-global decode, smooth unsqueeze, Jinc2) | **N/A** — the fork kept the pre-March flush design; only relevant if a progressive-preview UI becomes a requirement |
+
+Upstream 088ec7f..2fab17c (audited 2026-08-25, ported in the same 0.4.0
+batch):
+
+| upstream | what | disposition |
+|---|---|---|
+| 05e72af #898 | doc comment on `JxlParallelRunner::run` requirements | **N/A** — the fork has no `JxlParallelRunner` trait (parallelism is internal, rayon-based) |
+| 29a3e5e #891 | CMYK interleaved pixel format (`JxlColorType::Cmyk`, `cmyk8()`, `add_alpha -> Option`) | **PORTED** (`b9c8ca5`; plus fork-specific guard when a CMS 4→3 conversion consumes the K channel) |
+| 775837f #903 | premultiply expanded grayscale-as-RGBA channels | **PORTED** (`6dc641c`; failing test first — the fork had the same 1-channel-premultiply bug) |
+| 2b4a36a #902 | reject pre-color-transform / undersized blending reference frames | **PORTED** (`da205ec`; `Error::BlendingPreColorTransform` + both unit tests) |
+| 2fab17c #904 | `--num_threads` flag in upstream's jxl_cli | **SKIP** — the fork CLI has had `--num-threads` since the fork; only affects the speed-compare script note about pinning upstream with `RAYON_NUM_THREADS` (still works on all upstream versions) |
 
 ### Performance / memory
 
@@ -275,8 +286,12 @@ sweeps (`0038580`). Still to do: a CI job for `threads` without
 6. Perf batch, measured with zenbench per item: blending bundle, #787+#817,
    #716, #888, #812 scratch cap, #720 assert; then the #812/border-buffer
    modular project.
-7. Breaking-change batch (next 0.x minor): `flush_pixels -> bool`, drop
-   `progressive_mode` and `unconsume`, `rgba*` extra-channel semantics.
+7. Breaking-change batch: DONE — shipped as 0.4.0 (2026-08-25):
+   `flush_pixels -> bool` (`617ee66`), drop `progressive_mode` (`f273a2a`)
+   and `unconsume`/add `file_length` (`f8039de`), `rgba*` extra-channel
+   semantics + `rgb*` helpers (`c0c66bd`), `new_with_stride` (`b45bec6`),
+   CMYK (`b9c8ca5`), grayscale-premultiply fix (`6dc641c`), blending
+   reference validation (`da205ec`).
 
 ## How to redo this audit
 

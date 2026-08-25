@@ -6,18 +6,29 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
-### QUEUED BREAKING CHANGES
-<!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
-     Add items here as you discover them. Do NOT ship these piecemeal -- batch them. -->
-- `JxlDecoder::flush_pixels` will return `bool` (whether anything was
-  rendered), as upstream jxl-rs d782c19 (#755) does.
-- The no-op `JxlDecoderOptions::progressive_mode` will be removed (upstream
-  0977812, #880).
-- The dead `unconsume` API will be removed and `file_length` added in its
-  place (upstream 1cc9ab7, #820).
-- The `JxlPixelFormat::rgba*` constructors will stop requesting planar extra
-  channels alongside the interleaved alpha (upstream c5528f6, #767); code
-  that relied on receiving both gets only the interleaved output.
+The next release is **0.4.0**: the entries under "Changed (BREAKING)" and
+"Removed (BREAKING)" ship together as one breaking batch.
+
+### Changed (BREAKING)
+- `JxlDecoder::flush_pixels` (both states) returns `Result<bool>`: `true`
+  when new pixels were written to the buffers since the previous call,
+  `false` for a no-op flush, so callers can skip redundant post-processing
+  (upstream jxl-rs d782c19, #755). A flush before any frame data now also
+  returns `false` without running the parser -- previously it silently
+  derailed header staging so the next `process()` call consumed the rest of
+  the file before returning frame info. (617ee66)
+- The `JxlPixelFormat::rgba8/rgba16/rgba_f16/rgba_f32` constructors declare
+  their `num_extra_channels` extra channels as not-requested (`None`)
+  instead of requesting every extra channel plane at the color format
+  (upstream c5528f6, #767). Callers that passed `num_extra_channels > 0`
+  and supplied per-channel buffers now pass only the color buffer, or fill
+  the `extra_channel_format` entries explicitly. (c0c66bd)
+- `JxlColorType::add_alpha` returns `Option<JxlColorType>` (`None` for the
+  new `Cmyk` variant, which has no alpha-carrying counterpart) (upstream
+  29a3e5e, #891). (b9c8ca5)
+- `OwnedRawImage::prefault_parallel` (a `threads`-only helper) takes the
+  decoder's `parallel` flag and no-ops when the decode is sequential or the
+  buffer is small, instead of always pre-faulting. (87f4392)
 - The public `Error` is now wrapped as [`whereat::At<Error>`](https://docs.rs/whereat)
   via the `Result` alias, so decode errors carry a `file:line` source location for
   server-side stack traces. Match on the cause with `e.error()` (borrow) or
@@ -25,7 +36,43 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   bitstream/entropy hot path keeps a bare `Error` (no `At<>` in inner loops);
   only the frame/render/api layer carries the wrapper. (#28)
 
+### Removed (BREAKING)
+- The no-op `JxlDecoderOptions::progressive_mode` field,
+  `with_progressive_mode()` and the `JxlProgressiveMode` enum: nothing read
+  the option anywhere in the decode path, so setting it silently did
+  nothing (upstream 0977812, #880). The functional `reject_progressive`
+  option is unchanged. (f273a2a)
+- `JxlBitstreamInput::unconsume` (default method and the `BufReader` impl):
+  the decoder never called it. Callers that used it to find where the file
+  ended use the new `file_length()` instead (upstream 1cc9ab7, #820).
+  (f8039de)
+
 ### Added
+- CMYK interleaved output: `JxlColorType::Cmyk` + `JxlPixelFormat::cmyk8()`
+  decode C, M, Y from the color channels and K from the image's Black extra
+  channel; requesting it on a non-CMYK image fails with the new
+  `Error::NotCmyk` (upstream 29a3e5e, #891). (b9c8ca5)
+- `JxlDecoder::file_length()`: total length of the JPEG XL file once
+  decoding finishes, so callers that over-fed the decoder can tell which
+  trailing bytes were not part of the file (upstream 1cc9ab7, #820).
+  (f8039de)
+- `JxlPixelFormat::rgb8/rgb16/rgb_f16/rgb_f32` constructors (upstream
+  c5528f6, #767). (c0c66bd)
+- `JxlOutputBuffer::new_with_stride`: hand the decoder a sub-rectangle of a
+  larger buffer, rows `byte_stride` apart; safe implementation (no
+  `MaybeUninit`, unlike upstream e883140). (b45bec6)
+
+### Fixed
+- Premultiplied RGBA output from a grayscale image stays gray: the
+  premultiply stage covered only the single source color channel, leaving
+  the expanded G/B copies straight (upstream 775837f, #903). (6dc641c)
+- Blending now rejects reference frames saved before color transforms
+  (new `Error::BlendingPreColorTransform`) and asserts full-image-size
+  references, preventing out-of-bounds row access (upstream 2b4a36a,
+  #902). (da205ec)
+- `flush_pixels` with color output ignored no longer hits a latent unwrap
+  panic in the LF-preview path (`color_data_format` was unwrapped before
+  the `None` check guarding it). (617ee66)
 - `tests/testdata/jxlrs-865/issue865_large_toc.jxl` (5249x5377, 462-group
   TOC) with a streamed-equals-one-shot regression test (jxl-rs #865's
   incremental-parser stall; 64-bit only — the decode is 28 MP). (325cf98)

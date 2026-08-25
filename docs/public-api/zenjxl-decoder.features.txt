@@ -28,7 +28,7 @@ pub fn api::JxlDecoderInner::take_jpeg_reconstruction(&mut self) -> core::option
 pub unsafe fn api::JxlOutputBuffer<'a>::new_from_ptr(*mut core::mem::maybe_uninit::MaybeUninit<u8>, usize, usize, usize) -> Self
 pub struct api::MoxCms
 pub fn api::MoxCms::new() -> Self
-pub fn api::OwnedRawImage::prefault_parallel(&mut self)
+pub fn api::OwnedRawImage::prefault_parallel(&mut self, bool)
 pub fn api::print_profile_report()
 pub fn reconstruct_jpeg(&[u8]) -> api::Result<core::option::Option<alloc::vec::Vec<u8>>> [also: api]
 pub fn reconstruct_jpeg_with(&[u8], api::JxlDecoderOptions) -> api::Result<core::option::Option<alloc::vec::Vec<u8>>> [also: api]

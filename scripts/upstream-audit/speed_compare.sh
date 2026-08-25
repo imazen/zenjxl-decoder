@@ -8,8 +8,9 @@
 # Env:    FORK_CLI, UPSTREAM_CLI as in corpus_compare.sh.
 #         THREADS   thread count for both CLIs (default 1). With 1 the fork
 #                   runs its sequential path (parallel = false); upstream
-#                   jxl_cli >= 0.6.0 has no --num-threads flag and is pinned
-#                   with RAYON_NUM_THREADS.
+#                   jxl_cli is pinned with RAYON_NUM_THREADS (it gained a
+#                   --num_threads flag in #904, 2026-08-25, but the env var
+#                   works on every upstream version so we keep using it).
 # Note:   the fork CLI is measured with --no-cms so the lcms2 stage is not
 #         timed (upstream jxl_cli has no CMS). When FORK_CLI is not set the
 #         CLI is (re)built first: `cargo test --no-default-features` also

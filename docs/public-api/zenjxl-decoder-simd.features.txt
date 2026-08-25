@@ -9,34 +9,24 @@
 
 ## summary
 #
-#   pub types (struct/enum/trait/alias)         3
-#   inherent methods                            8
-#   trait roster entries (type × trait)        12
-#   auto-trait-complete types                   3
+#   pub types (struct/enum/trait/alias)         1
+#   inherent methods                            2
+#   trait roster entries (type × trait)         4
+#   auto-trait-complete types                   1
 #
 # per-module pub lines:
-#   (root)                           11
+#   (root)                            3
 
-## items (11 lines)
+## items (3 lines)
 
-pub struct Avx512Descriptor(_)
-pub fn Avx512Descriptor::as_avx(&self) -> AvxDescriptor
-pub fn Avx512Descriptor::from_token(archmage::tokens::generated::x86::X64V4Token) -> Self
-pub fn Avx512Descriptor::token(&self) -> archmage::tokens::generated::x86::X64V4Token
-pub struct AvxDescriptor(_)
-pub fn AvxDescriptor::as_sse42(&self) -> Sse42Descriptor
-pub fn AvxDescriptor::from_token(archmage::tokens::generated::x86::X64V3Token) -> Self
-pub fn AvxDescriptor::token(&self) -> archmage::tokens::generated::x86::X64V3Token
-pub struct Sse42Descriptor(_)
-pub fn Sse42Descriptor::from_token(archmage::tokens::generated::x86::X64V2Token) -> Self
-pub fn Sse42Descriptor::token(&self) -> archmage::tokens::generated::x86::X64V2Token
+pub struct NeonDescriptor(_)
+pub fn NeonDescriptor::from_token(archmage::tokens::generated::arm::NeonToken) -> Self
+pub fn NeonDescriptor::token(&self) -> archmage::tokens::generated::arm::NeonToken
 
-## trait impls (3 types)
+## trait impls (1 types)
 
-Avx512Descriptor: Clone, Copy, Debug, SimdDescriptor
-AvxDescriptor: Clone, Copy, Debug, SimdDescriptor
-Sse42Descriptor: Clone, Copy, Debug, SimdDescriptor
+NeonDescriptor: Clone, Copy, Debug, SimdDescriptor
 
 ## auto traits
 
-3 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+1 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

@@ -6,32 +6,33 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 630 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 22 lines (22 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 649 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 110 lines (122 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
 #   pub types (struct/enum/trait/alias)        49
-#   pub consts/statics                          2
+#   pub consts/statics                          3
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          181
+#   inherent methods                          189
 #   struct fields                             116
-#   enum variants                             209
-#   re-exports                                  2
-#   trait roster entries (type × trait)       137
+#   enum variants                             217
+#   re-exports                                  3
+#   trait roster entries (type × trait)       143
 #   auto-trait-complete types                  33
 #   auto-trait exceptions                      10
 #
 # per-module pub lines:
 #   (root)                            8
-#   api                             565
+#   api                             583
 
-## items (569 lines)
+## items (587 lines)
 
 pub mod zenjxl_decoder
 pub mod api
 pub use api::Stop
+pub use api::StopReason
 pub use api::Unstoppable
 pub mod api::states
 pub struct api::states::Initialized
@@ -58,6 +59,7 @@ pub api::Error::AlphabetTooLargeHuff(usize)
 pub api::Error::AnsChecksumMismatch
 pub api::Error::ArithmeticOverflow
 pub api::Error::BaseColorCorrelationOutOfRange
+pub api::Error::BlendingPreColorTransform(usize)
 pub api::Error::BlockContextMapSizeTooBig(usize, usize)
 pub api::Error::Cancelled
 pub api::Error::CmsChannelCountIncrease
@@ -74,7 +76,7 @@ pub api::Error::FloatNaNOrInf
 pub api::Error::HFBlockOutOfBounds
 pub api::Error::HfQuantFactorTooSmall(f32)
 pub api::Error::ICCOutputNoCMS
-pub api::Error::IOError(std::io::error::Error)
+pub api::Error::IOError(core::io::error::Error)
 pub api::Error::IccEndOfStream
 pub api::Error::IccInvalidTagString(alloc::string::String)
 pub api::Error::IccInvalidWhitePoint(f32, f32, alloc::string::String)
@@ -156,6 +158,7 @@ pub api::Error::Non444ChromaSubsampling
 pub api::Error::NonPatchReferenceWithCrop
 pub api::Error::NonXybOutputNoCMS
 pub api::Error::NonZeroPadding
+pub api::Error::NotCmyk
 pub api::Error::NotGrayscale
 pub api::Error::NumPassesTooLarge(u32, u32)
 pub api::Error::OutOfBounds(usize)
@@ -199,6 +202,16 @@ pub api::Error::TreeTooLarge(usize, usize)
 pub api::Error::TreeTooTall(usize, usize)
 pub api::Error::UnexpectedLz77Repeat
 pub api::Error::WrongBufferCount(usize, usize)
+pub fn api::Error::kind(&self) -> api::ErrorClass
+#[non_exhaustive] pub enum api::ErrorClass
+pub api::ErrorClass::Cancelled
+pub api::ErrorClass::Internal
+pub api::ErrorClass::InvalidBitstream
+pub api::ErrorClass::Io
+pub api::ErrorClass::LimitExceeded
+pub api::ErrorClass::OutOfMemory
+pub api::ErrorClass::OutputConfiguration
+pub api::ErrorClass::Unsupported
 pub enum api::ExtraChannel
 pub api::ExtraChannel::Alpha
 pub api::ExtraChannel::Black
@@ -257,11 +270,12 @@ pub fn api::JxlColorProfile::with_linear_tf(&self) -> core::option::Option<Self>
 pub enum api::JxlColorType
 pub api::JxlColorType::Bgr
 pub api::JxlColorType::Bgra
+pub api::JxlColorType::Cmyk
 pub api::JxlColorType::Grayscale
 pub api::JxlColorType::GrayscaleAlpha
 pub api::JxlColorType::Rgb
 pub api::JxlColorType::Rgba
-pub fn api::JxlColorType::add_alpha(&self) -> Self
+pub fn api::JxlColorType::add_alpha(&self) -> core::option::Option<Self>
 pub fn api::JxlColorType::has_alpha(&self) -> bool
 pub fn api::JxlColorType::is_grayscale(&self) -> bool
 pub fn api::JxlColorType::samples_per_pixel(&self) -> usize
@@ -289,10 +303,6 @@ pub api::JxlPrimaries::Chromaticities::ry: f32
 pub api::JxlPrimaries::P3
 pub api::JxlPrimaries::SRGB
 pub fn api::JxlPrimaries::to_xy_coords(&self) -> [(f32, f32); 3]
-pub enum api::JxlProgressiveMode
-pub api::JxlProgressiveMode::Eager
-pub api::JxlProgressiveMode::FullFrame
-pub api::JxlProgressiveMode::Pass
 pub enum api::JxlSignatureType
 pub api::JxlSignatureType::Codestream
 pub api::JxlSignatureType::Container
@@ -401,7 +411,7 @@ pub api::JxlBasicInfo::uses_original_profile: bool
 pub struct api::JxlDecoder<State: api::states::JxlState>
 pub fn api::JxlDecoder<api::states::Initialized>::new(api::JxlDecoderOptions) -> Self
 pub fn api::JxlDecoder<api::states::Initialized>::process(self, &mut impl api::JxlBitstreamInput) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithImageInfo>, Self>>
-pub fn api::JxlDecoder<api::states::WithFrameInfo>::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<()>
+pub fn api::JxlDecoder<api::states::WithFrameInfo>::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<bool>
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::frame_header(&self) -> api::JxlFrameHeader
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::num_completed_passes(&self) -> usize
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::process<In: api::JxlBitstreamInput>(self, &mut In, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithImageInfo>, Self>>
@@ -409,7 +419,8 @@ pub fn api::JxlDecoder<api::states::WithFrameInfo>::skip_frame(self, &mut impl a
 pub fn api::JxlDecoder<api::states::WithImageInfo>::basic_info(&self) -> &api::JxlBasicInfo
 pub fn api::JxlDecoder<api::states::WithImageInfo>::current_pixel_format(&self) -> &api::JxlPixelFormat
 pub fn api::JxlDecoder<api::states::WithImageInfo>::embedded_color_profile(&self) -> &api::JxlColorProfile
-pub fn api::JxlDecoder<api::states::WithImageInfo>::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<()>
+pub fn api::JxlDecoder<api::states::WithImageInfo>::file_length(&self) -> core::option::Option<u64>
+pub fn api::JxlDecoder<api::states::WithImageInfo>::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<bool>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::has_more_frames(&self) -> bool
 pub fn api::JxlDecoder<api::states::WithImageInfo>::output_color_profile(&self) -> &api::JxlColorProfile
 pub fn api::JxlDecoder<api::states::WithImageInfo>::process(self, &mut impl api::JxlBitstreamInput) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithFrameInfo>, Self>>
@@ -429,6 +440,7 @@ pub fn api::JxlDecoderInner::basic_info(&self) -> core::option::Option<&api::Jxl
 pub fn api::JxlDecoderInner::current_pixel_format(&self) -> core::option::Option<&api::JxlPixelFormat>
 pub fn api::JxlDecoderInner::embedded_color_profile(&self) -> core::option::Option<&api::JxlColorProfile>
 pub fn api::JxlDecoderInner::exif(&self) -> core::option::Option<&[u8]>
+pub fn api::JxlDecoderInner::file_length(&self) -> core::option::Option<u64>
 pub fn api::JxlDecoderInner::frame_header(&self) -> core::option::Option<api::JxlFrameHeader>
 pub fn api::JxlDecoderInner::frame_index(&self) -> core::option::Option<&container::frame_index::FrameIndexBox>
 pub fn api::JxlDecoderInner::gain_map(&self) -> core::option::Option<&api::GainMapBundle>
@@ -445,7 +457,7 @@ pub fn api::JxlDecoderInner::take_gain_map(&mut self) -> core::option::Option<ap
 pub fn api::JxlDecoderInner::take_xmp(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn api::JxlDecoderInner::vardct_quantizer(&self) -> core::option::Option<api::VardctQuantizer>
 pub fn api::JxlDecoderInner::xmp(&self) -> core::option::Option<&[u8]>
-pub fn api::JxlDecoderInner::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<()>
+pub fn api::JxlDecoderInner::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<bool>
 pub fn api::JxlDecoderInner::process(&mut self, &mut dyn api::JxlBitstreamInput, core::option::Option<&mut [api::JxlOutputBuffer<'_>]>) -> api::Result<api::ProcessingResult<(), ()>>
 #[non_exhaustive] pub struct api::JxlDecoderLimits
 pub api::JxlDecoderLimits::max_extra_channels: core::option::Option<usize>
@@ -471,11 +483,11 @@ pub api::JxlDecoderOptions::adjust_orientation: bool
 pub api::JxlDecoderOptions::cms: core::option::Option<alloc::boxed::Box<dyn api::JxlCms>>
 pub api::JxlDecoderOptions::coalescing: bool
 pub api::JxlDecoderOptions::desired_intensity_target: core::option::Option<f32>
+pub api::JxlDecoderOptions::dither_u8: bool
 pub api::JxlDecoderOptions::high_precision: bool
 pub api::JxlDecoderOptions::limits: api::JxlDecoderLimits
 pub api::JxlDecoderOptions::parallel: bool
 pub api::JxlDecoderOptions::premultiply_output: bool
-pub api::JxlDecoderOptions::progressive_mode: api::JxlProgressiveMode
 pub api::JxlDecoderOptions::reject_progressive: bool
 pub api::JxlDecoderOptions::render_spot_colors: bool
 pub api::JxlDecoderOptions::skip_preview: bool
@@ -484,11 +496,11 @@ pub fn api::JxlDecoderOptions::with_adjust_orientation(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_cms(self, alloc::boxed::Box<dyn api::JxlCms>) -> Self
 pub fn api::JxlDecoderOptions::with_coalescing(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_desired_intensity_target(self, f32) -> Self
+pub fn api::JxlDecoderOptions::with_dither_u8(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_high_precision(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_limits(self, api::JxlDecoderLimits) -> Self
 pub fn api::JxlDecoderOptions::with_parallel(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_premultiply_output(self, bool) -> Self
-pub fn api::JxlDecoderOptions::with_progressive_mode(self, api::JxlProgressiveMode) -> Self
 pub fn api::JxlDecoderOptions::with_reject_progressive(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_render_spot_colors(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_skip_preview(self, bool) -> Self
@@ -522,17 +534,24 @@ pub struct api::JxlOutputBuffer<'a>
 pub fn api::JxlOutputBuffer<'a>::byte_size(&self) -> (usize, usize)
 pub fn api::JxlOutputBuffer<'a>::from_image_rect_mut(api::RawImageRectMut<'a>) -> Self
 pub fn api::JxlOutputBuffer<'a>::new(&'a mut [u8], usize, usize) -> Self
+pub fn api::JxlOutputBuffer<'a>::new_with_stride(&'a mut [u8], usize, usize, usize) -> Self
 pub fn api::JxlOutputBuffer<'a>::rect(&mut self, api::Rect) -> api::JxlOutputBuffer<'_>
 pub fn api::JxlOutputBuffer<'a>::write_bytes(&mut self, usize, usize, &[u8])
 pub struct api::JxlPixelFormat
 pub api::JxlPixelFormat::color_data_format: core::option::Option<api::JxlDataFormat>
 pub api::JxlPixelFormat::color_type: api::JxlColorType
 pub api::JxlPixelFormat::extra_channel_format: alloc::vec::Vec<core::option::Option<api::JxlDataFormat>>
+pub fn api::JxlPixelFormat::cmyk8(usize) -> Self
+pub fn api::JxlPixelFormat::rgb16(usize) -> Self
+pub fn api::JxlPixelFormat::rgb8(usize) -> Self
+pub fn api::JxlPixelFormat::rgb_f16(usize) -> Self
+pub fn api::JxlPixelFormat::rgb_f32(usize) -> Self
 pub fn api::JxlPixelFormat::rgba16(usize) -> Self
 pub fn api::JxlPixelFormat::rgba8(usize) -> Self
 pub fn api::JxlPixelFormat::rgba_f16(usize) -> Self
 pub fn api::JxlPixelFormat::rgba_f32(usize) -> Self
 pub struct api::OwnedRawImage
+pub const api::OwnedRawImage::PREFAULT_MIN_BYTES: usize
 pub fn api::OwnedRawImage::byte_offset(&self) -> (usize, usize)
 pub fn api::OwnedRawImage::byte_padding(&self) -> (usize, usize)
 pub fn api::OwnedRawImage::byte_size(&self) -> (usize, usize)
@@ -581,10 +600,9 @@ pub const api::ImageDataType::DATA_TYPE_ID: api::DataTypeTag
 pub fn api::ImageDataType::from_f64(f64) -> Self
 pub fn api::ImageDataType::to_f64(self) -> f64
 pub trait api::JxlBitstreamInput
-pub fn api::JxlBitstreamInput::available_bytes(&mut self) -> core::result::Result<usize, std::io::error::Error>
-pub fn api::JxlBitstreamInput::read(&mut self, &mut [core::io::io_slice::IoSliceMut<'_>]) -> core::result::Result<usize, std::io::error::Error>
-pub fn api::JxlBitstreamInput::skip(&mut self, usize) -> core::result::Result<usize, std::io::error::Error>
-pub fn api::JxlBitstreamInput::unconsume(&mut self, usize) -> core::result::Result<(), std::io::error::Error>
+pub fn api::JxlBitstreamInput::available_bytes(&mut self) -> core::result::Result<usize, core::io::error::Error>
+pub fn api::JxlBitstreamInput::read(&mut self, &mut [core::io::io_slice::IoSliceMut<'_>]) -> core::result::Result<usize, core::io::error::Error>
+pub fn api::JxlBitstreamInput::skip(&mut self, usize) -> core::result::Result<usize, core::io::error::Error>
 pub trait api::JxlCms
 pub fn api::JxlCms::initialize_transforms(&self, usize, usize, api::JxlColorProfile, api::JxlColorProfile, f32) -> api::Result<(usize, alloc::vec::Vec<alloc::boxed::Box<(dyn api::JxlCmsTransformer + core::marker::Send + core::marker::Sync)>>)>
 pub trait api::JxlCmsTransformer
@@ -594,17 +612,19 @@ pub fn api::check_signature(&[u8]) -> api::ProcessingResult<core::option::Option
 pub fn api::compute_md5(&[u8]) -> [u8; 16]
 pub type api::Result<T, E> = core::result::Result<T, E>
 pub macro profile!
-pub fn decode(&[u8]) -> api::Result<api::JxlImage> [also: api]
-pub fn decode_with(&[u8], api::JxlDecoderOptions) -> api::Result<api::JxlImage> [also: api]
+pub fn decode(&[u8]) -> api::Result<api::JxlImage, whereat::at::At<api::Error>> [also: api]
+pub fn decode_with(&[u8], api::JxlDecoderOptions) -> api::Result<api::JxlImage, whereat::at::At<api::Error>> [also: api]
 pub fn read_header(&[u8]) -> api::Result<api::JxlImageInfo> [also: api]
 pub fn read_header_with(&[u8], api::JxlDecoderLimits) -> api::Result<api::JxlImageInfo> [also: api]
 
-## trait impls (50 types)
+## trait impls (51 types)
 
 &[u8]: api::JxlBitstreamInput
+alloc::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
 api::DataTypeTag: Clone, Copy, Debug, Eq, PartialEq
 api::Endianness: Clone, Copy, Debug, Eq, PartialEq
-api::Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<enough::reason::StopReason>, From<std::io::error::Error>
+api::Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<core::io::error::Error>, From<enough::reason::StopReason>
+api::ErrorClass: Clone, Copy, Debug, Eq, Hash, PartialEq
 api::ExtraChannel: Clone, Copy, Debug, Eq, PartialEq, num_traits::cast::FromPrimitive
 api::GainMapBundle: Clone, Debug, Eq, PartialEq
 api::Image<T>: Debug
@@ -647,7 +667,6 @@ f64: api::ImageDataType
 i16: api::ImageDataType
 i32: api::ImageDataType
 i8: api::ImageDataType
-std::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
 u16: api::ImageDataType
 u32: api::ImageDataType
 u8: api::ImageDataType
