@@ -264,7 +264,7 @@ impl<'a> JpegWriter<'a> {
                 self.out.push(val);
             }
             // Update the active table set for subsequent scans.
-            let table = HuffmanEncodeTable::from_counts_values(&hc.counts, &hc.values);
+            let table = HuffmanEncodeTable::from_counts_values(&hc.counts, &hc.values)?;
             if hc.is_ac {
                 active_ac[hc.id as usize] = Some(table);
             } else {
@@ -400,6 +400,7 @@ impl<'a> JpegWriter<'a> {
                 // at the boundary.
                 if restart_interval > 0 && restart_counter == restart_interval {
                     bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
+                    bw.check_missing()?;
                     self.out.extend_from_slice(&bw.finish());
                     bw = BitWriter::new();
 
@@ -480,6 +481,7 @@ impl<'a> JpegWriter<'a> {
 
         // Flush remaining bits
         bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
+        bw.check_missing()?;
         self.out.extend_from_slice(&bw.finish());
 
         Ok(())
@@ -554,12 +556,17 @@ impl<'a> JpegWriter<'a> {
                 // Restart marker every `restart_interval` MCUs: flush the EOB
                 // run, pad to a byte, emit RSTn, reset DC prediction.
                 if restart_interval > 0 && restarts_to_go == 0 {
-                    if ss > 0
-                        && let Some(ac) = ac_tables[flush_ac_idx].as_ref()
-                    {
+                    if ss > 0 {
+                        // Dropping a pending EOB run because the table is
+                        // missing silently removes symbols from the stream
+                        // (sweep issue #56) — error instead.
+                        let ac = ac_tables[flush_ac_idx].as_ref().ok_or_else(|| {
+                            Error::InvalidJbrd("missing AC Huffman table at restart flush".into())
+                        })?;
                         cs.flush(&mut bw, ac);
                     }
                     bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
+                    bw.check_missing()?;
                     self.out.extend_from_slice(&bw.finish());
                     bw = BitWriter::new();
                     self.out.push(0xFF);
@@ -587,9 +594,12 @@ impl<'a> JpegWriter<'a> {
                             if reset_point_pos < scan.reset_points.len()
                                 && block_scan_index == scan.reset_points[reset_point_pos]
                             {
-                                if let Some(ac) = ac_tables[ac_idx].as_ref() {
-                                    cs.flush(&mut bw, ac);
-                                }
+                                let ac = ac_tables[ac_idx].as_ref().ok_or_else(|| {
+                                    Error::InvalidJbrd(
+                                        "missing AC Huffman table at reset point".into(),
+                                    )
+                                })?;
+                                cs.flush(&mut bw, ac);
                                 reset_point_pos += 1;
                             }
                             // extra zero runs (extra ZRLs) before this block.
@@ -616,13 +626,43 @@ impl<'a> JpegWriter<'a> {
                             // band (DC-only scans never touch the AC table, and
                             // its DHT may not even be active yet). Supply a
                             // non-None reference for the unused slot.
-                            let dc = dc_tables[dc_idx].as_ref();
-                            let ac = ac_tables[ac_idx].as_ref();
-                            let any = dc.or(ac).ok_or_else(|| {
-                                Error::InvalidJbrd("no active Huffman table for scan".into())
-                            })?;
-                            let dc = dc.unwrap_or(any);
-                            let ac = ac.unwrap_or(any);
+                            // A scan must use the table class it declares:
+                            // ss == 0 needs the DC table, ss > 0 needs the AC
+                            // table. The old code substituted whichever table
+                            // happened to be active ("any"), so an AC scan
+                            // with an unactivated AC slot encoded real AC
+                            // symbols with a DC table — wrong codes, corrupt
+                            // stream (sweep issue #56). Mirror the baseline
+                            // path: error loudly instead.
+                            let need_dc = ss == 0;
+                            let need_ac = se > 0;
+                            let dc = if need_dc {
+                                dc_tables[dc_idx].as_ref().ok_or_else(|| {
+                                    Error::InvalidJbrd(
+                                        "missing DC Huffman table for progressive scan".into(),
+                                    )
+                                })?
+                            } else {
+                                // Unused by this scan; any table satisfies the
+                                // signature without being consulted.
+                                dc_tables[dc_idx]
+                                    .as_ref()
+                                    .or(ac_tables[ac_idx].as_ref())
+                                    .ok_or_else(|| {
+                                        Error::InvalidJbrd(
+                                            "no active Huffman table for scan".into(),
+                                        )
+                                    })?
+                            };
+                            let ac = if need_ac {
+                                ac_tables[ac_idx].as_ref().ok_or_else(|| {
+                                    Error::InvalidJbrd(
+                                        "missing AC Huffman table for progressive scan".into(),
+                                    )
+                                })?
+                            } else {
+                                dc
+                            };
                             if is_refinement {
                                 encode_refinement(&mut bw, coeffs, ac, ss, se, al, &mut cs);
                             } else {
@@ -649,12 +689,14 @@ impl<'a> JpegWriter<'a> {
             }
         }
         // Final flush of any pending EOB run + byte padding.
-        if ss > 0
-            && let Some(ac) = ac_tables[flush_ac_idx].as_ref()
-        {
+        if ss > 0 {
+            let ac = ac_tables[flush_ac_idx].as_ref().ok_or_else(|| {
+                Error::InvalidJbrd("missing AC Huffman table at final flush".into())
+            })?;
             cs.flush(&mut bw, ac);
         }
         bw.pad_to_byte(&jpeg.padding_bits, &mut padding_bit_idx);
+        bw.check_missing()?;
         self.out.extend_from_slice(&bw.finish());
         Ok(())
     }
@@ -958,7 +1000,18 @@ struct HuffmanEncodeTable {
 }
 
 impl HuffmanEncodeTable {
-    fn from_counts_values(counts: &[u32; 16], values: &[u8]) -> Self {
+    fn from_counts_values(counts: &[u32; 16], values: &[u8]) -> Result<Self> {
+        // A counts/values mismatch means the jbrd payload is inconsistent;
+        // tolerating it (as the old code did) leaves symbols codeless and
+        // the writer would silently emit them as zero bits (sweep issue #56).
+        let total: u32 = counts.iter().sum();
+        if total as usize != values.len() {
+            return Err(Error::InvalidJbrd(format!(
+                "DHT counts sum ({total}) does not match value count ({})",
+                values.len()
+            )));
+        }
+
         let mut codes = [0u32; 256];
         let mut lengths = [0u8; 256];
 
@@ -968,18 +1021,16 @@ impl HuffmanEncodeTable {
         for (bits_minus_1, &count) in counts.iter().enumerate() {
             let bits = bits_minus_1 as u8 + 1;
             for _ in 0..count {
-                if val_idx < values.len() {
-                    let symbol = values[val_idx] as usize;
-                    codes[symbol] = code;
-                    lengths[symbol] = bits;
-                    val_idx += 1;
-                }
+                let symbol = values[val_idx] as usize;
+                codes[symbol] = code;
+                lengths[symbol] = bits;
+                val_idx += 1;
                 code += 1;
             }
             code <<= 1;
         }
 
-        Self { codes, lengths }
+        Ok(Self { codes, lengths })
     }
 }
 
@@ -988,6 +1039,11 @@ struct BitWriter {
     buffer: Vec<u8>,
     bit_buffer: u32,
     bits_in_buffer: u32,
+    /// First symbol encountered that has no code in its Huffman table.
+    /// `write_huffman` used to silently write ZERO bits for such symbols
+    /// (the zenjpeg #194/#196 mechanism), producing an undecodable stream
+    /// returned as Ok. The flag is checked once per scan (sweep issue #56).
+    missing_symbol: Option<u8>,
 }
 
 impl BitWriter {
@@ -996,6 +1052,7 @@ impl BitWriter {
             buffer: Vec::new(),
             bit_buffer: 0,
             bits_in_buffer: 0,
+            missing_symbol: None,
         }
     }
 
@@ -1004,7 +1061,22 @@ impl BitWriter {
         let length = table.lengths[symbol as usize];
         if length > 0 {
             self.write_bits(code, length as u32);
+        } else {
+            // Record and keep going; the scan writer errors on the flag.
+            // Writing nothing here would silently desync the stream.
+            self.missing_symbol.get_or_insert(symbol);
         }
+    }
+
+    /// Error if any symbol had no Huffman code during this writer's lifetime.
+    fn check_missing(&self) -> Result<()> {
+        if let Some(sym) = self.missing_symbol {
+            return Err(Error::InvalidJbrd(format!(
+                "Huffman table has no code for symbol {sym:#04x}; \
+                 emitting it would silently corrupt the reconstruction"
+            )));
+        }
+        Ok(())
     }
 
     fn write_bits(&mut self, value: u32, num_bits: u32) {

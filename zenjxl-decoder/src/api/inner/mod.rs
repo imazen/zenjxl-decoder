@@ -26,6 +26,10 @@ pub struct JxlDecoderInner {
     options: JxlDecoderOptions,
     box_parser: BoxParser,
     codestream_parser: CodestreamParser,
+    /// Set when a jbrd box was present but its JPEG serialization failed
+    /// (see `jpeg_reconstruction_error`).
+    #[cfg(feature = "jpeg")]
+    jpeg_reconstruction_error: Option<crate::error::Error>,
 }
 
 impl JxlDecoderInner {
@@ -35,6 +39,8 @@ impl JxlDecoderInner {
             options,
             box_parser: BoxParser::new(),
             codestream_parser: CodestreamParser::new(),
+            #[cfg(feature = "jpeg")]
+            jpeg_reconstruction_error: None,
         }
     }
 
@@ -209,7 +215,26 @@ impl JxlDecoderInner {
             self.box_parser.xmp.clone(),
             icc.as_deref(),
         );
-        crate::jpeg::write_jpeg(&jpeg).ok()
+        match crate::jpeg::write_jpeg(&jpeg) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                // A jbrd box was present but its serialization failed —
+                // distinguish this from "no reconstruction data" instead of
+                // silently conflating the two (sweep issue #56). Callers can
+                // inspect `jpeg_reconstruction_error()`.
+                self.jpeg_reconstruction_error = Some(e);
+                None
+            }
+        }
+    }
+
+    /// The error from the last failed JPEG-reconstruction serialization, if
+    /// any. `take_jpeg_reconstruction` returning `None` with this set means
+    /// the file DID carry reconstruction data but it was invalid — callers
+    /// falling back to pixel decode may want to surface that.
+    #[cfg(feature = "jpeg")]
+    pub fn jpeg_reconstruction_error(&self) -> Option<&crate::error::Error> {
+        self.jpeg_reconstruction_error.as_ref()
     }
 
     /// Returns the parsed frame index box, if the file contained one.

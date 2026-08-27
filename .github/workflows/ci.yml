@@ -12,6 +12,9 @@ on:
     types: [opened, reopened, synchronize]
 
 env:
+  # codec-corpus is not provisioned in CI; corpus-backed feature tests skip
+  # EXPLICITLY via this flag (without it they fail loudly — no silent skips).
+  ZENJXL_ALLOW_MISSING_CORPUS: "1"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 

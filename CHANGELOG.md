@@ -6,6 +6,26 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Fixed
+
+- **JPEG-reconstruction writer could silently emit corrupt streams** (issue
+  #56, 2026-08-26 ultracode sweep, adversarially verified): `write_huffman`
+  wrote ZERO bits for any symbol missing from its DHT (the zenjpeg #194/#196
+  mechanism); the progressive scan writer substituted the DC table for a
+  missing AC table and silently skipped pending EOB-run flushes; and
+  `from_counts_values` tolerated DHT counts/values mismatches, leaving
+  symbols codeless. Now: a sticky missing-symbol flag on the bit writer is
+  checked at every scan flush (loud `InvalidJbrd` instead of corrupt bytes),
+  progressive scans require the table class they declare, EOB-run flushes
+  error on a missing table, and counts/values consistency is validated at
+  table build. All 8 byte-exact reconstruction fixtures still pass.
+- `take_jpeg_reconstruction` no longer swallows serialization errors with
+  `.ok()` — a failed reconstruction is recorded and exposed via the new
+  `jpeg_reconstruction_error()` accessor, distinguishable from "no jbrd box".
+- Corpus-backed feature tests no longer skip silently when codec-corpus is
+  absent: they fail loudly unless `ZENJXL_ALLOW_MISSING_CORPUS=1` is set
+  explicitly (CI sets it, visibly, in ci.yml).
+
 The next release is **0.4.0**: the entries under "Changed (BREAKING)" and
 "Removed (BREAKING)" ship together as one breaking batch.
 

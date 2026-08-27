@@ -39,17 +39,33 @@ fn decode_file(path: &std::path::Path) -> Result<(u32, u32, bool), String> {
 
 /// Test helper that tries to decode and reports result
 fn test_feature(name: &str, filename: &str) {
+    // NO SILENT SKIPS: a test that quietly passes without testing anything
+    // creates false confidence (this is how corrupt encoder output stayed
+    // green elsewhere). Absence of the corpus is only a valid skip when the
+    // caller explicitly said so via ZENJXL_ALLOW_MISSING_CORPUS=1; otherwise
+    // it is a loud failure.
+    let allow_missing = std::env::var_os("ZENJXL_ALLOW_MISSING_CORPUS").is_some_and(|v| v == "1");
     let corpus = match codec_corpus_jxl_dir() {
         Some(d) => d,
         None => {
-            eprintln!("SKIP {}: codec-corpus not found", name);
+            assert!(
+                allow_missing,
+                "{name}: codec-corpus not found; set ZENJXL_ALLOW_MISSING_CORPUS=1 \
+                 to skip corpus-backed feature tests explicitly"
+            );
+            eprintln!("SKIP {}: codec-corpus not found (explicitly allowed)", name);
             return;
         }
     };
 
     let path = corpus.join("features").join(filename);
     if !path.exists() {
-        eprintln!("SKIP {}: {} not found", name, filename);
+        assert!(
+            allow_missing,
+            "{name}: corpus file {filename} not found; set \
+             ZENJXL_ALLOW_MISSING_CORPUS=1 to skip explicitly"
+        );
+        eprintln!("SKIP {}: {} not found (explicitly allowed)", name, filename);
         return;
     }
 
