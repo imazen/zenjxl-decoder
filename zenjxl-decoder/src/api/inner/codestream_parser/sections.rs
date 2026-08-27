@@ -415,32 +415,12 @@ impl CodestreamParser {
         }
 
         let decoder_state = self.frame.take().unwrap().finalize()?;
-        if let Some(state) = decoder_state {
-            self.decoder_state = Some(state);
-        } else if might_be_preview {
-            // Preview frame has is_last=true but the main frame follows.
-            // Recreate decoder state from saved file header for the main frame.
-            //
-            // Ported from libjxl/jxl-rs #743 (f1514f1): route every
-            // option-propagation step through `apply_decoder_options` so the
-            // recreated state carries the same high_precision, premultiply,
-            // parallel, memory_tracker, and embedded_color_profile fields as
-            // the primary decoder_state creation. Before this, those fields
-            // silently reverted to defaults on the main frame whenever the
-            // file had a preview — dropping security limits, disabling
-            // parallel rendering, and breaking CMYK ICC handling.
-            if let Some(fh) = self.saved_file_header.take() {
-                let mut new_state = crate::frame::DecoderState::new(fh);
-                super::non_section::apply_decoder_options(
-                    &mut new_state,
-                    decode_options,
-                    &self.embedded_color_profile,
-                );
-                self.decoder_state = Some(new_state);
-            }
-        } else {
-            self.has_more_frames = false;
-        }
+        // Preview frame has is_last=true but the main frame follows: the
+        // helper recreates the decoder state from the saved file header,
+        // routing every option through `apply_decoder_options`
+        // (libjxl/jxl-rs #743, f1514f1) so high_precision, premultiply,
+        // parallel, memory_tracker and embedded_color_profile survive.
+        self.install_decoder_state_after_frame(decoder_state, might_be_preview, decode_options);
         Ok(None)
     }
 }

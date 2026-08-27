@@ -294,7 +294,9 @@ impl CodestreamParser {
             self.non_section_buf.consume(br.total_bits_read() / 8);
 
             // We now have image information.
-            let mut decoder_state = DecoderState::new(self.file_header.take().unwrap());
+            let file_header = self.file_header.take().unwrap();
+            self.image_file_header = Some(file_header.clone());
+            let mut decoder_state = DecoderState::new(file_header);
             apply_decoder_options(
                 &mut decoder_state,
                 decode_options,

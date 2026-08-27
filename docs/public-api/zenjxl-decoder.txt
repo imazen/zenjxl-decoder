@@ -6,28 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 649 lines (supported surface) | zenjxl-decoder.features.txt 12 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 110 lines (122 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 670 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 112 lines (124 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)        49
+#   pub types (struct/enum/trait/alias)        51
 #   pub consts/statics                          3
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          189
-#   struct fields                             116
-#   enum variants                             217
+#   inherent methods                          194
+#   struct fields                             127
+#   enum variants                             218
 #   re-exports                                  3
-#   trait roster entries (type × trait)       143
-#   auto-trait-complete types                  33
+#   trait roster entries (type × trait)       151
+#   auto-trait-complete types                  35
 #   auto-trait exceptions                      10
 #
 # per-module pub lines:
 #   (root)                            8
-#   api                             583
+#   api                             602
 
-## items (587 lines)
+## items (606 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -182,6 +182,7 @@ pub api::Error::PointListEmpty
 pub api::Error::ProgressiveRejected
 pub api::Error::SaveDifferentDownsample((u8, u8), (u8, u8))
 pub api::Error::SectionTooShort
+pub api::Error::SeekBeforeImageInfo
 pub api::Error::SizeOverflow
 pub api::Error::SplineAdjacentCoincidingControlPoints(usize, api::Point, usize, api::Point)
 pub api::Error::SplinesAreaTooLarge(u64, u64)
@@ -426,10 +427,12 @@ pub fn api::JxlDecoder<api::states::WithImageInfo>::output_color_profile(&self) 
 pub fn api::JxlDecoder<api::states::WithImageInfo>::process(self, &mut impl api::JxlBitstreamInput) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithFrameInfo>, Self>>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::set_output_color_profile(&mut self, api::JxlColorProfile) -> api::Result<()>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::set_pixel_format(&mut self, api::JxlPixelFormat)
+pub fn api::JxlDecoder<api::states::WithImageInfo>::start_new_frame(&mut self, api::VisibleFrameSeekTarget)
 pub fn api::JxlDecoder<S>::exif(&self) -> core::option::Option<&[u8]>
 pub fn api::JxlDecoder<S>::frame_index(&self) -> core::option::Option<&container::frame_index::FrameIndexBox>
 pub fn api::JxlDecoder<S>::gain_map(&self) -> core::option::Option<&api::GainMapBundle>
 pub fn api::JxlDecoder<S>::rewind(self) -> api::JxlDecoder<api::states::Initialized>
+pub fn api::JxlDecoder<S>::scanned_frames(&self) -> &[api::VisibleFrameInfo]
 pub fn api::JxlDecoder<S>::take_exif(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn api::JxlDecoder<S>::take_gain_map(&mut self) -> core::option::Option<api::GainMapBundle>
 pub fn api::JxlDecoder<S>::take_xmp(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
@@ -450,8 +453,10 @@ pub fn api::JxlDecoderInner::num_completed_passes(&self) -> core::option::Option
 pub fn api::JxlDecoderInner::output_color_profile(&self) -> core::option::Option<&api::JxlColorProfile>
 pub fn api::JxlDecoderInner::reset(&mut self)
 pub fn api::JxlDecoderInner::rewind(&mut self) -> bool
+pub fn api::JxlDecoderInner::scanned_frames(&self) -> &[api::VisibleFrameInfo]
 pub fn api::JxlDecoderInner::set_output_color_profile(&mut self, api::JxlColorProfile) -> api::Result<()>
 pub fn api::JxlDecoderInner::set_pixel_format(&mut self, api::JxlPixelFormat)
+pub fn api::JxlDecoderInner::start_new_frame(&mut self, api::VisibleFrameSeekTarget) -> api::Result<()>
 pub fn api::JxlDecoderInner::take_exif(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn api::JxlDecoderInner::take_gain_map(&mut self) -> core::option::Option<api::GainMapBundle>
 pub fn api::JxlDecoderInner::take_xmp(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
@@ -490,6 +495,7 @@ pub api::JxlDecoderOptions::parallel: bool
 pub api::JxlDecoderOptions::premultiply_output: bool
 pub api::JxlDecoderOptions::reject_progressive: bool
 pub api::JxlDecoderOptions::render_spot_colors: bool
+pub api::JxlDecoderOptions::scan_frames_only: bool
 pub api::JxlDecoderOptions::skip_preview: bool
 pub api::JxlDecoderOptions::stop: alloc::sync::Arc<dyn enough::Stop>
 pub fn api::JxlDecoderOptions::with_adjust_orientation(self, bool) -> Self
@@ -503,6 +509,7 @@ pub fn api::JxlDecoderOptions::with_parallel(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_premultiply_output(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_reject_progressive(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_render_spot_colors(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_scan_frames_only(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_skip_preview(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_stop(self, alloc::sync::Arc<dyn enough::Stop>) -> Self
 pub struct api::JxlExtraChannel
@@ -595,6 +602,18 @@ pub struct api::VardctQuantizer
 pub api::VardctQuantizer::global_scale: u32
 pub api::VardctQuantizer::quant_lf: u32
 pub fn api::VardctQuantizer::inv_global_scale(&self) -> f32
+pub struct api::VisibleFrameInfo
+pub api::VisibleFrameInfo::duration_ms: f64
+pub api::VisibleFrameInfo::duration_ticks: u32
+pub api::VisibleFrameInfo::file_offset: core::option::Option<u64>
+pub api::VisibleFrameInfo::index: usize
+pub api::VisibleFrameInfo::is_keyframe: bool
+pub api::VisibleFrameInfo::is_last: bool
+pub api::VisibleFrameInfo::name: alloc::string::String
+pub api::VisibleFrameInfo::seek_target: core::option::Option<api::VisibleFrameSeekTarget>
+pub struct api::VisibleFrameSeekTarget
+pub api::VisibleFrameSeekTarget::decode_start_file_offset: u64
+pub api::VisibleFrameSeekTarget::visible_frames_to_skip: usize
 pub trait api::ImageDataType: image::data_type::private::Sealed + bytemuck::pod::Pod + core::marker::Copy + core::default::Default + 'static + core::fmt::Debug + core::cmp::PartialEq + core::marker::Send + core::marker::Sync
 pub const api::ImageDataType::DATA_TYPE_ID: api::DataTypeTag
 pub fn api::ImageDataType::from_f64(f64) -> Self
@@ -617,7 +636,7 @@ pub fn decode_with(&[u8], api::JxlDecoderOptions) -> api::Result<api::JxlImage, 
 pub fn read_header(&[u8]) -> api::Result<api::JxlImageInfo> [also: api]
 pub fn read_header_with(&[u8], api::JxlDecoderLimits) -> api::Result<api::JxlImageInfo> [also: api]
 
-## trait impls (51 types)
+## trait impls (53 types)
 
 &[u8]: api::JxlBitstreamInput
 alloc::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
@@ -659,6 +678,8 @@ api::Rect: Clone, Copy, Debug
 api::RenderingIntent: Clone, Copy, Debug, Display, PartialEq, num_traits::cast::FromPrimitive
 api::ToneMapping: Clone
 api::VardctQuantizer: Clone, Copy, Debug, Eq, PartialEq
+api::VisibleFrameInfo: Clone, Debug, PartialEq
+api::VisibleFrameSeekTarget: Clone, Copy, Debug, Eq, PartialEq
 api::states::Initialized: api::states::JxlState
 api::states::WithFrameInfo: api::states::JxlState
 api::states::WithImageInfo: api::states::JxlState
@@ -673,7 +694,7 @@ u8: api::ImageDataType
 
 ## auto traits
 
-33 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+35 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 api::Error: !RefUnwindSafe !UnwindSafe
 api::Image<T>: !RefUnwindSafe !Unpin !UnwindSafe
 api::ImageRect<'a, T>: !RefUnwindSafe !Unpin !UnwindSafe

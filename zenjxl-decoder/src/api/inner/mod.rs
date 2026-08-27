@@ -6,7 +6,7 @@
 #[cfg(test)]
 use crate::api::FrameCallback;
 use crate::{
-    api::JxlFrameHeader,
+    api::{JxlFrameHeader, VisibleFrameInfo, VisibleFrameSeekTarget},
     error::{Error, Result},
 };
 use whereat::at;
@@ -20,6 +20,8 @@ use codestream_parser::CodestreamParser;
 mod box_parser;
 mod codestream_parser;
 mod process;
+
+pub(crate) use codestream_parser::SeekPoint;
 
 /// Low-level, less-type-safe API.
 pub struct JxlDecoderInner {
@@ -164,9 +166,32 @@ impl JxlDecoderInner {
     ///
     /// After calling this, the caller should provide input from the beginning of the file.
     pub fn reset(&mut self) {
-        // TODO(veluca): keep track of frame offsets for skipping.
         self.box_parser = BoxParser::new();
         self.codestream_parser = CodestreamParser::new();
+    }
+
+    /// Visible frames discovered so far (see
+    /// [`JxlDecoder::scanned_frames`](crate::api::JxlDecoder::scanned_frames)).
+    pub fn scanned_frames(&self) -> &[VisibleFrameInfo] {
+        &self.codestream_parser.scanned_frames
+    }
+
+    /// Repositions the decoder at `target` (see
+    /// [`JxlDecoder::start_new_frame`](crate::api::JxlDecoder::start_new_frame)).
+    /// After this call, feed raw file bytes starting at
+    /// `target.decode_start_file_offset`.
+    ///
+    /// Errors with [`Error::SeekBeforeImageInfo`] if the image header has
+    /// not been parsed yet (or the decoder was `reset`/`rewind`-ed since).
+    pub fn start_new_frame(&mut self, target: VisibleFrameSeekTarget) -> Result<()> {
+        self.codestream_parser
+            .start_new_frame(&self.options, &target)?;
+        self.box_parser.reset_for_codestream_seek(
+            target.point.file_offset,
+            target.point.remaining_in_box,
+            target.point.box_type,
+        );
+        Ok(())
     }
 
     /// Rewinds for animation loop replay, keeping pixel_format setting.

@@ -320,6 +320,10 @@ pub enum Error {
         "Progressive content rejected: a progressive frame header (multi-pass or LF frame) was seen but `JxlDecoderOptions::reject_progressive` forbids it"
     )]
     ProgressiveRejected,
+    #[error(
+        "start_new_frame called before the image header was parsed: seeking needs the image info first"
+    )]
+    SeekBeforeImageInfo,
 }
 
 /// A coarse, best-effort classification of an [`Error`], for operational
@@ -393,7 +397,8 @@ impl Error {
             | Error::ICCOutputNoCMS
             | Error::NonXybOutputNoCMS
             | Error::CmsConsumedChannelRequested { .. }
-            | Error::CmsChannelCountIncrease { .. } => ErrorClass::OutputConfiguration,
+            | Error::CmsChannelCountIncrease { .. }
+            | Error::SeekBeforeImageInfo => ErrorClass::OutputConfiguration,
 
             // Valid input using a feature this decoder / configuration refuses.
             Error::ProgressiveRejected | Error::InvalidRenderingIntent => ErrorClass::Unsupported,
@@ -458,6 +463,10 @@ mod tests {
         );
         assert_eq!(Error::NotGrayscale.kind(), ErrorClass::OutputConfiguration);
         assert_eq!(Error::NotCmyk.kind(), ErrorClass::OutputConfiguration);
+        assert_eq!(
+            Error::SeekBeforeImageInfo.kind(),
+            ErrorClass::OutputConfiguration
+        );
         assert_eq!(Error::ProgressiveRejected.kind(), ErrorClass::Unsupported,);
         assert_eq!(Error::ArithmeticOverflow.kind(), ErrorClass::Internal);
         // Malformed-bitstream variants fall into the default class.

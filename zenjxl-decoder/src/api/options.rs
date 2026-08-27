@@ -250,6 +250,18 @@ pub struct JxlDecoderOptions {
     ///
     /// When `false`, all decoding is single-threaded.
     pub parallel: bool,
+    /// Only parse frame headers and tables of contents; never decode section
+    /// data (not even for reference/patch-dictionary frames, which a normal
+    /// `skip_frame` still has to decode).
+    ///
+    /// Use this to build the seek table for an animation quickly: drive the
+    /// decoder through `process` / `skip_frame` and read
+    /// [`JxlDecoder::scanned_frames`](crate::api::JxlDecoder::scanned_frames).
+    /// No pixels are ever produced while this is set, even when output
+    /// buffers are supplied.
+    ///
+    /// Default: `false`.
+    pub scan_frames_only: bool,
 }
 
 impl Default for JxlDecoderOptions {
@@ -268,6 +280,7 @@ impl Default for JxlDecoderOptions {
             limits: JxlDecoderLimits::default(),
             stop: Arc::new(enough::Unstoppable),
             parallel: cfg!(feature = "threads"),
+            scan_frames_only: false,
         }
     }
 }
@@ -356,6 +369,14 @@ impl JxlDecoderOptions {
     #[must_use]
     pub fn with_stop(mut self, stop: Arc<dyn enough::Stop>) -> Self {
         self.stop = stop;
+        self
+    }
+
+    /// Only parse frame headers/TOCs, never section data (see
+    /// [`scan_frames_only`](Self::scan_frames_only)).
+    #[must_use]
+    pub fn with_scan_frames_only(mut self, v: bool) -> Self {
+        self.scan_frames_only = v;
         self
     }
 

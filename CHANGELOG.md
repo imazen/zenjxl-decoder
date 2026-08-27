@@ -6,6 +6,28 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Added
+
+- **Animation frame seeking** (issue #11; port of upstream jxl-rs #678 +
+  #702, adapted to this fork's parser). `JxlDecoder::scanned_frames()`
+  returns a `VisibleFrameInfo` per visible frame parsed so far (index,
+  duration, file offset, `is_keyframe`, name) with a
+  `VisibleFrameSeekTarget`; `JxlDecoder<WithImageInfo>::start_new_frame`
+  repositions the decoder so that feeding raw file bytes from
+  `target.decode_start_file_offset` yields that frame, passing over the
+  intermediate visible frames internally. Seeks are bit-exact with a
+  from-start decode: the decode start is resolved through blending-source,
+  patch-dictionary and LF-frame dependencies; the container box state
+  (`jxlc`/`jxlp`, frames straddling box boundaries included) is restored;
+  and the frame counters that seed the noise RNG are restored. New
+  `JxlDecoderOptions::scan_frames_only` / `with_scan_frames_only` parse only
+  frame headers and TOCs to build the seek table without decoding reference
+  frames. Containers with out-of-order `jxlp` boxes report
+  `seek_target: None`. The inner API's `start_new_frame` returns the new
+  `Error::SeekBeforeImageInfo` (`ErrorClass::OutputConfiguration`) when
+  called before the image header. Covered by a corpus-wide sweep that seeks
+  to every visible frame of every fixture.
+
 ### Fixed
 
 - **JPEG-reconstruction writer could silently emit corrupt streams** (issue

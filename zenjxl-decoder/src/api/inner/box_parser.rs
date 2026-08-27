@@ -3,7 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use std::io::IoSliceMut;
+use std::{collections::VecDeque, io::IoSliceMut};
 use whereat::at;
 
 use crate::container::frame_index::FrameIndexBox;
@@ -55,11 +55,32 @@ enum ParseState {
     BufferingBrob(u64, Vec<u8>),
 }
 
-enum CodestreamBoxType {
+/// Which container box the codestream bytes currently being parsed come
+/// from. Recorded per frame start so a seek can restore the `jxlp` index
+/// bookkeeping at the target position. Each value identifies one box of
+/// the file: `Jxlp` indices increase, and `None` (bare codestream), `Jxlc`
+/// and `LastJxlp` occur at most once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodestreamBoxType {
     None,
     Jxlc,
     Jxlp(u32),
     LastJxlp,
+}
+
+/// One codestream box the parser has entered: where its payload sits in the
+/// concatenated codestream and in the file. The codestream parser maps a
+/// frame's codestream position through these records to get a seekable file
+/// position, independent of how far ahead the box parser has already read.
+#[derive(Debug, Clone, Copy)]
+struct CodestreamBoxRecord {
+    /// Codestream position of the box's first payload byte.
+    cs_start: u64,
+    /// File offset of the box's first payload byte.
+    file_start: u64,
+    /// Payload length (`u64::MAX`: unbounded / bare codestream).
+    len: u64,
+    box_type: CodestreamBoxType,
 }
 
 /// Out-of-order `jxlp` support (ISO/IEC 18181-2 with `ftyp` minor version 1;
@@ -123,6 +144,18 @@ pub(super) struct BoxParser {
     pub(super) total_file_read: u64,
     state: ParseState,
     box_type: CodestreamBoxType,
+    /// Set once an out-of-order `jxlp` box has been buffered. From then on
+    /// the bytes handed to the codestream parser are no longer in file order,
+    /// so "bytes consumed so far" is not a file position and frame-start
+    /// offsets recorded for seeking are meaningless.
+    pub(super) reordered_jxlp: bool,
+    /// Codestream bytes handed to the codestream parser so far (see
+    /// [`Self::consume_codestream`]); the codestream position of the next
+    /// byte the parser will receive.
+    pub(super) codestream_consumed: u64,
+    /// The most recent codestream boxes entered (oldest first), enough to
+    /// map any position the codestream parser may still be working on.
+    codestream_boxes: VecDeque<CodestreamBoxRecord>,
     #[cfg(feature = "jpeg")]
     jbrd_data: Option<Vec<u8>>,
     /// Parsed frame index box, if present in the file.
@@ -143,6 +176,9 @@ impl BoxParser {
             total_file_read: 0,
             state: ParseState::SignatureNeeded,
             box_type: CodestreamBoxType::None,
+            reordered_jxlp: false,
+            codestream_consumed: 0,
+            codestream_boxes: VecDeque::new(),
             #[cfg(feature = "jpeg")]
             jbrd_data: None,
             frame_index: None,
@@ -204,7 +240,59 @@ impl BoxParser {
         };
         let result = self.get_more_codestream_impl(&mut counting);
         self.total_file_read += counting.count;
+        self.record_entered_codestream_box();
         result
+    }
+
+    /// Records the codestream box the parser is in, if it is a new one (each
+    /// [`CodestreamBoxType`] value occurs once per file). Called right after
+    /// the box header has been consumed and before any payload byte is handed
+    /// out, so the box buffer starts exactly at the payload.
+    fn record_entered_codestream_box(&mut self) {
+        let ParseState::CodestreamBox(len) = self.state else {
+            return;
+        };
+        if self
+            .codestream_boxes
+            .back()
+            .is_some_and(|b| b.box_type == self.box_type)
+        {
+            return;
+        }
+        const MAX_RECORDS: usize = 16;
+        if self.codestream_boxes.len() >= MAX_RECORDS {
+            self.codestream_boxes.pop_front();
+        }
+        self.codestream_boxes.push_back(CodestreamBoxRecord {
+            cs_start: self.codestream_consumed,
+            file_start: self
+                .total_file_read
+                .saturating_sub(self.box_buffer.len() as u64),
+            len,
+            box_type: self.box_type,
+        });
+    }
+
+    /// Maps a codestream position to `(file_offset, remaining_in_box,
+    /// box_type)`, or `None` if the box holding it has not been entered yet
+    /// (the position is exactly at the end of the last known box) or is no
+    /// longer remembered.
+    pub(super) fn locate_codestream_pos(&self, pos: u64) -> Option<(u64, u64, CodestreamBoxType)> {
+        self.codestream_boxes
+            .iter()
+            .rev()
+            .find(|b| {
+                b.cs_start <= pos && (b.len == u64::MAX || pos < b.cs_start.saturating_add(b.len))
+            })
+            .map(|b| {
+                let into = pos - b.cs_start;
+                let remaining = if b.len == u64::MAX {
+                    u64::MAX
+                } else {
+                    b.len - into
+                };
+                (b.file_start + into, remaining, b.box_type)
+            })
     }
 
     /// Bytes read from the input that are still buffered (not yet part of any
@@ -637,6 +725,7 @@ impl BoxParser {
                                     return Err(at!(Error::InvalidBox));
                                 }
                                 self.ooo_jxlp.pending.clear();
+                                self.reordered_jxlp = true;
                                 self.state = ParseState::BufferingOooJxlp {
                                     remaining: content_len,
                                     idx,
@@ -746,7 +835,39 @@ impl BoxParser {
         }
     }
 
+    /// Repositions the parser at a previously recorded frame start so the
+    /// caller can feed raw file bytes from `file_offset`.
+    ///
+    /// The parser is put in `CodestreamBox(remaining)` with the recorded
+    /// `box_type` (so `jxlp` index checks continue from the right box),
+    /// buffered bytes are dropped, and `total_file_read` is rewound to
+    /// `file_offset` so it keeps counting file positions. The codestream
+    /// position counter restarts at 0 in a fresh box record. Parsed metadata
+    /// boxes (`jxli`, `jhgm`, `Exif`, `xml `, `jbrd`) are kept.
+    pub(super) fn reset_for_codestream_seek(
+        &mut self,
+        file_offset: u64,
+        remaining: u64,
+        box_type: CodestreamBoxType,
+    ) {
+        self.box_buffer = SmallBuffer::new(128);
+        self.total_file_read = file_offset;
+        self.state = ParseState::CodestreamBox(remaining);
+        self.box_type = box_type;
+        self.ooo_jxlp.pending = Vec::new();
+        self.ooo_jxlp.buffered.clear();
+        self.codestream_consumed = 0;
+        self.codestream_boxes.clear();
+        self.codestream_boxes.push_back(CodestreamBoxRecord {
+            cs_start: 0,
+            file_start: file_offset,
+            len: remaining,
+            box_type,
+        });
+    }
+
     pub(super) fn consume_codestream(&mut self, amount: u64) {
+        self.codestream_consumed += amount;
         if let ParseState::CodestreamBox(cb) = &mut self.state {
             *cb = cb.checked_sub(amount).unwrap();
             if *cb == 0 {

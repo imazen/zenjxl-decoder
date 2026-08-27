@@ -13,17 +13,17 @@
 #   pub types (struct/enum/trait/alias)         1
 #   pub consts/statics                          6
 #   free functions                             43
-#   inherent methods                           16
+#   inherent methods                           17
 #   enum variants                              27
-#   trait roster entries (type × trait)        17
+#   trait roster entries (type × trait)        18
 #   auto-trait-complete types                   1
 #
 # per-module pub lines:
 #   (root)                            1
 #   __bench_kernels                  83
-#   api                              12
+#   api                              13
 
-## items (96 lines)
+## items (97 lines)
 
 pub const __bench_kernels::transform_map::HfTransformType::CARDINALITY: usize
 pub const __bench_kernels::transform_map::HfTransformType::INVALID_TRANSFORM: u8
@@ -91,6 +91,7 @@ pub fn api::JxlDataFormat::assert_fields_are_eq(&self)
 pub fn api::JxlExtraChannel::assert_fields_are_eq(&self)
 pub fn api::JxlPixelFormat::assert_fields_are_eq(&self)
 pub fn api::VardctQuantizer::assert_fields_are_eq(&self)
+pub fn api::VisibleFrameSeekTarget::assert_fields_are_eq(&self)
 pub mod __bench_kernels
 pub mod __bench_kernels::transform
 pub mod __bench_kernels::transform_map
@@ -122,7 +123,7 @@ pub __bench_kernels::transform_map::HfTransformType::DCT8X32 = 9
 pub __bench_kernels::transform_map::HfTransformType::DCT8X4 = 13
 pub __bench_kernels::transform_map::HfTransformType::IDENTITY = 1
 
-## trait impls (13 types)
+## trait impls (14 types)
 
 __bench_kernels::transform_map::HfTransformType: Clone, Copy, Debug, PartialEq, TrivialClone
 api::DataTypeTag: TrivialClone
@@ -137,6 +138,7 @@ api::RawImageRect<'a>: TrivialClone
 api::Rect: TrivialClone
 api::RenderingIntent: TrivialClone
 api::VardctQuantizer: TrivialClone
+api::VisibleFrameSeekTarget: TrivialClone
 
 ## auto traits
 

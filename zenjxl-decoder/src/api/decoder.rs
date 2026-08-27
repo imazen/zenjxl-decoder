@@ -5,7 +5,7 @@
 
 use super::{
     JxlBasicInfo, JxlBitstreamInput, JxlColorProfile, JxlDecoderInner, JxlDecoderOptions,
-    JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
+    JxlOutputBuffer, JxlPixelFormat, ProcessingResult, inner::SeekPoint,
 };
 #[cfg(test)]
 use crate::frame::Frame;
@@ -41,6 +41,64 @@ pub struct JxlDecoder<State: JxlState> {
 #[cfg(test)]
 pub type FrameCallback = dyn FnMut(&Frame, usize) -> Result<()>;
 
+/// One visible frame discovered while decoding or scanning an image
+/// (upstream jxl-rs #678 design).
+///
+/// Collected by every decoder as frame headers are parsed — sequential
+/// decoding, `skip_frame`, or a header-only scan with
+/// [`JxlDecoderOptions::scan_frames_only`] — and read back through
+/// [`JxlDecoder::scanned_frames`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct VisibleFrameInfo {
+    /// Zero-based index among visible frames.
+    pub index: usize,
+    /// Duration in milliseconds (0 for still images or a frame with zero
+    /// ticks).
+    pub duration_ms: f64,
+    /// Duration in animation ticks, as coded in the frame header.
+    pub duration_ticks: u32,
+    /// Byte offset of this frame's header in the input file. `None` when the
+    /// container's `jxlp` boxes were out of order (the decoder reorders them
+    /// internally, so consumed bytes are not file positions).
+    pub file_offset: Option<u64>,
+    /// Whether this is the last frame of the codestream.
+    pub is_last: bool,
+    /// Whether this frame can be displayed after a seek without skipping any
+    /// visible frame first (equivalent to `visible_frames_to_skip == 0` of
+    /// its seek target). Decoding may still start earlier, at an invisible
+    /// reference/LF frame it depends on.
+    pub is_keyframe: bool,
+    /// Where to restart decoding to display this frame, for
+    /// [`JxlDecoder::start_new_frame`]. `None` if the file cannot be seeked
+    /// (out-of-order `jxlp` boxes), or if the frame depends on a frame that
+    /// was recorded before a `rewind` — rescan from the start in that case.
+    pub seek_target: Option<VisibleFrameSeekTarget>,
+    /// Frame name from the header (may be empty).
+    pub name: String,
+}
+
+/// Where to restart decoding to display a visible frame; obtained from
+/// [`VisibleFrameInfo::seek_target`] and consumed by
+/// [`JxlDecoder::start_new_frame`].
+///
+/// The decode start is the earliest frame the target transitively depends
+/// on through blending sources, patch dictionaries and LF frames (or the
+/// target itself); everything in between is decoded internally without
+/// output. The container box state at the decode start travels inside the
+/// target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisibleFrameSeekTarget {
+    /// File byte offset to feed input from after `start_new_frame`.
+    pub decode_start_file_offset: u64,
+    /// Visible frames between the decode start and the requested frame. The
+    /// decoder passes over them by itself after `start_new_frame`; the count
+    /// is exposed so callers can estimate the cost of the seek.
+    pub visible_frames_to_skip: usize,
+    pub(crate) point: SeekPoint,
+    pub(crate) reference_slots: [Option<u64>; crate::frame::DecoderState::MAX_STORED_FRAMES],
+    pub(crate) lf_slots: [Option<u64>; crate::frame::DecoderState::NUM_LF_FRAMES],
+}
+
 impl<S: JxlState> JxlDecoder<S> {
     fn wrap_inner(inner: Box<JxlDecoderInner>) -> Self {
         Self {
@@ -75,6 +133,20 @@ impl<S: JxlState> JxlDecoder<S> {
     /// byte offsets, timestamps, and frame counts.
     pub fn frame_index(&self) -> Option<&FrameIndexBox> {
         self.inner.frame_index()
+    }
+
+    /// Visible frames discovered so far, sorted by index.
+    ///
+    /// Every frame header the decoder parses — while decoding, skipping, or
+    /// scanning with [`JxlDecoderOptions::scan_frames_only`] — adds an entry
+    /// with its timing and a [`VisibleFrameSeekTarget`] for
+    /// [`start_new_frame`](JxlDecoder::start_new_frame). The list is
+    /// contiguous for a sequential pass and may have gaps after a seek that
+    /// jumped over frames never parsed. To build a complete seek table, scan
+    /// the whole file once (`process` + `skip_frame` until
+    /// `has_more_frames()` is false) with `scan_frames_only` set.
+    pub fn scanned_frames(&self) -> &[VisibleFrameInfo] {
+        self.inner.scanned_frames()
     }
 
     /// Returns the first regular VarDCT frame's quantizer (`global_scale`,
@@ -182,8 +254,6 @@ impl JxlDecoder<Initialized> {
 }
 
 impl JxlDecoder<WithImageInfo> {
-    // TODO(veluca): once frame skipping is implemented properly, expose that in the API.
-
     /// Obtains the image's basic information.
     pub fn basic_info(&self) -> &JxlBasicInfo {
         self.inner.basic_info().unwrap()
@@ -249,6 +319,47 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.file_length()
     }
 
+    /// Repositions the decoder to decode the visible frame described by
+    /// `seek_target` (random access into an animation).
+    ///
+    /// Frame-level state is dropped and the decoder is rebuilt at the target's
+    /// decode start — the earliest frame the target depends on through
+    /// blending sources, patch dictionaries and LF frames — with the frame
+    /// counters a sequential decode would have had there, so the result is
+    /// pixel-identical to decoding from the start. Image-level state (basic
+    /// info, color profiles, pixel format) is kept; reference frames are not,
+    /// every slot the target reads is re-filled while decoding forward.
+    ///
+    /// After this call feed raw file bytes starting at
+    /// `seek_target.decode_start_file_offset`: the next `process` passes
+    /// over the `seek_target.visible_frames_to_skip` visible frames before
+    /// the target internally and returns with the requested frame's header
+    /// (upstream jxl-rs #702 semantics). Continuing sequentially after that
+    /// reproduces a from-start decode as long as every later frame's
+    /// `decode_start_file_offset` is at or after this seek's — otherwise seek
+    /// again with that frame's own target.
+    ///
+    /// `file_length()` is `None` after a seek until the last frame is decoded
+    /// again from the seek point.
+    ///
+    /// ```rust,ignore
+    /// // 1. Build the seek table (header-only pass).
+    /// let opts = JxlDecoderOptions::default().with_scan_frames_only(true);
+    /// // ...process + skip_frame until !has_more_frames(), then:
+    /// let frames = decoder.scanned_frames().to_vec();
+    ///
+    /// // 2. Seek to visible frame n with a normal decoder that has parsed image info.
+    /// let target = frames[n].seek_target.expect("seekable");
+    /// decoder.start_new_frame(target);
+    /// let mut input = &file[target.decode_start_file_offset as usize..];
+    /// // 3. process() -> WithFrameInfo for frame n; process(buffers) decodes it.
+    /// ```
+    pub fn start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) {
+        self.inner
+            .start_new_frame(seek_target)
+            .expect("image info is available in the WithImageInfo state");
+    }
+
     #[cfg(test)]
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.inner.set_use_simple_pipeline(u);
@@ -256,7 +367,13 @@ impl JxlDecoder<WithImageInfo> {
 }
 
 impl JxlDecoder<WithFrameInfo> {
-    /// Skip the current frame.
+    /// Skip the current frame without producing pixels.
+    ///
+    /// The frame's section data is read past (or, for frames later frames
+    /// can reference — patch dictionaries, blending sources, LF frames —
+    /// decoded internally without output). To jump straight to a frame, see
+    /// [`scanned_frames`](JxlDecoder::scanned_frames) and
+    /// [`start_new_frame`](JxlDecoder::start_new_frame).
     pub fn skip_frame(
         mut self,
         input: &mut impl JxlBitstreamInput,
@@ -1978,6 +2095,26 @@ pub(crate) mod tests {
         }
     }
 
+    fn make_box(ty: &[u8; 4], content: &[u8]) -> Vec<u8> {
+        let len = (8 + content.len()) as u32;
+        let mut buf = Vec::new();
+        buf.extend(len.to_be_bytes());
+        buf.extend(ty);
+        buf.extend(content);
+        buf
+    }
+
+    fn add_container_header(container: &mut Vec<u8>) {
+        // JXL signature box
+        let sig = [
+            0x00, 0x00, 0x00, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a,
+        ];
+        // ftyp box
+        let ftyp = make_box(b"ftyp", b"jxl \x00\x00\x00\x00jxl ");
+        container.extend(&sig);
+        container.extend(&ftyp);
+    }
+
     /// Helper to wrap a bare codestream in a JXL container with a jxli frame index box.
     fn wrap_with_frame_index(
         codestream: &[u8],
@@ -1987,32 +2124,654 @@ pub(crate) mod tests {
     ) -> Vec<u8> {
         use crate::util::test::build_frame_index_content;
 
-        fn make_box(ty: &[u8; 4], content: &[u8]) -> Vec<u8> {
-            let len = (8 + content.len()) as u32;
-            let mut buf = Vec::new();
-            buf.extend(len.to_be_bytes());
-            buf.extend(ty);
-            buf.extend(content);
-            buf
-        }
-
         let jxli_content = build_frame_index_content(tnum, tden, entries);
-
-        // JXL signature box
-        let sig = [
-            0x00, 0x00, 0x00, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a,
-        ];
-        // ftyp box
-        let ftyp = make_box(b"ftyp", b"jxl \x00\x00\x00\x00jxl ");
         let jxli = make_box(b"jxli", &jxli_content);
         let jxlc = make_box(b"jxlc", codestream);
 
         let mut container = Vec::new();
-        container.extend(&sig);
-        container.extend(&ftyp);
+        add_container_header(&mut container);
         container.extend(&jxli);
         container.extend(&jxlc);
         container
+    }
+
+    /// Helper to wrap a bare codestream in a container split across `jxlp`
+    /// boxes. `chunk_starts` are codestream offsets where a new box begins.
+    fn wrap_with_jxlp_chunks(codestream: &[u8], chunk_starts: &[usize]) -> Vec<u8> {
+        let mut starts = chunk_starts.to_vec();
+        starts.sort_unstable();
+        starts.dedup();
+        if starts.first().copied() != Some(0) {
+            starts.insert(0, 0);
+        }
+        if starts.last().copied() != Some(codestream.len()) {
+            starts.push(codestream.len());
+        }
+        assert!(starts.len() >= 2);
+
+        let mut container = Vec::new();
+        add_container_header(&mut container);
+
+        let num_chunks = starts.len() - 1;
+        for i in 0..num_chunks {
+            let begin = starts[i];
+            let end = starts[i + 1];
+            assert!(begin <= end && end <= codestream.len());
+            let mut payload = Vec::with_capacity(4 + (end - begin));
+            let mut index = i as u32;
+            if i + 1 == num_chunks {
+                index |= 0x8000_0000;
+            }
+            payload.extend(index.to_be_bytes());
+            payload.extend(&codestream[begin..end]);
+            container.extend(make_box(b"jxlp", &payload));
+        }
+        container
+    }
+
+    // ---------------------------------------------------------------------
+    // Frame scanning + seeking (issue #11, port of upstream jxl-rs #678).
+    // ---------------------------------------------------------------------
+
+    /// Feeds `chunk_size` bytes of `input` at a time to a typestate method
+    /// that returns a `ProcessingResult`, until it completes.
+    macro_rules! advance_chunked {
+        ($input:ident, $chunk_input:ident, $chunk_size:expr, $decoder:ident . $method:ident ($($arg:expr),*)) => {
+            loop {
+                $chunk_input =
+                    &$input[..($chunk_input.len().saturating_add($chunk_size)).min($input.len())];
+                let available_before = $chunk_input.len();
+                let result = $decoder.$method(&mut $chunk_input $(, $arg)*);
+                $input = &$input[(available_before - $chunk_input.len())..];
+                match result.unwrap() {
+                    ProcessingResult::Complete { result } => break result,
+                    ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                        assert!(!$input.is_empty(), "unexpected end of input");
+                        $decoder = fallback;
+                    }
+                }
+            }
+        };
+    }
+
+    /// Drives a decoder built from `options` through the whole file with
+    /// `process` + `skip_frame` (never decoding pixels), feeding `chunk_size`
+    /// bytes at a time, and returns the frames it discovered.
+    fn scan_frames_with_options(
+        mut input: &[u8],
+        chunk_size: usize,
+        options: JxlDecoderOptions,
+    ) -> Vec<VisibleFrameInfo> {
+        let mut chunk_input = &input[0..0];
+        let mut decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut decoder = advance_chunked!(input, chunk_input, chunk_size, decoder.process());
+        while decoder.has_more_frames() {
+            let mut with_frame =
+                advance_chunked!(input, chunk_input, chunk_size, decoder.process());
+            decoder = advance_chunked!(input, chunk_input, chunk_size, with_frame.skip_frame());
+        }
+        decoder.scanned_frames().to_vec()
+    }
+
+    /// Header-only scan (`scan_frames_only`), the intended way to build a
+    /// seek table.
+    fn scan_frames_with_decoder(input: &[u8], chunk_size: usize) -> Vec<VisibleFrameInfo> {
+        let options = JxlDecoderOptions::default().with_scan_frames_only(true);
+        scan_frames_with_options(input, chunk_size, options)
+    }
+
+    /// A decoder that has parsed `data`'s image info and requests f32 output
+    /// for the color channels and every extra channel (the same format the
+    /// sequential `decode` helper uses, so planes compare bit-exactly).
+    ///
+    /// Also returns the input left after the image header, for callers that
+    /// continue sequentially.
+    fn decoder_with_image_info(data: &[u8]) -> (JxlDecoder<states::WithImageInfo>, &[u8]) {
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_memory_bytes = None;
+        let decoder = JxlDecoder::<states::Initialized>::new(options);
+        let mut input = data;
+        let ProcessingResult::Complete {
+            result: mut decoder,
+        } = decoder.process(&mut input).unwrap()
+        else {
+            panic!("expected Complete with full data");
+        };
+        let default_format = decoder.current_pixel_format().clone();
+        decoder.set_pixel_format(JxlPixelFormat {
+            color_type: default_format.color_type,
+            color_data_format: Some(JxlDataFormat::f32()),
+            extra_channel_format: default_format
+                .extra_channel_format
+                .iter()
+                .map(|_| Some(JxlDataFormat::f32()))
+                .collect(),
+        });
+        (decoder, input)
+    }
+
+    /// Allocates one f32 plane per requested buffer (color interleaved, then
+    /// each extra channel), NaN-filled so unwritten pixels are detectable.
+    fn output_planes(decoder: &JxlDecoder<states::WithImageInfo>) -> Vec<Image<f32>> {
+        let (w, h) = decoder.basic_info().size;
+        let fmt = decoder.current_pixel_format();
+        let mut planes = vec![
+            Image::new_with_value((w * fmt.color_type.samples_per_pixel(), h), f32::NAN).unwrap(),
+        ];
+        for ecf in fmt.extra_channel_format.iter() {
+            if ecf.is_some() {
+                planes.push(Image::new_with_value((w, h), f32::NAN).unwrap());
+            }
+        }
+        planes
+    }
+
+    fn planes_as_buffers<'a>(planes: &'a mut [Image<f32>]) -> Vec<JxlOutputBuffer<'a>> {
+        planes
+            .iter_mut()
+            .map(|p| {
+                let size = p.size();
+                JxlOutputBuffer::from_image_rect_mut(
+                    p.get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size,
+                    })
+                    .into_raw(),
+                )
+            })
+            .collect()
+    }
+
+    /// Parses the next frame header and decodes that frame, feeding
+    /// `chunk_size` bytes at a time. Returns the decoder and the planes.
+    fn decode_next_frame(
+        mut decoder: JxlDecoder<states::WithImageInfo>,
+        input: &mut &[u8],
+        chunk_size: usize,
+    ) -> (JxlDecoder<states::WithImageInfo>, Vec<Image<f32>>) {
+        // The output size and pixel format are image-level: read them before
+        // the typestate transition.
+        let mut planes = output_planes(&decoder);
+        let mut data = *input;
+        let mut chunk_input = &data[0..0];
+        let mut with_frame = advance_chunked!(data, chunk_input, chunk_size, decoder.process());
+        {
+            let mut buffers = planes_as_buffers(&mut planes);
+            decoder = advance_chunked!(
+                data,
+                chunk_input,
+                chunk_size,
+                with_frame.process(&mut buffers)
+            );
+        }
+        *input = data;
+        for plane in &planes {
+            let (xs, ys) = plane.size();
+            for y in 0..ys {
+                assert!(
+                    plane.row(y).iter().all(|v| !v.is_nan()),
+                    "row {y} of a {xs}x{ys} plane was not fully written"
+                );
+            }
+        }
+        (decoder, planes)
+    }
+
+    /// Seeks `decoder` to `target`, skips the visible frames the target says
+    /// to skip, decodes the target frame feeding `chunk_size` bytes at a
+    /// time, and returns the decoder positioned after it plus the planes.
+    fn decode_after_seek(
+        data: &[u8],
+        mut decoder: JxlDecoder<states::WithImageInfo>,
+        target: VisibleFrameSeekTarget,
+        chunk_size: usize,
+    ) -> (JxlDecoder<states::WithImageInfo>, Vec<Image<f32>>, &[u8]) {
+        decoder.start_new_frame(target);
+        let mut input = &data[target.decode_start_file_offset as usize..];
+        // No manual `skip_frame` loop: the decoder passes over
+        // `visible_frames_to_skip` frames by itself.
+        let (decoder, planes) = decode_next_frame(decoder, &mut input, chunk_size);
+        (decoder, planes, input)
+    }
+
+    /// For every visible frame of `data`: seek to it with a fresh decoder and
+    /// check the pixels match a from-start sequential decode bit for bit.
+    fn assert_seek_to_every_frame_matches_sequential(
+        data: &[u8],
+        expect_bare_codestream: bool,
+        chunk_size: usize,
+    ) -> Vec<VisibleFrameInfo> {
+        let scanned = scan_frames_with_decoder(data, usize::MAX);
+        assert!(scanned.len() > 1, "need an animation with several frames");
+        let (_, sequential) = decode(data, usize::MAX, false, false, None).unwrap();
+        assert_eq!(sequential.len(), scanned.len());
+
+        for frame in &scanned {
+            let target = frame
+                .seek_target
+                .unwrap_or_else(|| panic!("frame {} must be seekable", frame.index));
+            assert_eq!(
+                target.point.remaining_in_box == u64::MAX,
+                expect_bare_codestream,
+                "frame {}: remaining_in_box {}",
+                frame.index,
+                target.point.remaining_in_box
+            );
+            eprintln!("seeking to visible frame {} via {target:?}", frame.index);
+            let (decoder, _) = decoder_with_image_info(data);
+            let (_, planes, _) = decode_after_seek(data, decoder, target, chunk_size);
+            compare_frames(
+                Path::new("start_new_frame_seek"),
+                frame.index,
+                &sequential[frame.index],
+                &planes,
+            )
+            .unwrap();
+        }
+        scanned
+    }
+
+    fn animation_fixture(name: &str) -> Vec<u8> {
+        crate::util::test::fixture_bytes(&format!("conformance_test_images/{name}"))
+    }
+
+    #[test]
+    fn test_start_new_frame_bare_codestream_icos4d() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        assert_seek_to_every_frame_matches_sequential(&data, true, usize::MAX);
+    }
+
+    #[test]
+    fn test_start_new_frame_bare_codestream_spline() {
+        let data = animation_fixture("animation_spline.jxl");
+        assert_seek_to_every_frame_matches_sequential(&data, true, usize::MAX);
+    }
+
+    #[test]
+    fn test_start_new_frame_bare_codestream_newtons_cradle() {
+        let data = animation_fixture("animation_newtons_cradle.jxl");
+        assert_seek_to_every_frame_matches_sequential(&data, true, usize::MAX);
+    }
+
+    /// The seek path must also work when the input arrives in small pieces
+    /// (`NeedsMoreInput` round trips after `start_new_frame`).
+    #[test]
+    fn test_start_new_frame_chunked_input() {
+        let data = animation_fixture("animation_spline.jxl");
+        assert_seek_to_every_frame_matches_sequential(&data, true, 100);
+    }
+
+    #[test]
+    fn test_start_new_frame_boxed_jxlc() {
+        let codestream = animation_fixture("animation_icos4d_5.jxl");
+        let entries = vec![(0u64, 100u64, 1u64), (500, 100, 1), (600, 100, 1)];
+        let container = wrap_with_frame_index(&codestream, 1, 1000, &entries);
+        assert_seek_to_every_frame_matches_sequential(&container, false, usize::MAX);
+    }
+
+    /// One `jxlp` box per visible frame: every frame starts exactly at a box
+    /// boundary, so the previous frame ends its box and the seek point has
+    /// to carry the new box's remaining length and index.
+    #[test]
+    fn test_start_new_frame_jxlp_per_visible_frame() {
+        let codestream = animation_fixture("animation_icos4d_5.jxl");
+        let scanned = scan_frames_with_decoder(&codestream, usize::MAX);
+        let chunk_starts: Vec<usize> = scanned
+            .iter()
+            .map(|f| f.file_offset.expect("bare codestream offsets are known") as usize)
+            .collect();
+        assert_eq!(chunk_starts.len(), scanned.len());
+        let container = wrap_with_jxlp_chunks(&codestream, &chunk_starts);
+        assert_seek_to_every_frame_matches_sequential(&container, false, usize::MAX);
+    }
+
+    /// Fine `jxlp` chunks: box boundaries fall inside frame headers, TOCs and
+    /// section data, and frames start at arbitrary positions inside a box
+    /// (including right after a box boundary, where the previous frame's
+    /// over-read tail sits in the non-section buffer).
+    #[test]
+    fn test_start_new_frame_jxlp_fine_chunks() {
+        let codestream = animation_fixture("animation_spline.jxl");
+        for step in [97usize, 512, 1000] {
+            eprintln!("jxlp chunk step {step}");
+            let chunk_starts: Vec<usize> = (0..codestream.len()).step_by(step).collect();
+            let container = wrap_with_jxlp_chunks(&codestream, &chunk_starts);
+            assert_seek_to_every_frame_matches_sequential(&container, false, usize::MAX);
+            assert_seek_to_every_frame_matches_sequential(&container, false, 333);
+        }
+    }
+
+    /// Seeking backwards after the whole animation has been decoded: the last
+    /// frame consumed the live `DecoderState`, so the seek must rebuild one.
+    #[test]
+    fn test_start_new_frame_after_last_frame() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let (_, sequential) = decode(&data, usize::MAX, false, false, None).unwrap();
+        let (mut decoder, mut input) = decoder_with_image_info(&data);
+        while decoder.has_more_frames() {
+            let (d, _) = decode_next_frame(decoder, &mut input, usize::MAX);
+            decoder = d;
+        }
+        let scanned = decoder.scanned_frames().to_vec();
+        assert_eq!(scanned.len(), sequential.len());
+        assert!(!decoder.has_more_frames());
+
+        for index in [1usize, 0, scanned.len() - 1] {
+            let target = scanned[index].seek_target.unwrap();
+            let (d, planes, _) = decode_after_seek(&data, decoder, target, usize::MAX);
+            decoder = d;
+            compare_frames(
+                Path::new("seek_after_end"),
+                index,
+                &sequential[index],
+                &planes,
+            )
+            .unwrap();
+        }
+    }
+
+    /// After a seek, sequential playback continues correctly (as long as no
+    /// later frame depends on something before the seek start, which the
+    /// scan guarantees here).
+    #[test]
+    fn test_start_new_frame_then_play_forward() {
+        let data = animation_fixture("animation_newtons_cradle.jxl");
+        let (_, sequential) = decode(&data, usize::MAX, false, false, None).unwrap();
+        let scanned = scan_frames_with_decoder(&data, usize::MAX);
+        let start_index = 2;
+        let target = scanned[start_index].seek_target.unwrap();
+        for f in &scanned[start_index..] {
+            assert!(
+                f.seek_target.unwrap().decode_start_file_offset >= target.decode_start_file_offset,
+                "fixture no longer suits this test: frame {} depends on data before frame {start_index}",
+                f.index
+            );
+        }
+
+        let (decoder, _) = decoder_with_image_info(&data);
+        let (mut decoder, planes, mut input) =
+            decode_after_seek(&data, decoder, target, usize::MAX);
+        compare_frames(
+            Path::new("play_forward"),
+            start_index,
+            &sequential[start_index],
+            &planes,
+        )
+        .unwrap();
+        let mut index = start_index + 1;
+        while decoder.has_more_frames() {
+            let (d, planes) = decode_next_frame(decoder, &mut input, usize::MAX);
+            decoder = d;
+            compare_frames(
+                Path::new("play_forward"),
+                index,
+                &sequential[index],
+                &planes,
+            )
+            .unwrap();
+            index += 1;
+        }
+        assert_eq!(
+            index,
+            sequential.len(),
+            "playback must reach the last frame"
+        );
+        // The frames seen since the seek were re-recorded consistently.
+        assert_eq!(decoder.scanned_frames(), &scanned[..]);
+        assert_eq!(decoder.file_length(), Some(data.len() as u64));
+    }
+
+    /// The noise RNG is seeded from `DecoderState`'s frame counters, so a seek
+    /// must restore the counters a sequential decode would have had at the
+    /// target, not start from zero.
+    #[test]
+    fn test_start_new_frame_restores_frame_counters() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let scanned = scan_frames_with_decoder(&data, usize::MAX);
+        let target_index = 3;
+        assert!(scanned.len() > target_index);
+
+        // Sequential: parse headers up to (and including) the target frame.
+        let (mut sequential, mut input) = decoder_with_image_info(&data);
+        for _ in 0..target_index {
+            let (d, _) = decode_next_frame(sequential, &mut input, usize::MAX);
+            sequential = d;
+        }
+        let ProcessingResult::Complete { result: sequential } =
+            sequential.process(&mut input).unwrap()
+        else {
+            panic!("need more input")
+        };
+        let seq_state = sequential.inner.decoder_state_for_test().unwrap();
+        let expected = (
+            seq_state.visible_frame_index,
+            seq_state.nonvisible_frame_index,
+        );
+        assert_eq!(expected.0, target_index + 1);
+
+        // Seek: parse the target frame's header the same way.
+        let (mut seeked, _) = decoder_with_image_info(&data);
+        let target = scanned[target_index].seek_target.unwrap();
+        assert_eq!(target.visible_frames_to_skip, 0);
+        seeked.start_new_frame(target);
+        let mut input = &data[target.decode_start_file_offset as usize..];
+        let ProcessingResult::Complete { result: seeked } = seeked.process(&mut input).unwrap()
+        else {
+            panic!("need more input")
+        };
+        let state = seeked.inner.decoder_state_for_test().unwrap();
+        assert_eq!(
+            (state.visible_frame_index, state.nonvisible_frame_index),
+            expected,
+            "frame counters after a seek must match the sequential decode"
+        );
+    }
+
+    #[test]
+    fn test_start_new_frame_before_image_info_errors() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let target = scan_frames_with_decoder(&data, usize::MAX)[1]
+            .seek_target
+            .unwrap();
+        let mut inner = JxlDecoderInner::new(JxlDecoderOptions::default());
+        let err = inner.start_new_frame(target).unwrap_err();
+        assert!(matches!(err.error(), Error::SeekBeforeImageInfo), "{err:?}");
+        assert_eq!(
+            err.error().kind(),
+            crate::error::ErrorClass::OutputConfiguration
+        );
+    }
+
+    /// A normal pixel-producing decode records the same seek table as a
+    /// header-only scan.
+    #[test]
+    fn test_scanned_frames_identical_for_decode_and_scan() {
+        for name in [
+            "animation_icos4d_5.jxl",
+            "animation_spline.jxl",
+            "animation_newtons_cradle.jxl",
+        ] {
+            let data = animation_fixture(name);
+            let scanned = scan_frames_with_decoder(&data, usize::MAX);
+            let (mut decoder, mut input) = decoder_with_image_info(&data);
+            while decoder.has_more_frames() {
+                let (d, _) = decode_next_frame(decoder, &mut input, usize::MAX);
+                decoder = d;
+            }
+            assert_eq!(decoder.scanned_frames(), &scanned[..], "{name}");
+            // And so does a plain `skip_frame` pass without `scan_frames_only`.
+            let skipped = scan_frames_with_options(&data, usize::MAX, JxlDecoderOptions::default());
+            assert_eq!(skipped, scanned, "{name}");
+        }
+    }
+
+    #[test]
+    fn test_scan_still_image() {
+        let data = crate::util::test::fixture_bytes("green_queen_vardct_e3.jxl");
+        let frames = scan_frames_with_decoder(&data, usize::MAX);
+        assert_eq!(frames.len(), 1);
+        let f = &frames[0];
+        assert!(f.is_last);
+        assert!(f.is_keyframe);
+        assert_eq!(f.duration_ms, 0.0);
+        assert_eq!(f.duration_ticks, 0);
+        let target = f.seek_target.unwrap();
+        assert_eq!(Some(target.decode_start_file_offset), f.file_offset);
+        assert_eq!(target.visible_frames_to_skip, 0);
+        assert_eq!(target.point.remaining_in_box, u64::MAX);
+    }
+
+    #[test]
+    fn test_scan_bare_animation() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let frames = scan_frames_with_decoder(&data, usize::MAX);
+        assert!(frames.len() > 1, "expected multiple frames");
+        for (i, frame) in frames.iter().enumerate() {
+            assert_eq!(frame.index, i);
+            assert_eq!(frame.is_last, i + 1 == frames.len());
+            assert!(frame.duration_ticks > 0 || frame.is_last);
+            assert_eq!(frame.duration_ms > 0.0, frame.duration_ticks > 0);
+        }
+        assert!(frames[0].is_keyframe);
+        assert_eq!(
+            Some(frames[0].seek_target.unwrap().decode_start_file_offset),
+            frames[0].file_offset
+        );
+        // Frame headers are laid out in file order, after the image header.
+        assert!(frames[0].file_offset.unwrap() > 0);
+        for w in frames.windows(2) {
+            assert!(
+                w[1].file_offset.unwrap() > w[0].file_offset.unwrap(),
+                "frame {} offset {:?} should be > frame {} offset {:?}",
+                w[1].index,
+                w[1].file_offset,
+                w[0].index,
+                w[0].file_offset,
+            );
+        }
+    }
+
+    /// Scanning must produce the same table whether the file arrives in one
+    /// piece or in small chunks (the frame-start capture is re-entered).
+    #[test]
+    fn test_scan_incremental() {
+        for name in ["animation_icos4d_5.jxl", "animation_spline.jxl"] {
+            let data = animation_fixture(name);
+            let whole = scan_frames_with_decoder(&data, usize::MAX);
+            for chunk in [1usize, 7, 128] {
+                assert_eq!(
+                    scan_frames_with_decoder(&data, chunk),
+                    whole,
+                    "{name}/{chunk}"
+                );
+            }
+            assert!(whole.len() > 1);
+            assert!(whole.last().unwrap().is_last);
+        }
+    }
+
+    #[test]
+    fn test_scan_decode_start_file_offset_consistency() {
+        let data = animation_fixture("animation_newtons_cradle.jxl");
+        let frames = scan_frames_with_decoder(&data, usize::MAX);
+        for frame in &frames {
+            let target = frame.seek_target.unwrap();
+            assert!(
+                target.decode_start_file_offset <= frame.file_offset.unwrap(),
+                "frame {}: decode_start_file_offset {} > file_offset {:?}",
+                frame.index,
+                target.decode_start_file_offset,
+                frame.file_offset,
+            );
+            assert_eq!(
+                frame.is_keyframe,
+                target.visible_frames_to_skip == 0,
+                "frame {}: keyframe flag should match visible_frames_to_skip",
+                frame.index,
+            );
+        }
+    }
+
+    /// The preview frame is not a visible frame of the animation: it is
+    /// skipped (also in the header-only scan path) and the main frame that
+    /// follows it is the one recorded.
+    #[test]
+    fn test_scan_with_preview() {
+        let data = crate::util::test::fixture_bytes("with_preview.jxl");
+        let frames = scan_frames_with_decoder(&data, usize::MAX);
+        assert_eq!(frames.len(), 1, "{frames:?}");
+        assert!(frames[0].is_last);
+        assert!(frames[0].is_keyframe);
+        // The scan agrees with a real decode of the same file.
+        let (_, decoded) = decode(&data, usize::MAX, false, false, None).unwrap();
+        assert_eq!(decoded.len(), 1);
+        let target = frames[0].seek_target.unwrap();
+        let (_, planes, _) =
+            decode_after_seek(&data, decoder_with_image_info(&data).0, target, usize::MAX);
+        compare_frames(Path::new("preview_seek"), 0, &decoded[0], &planes).unwrap();
+    }
+
+    /// A frame with patches depends on the (invisible) dictionary frame that
+    /// precedes it: its seek starts there, with no visible frame to skip.
+    #[test]
+    fn test_scan_patches_decode_start_at_dictionary_frame() {
+        let data = crate::util::test::fixture_bytes("grayscale_patches_var_dct.jxl");
+        let frames = scan_frames_with_decoder(&data, usize::MAX);
+        assert_eq!(frames.len(), 1);
+        let f = &frames[0];
+        let target = f.seek_target.unwrap();
+        assert!(
+            target.decode_start_file_offset < f.file_offset.unwrap(),
+            "decode must start at the patch dictionary frame: {target:?} vs {:?}",
+            f.file_offset
+        );
+        assert_eq!(target.visible_frames_to_skip, 0);
+        assert!(f.is_keyframe);
+        // Seeking there reproduces the sequential decode (patches applied).
+        let (_, decoded) = decode(&data, usize::MAX, false, false, None).unwrap();
+        let (_, planes, _) =
+            decode_after_seek(&data, decoder_with_image_info(&data).0, target, usize::MAX);
+        compare_frames(Path::new("patches_seek"), 0, &decoded[0], &planes).unwrap();
+    }
+
+    /// Seeks to every visible frame of every fixture and checks the pixels
+    /// against the from-start sequential decode, bit for bit. Also proves
+    /// the corpus exercises the "pass over earlier visible frames" path
+    /// (blending / reference-dependent animations), so `start_new_frame`'s
+    /// internal skipping is covered, not just independent keyframes.
+    #[test]
+    fn seek_every_visible_frame_sweep() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dependent_frames = AtomicUsize::new(0);
+        let check = |path: &Path| -> Result<()> {
+            let data = std::fs::read(path).map_err(|e| at!(Error::from(e)))?;
+            let (_, sequential) = decode(&data, usize::MAX, false, false, None)?;
+            let scanned = scan_frames_with_decoder(&data, usize::MAX);
+            assert_eq!(
+                scanned.len(),
+                sequential.len(),
+                "{}: scan and decode disagree on the visible frame count",
+                path.display()
+            );
+            for frame in &scanned {
+                let target = frame.seek_target.unwrap_or_else(|| {
+                    panic!("{}: frame {} not seekable", path.display(), frame.index)
+                });
+                if target.visible_frames_to_skip > 0 {
+                    dependent_frames.fetch_add(1, Ordering::Relaxed);
+                }
+                let (decoder, _) = decoder_with_image_info(&data);
+                let (_, planes, _) = decode_after_seek(&data, decoder, target, usize::MAX);
+                compare_frames(path, frame.index, &sequential[frame.index], &planes)?;
+            }
+            Ok(())
+        };
+        run_fixture_sweep("seek_every_visible_frame", check);
+        assert!(
+            dependent_frames.load(Ordering::Relaxed) > 0,
+            "no fixture has a visible frame that depends on an earlier visible frame; \
+             the internal skip path after start_new_frame is untested"
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     io::IoSliceMut,
 };
 use whereat::at;
@@ -16,8 +16,12 @@ use crate::api::FrameCallback;
 use crate::{
     api::{
         JxlBasicInfo, JxlBitstreamInput, JxlColorEncoding, JxlColorProfile, JxlDataFormat,
-        JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
-        inner::{box_parser::BoxParser, process::SmallBuffer},
+        JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, VisibleFrameInfo,
+        VisibleFrameSeekTarget,
+        inner::{
+            box_parser::{BoxParser, CodestreamBoxType},
+            process::SmallBuffer,
+        },
     },
     error::{Error, Result},
     frame::{DecoderState, Frame, Section},
@@ -32,6 +36,50 @@ struct SectionBuffer {
     len: usize,
     data: Vec<u8>,
     section: Section,
+}
+
+/// Everything needed to restart decoding at the start of one frame's header:
+/// where the header sits in the file, the container box state at that
+/// position, and the per-decoder counters a sequential decode would have had
+/// there (the noise RNG is seeded from the frame counters, so a seek must
+/// reproduce them exactly).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SeekPoint {
+    /// Byte offset of the frame header in the input file. For a container
+    /// whose `jxlp` boxes are out of order this is only the count of
+    /// codestream bytes consumed before the frame (a stable, monotonic key
+    /// for dependency tracking), see `seekable`.
+    pub(crate) file_offset: u64,
+    /// Codestream bytes left in the containing box at `file_offset`
+    /// (`u64::MAX` for a bare codestream or an unbounded box).
+    pub(crate) remaining_in_box: u64,
+    /// Box parser bookkeeping at `file_offset`.
+    pub(crate) box_type: CodestreamBoxType,
+    /// Visible frames parsed before this frame (= the index of the next
+    /// visible frame).
+    pub(crate) visible_count_before: usize,
+    /// `DecoderState::visible_frame_index` before this frame was parsed.
+    pub(crate) visible_counter: usize,
+    /// `DecoderState::nonvisible_frame_index` before this frame was parsed.
+    pub(crate) nonvisible_counter: usize,
+    /// `false` when `file_offset` is not a real file position (out-of-order
+    /// `jxlp` boxes were spliced in before this frame), so it cannot be used
+    /// as a seek target.
+    pub(crate) seekable: bool,
+}
+
+/// Per-frame record kept for every non-preview frame parsed so far, keyed by
+/// `SeekPoint::file_offset`. Never truncated: after a seek the same frames
+/// re-record identical entries, and a seek target's dependency slots may
+/// point at frames recorded during an earlier pass.
+#[derive(Debug, Clone, Copy)]
+struct FrameStartInfo {
+    point: SeekPoint,
+    /// Reference-slot dependency origins *before* this frame's own save, as
+    /// `file_offset` keys into the same map.
+    reference_slots: [Option<u64>; DecoderState::MAX_STORED_FRAMES],
+    /// LF-slot dependency origins before this frame, likewise.
+    lf_slots: [Option<u64>; DecoderState::NUM_LF_FRAMES],
 }
 
 /// Padding bytes appended to each section buffer so BitReader::refill()
@@ -98,6 +146,33 @@ pub(super) struct CodestreamParser {
     preview_done: bool,
     // Saved file header for recreating decoder state after preview frame
     saved_file_header: Option<crate::headers::FileHeader>,
+    /// The parsed image header, kept for the decoder's lifetime so a seek can
+    /// build a fresh `DecoderState` even after the last frame consumed the
+    /// live one.
+    image_file_header: Option<FileHeader>,
+
+    // --- Frame scanning / seeking (upstream jxl-rs #678) ---
+    /// Visible frames discovered so far, sorted by `index`. Contiguous for a
+    /// sequential pass; may have gaps after a seek jumped over frames that
+    /// were never parsed.
+    pub(super) scanned_frames: Vec<VisibleFrameInfo>,
+    /// Index the next visible frame will get.
+    visible_frame_index: usize,
+    /// All non-preview frame starts parsed so far, keyed by file offset.
+    frame_starts: BTreeMap<u64, FrameStartInfo>,
+    /// For each reference slot, the file offset of the earliest frame that
+    /// must be decoded to reconstruct the slot's current contents.
+    reference_slot_decode_start: [Option<u64>; DecoderState::MAX_STORED_FRAMES],
+    /// Same for the LF-frame slots.
+    lf_slot_decode_start: [Option<u64>; DecoderState::NUM_LF_FRAMES],
+    /// Seek point captured for the frame header currently being parsed.
+    current_frame_start: Option<SeekPoint>,
+    /// Visible frames still to be passed over internally after a seek before
+    /// the requested frame is handed to the caller (upstream jxl-rs #702).
+    pending_visible_skips: usize,
+    /// The current frame is a visible frame being passed over after a seek:
+    /// its sections may be skipped like `skip_frame` does.
+    auto_skipping_visible: bool,
 
     section_state: SectionState,
 
@@ -197,6 +272,15 @@ impl CodestreamParser {
             process_without_output: false,
             preview_done: false,
             saved_file_header: None,
+            image_file_header: None,
+            scanned_frames: Vec::new(),
+            visible_frame_index: 0,
+            frame_starts: BTreeMap::new(),
+            reference_slot_decode_start: [None; DecoderState::MAX_STORED_FRAMES],
+            lf_slot_decode_start: [None; DecoderState::NUM_LF_FRAMES],
+            current_frame_start: None,
+            pending_visible_skips: 0,
+            auto_skipping_visible: false,
             section_state: SectionState::new(0, 0),
             lf_global_section: None,
             lf_sections: vec![],
@@ -247,6 +331,255 @@ impl CodestreamParser {
         pixel_format
     }
 
+    /// Captures the seek point for the frame header that is about to be
+    /// parsed, if the box parser can already place it. The frame starts at
+    /// codestream position "bytes handed to this parser" minus the bytes
+    /// still unparsed in `non_section_buf` (the previous frame's over-read
+    /// tail); the box parser maps that through the boxes it has entered, so
+    /// it does not matter whether it has already read ahead into the next
+    /// box while the tail of the previous one is still buffered here.
+    /// Returns `false` when the frame starts exactly at the end of the last
+    /// box the parser has entered (call again after `get_more_codestream`).
+    fn try_capture_frame_start(&mut self, box_parser: &BoxParser) -> bool {
+        let pos = box_parser
+            .codestream_consumed
+            .saturating_sub(self.non_section_buf.len() as u64);
+        let Some((file_offset, remaining_in_box, box_type)) = box_parser.locate_codestream_pos(pos)
+        else {
+            return false;
+        };
+        let state = self
+            .decoder_state
+            .as_ref()
+            .expect("frame start is captured only once image info exists");
+        let seekable = !box_parser.reordered_jxlp;
+        self.current_frame_start = Some(SeekPoint {
+            // Without a real file layout the codestream position still
+            // works as the monotonic dependency-tracking key.
+            file_offset: if seekable { file_offset } else { pos },
+            remaining_in_box,
+            box_type,
+            visible_count_before: self.visible_frame_index,
+            visible_counter: state.visible_frame_index,
+            nonvisible_counter: state.nonvisible_frame_index,
+            seekable,
+        });
+        true
+    }
+
+    /// Records the frame that was just created from its header and TOC:
+    /// remembers its seek point, resolves which earlier frame a seek must
+    /// start from (through the reference / LF slots it reads), and appends a
+    /// [`VisibleFrameInfo`] if the frame is visible. Preview frames are not
+    /// recorded.
+    fn record_frame_info(&mut self) {
+        let Some(frame) = self.frame.as_ref() else {
+            return;
+        };
+        let Some(start) = self.current_frame_start.take() else {
+            return;
+        };
+        let header = frame.header();
+
+        // Dependencies: blending reads exactly the slots named in the
+        // header; patches may read any slot, so assume all of them.
+        let mut used_reference_slots = [false; DecoderState::MAX_STORED_FRAMES];
+        if header.needs_blending() {
+            for info in header
+                .ec_blending_info
+                .iter()
+                .chain(std::iter::once(&header.blending_info))
+            {
+                if let Some(slot) = used_reference_slots.get_mut(info.source as usize) {
+                    *slot = true;
+                }
+            }
+        }
+        if header.has_patches() {
+            used_reference_slots.fill(true);
+        }
+        let mut decode_start_offset = start.file_offset;
+        for (slot, used) in used_reference_slots.iter().enumerate() {
+            if *used && let Some(dep) = self.reference_slot_decode_start[slot] {
+                decode_start_offset = decode_start_offset.min(dep);
+            }
+        }
+        if header.has_lf_frame()
+            && let Some(Some(dep)) = self.lf_slot_decode_start.get(header.lf_level as usize)
+        {
+            decode_start_offset = decode_start_offset.min(*dep);
+        }
+
+        let this = FrameStartInfo {
+            point: start,
+            reference_slots: self.reference_slot_decode_start,
+            lf_slots: self.lf_slot_decode_start,
+        };
+        self.frame_starts.insert(start.file_offset, this);
+
+        if header.is_visible() {
+            let duration_ms = self
+                .animation
+                .as_ref()
+                .filter(|anim| anim.tps_numerator > 0)
+                .map_or(0.0, |anim| header.duration(anim));
+            // The frame a seek has to start from: this one, or the earliest
+            // origin of a slot it reads. Its entry is always present (it is
+            // this frame or an earlier one) unless a `rewind` cleared the map
+            // and a seek target restored slot origins from before the rewind.
+            let decode_start = if decode_start_offset == start.file_offset {
+                Some(this)
+            } else {
+                self.frame_starts.get(&decode_start_offset).copied()
+            };
+            let visible_frames_to_skip = decode_start.map(|ds| {
+                self.visible_frame_index
+                    .saturating_sub(ds.point.visible_count_before)
+            });
+            let seek_target =
+                decode_start
+                    .filter(|ds| ds.point.seekable)
+                    .map(|ds| VisibleFrameSeekTarget {
+                        decode_start_file_offset: ds.point.file_offset,
+                        visible_frames_to_skip: visible_frames_to_skip.unwrap_or(0),
+                        point: ds.point,
+                        reference_slots: ds.reference_slots,
+                        lf_slots: ds.lf_slots,
+                    });
+            let info = VisibleFrameInfo {
+                index: self.visible_frame_index,
+                duration_ms,
+                duration_ticks: header.duration,
+                file_offset: start.seekable.then_some(start.file_offset),
+                is_last: header.is_last,
+                is_keyframe: visible_frames_to_skip == Some(0),
+                seek_target,
+                name: header.name.clone(),
+            };
+            match self
+                .scanned_frames
+                .binary_search_by_key(&info.index, |f| f.index)
+            {
+                Ok(i) => self.scanned_frames[i] = info,
+                Err(i) => self.scanned_frames.insert(i, info),
+            }
+            self.visible_frame_index += 1;
+        }
+
+        // This frame's own saves become the origin of whatever it stores.
+        if header.can_be_referenced
+            && let Some(slot) = self
+                .reference_slot_decode_start
+                .get_mut(header.save_as_reference as usize)
+        {
+            *slot = Some(decode_start_offset);
+        }
+        if header.lf_level != 0
+            && let Some(slot) = self
+                .lf_slot_decode_start
+                .get_mut((header.lf_level - 1) as usize)
+        {
+            *slot = Some(decode_start_offset);
+        }
+    }
+
+    /// Repositions the parser at `target` so the next `process` call parses
+    /// frames from raw file input starting at
+    /// `target.decode_start_file_offset`, passing over
+    /// `target.visible_frames_to_skip` visible frames internally, and returns
+    /// with the requested frame's header.
+    ///
+    /// Frame-level state is dropped. The decoder state is rebuilt fresh
+    /// (empty reference and LF slots) with the frame counters a sequential
+    /// decode would have had at the target, so noise seeds match; every slot
+    /// the target and the frames after it read is re-filled by decoding
+    /// forward from the dependency-resolved start. Image-level state (image
+    /// header, basic info, color profiles, pixel format, `preview_done`) is
+    /// kept. Dependency tracking resumes from the snapshot carried by the
+    /// target, so `scanned_frames` stays consistent across seeks.
+    pub(super) fn start_new_frame(
+        &mut self,
+        decode_options: &JxlDecoderOptions,
+        target: &VisibleFrameSeekTarget,
+    ) -> Result<()> {
+        let file_header = self
+            .image_file_header
+            .clone()
+            .ok_or_else(|| at!(Error::SeekBeforeImageInfo))?;
+        let mut state = DecoderState::new(file_header);
+        non_section::apply_decoder_options(
+            &mut state,
+            decode_options,
+            &self.embedded_color_profile,
+        );
+        state.visible_frame_index = target.point.visible_counter;
+        state.nonvisible_frame_index = target.point.nonvisible_counter;
+        #[cfg(test)]
+        if let Some(old) = self.decoder_state.as_ref() {
+            state.use_simple_pipeline = old.use_simple_pipeline;
+        }
+        self.decoder_state = Some(state);
+
+        self.frame_header = None;
+        self.toc_parser = None;
+        self.frame = None;
+        self.non_section_buf = SmallBuffer::new(4096);
+        self.non_section_bit_offset = 0;
+        self.sections.clear();
+        self.ready_section_data = 0;
+        self.skip_sections = false;
+        self.process_without_output = false;
+        // Only non-preview frames are recorded, so the target is never the
+        // preview frame; its header must be parsed with the main dimensions.
+        self.preview_done = true;
+        self.section_state = SectionState::new(0, 0);
+        self.lf_global_section = None;
+        self.lf_sections.clear();
+        self.hf_global_section = None;
+        self.hf_sections.clear();
+        self.candidate_hf_sections.clear();
+        self.file_length = None;
+        self.pixels_dirty = false;
+        self.has_more_frames = true;
+        self.header_needed_bytes = None;
+
+        self.visible_frame_index = target.point.visible_count_before;
+        self.reference_slot_decode_start = target.reference_slots;
+        self.lf_slot_decode_start = target.lf_slots;
+        self.current_frame_start = None;
+        self.pending_visible_skips = target.visible_frames_to_skip;
+        self.auto_skipping_visible = false;
+        Ok(())
+    }
+
+    /// Installs the decoder state handed back by `Frame::finalize` (shared by
+    /// the decode and skip paths). `None` means the frame was `is_last`: for
+    /// a skipped preview frame the main frame still follows, so the state is
+    /// recreated from the saved image header with all options re-applied
+    /// (libjxl/jxl-rs #743); otherwise the codestream is finished.
+    pub(super) fn install_decoder_state_after_frame(
+        &mut self,
+        decoder_state: Option<DecoderState>,
+        might_be_preview: bool,
+        decode_options: &JxlDecoderOptions,
+    ) {
+        if let Some(state) = decoder_state {
+            self.decoder_state = Some(state);
+        } else if might_be_preview {
+            if let Some(fh) = self.saved_file_header.take() {
+                let mut new_state = DecoderState::new(fh);
+                non_section::apply_decoder_options(
+                    &mut new_state,
+                    decode_options,
+                    &self.embedded_color_profile,
+                );
+                self.decoder_state = Some(new_state);
+            }
+        } else {
+            self.has_more_frames = false;
+        }
+    }
+
     pub(super) fn process(
         &mut self,
         box_parser: &mut BoxParser,
@@ -290,7 +623,11 @@ impl CodestreamParser {
                     .frame
                     .as_ref()
                     .is_some_and(|f| f.header().can_be_referenced);
-                if !self.process_without_output && output_buffers.is_none() && !can_be_referenced {
+                if decode_options.scan_frames_only
+                    || (!can_be_referenced
+                        && (self.auto_skipping_visible
+                            || (!self.process_without_output && output_buffers.is_none())))
+                {
                     self.skip_sections = true;
                 }
 
@@ -404,11 +741,20 @@ impl CodestreamParser {
                             .frame
                             .take()
                             .expect("frame must be set when skip_sections is true");
-                        if let Some(decoder_state) = frame.finalize()? {
-                            self.decoder_state = Some(decoder_state);
-                        } else {
-                            self.has_more_frames = false;
-                        }
+                        // A skipped preview frame (only reachable here with
+                        // `scan_frames_only`) is `is_last` but the main frame
+                        // still follows.
+                        let might_be_preview = self.process_without_output
+                            && self
+                                .basic_info
+                                .as_ref()
+                                .is_some_and(|info| info.preview_size.is_some());
+                        let decoder_state = frame.finalize()?;
+                        self.install_decoder_state_after_frame(
+                            decoder_state,
+                            might_be_preview,
+                            decode_options,
+                        );
                         self.record_file_length(box_parser);
                         self.skip_sections = false;
                     }
@@ -419,6 +765,7 @@ impl CodestreamParser {
                     // (not a frame we were skipping like a preview frame)
                     let was_skipping = self.process_without_output;
                     self.process_without_output = false;
+                    self.auto_skipping_visible = false;
                     if regular_frame && !was_skipping {
                         // JBRD reconstruction: the trailing Exif / XMP / brob
                         // metadata boxes follow the frame's codestream. When the
@@ -468,6 +815,18 @@ impl CodestreamParser {
                     return Ok(());
                 }
 
+                // Record where the next frame header starts, for seeking. A
+                // frame that begins exactly at a box boundary can only be
+                // placed once `get_more_codestream` has entered the next box,
+                // hence the second attempt inside the loop. Re-entries (the
+                // header needed more input) recompute the same point because
+                // nothing is consumed until the header parses.
+                let mut capture_frame_start =
+                    self.decoder_state.is_some() && self.frame_header.is_none();
+                if capture_frame_start && self.try_capture_frame_start(box_parser) {
+                    capture_frame_start = false;
+                }
+
                 // Loop to handle incremental parsing (e.g. large ICC profiles) that may need
                 // multiple buffer refills to complete.
                 loop {
@@ -476,6 +835,9 @@ impl CodestreamParser {
                         Ok(c) => c as usize,
                         Err(e) => return Err(e),
                     };
+                    if capture_frame_start && self.try_capture_frame_start(box_parser) {
+                        capture_frame_start = false;
+                    }
                     let c = self.non_section_buf.refill(
                         |buf| {
                             if !box_parser.box_buffer.is_empty() {
@@ -566,9 +928,21 @@ impl CodestreamParser {
                             self.process_without_output = true;
                             continue;
                         }
+                    } else {
+                        // Frame scanning / seek table (never for the preview).
+                        self.record_frame_info();
                     }
 
                     if self.has_visible_frame() {
+                        if self.pending_visible_skips > 0 {
+                            // A visible frame before the seek target: pass over
+                            // it (decoding it without output if later frames
+                            // can reference it) instead of returning it.
+                            self.pending_visible_skips -= 1;
+                            self.process_without_output = true;
+                            self.auto_skipping_visible = true;
+                            continue;
+                        }
                         // Return to caller if we found visible frame info.
                         return Ok(());
                     } else {

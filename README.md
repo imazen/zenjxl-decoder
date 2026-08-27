@@ -136,7 +136,7 @@ To force single-threaded mode at runtime, use `JxlDecoderOptions::default().with
 - [`decode_with(bytes, options)`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/fn.decode_with.html) — full control over limits, cancellation, parallel mode, CMS, and premultiplied alpha.
 - [`read_header(bytes)`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/fn.read_header.html) / `read_header_with(bytes, limits)` — metadata only, no pixel decode.
 - `reconstruct_jpeg(bytes)` / `reconstruct_jpeg_with(..)` — losslessly reconstruct the original JPEG from a JXL that was transcoded from one (requires the `jpeg` feature). Returns `Ok(None)` when the file carries no reconstruction data.
-- The streaming [`JxlDecoder`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/struct.JxlDecoder.html) typestate API decodes frame-by-frame for animation.
+- The streaming [`JxlDecoder`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/struct.JxlDecoder.html) typestate API decodes frame-by-frame for animation, and seeks: `scanned_frames()` lists every visible frame with a `seek_target`, `start_new_frame(target)` jumps to it (feed the file from `target.decode_start_file_offset`), and `JxlDecoderOptions::scan_frames_only` builds the seek table from frame headers alone.
 
 ## Features
 

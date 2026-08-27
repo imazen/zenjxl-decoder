@@ -11,19 +11,20 @@
 #
 #   pub types (struct/enum/trait/alias)         1
 #   free functions                              5
-#   inherent methods                            4
+#   inherent methods                            5
 #   enum variants                               2
 #   trait roster entries (type × trait)         3
 #   auto-trait-complete types                   1
 #
 # per-module pub lines:
 #   (root)                            3
-#   api                               9
+#   api                              10
 
-## items (10 lines)
+## items (11 lines)
 
 pub api::Error::InvalidJbrd(alloc::string::String)
 pub fn api::JxlDecoder<S>::take_jpeg_reconstruction(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn api::JxlDecoderInner::jpeg_reconstruction_error(&self) -> core::option::Option<&api::Error>
 pub fn api::JxlDecoderInner::take_jpeg_reconstruction(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
 pub unsafe fn api::JxlOutputBuffer<'a>::new_from_ptr(*mut core::mem::maybe_uninit::MaybeUninit<u8>, usize, usize, usize) -> Self
 pub struct api::MoxCms
