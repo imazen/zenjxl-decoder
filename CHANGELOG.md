@@ -6,6 +6,23 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Fixed
+
+- **The fuzz regression harness could still pass without replaying a seed.**
+  b952a93 already made the `Fuzz regression` CI step a real gate (it exits 1 on
+  a missing or empty `fuzz/regression/` instead of the old
+  `cargo test … 2>/dev/null || echo …`, which reported green for the #54 seeds
+  on the same push whose fuzz targets crashed on them). One vacuity path
+  remained on the harness side: `zenutils_fuzz::RegressionSuite` documents a
+  missing or empty seed directory as a clean no-op, and the workflow's
+  `ls fuzz/regression/ | wc -l` counts `README.md` and dotfiles that the suite
+  skips — so a corpus stripped to its README passed both checks and replayed
+  nothing. The risk is sharper here than in sibling codecs because the corpus
+  lives one level above the crate, outside `CARGO_MANIFEST_DIR`. The harness now
+  asserts at least `MIN_SEEDS` (21) *replayable* files, counted with the suite's
+  own filters. Mutation-verified: removing the corpus and injecting a panic into
+  the `decode` target each fail the test with exit code 101.
+
 ### Added
 
 - **Animation frame seeking** (issue #11; port of upstream jxl-rs #678 +
