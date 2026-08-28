@@ -87,7 +87,14 @@ jobs:
       - name: Build
         run: cargo build
       - name: Regression seeds
+        # A real gate. The previous form (`cargo test … 2>/dev/null || echo …`)
+        # could not fail: a seed that panicked in the harness printed a
+        # cheerful line and the job went green — which is how the #54
+        # negate-overflow seeds passed this job on the same push whose fuzz
+        # targets crashed on them. Debug profile on purpose: overflow checks
+        # on, the same class of panic the fuzz build sees. Fails if the seed
+        # directory is empty, too — an empty gate is a silent pass.
         run: |
-          if [ -d fuzz/regression ] && [ "$(ls fuzz/regression/ 2>/dev/null | wc -l)" -gt 0 ]; then
-            cargo test --test fuzz_regression 2>/dev/null || echo "No regression test found — seeds exist but no test harness"
-          fi
+          test -d fuzz/regression && [ "$(ls fuzz/regression/ | wc -l)" -gt 0 ] \
+            || { echo "fuzz/regression is missing or empty"; exit 1; }
+          cargo test --test fuzz_regression

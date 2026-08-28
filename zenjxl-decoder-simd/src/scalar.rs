@@ -256,7 +256,13 @@ impl I32SimdVec for Wrapping<i32> {
 
     #[inline(always)]
     fn abs(self) -> Self {
-        Wrapping(self.0.abs())
+        // `wrapping_abs`, not `abs`: every SIMD tier's integer `abs`
+        // (`_mm256_abs_epi32`, `vabsq_s32`, `i32x4.abs`) maps `i32::MIN` to
+        // `i32::MIN`, while `i32::abs` panics on it under overflow checks. A
+        // corrupt stream can put `i32::MIN` in a quantized coefficient
+        // (zenjxl-decoder#54, `adjust_quant_bias`), and the scalar tier must
+        // give the same answer as the vector tiers rather than a panic.
+        Wrapping(self.0.wrapping_abs())
     }
 
     #[inline(always)]

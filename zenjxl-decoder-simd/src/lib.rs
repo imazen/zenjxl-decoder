@@ -1406,6 +1406,19 @@ mod test {
 /// the release-mode tests will fail.
 #[cfg(test)]
 mod soundness_tests {
+    /// zenjxl-decoder#54: a corrupt stream can leave `i32::MIN` in a quantized
+    /// coefficient, and `adjust_quant_bias` takes its `abs`. Every vector tier
+    /// maps `i32::MIN` to `i32::MIN`; the scalar tier used `i32::abs`, which
+    /// panics under overflow checks (the fuzz build) instead of agreeing.
+    #[test]
+    fn scalar_i32_abs_of_min_wraps_like_the_vector_tiers() {
+        use crate::I32SimdVec;
+        let v = Wrapping::<i32>::splat(ScalarDescriptor, i32::MIN);
+        assert_eq!(v.abs(), Wrapping(i32::MIN));
+        let w = Wrapping::<i32>::splat(ScalarDescriptor, -7);
+        assert_eq!(w.abs(), Wrapping(7));
+    }
+
     use super::*;
     use std::num::Wrapping;
 
