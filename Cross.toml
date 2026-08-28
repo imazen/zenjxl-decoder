@@ -1,0 +1,7 @@
+# `cross` runs the i686 tests inside a Docker container that does NOT inherit
+# the host environment. Name the variables the tests read; without the corpus
+# flag the corpus-backed feature tests fail loudly by design (no silent skips),
+# which is what turned the i686 leg red from 2026-08-27 on — CI sets the flag
+# at the workflow level, and it never reached the container.
+[build.env]
+passthrough = ["ZENJXL_ALLOW_MISSING_CORPUS", "RUST_BACKTRACE"]
