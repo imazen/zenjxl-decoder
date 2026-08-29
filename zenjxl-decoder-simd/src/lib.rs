@@ -201,8 +201,22 @@ pub trait F32SimdVec:
     /// Requires `src.len() >= 4 * Self::LEN` or it will panic.
     fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self);
 
-    /// Rounds to nearest integer and stores as u8.
-    /// Behavior is unspecified if values would overflow u8.
+    /// Clamps to `[0, 255]`, rounds half to even, and stores as u8.
+    ///
+    /// Every tier must produce byte-identical output for identical input, so
+    /// the out-of-range and tie behaviour is part of the contract, not left
+    /// unspecified:
+    ///
+    /// - values below 0 (and NaN) store `0`; values above 255 store `255`
+    /// - exact halves round to even (`0.5 -> 0`, `1.5 -> 2`, `2.5 -> 2`)
+    ///
+    /// The clamp happens in float space *before* the integer conversion. That
+    /// is what makes the tiers agree: once every lane is in `[0, 255]` the
+    /// float->i32 conversion is exact everywhere, so the tiers' differing
+    /// out-of-range conversion semantics (x86 maps out-of-range to `INT_MIN`,
+    /// NEON saturates to `INT_MAX`, AVX-512's `vpmovusdb` reads lanes as
+    /// unsigned) can no longer be observed.
+    ///
     /// Requires `dest.len() >= Self::LEN` or it will panic.
     fn round_store_u8(self, dest: &mut [u8]);
 
@@ -213,8 +227,11 @@ pub trait F32SimdVec:
         self.round_store_u8(&mut dest[offset..]);
     }
 
-    /// Rounds to nearest integer and stores as u16.
-    /// Behavior is unspecified if values would overflow u16.
+    /// Clamps to `[0, 65535]`, rounds half to even, and stores as u16.
+    ///
+    /// The u16 counterpart of [`F32SimdVec::round_store_u8`]; the same
+    /// cross-tier contract applies, with `65535` as the upper bound.
+    ///
     /// Requires `dest.len() >= Self::LEN` or it will panic.
     fn round_store_u16(self, dest: &mut [u16]);
 
@@ -1632,4 +1649,128 @@ mod soundness_tests {
         );
     }
     test_all_instruction_sets!(soundness_simd_round_store_u8_short);
+
+    /// Inputs that separate the tiers: out-of-range values, exact ties, and
+    /// NaN. Padded to 16 (the largest `LEN`) so every tier consumes whole
+    /// vectors.
+    const ROUND_STORE_INPUTS: &[f32] = &[
+        // Negative — the AVX-512 0<->255 flip lived here.
+        -0.0,
+        -1.0,
+        -0.5,
+        -1.5,
+        -128.0,
+        -255.0,
+        -256.0,
+        -1.0e9,
+        f32::MIN,
+        f32::NEG_INFINITY,
+        // Exact ties — scalar rounded these away from zero, SIMD to even.
+        0.5,
+        1.5,
+        2.5,
+        3.5,
+        253.5,
+        254.5,
+        // In range.
+        0.0,
+        1.0,
+        127.0,
+        127.4,
+        127.6,
+        254.9,
+        255.0,
+        // Above range, including values outside i32 entirely.
+        255.5,
+        256.0,
+        300.0,
+        1.0e9,
+        f32::MAX,
+        f32::INFINITY,
+        f32::NAN,
+        // Pad to 32 = 2 * the largest `LEN`.
+        0.0,
+        0.0,
+    ];
+
+    /// The `round_store_u8` contract, spelled out independently of any tier:
+    /// clamp to `[0, 255]` (NaN to 0), then round half to even.
+    fn reference_round_u8(v: f32) -> u8 {
+        // Spelled out from the contract rather than delegating to any tier.
+        // The NaN case is handled first because `f32::clamp` propagates NaN,
+        // whereas the contract (and every tier) maps it to 0.
+        if v.is_nan() {
+            return 0;
+        }
+        v.clamp(0.0, 255.0).round_ties_even() as u8
+    }
+
+    fn reference_round_u16(v: f32) -> u16 {
+        if v.is_nan() {
+            return 0;
+        }
+        v.clamp(0.0, 65535.0).round_ties_even() as u16
+    }
+
+    /// Every dispatch tier must store the same bytes for the same floats.
+    ///
+    /// Before this test the trait documented overflow as "unspecified" and the
+    /// tiers duly disagreed, so the same file decoded differently depending on
+    /// the CPU:
+    ///
+    /// * negative samples stored `0` on scalar/sse42/avx/neon/wasm128 but
+    ///   `255` on avx512, whose `_mm512_cvtusepi32_epi8` reads the i32 lanes as
+    ///   unsigned — a full black/white inversion;
+    /// * exact halves rounded away from zero on scalar (`f32::round`) and to
+    ///   even on all five SIMD tiers, so the scalar tier — which is what runs
+    ///   on i686 and in the fuzzers — disagreed with everything else.
+    ///
+    /// Values outside i32 are in the input on purpose. `cvtps_epi32` maps
+    /// out-of-range floats (including `+inf`) to the "integer indefinite"
+    /// value `INT_MIN`, which then saturates *down* to 0, while NEON's
+    /// `vcvtq_s32_f32` saturates *up* to `INT_MAX` and stores 255 — so
+    /// sse42/avx and neon disagreed on large positive samples too, not just
+    /// avx512 on negative ones. Clamping after the conversion would not have
+    /// fixed that; clamping in float space before it does.
+    ///
+    /// Measured on this aarch64 host: neon already satisfied the contract
+    /// unaided (dropping its clamp keeps this test green), so the clamp is
+    /// load-bearing on scalar, sse42, avx, avx512 and wasm128, and is kept on
+    /// neon so every tier enforces the contract the same way rather than
+    /// relying on incidental saturation semantics.
+    fn round_store_u8_contract<D: SimdDescriptor>(d: D) {
+        for start in (0..ROUND_STORE_INPUTS.len()).step_by(D::F32Vec::LEN) {
+            let v = D::F32Vec::load(d, &ROUND_STORE_INPUTS[start..]);
+            let mut got = [0u8; 16];
+            v.round_store_u8(&mut got[..D::F32Vec::LEN]);
+            for i in 0..D::F32Vec::LEN {
+                let input = ROUND_STORE_INPUTS[start + i];
+                assert_eq!(
+                    got[i],
+                    reference_round_u8(input),
+                    "round_store_u8({input:?}) diverged at LEN={}",
+                    D::F32Vec::LEN
+                );
+            }
+        }
+    }
+    test_all_instruction_sets!(round_store_u8_contract);
+
+    fn round_store_u16_contract<D: SimdDescriptor>(d: D) {
+        for start in (0..ROUND_STORE_INPUTS.len()).step_by(D::F32Vec::LEN) {
+            let v = D::F32Vec::load(d, &ROUND_STORE_INPUTS[start..]);
+            let mut got = [0u16; 16];
+            v.round_store_u16(&mut got[..D::F32Vec::LEN]);
+            for i in 0..D::F32Vec::LEN {
+                let input = ROUND_STORE_INPUTS[start + i];
+                assert_eq!(
+                    got[i],
+                    reference_round_u16(input),
+                    "round_store_u16({input:?}) diverged at LEN={}",
+                    D::F32Vec::LEN
+                );
+            }
+        }
+    }
+    test_all_instruction_sets!(round_store_u16_contract);
 }

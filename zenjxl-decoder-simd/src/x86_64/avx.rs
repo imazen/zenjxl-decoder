@@ -584,8 +584,14 @@ impl F32SimdVec for F32VecAvx {
         #[inline(always)]
         fn impl_(_: archmage::X64V3Token, v: __m256, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecAvx::LEN);
+            // Clamp in float space first — see `F32SimdVec::round_store_u8`.
+            // `_mm256_max_ps(a, b)` returns `b` when either operand is NaN, so
+            // NaN clamps to 0.
+            let clamped =
+                _mm256_min_ps(_mm256_max_ps(v, _mm256_setzero_ps()), _mm256_set1_ps(255.0));
             // Round to nearest integer
-            let rounded = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
+            let rounded =
+                _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(clamped);
             // Convert to i32
             let i32s = _mm256_cvtps_epi32(rounded);
             // Extract 128-bit halves and pack
@@ -610,8 +616,13 @@ impl F32SimdVec for F32VecAvx {
         #[inline(always)]
         fn impl_(_: archmage::X64V3Token, v: __m256, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx::LEN);
+            let clamped = _mm256_min_ps(
+                _mm256_max_ps(v, _mm256_setzero_ps()),
+                _mm256_set1_ps(65535.0),
+            );
             // Round to nearest integer
-            let rounded = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
+            let rounded =
+                _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(clamped);
             // Convert to i32
             let i32s = _mm256_cvtps_epi32(rounded);
             // Extract 128-bit halves and pack

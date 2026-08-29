@@ -403,7 +403,11 @@ impl F32SimdVec for F32VecWasm128 {
 
         fn round_store_u8(this: F32VecWasm128, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecWasm128::LEN);
-            let rounded = f32x4_nearest(this.0);
+            // Clamp in float space first — see `F32SimdVec::round_store_u8`.
+            // `f32x4_max`/`f32x4_min` propagate NaN, and the following
+            // `trunc_sat` maps NaN to 0, so NaN still clamps to 0.
+            let clamped = f32x4_min(f32x4_max(this.0, f32x4_splat(0.0)), f32x4_splat(255.0));
+            let rounded = f32x4_nearest(clamped);
             let i32s = i32x4_trunc_sat_f32x4(rounded);
             // Narrow i32→i16→u8 with saturation
             let zeros = i32x4_splat(0);
@@ -419,7 +423,8 @@ impl F32SimdVec for F32VecWasm128 {
 
         fn round_store_u16(this: F32VecWasm128, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecWasm128::LEN);
-            let rounded = f32x4_nearest(this.0);
+            let clamped = f32x4_min(f32x4_max(this.0, f32x4_splat(0.0)), f32x4_splat(65535.0));
+            let rounded = f32x4_nearest(clamped);
             let i32s = i32x4_trunc_sat_f32x4(rounded);
             // Narrow i32→u16 with unsigned saturation
             let zeros = i32x4_splat(0);

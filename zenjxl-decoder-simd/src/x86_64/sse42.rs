@@ -444,7 +444,12 @@ impl F32SimdVec for F32VecSse42 {
         #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecSse42::LEN);
-            let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
+            // Clamp in float space first — see `F32SimdVec::round_store_u8`.
+            // `_mm_max_ps(a, b)` returns `b` when either operand is NaN, so
+            // NaN clamps to 0.
+            let clamped = _mm_min_ps(_mm_max_ps(v, _mm_setzero_ps()), _mm_set1_ps(255.0));
+            let rounded =
+                _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(clamped);
             let i32s = _mm_cvtps_epi32(rounded);
             let u16s = _mm_packus_epi32(i32s, i32s);
             let u8s = _mm_packus_epi16(u16s, u16s);
@@ -460,7 +465,9 @@ impl F32SimdVec for F32VecSse42 {
         #[inline(always)]
         fn impl_(_: archmage::X64V2Token, v: __m128, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecSse42::LEN);
-            let rounded = _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
+            let clamped = _mm_min_ps(_mm_max_ps(v, _mm_setzero_ps()), _mm_set1_ps(65535.0));
+            let rounded =
+                _mm_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(clamped);
             let i32s = _mm_cvtps_epi32(rounded);
             let u16s = _mm_packus_epi32(i32s, i32s);
             dest[0] = _mm_extract_epi16::<0>(u16s) as u16;

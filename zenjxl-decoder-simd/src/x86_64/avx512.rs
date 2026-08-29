@@ -647,8 +647,17 @@ impl F32SimdVec for F32VecAvx512 {
         #[inline(always)]
         fn impl_(_: archmage::X64V4Token, v: __m512, dest: &mut [u8]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
+            // Clamp in float space FIRST. `_mm512_cvtusepi32_epi8` below reads
+            // its i32 lanes as *unsigned*, so a negative lane would saturate to
+            // 255 (white) where every other tier stores 0 (black) — a full
+            // 0<->255 flip that depended only on which CPU ran the decode.
+            // Clamping here keeps every lane in [0, 255], where the unsigned
+            // reading and the signed one coincide. `_mm512_max_ps(a, b)`
+            // returns `b` when either operand is NaN, so NaN clamps to 0.
+            let clamped =
+                _mm512_min_ps(_mm512_max_ps(v, _mm512_setzero_ps()), _mm512_set1_ps(255.0));
             // Round to nearest integer
-            let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
+            let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(clamped);
             // Convert to i32
             let i32s = _mm512_cvtps_epi32(rounded);
             // Use pmovusdb: saturating conversion from 32-bit to 8-bit unsigned
@@ -665,8 +674,13 @@ impl F32SimdVec for F32VecAvx512 {
         #[inline(always)]
         fn impl_(_: archmage::X64V4Token, v: __m512, dest: &mut [u16]) {
             assert!(dest.len() >= F32VecAvx512::LEN);
+            // See `round_store_u8`: `vpmovusdw` also reads its lanes unsigned.
+            let clamped = _mm512_min_ps(
+                _mm512_max_ps(v, _mm512_setzero_ps()),
+                _mm512_set1_ps(65535.0),
+            );
             // Round to nearest integer
-            let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(v);
+            let rounded = _mm512_roundscale_ps::<{ _MM_FROUND_TO_NEAREST_INT }>(clamped);
             // Convert to i32
             let i32s = _mm512_cvtps_epi32(rounded);
             // Use pmovusdw: saturating conversion from 32-bit to 16-bit unsigned

@@ -208,12 +208,20 @@ impl F32SimdVec for f32 {
 
     #[inline(always)]
     fn round_store_u8(self, dest: &mut [u8]) {
-        dest[0] = self.round() as u8;
+        // `round_ties_even`, not `round`: `f32::round` rounds ties *away from
+        // zero*, while every SIMD tier rounds ties to even. That made the
+        // scalar tier — which is what runs on i686, on wasm without simd128,
+        // and in the fuzzers — disagree with every other tier on exact halves.
+        //
+        // No explicit clamp is needed here: the `as` cast from float to
+        // integer is saturating and maps NaN to 0, which is exactly the
+        // `[0, 255]` clamp the SIMD tiers apply before converting.
+        dest[0] = self.round_ties_even() as u8;
     }
 
     #[inline(always)]
     fn round_store_u16(self, dest: &mut [u16]) {
-        dest[0] = self.round() as u16;
+        dest[0] = self.round_ties_even() as u16;
     }
 
     #[inline(always)]

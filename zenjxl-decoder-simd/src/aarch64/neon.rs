@@ -442,7 +442,10 @@ impl F32SimdVec for F32VecNeon {
 
     fn_neon!(this: F32VecNeon, fn round_store_u8(dest: &mut [u8]) {
         assert!(dest.len() >= F32VecNeon::LEN);
-        let rounded = vrndnq_f32(this.0);
+        // Clamp in float space first — see `F32SimdVec::round_store_u8`.
+        // `vmaxq_f32` returns the non-NaN operand, so NaN clamps to 0.
+        let clamped = vminq_f32(vmaxq_f32(this.0, vdupq_n_f32(0.0)), vdupq_n_f32(255.0));
+        let rounded = vrndnq_f32(clamped);
         let i32s = vcvtq_s32_f32(rounded);
         let u16s = vqmovun_s32(i32s);
         let u8s = vqmovn_u16(vcombine_u16(u16s, u16s));
@@ -452,7 +455,8 @@ impl F32SimdVec for F32VecNeon {
 
     fn_neon!(this: F32VecNeon, fn round_store_u16(dest: &mut [u16]) {
         assert!(dest.len() >= F32VecNeon::LEN);
-        let rounded = vrndnq_f32(this.0);
+        let clamped = vminq_f32(vmaxq_f32(this.0, vdupq_n_f32(0.0)), vdupq_n_f32(65535.0));
+        let rounded = vrndnq_f32(clamped);
         let i32s = vcvtq_s32_f32(rounded);
         let u16s = vqmovun_s32(i32s);
         vst1_u16(dest.first_chunk_mut::<4>().unwrap(), u16s);
