@@ -13,9 +13,21 @@
 //! and the runtime-dispatched SIMD backend (avx512 / avx / sse / neon) and the
 //! scalar fallback round the last bit differently. A whole-image FNV hash is
 //! therefore not reproducible across the CI matrix (it was only valid on the CPU
-//! that generated it). Measured cross-backend divergence is at most 1 LSB on
-//! ~0.003% of bytes — far below any buffer-reuse corruption, which replays a
-//! whole stale group (hundreds of bytes off by large amounts).
+//! that generated it). The irreducible part of that is `mul_add`: it is a fused
+//! multiply-add on avx/avx512/neon and an unfused multiply-then-add on sse42 and
+//! wasm128, which have no FMA instruction, so those tiers round once versus
+//! twice. Re-measured across all 80 fixtures (557 MB of output) after the
+//! round_store_u8 fixes: scalar-vs-neon divergence is 12,217 bytes, 0.0022%, max
+//! delta 1 — far below any buffer-reuse corruption, which replays a whole stale
+//! group (hundreds of bytes off by large amounts).
+//!
+//! The "at most 1 LSB" part of that was **not** true when it was written. On
+//! avx512 a negative sample stored 255 where every other tier stored 0, so
+//! cross-backend divergence there was a full 0-to-255 inversion that this
+//! tolerance would have flagged had CI ever run on an avx512 host that reached
+//! the affected path. That is fixed, and `tests/cross_tier_determinism.rs` now
+//! gates it directly by decoding the same fixtures on every dispatch tier the
+//! host supports rather than inferring cross-tier behaviour from one reference.
 //!
 //! So this compares against a committed reference within a small per-byte
 //! tolerance. The reference is a strided sample (every `STRIDE`-th pixel in each
@@ -33,6 +45,11 @@ const STRIDE: usize = 32;
 /// Per-byte tolerance. Cross-backend FP rounding is <= 1 LSB; a buffer-reuse
 /// corruption is far larger. 2 leaves headroom for backends not measured locally
 /// (e.g. NEON FMA) without coming anywhere near corruption magnitude.
+///
+/// Kept at 2 rather than tightened to the measured 1: the measurement covers
+/// scalar-vs-neon on one aarch64 host, and the x86 tiers cannot be executed
+/// there. `tests/cross_tier_determinism.rs` is the gate that actually bounds
+/// cross-tier divergence, and it holds the float pipeline to 1.
 const MAX_DIFF: u8 = 2;
 
 struct Expected {
