@@ -12,6 +12,11 @@ on:
     branches: [main]
 
 env:
+  # codec-corpus is not provisioned in CI; corpus-backed feature tests skip
+  # EXPLICITLY via this flag (without it they fail loudly — no silent skips).
+  # Same setting as ci.yml: this run has been red since the skips became
+  # explicit (f1faec70) because it lacked the flag.
+  ZENJXL_ALLOW_MISSING_CORPUS: "1"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
