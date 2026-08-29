@@ -1,4 +1,9 @@
 #!/bin/zsh
+# Copyright (c) the JPEG XL Project Authors. All rights reserved.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
 # Decode every given .jxl with the fork CLI and an upstream jxl-rs CLI, both at
 # 16-bit PNG output (u8 output is dithered upstream since jxl-rs 0.6.0, which
 # would make every lossy comparison noisy), and compare pixels exactly.

@@ -1,3 +1,8 @@
+// Copyright (c) the JPEG XL Project Authors. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! zenjxl-decoder#55: the convenience decoders' output buffers are cache-line
 //! padded per row, so a stream that passes `max_pixels` can still demand far
 //! more memory than its pixel count suggests. The farm's seed is a 1x235875981

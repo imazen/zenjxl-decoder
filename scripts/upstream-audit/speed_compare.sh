@@ -1,4 +1,9 @@
 #!/bin/zsh
+# Copyright (c) the JPEG XL Project Authors. All rights reserved.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
 # Rough CLI --speedtest comparison, fork vs upstream jxl-rs, interleaved
 # A/B/A/B per image (2 passes x 5 reps). This is a smoke-level measurement
 # for "are we far behind upstream on this file?" -- NOT a zenbench paired

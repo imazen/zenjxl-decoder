@@ -1,4 +1,9 @@
 #!/bin/sh
+# Copyright (c) the JPEG XL Project Authors. All rights reserved.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
 # Runs a wasm32-wasip1 test binary under wasmtime. Cargo runs tests with the
 # package directory as the working directory; the tests locate fixtures with
 # absolute paths built from `env!("CARGO_MANIFEST_DIR")`, so the host package

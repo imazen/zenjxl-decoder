@@ -1,3 +1,8 @@
+// Copyright (c) the JPEG XL Project Authors. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Regression: spot-colour JXL decode through the low-memory pipeline.
 //!
 //! `spot.jxl` (colour + a spot-colour extra channel, with alpha folded into the
