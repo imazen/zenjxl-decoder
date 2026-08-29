@@ -52,7 +52,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
     point is the lane count, the output moved with the CPU. The duplicate is
     deleted: the tail now calls the same `unsqueeze_impl` at `LEN == 1`. Streams
     that do not overflow — everything a valid encoder emits — decode to exactly
-    the same bytes as before (c09eb6e).
+    the same bytes as before (83fb368).
 - **A 256-cluster context map panicked (debug) or silently decoded nothing
   (release).** `Histograms::decode` computed `num_histograms` as
   `*context_map.iter().max().unwrap() + 1` in **u8**, while both sibling sites
@@ -109,9 +109,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   `archmage::testing::for_each_token_permutation` disables SIMD tokens
   process-wide, so `summon()` falls through and the *whole decoder* — not one
   kernel — runs on the lower tier; the test decodes a fixture grid under every
-  permutation the host supports and compares the results. Lossless fixtures
-  decoded with dithering off must be **byte-identical**, since the pipeline is
-  integer-valued there and lossless is exact by definition; float-pipeline
+  permutation the host supports and compares the results. Fixtures whose decode
+  carries no float quantization onto the output path must be **byte-identical**
+  when decoded with dithering off; float-pipeline
   fixtures are held to an envelope of at most 1 per byte and 0.1% of the image,
   because `mul_add` is fused on avx/avx512/neon and unfused on sse42/wasm128
   (which have no FMA instruction), so those tiers round once versus twice. That
@@ -123,7 +123,29 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   worst per-byte difference 1, worst differing fraction 0.0122%. Coverage is
   bounded by the host — an aarch64 machine cannot execute the x86 tiers — so
   the test prints the permutations it actually ran, making an absent tier
-  visible in the log rather than silently green (652b39c).
+  visible in the log rather than silently green (61dac52).
+
+  Two follow-up corrections, both prompted by CI on platforms this host cannot
+  run (b04c2a1). Exact-set membership is now **measured with `jxlinspect`, not
+  inferred from filenames**: the first version classified
+  `squeeze_empty_residual.jxl` as lossless because of its name, and
+  windows-11-arm failed with "1 of 16384 bytes differ (max 1)" while the same
+  fixture was byte-equal on aarch64 macOS — it is in fact `64x64, lossy`, as is
+  `squeeze_alpha.jxl`. Both moved to the envelope, where a 1-ULP
+  fused-vs-unfused difference that only crosses a rounding boundary on some
+  codegen belongs. The criterion is now stated rather than assumed — 8-bit
+  output (`k / 255.0 * 255.0` round-trips exactly in f32, which is untrue at 10
+  or 16 bits), an sRGB transfer function, and no spline or noise synthesis —
+  which also moves `hdr_pq_test`, `hdr_hlg_test`, `pq_gradient`, `splines` and
+  `spline_on_first_frame` out despite their headers reading
+  "(possibly) lossless". `squeeze_edge.jxl` stays, and is the fixture that
+  matters for the squeeze inverse: 513x513 is not a multiple of any lane count,
+  so the decode crosses from the vector body into the scalar tail. Second, the
+  tier comparison now forces `parallel = false`, since it defaults to `true`
+  with the `threads` feature and rayon scheduling varies with core count —
+  otherwise a scheduling difference could be reported as a tier difference; a
+  companion `decode_is_deterministic_when_parallel` covers the parallel path by
+  holding the tier fixed and varying nothing.
 
 - **A `Fuzz targets compile` gate covering all six fuzz targets, on push and on
   pull requests.** Three of them were reached by no workflow at all:
