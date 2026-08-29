@@ -31,11 +31,17 @@
 //! # What is asserted, and why it is not simply "all tiers are byte-equal"
 //!
 //! Byte-equality is the right contract for the integer pipeline and is
-//! asserted exactly there: [`LOSSLESS_FIXTURES`] decoded with dithering off go
+//! asserted exactly there: [`EXACT_FIXTURES`] decoded with dithering off go
 //! through modular decode and an integer-valued conversion, so every tier must
-//! agree to the byte. Lossless means exact by definition; any divergence there
-//! is a defect, and that is where the squeeze inverse's SIMD/scalar split
-//! lives.
+//! agree to the byte. Any divergence there is a defect, and that is where the
+//! squeeze inverse's SIMD/scalar split lives.
+//!
+//! "Lossless" alone is *not* the criterion, and assuming it was is how this
+//! test first went wrong: `squeeze_empty_residual.jxl` was put in the exact
+//! list on the strength of its name, is actually lossy, and failed on
+//! windows-on-arm while passing on aarch64 macOS. See [`EXACT_FIXTURES`] for
+//! the four conditions that actually have to hold and how each entry was
+//! checked.
 //!
 //! The float pipeline cannot be held to byte-equality, and the reason is
 //! structural rather than a defect: `mul_add` is a fused multiply-add on
@@ -69,29 +75,57 @@ use std::path::{Path, PathBuf};
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zenjxl_decoder::api::JxlDecoderOptions;
 
-/// Lossless fixtures: modular decode with no float quantization on the output
-/// path, so with dithering off every tier must agree to the byte.
+/// Fixtures held to byte-equality: 8-bit modular lossless, whose decode carries
+/// no float quantization onto the output path, so with dithering off every tier
+/// must agree to the byte.
 ///
-/// This is the list the squeeze inverse is gated by — `squeeze_*` exercise the
-/// transform whose SIMD body and scalar tail split at `h & !(lanes - 1)`.
-const LOSSLESS_FIXTURES: &[&str] = &[
+/// Membership is measured, not inferred from the filename — every entry was
+/// checked with `jxlinspect`, which reports mode, bit depth and channels. Two
+/// fixtures were originally put here on the strength of their names and do not
+/// belong: `squeeze_alpha.jxl` and `squeeze_empty_residual.jxl` are both
+/// **lossy** (jxlinspect: "203x354, lossy" and "64x64, lossy"), so they go
+/// through VarDCT and are held to the envelope below instead. Windows-on-arm
+/// CI is what caught that — `squeeze_empty_residual` differed by one byte of
+/// 16384 there while being byte-equal on this aarch64 host, because a 1-ULP
+/// fused-vs-unfused difference only crosses a rounding boundary on some
+/// codegen.
+///
+/// Three more constraints are load-bearing, and "the header says lossless" does
+/// not imply them, which is why several `(possibly) lossless` fixtures are in
+/// the envelope list instead:
+///
+/// * **8-bit output.** `k / 255.0 * 255.0` round-trips exactly in f32 for every
+///   `k` in `0..=255`, so the conversion is exact on every tier. At 10- or
+///   16-bit (`hdr_pq_test`, `hdr_hlg_test`, `pq_gradient`) it is not.
+/// * **An sRGB transfer function.** PQ and HLG are evaluated in float.
+/// * **No spline or noise synthesis**, both of which are float
+///   (`splines.jxl`, `spline_on_first_frame.jxl`).
+///
+/// This is the list the squeeze inverse is gated by. `squeeze_edge.jxl` is the
+/// one that matters there: 513x513 is deliberately not a multiple of any lane
+/// count, so the decode crosses from the vector body into the scalar tail at
+/// `h & !(lanes - 1)` — exactly the split the two implementations disagreed
+/// across.
+const EXACT_FIXTURES: &[&str] = &[
     "3x3_srgb_lossless.jxl",
     "3x3a_srgb_lossless.jxl",
     "gray_alpha_lossless.jxl",
-    "squeeze_alpha.jxl",
     "squeeze_edge.jxl",
-    "squeeze_empty_residual.jxl",
     "grayscale_patches_modular.jxl",
     "orientation5_transpose.jxl",
+    "extra_channels.jxl",
 ];
 
-/// Fixtures whose decode goes through the float pipeline: VarDCT, noise,
-/// splines, upsampling, and the non-sRGB transfer functions.
+/// Fixtures whose decode involves float arithmetic somewhere, and which are
+/// therefore held to the FMA envelope rather than to byte-equality: VarDCT,
+/// noise, splines, upsampling, non-sRGB transfer functions, and any output
+/// deeper than 8 bits.
 ///
 /// PQ and HLG matter specifically because they take the Gamma/DCI branch of
 /// `XybToU8Stage`, which clamps the *absolute* value before the transfer
 /// function and then restores the sign with `copysign` — the one caller that
-/// reached `round_store_u8` with a signed, unbounded value.
+/// reached `round_store_u8` with a signed, unbounded value. Measured on
+/// `3x3_srgb_lossy.jxl`, samples from -44.6 to +262.3 arrive at that store.
 const FLOAT_FIXTURES: &[&str] = &[
     "3x3_srgb_lossy.jxl",
     "3x3a_srgb_lossy.jxl",
@@ -100,10 +134,11 @@ const FLOAT_FIXTURES: &[&str] = &[
     "hdr_pq_test.jxl",
     "hdr_hlg_test.jxl",
     "pq_gradient.jxl",
-    "extra_channels.jxl",
     "upsampled_alpha.jxl",
     "splines.jxl",
     "spline_on_first_frame.jxl",
+    "squeeze_alpha.jxl",
+    "squeeze_empty_residual.jxl",
 ];
 
 /// Largest per-byte difference any two tiers may show on the float pipeline.
@@ -178,34 +213,31 @@ enum Strictness {
 /// computed in float, so a dithered decode is held to the envelope even for a
 /// lossless fixture. With dithering off a lossless decode must be exact.
 fn grid() -> Vec<(&'static str, &'static str, JxlDecoderOptions, Strictness)> {
+    // Single-threaded, always. The dispatch tier is the only thing this test is
+    // allowed to vary; `parallel` defaults to `true` whenever the `threads`
+    // feature is on, and leaving it on would let rayon's scheduling — which
+    // depends on the machine's core count — confound a tier difference with a
+    // scheduling one. `decode_is_deterministic_when_parallel` covers the
+    // parallel path separately, where run-to-run equality is the actual claim.
+    let base = || JxlDecoderOptions::default().with_parallel(false);
     let mut out = Vec::new();
-    for name in LOSSLESS_FIXTURES {
+    for name in EXACT_FIXTURES {
         out.push((
             *name,
             "dither_u8=false",
-            JxlDecoderOptions::default().with_dither_u8(false),
+            base().with_dither_u8(false),
             Strictness::Exact,
         ));
-        out.push((
-            *name,
-            "default",
-            JxlDecoderOptions::default(),
-            Strictness::FmaEnvelope,
-        ));
+        out.push((*name, "default", base(), Strictness::FmaEnvelope));
     }
     for name in FLOAT_FIXTURES {
         out.push((
             *name,
             "dither_u8=false",
-            JxlDecoderOptions::default().with_dither_u8(false),
+            base().with_dither_u8(false),
             Strictness::FmaEnvelope,
         ));
-        out.push((
-            *name,
-            "default",
-            JxlDecoderOptions::default(),
-            Strictness::FmaEnvelope,
-        ));
+        out.push((*name, "default", base(), Strictness::FmaEnvelope));
     }
     out
 }
@@ -270,7 +302,7 @@ fn compare(a: &Decoded, b: &Decoded) -> (usize, u8, usize) {
 #[test]
 fn decode_is_identical_on_every_dispatch_tier() {
     let root = fixture_root();
-    let names: Vec<&'static str> = LOSSLESS_FIXTURES
+    let names: Vec<&'static str> = EXACT_FIXTURES
         .iter()
         .chain(FLOAT_FIXTURES.iter())
         .copied()
@@ -346,8 +378,11 @@ fn decode_is_identical_on_every_dispatch_tier() {
 
             match strictness {
                 Strictness::Exact => panic!(
-                    "{context}\n  A lossless decode must be byte-identical on every \
-                     dispatch tier; lossless is exact by definition."
+                    "{context}\n  This fixture's decode carries no float quantization \
+                     onto the output path (8-bit modular lossless, sRGB transfer, no \
+                     splines or noise), so every dispatch tier must agree to the byte. \
+                     If the fixture does not actually satisfy that, fix its \
+                     classification in EXACT_FIXTURES rather than this assertion."
                 ),
                 Strictness::FmaEnvelope => {
                     assert!(
@@ -383,4 +418,63 @@ fn decode_is_identical_on_every_dispatch_tier() {
         report.permutations_run >= 1,
         "no dispatch permutation ran; the differential test proved nothing"
     );
+}
+
+/// Decoding the same bytes twice must give the same bytes, including when the
+/// work is spread across rayon's thread pool.
+///
+/// The tier comparison above deliberately runs single-threaded so that the
+/// dispatch tier is the only variable. That leaves a gap: if parallel decode
+/// were order-dependent, the tier test could neither see it nor be trusted,
+/// since it would attribute a scheduling difference to the tier. This closes
+/// that gap by holding the tier fixed and varying nothing at all — any
+/// difference here is nondeterminism in the decoder, not a tier divergence.
+///
+/// Without the `threads` feature `parallel` is already false and this reduces
+/// to a repeat-decode check, which is still worth running.
+#[test]
+fn decode_is_deterministic_when_parallel() {
+    let root = fixture_root();
+    for name in EXACT_FIXTURES.iter().chain(FLOAT_FIXTURES.iter()) {
+        let path = root.join(name);
+        let data = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()));
+
+        let first =
+            zenjxl_decoder::decode_with(&data, JxlDecoderOptions::default().with_parallel(true));
+        for round in 1..4 {
+            let again = zenjxl_decoder::decode_with(
+                &data,
+                JxlDecoderOptions::default().with_parallel(true),
+            );
+            match (&first, &again) {
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(
+                        (a.width, a.height, a.channels),
+                        (b.width, b.height, b.channels),
+                        "{name}: geometry changed between identical decodes (round {round})"
+                    );
+                    let differing = a
+                        .data
+                        .iter()
+                        .zip(b.data.iter())
+                        .filter(|(x, y)| x != y)
+                        .count();
+                    assert_eq!(
+                        differing,
+                        0,
+                        "{name}: {differing} of {} bytes differ between two identical decodes \
+                         (round {round}) — the decoder is not deterministic",
+                        a.data.len()
+                    );
+                }
+                (Err(a), Err(b)) => assert_eq!(
+                    format!("{a:?}"),
+                    format!("{b:?}"),
+                    "{name}: identical decodes failed differently (round {round})"
+                ),
+                _ => panic!("{name}: identical decodes disagreed on success (round {round})"),
+            }
+        }
+    }
 }
