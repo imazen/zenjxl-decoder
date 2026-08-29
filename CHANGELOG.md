@@ -77,6 +77,23 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   that these checks reject and **zero** that were accepted without them — the
   downstream section-length and bit-padding checks caught every one, just later
   and with a less specific error.
+- **The `PR` workflow had failed every run**, on a check nobody was reading.
+  `ci/pull_request_checks.sh`'s `test_copyright` (inherited from upstream libjxl
+  tooling) requires both the "Copyright (c) the JPEG XL Project Authors." and
+  "Use of this source code is governed by a BSD-style" lines within the first
+  ten lines of every tracked text file outside `third_party/`, and twelve files
+  lacked them: `.cargo/wasm-runner.sh`, `apidoc/tests/public_api_doc.rs`, the
+  four `scripts/upstream-audit/` scripts, `zenjxl-decoder/benches/kernel_tiers.rs`,
+  `zenjxl-decoder/examples/heaptrack_decode.rs`, three `zenjxl-decoder/tests/`
+  files, and `zenjxl-decoder-cli/tests/spot_low_memory_regression.rs`. Headers
+  added verbatim from the adjacent files that already carry them, with `#`
+  markers for shell and Python and the block placed under the shebang where
+  there is one. `ci/pull_request_checks.sh` is standalone and now passes both
+  its checks locally. **The workflow itself remains unverified**: it triggers
+  only on `pull_request`, and this repo is worked directly on `main`, which is
+  precisely why it stayed red unnoticed — a workflow that can only fire on pull
+  requests, in a repo that never opens them, is either a reason to start using
+  PRs somewhere or a permanent red mark that means nothing.
 - **The fuzz regression harness could still pass without replaying a seed.**
   b952a93 already made the `Fuzz regression` CI step a real gate (it exits 1 on
   a missing or empty `fuzz/regression/` instead of the old
