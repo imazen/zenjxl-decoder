@@ -46,14 +46,14 @@ fn ready_image_area(
 ) -> Option<Rect> {
     let y0 = match (gy == 0, yrange.start) {
         (true, 0) => group_rect.origin.1,
-        (false, 0) => group_rect.origin.1 - border_size.1,
+        (false, 0) => group_rect.origin.1.saturating_sub(border_size.1),
         (_, 1) => group_rect.origin.1 + border_size.1,
         // (_, 2)
         _ => group_rect.end().1.saturating_sub(border_size.1),
     };
     let x0 = match (gx == 0, xrange.start) {
         (true, 0) => group_rect.origin.0,
-        (false, 0) => group_rect.origin.0 - border_size.0,
+        (false, 0) => group_rect.origin.0.saturating_sub(border_size.0),
         (_, 1) => group_rect.origin.0 + border_size.0,
         // (_, 2)
         _ => group_rect.end().0.saturating_sub(border_size.0),
@@ -61,7 +61,7 @@ fn ready_image_area(
     let y1 = match (gy + 1 == group_count.1, yrange.end) {
         (true, 3) => group_rect.end().1,
         (false, 3) => group_rect.end().1 + border_size.1,
-        (_, 2) => group_rect.end().1 - border_size.1,
+        (_, 2) => group_rect.end().1.saturating_sub(border_size.1),
         // (_, 1)
         _ => group_rect.origin.1 + border_size.1,
     }
@@ -69,12 +69,16 @@ fn ready_image_area(
     let x1 = match (gx + 1 == group_count.0, xrange.end) {
         (true, 3) => group_rect.end().0,
         (false, 3) => group_rect.end().0 + border_size.0,
-        (_, 2) => group_rect.end().0 - border_size.0,
+        (_, 2) => group_rect.end().0.saturating_sub(border_size.0),
         // (_, 1)
         _ => group_rect.origin.0 + border_size.0,
     }
     .min(input_size.0);
-    (x1 > x0 && y1 > y0).then_some(Rect {
+    // `then` (lazy), not `then_some`: the argument of `then_some` is evaluated
+    // before the condition is consulted, so an empty strip (`x1 <= x0`, e.g. a
+    // 3-px last column inside a 7-px border) underflowed `x1 - x0` -- a panic
+    // under overflow checks, a wrapped-then-discarded value in release.
+    (x1 > x0 && y1 > y0).then(|| Rect {
         origin: (x0, y0),
         size: (x1 - x0, y1 - y0),
     })
