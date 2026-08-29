@@ -8,6 +8,12 @@ name: Fuzz
 on:
   push:
     branches: [main]
+  # The `targets` compile gate below wants to run on PRs, where it is the whole
+  # point: a PR that breaks a fuzz target should fail before merge, not after.
+  # The `fuzz` campaign job does NOT run on PRs (see its `if:`) — an hour of
+  # nightly sanitizer builds per PR is not what this is for.
+  pull_request:
+    types: [opened, reopened, synchronize]
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
@@ -22,9 +28,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A BUILD gate, distinct from the campaign below: it compiles every fuzz
+  # target on stable, in seconds, on push AND on pull requests.
+  #
+  # Why it is needed even though `fuzz` already builds targets:
+  #  * `zenjxl-decoder/fuzz/` (the nested `jxl-fuzz` package: `decode`,
+  #    `decode_header`) is reached by NOTHING. It declares its own `[workspace]`
+  #    table, so no root-level cargo command sees it; the `fuzz` job below only
+  #    knows the root workspace; and `.clusterfuzzlite/build.sh` globs
+  #    `fuzz/fuzz_targets/*.rs`, which is the root workspace too. Those two
+  #    targets could rot indefinitely with every workflow green.
+  #  * `decode_parallel` was missing from the campaign matrix, so it was never
+  #    built here either (ClusterFuzzLite did build it, but only on PRs and on
+  #    its 6-hourly batch cron, inside a Docker image — a slow and indirect way
+  #    to learn that a target stopped compiling).
+  #  * Neither the campaign nor ClusterFuzzLite's batch mode runs on push for
+  #    the nested workspace at all.
+  #
+  # A workspace-wide audit on 2026-08-29 found 35 fuzz targets across 11 repos
+  # that no CI ever compiled; zenpipe's eleven had been broken for roughly seven
+  # weeks before anyone noticed. All six here still compiled when this gate was
+  # added. `cargo check` on stable catches the same class of rot as
+  # `cargo fuzz build` (type and resolution errors) without nightly or
+  # per-target sanitizer codegen.
+  targets:
+    name: Fuzz targets compile (${{ matrix.workspace }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - fuzz
+          - zenjxl-decoder/fuzz
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+
+      # No sibling checkouts and no manifest rewriting. Verified with
+      # `cargo metadata` on 2026-08-29: 47 packages for `fuzz`, 40 for
+      # `zenjxl-decoder/fuzz`, every one from crates.io or an in-repo path dep —
+      # nothing outside this checkout (`zenutils-fuzz`, which the replay harness
+      # uses, is a published crates.io dependency). This job deliberately does
+      # NOT route through any setup action that rewrites manifests: the failure
+      # it exists to catch is a fuzz manifest gone stale, and a rewrite would
+      # mask exactly that.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz-check-${{ matrix.workspace }}
+          workspaces: ${{ matrix.workspace }}
+
+      # No `--locked`: a stale committed lock would keep resolving happily while
+      # the API it targets moved on, which is the drift this gate exists to see.
+      # Both `Cargo.lock` files stay committed for reproducible hand-fuzzing.
+      - name: cargo check --all-targets
+        working-directory: ${{ matrix.workspace }}
+        run: cargo check --all-targets
+
   fuzz:
     name: Fuzz (${{ matrix.target }})
     runs-on: ubuntu-latest
+    # Push, cron and manual dispatch only. On a PR the `targets` job above is
+    # the gate; running nightly sanitizer builds plus a timed campaign per PR
+    # would burn the queue for a signal ClusterFuzzLite's PR job already gives.
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +100,10 @@ jobs:
           - decode
           - decode_with_limits
           - probe
+          # Was absent from this list, so it was neither fuzzed nor built here.
+          # It exercises the chunked/parallel `decode_groups_parallel` path,
+          # which is where the partially-ready-border bug it documents lived.
+          - decode_parallel
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly

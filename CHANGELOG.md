@@ -36,6 +36,21 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Added
 
+- **A `Fuzz targets compile` gate covering all six fuzz targets, on push and on
+  pull requests.** Three of them were reached by no workflow at all:
+  `decode_parallel` was missing from the `Fuzz` campaign matrix, and the whole
+  nested `zenjxl-decoder/fuzz/` package (`decode`, `decode_header`) is invisible
+  to every root-level cargo command because it declares its own `[workspace]`
+  table — `.clusterfuzzlite/build.sh` globs the *root* `fuzz/fuzz_targets/`, so
+  it does not cover it either. They could rot indefinitely with every workflow
+  green. The gate runs `cargo check --all-targets` per workspace on stable,
+  which catches the same class of rot as `cargo fuzz build` (type and
+  resolution errors) without nightly or per-target sanitizer codegen. All six
+  still compiled when it was added. `decode_parallel` is now also in the
+  campaign matrix, and the campaign itself is skipped on pull requests
+  (`if: github.event_name != 'pull_request'`) so the new PR trigger buys the
+  cheap gate without an hour of sanitizer builds per PR.
+
 - **Animation frame seeking** (issue #11; port of upstream jxl-rs #678 +
   #702, adapted to this fork's parser). `JxlDecoder::scanned_frames()`
   returns a `VisibleFrameInfo` per visible frame parsed so far (index,
