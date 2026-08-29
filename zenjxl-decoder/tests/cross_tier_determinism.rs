@@ -66,9 +66,24 @@
 //! # Coverage is bounded by the host
 //!
 //! A tier the CPU does not implement cannot be exercised here — an aarch64 host
-//! can reach neon and scalar, and nothing on x86. The test prints the
-//! permutations it actually ran, so a tier that is silently absent (AVX-512 on
-//! a runner without it) shows up in the log rather than passing quietly.
+//! can reach neon and scalar, and nothing on x86. Building the avx512 tier is
+//! not the same as running it: CI's `avx512` job proves it compiles, and only
+//! proves it *executes* if the runner's CPU actually has AVX-512.
+//!
+//! Two things keep that from being mistaken for coverage. On x86_64 and aarch64
+//! the run asserts that at least two permutations executed, so a baseline
+//! compared against nothing fails instead of passing vacuously. And on x86_64
+//! it reports whether the avx512 token could be summoned at all. Both matter
+//! because `cargo test` captures output for passing tests: a printed summary
+//! alone is invisible in CI unless something fails, so the guarantee has to be
+//! an assertion.
+//!
+//! i686 and wasm32 are exempt from that floor, and the exemption is real rather
+//! than convenient: archmage registers disable-able token slots for x86_64 and
+//! aarch64 only, so there is nothing to permute on either. On i686 — a target
+//! this crate treats as primary — the scalar tier is simply what runs, which is
+//! why the per-sample rules it must obey are pinned by
+//! `round_store_u8_contract` in zenjxl-decoder-simd instead.
 
 use std::path::{Path, PathBuf};
 
@@ -414,10 +429,56 @@ fn decode_is_identical_on_every_dispatch_tier() {
         eprintln!("cross-tier decode: {warning}");
     }
 
+    // Anti-vacuity gate. `cargo test` captures stdout and stderr for passing
+    // tests, so the summary above is only visible on failure or under
+    // `--nocapture` — it cannot be relied on to reveal that a tier went
+    // unexercised. One permutation means the baseline was compared against
+    // nothing at all, which passes while proving nothing.
+    //
+    // Only x86_64 and aarch64 can be held to that. archmage registers
+    // disable-able token slots for those two architectures and no others, so on
+    // i686 and wasm32 there is nothing to permute — i686 has no archmage tokens
+    // at all, and the wasm128 tier is selected at compile time rather than
+    // summoned. On those targets this test degenerates to a repeat-decode
+    // check, which is still worth running but proves nothing about tiers.
+    let min_permutations = if cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) {
+        2
+    } else {
+        1
+    };
     assert!(
-        report.permutations_run >= 1,
-        "no dispatch permutation ran; the differential test proved nothing"
+        report.permutations_run >= min_permutations,
+        "only {} dispatch permutation(s) ran ({}), so nothing was compared against \
+         anything. This target registers disable-able SIMD tokens (and the archmage \
+         `testable_dispatch` dev-feature makes even compile-time guaranteed ones \
+         disable-able), so this means token discovery is broken, not that the CPU is \
+         unusual.{}",
+        report.permutations_run,
+        labels.join(" | "),
+        if report.warnings.is_empty() {
+            String::new()
+        } else {
+            format!(" Warnings: {}", report.warnings.join("; "))
+        }
     );
+
+    // Which tiers a run can reach is a property of the host, not of this test,
+    // and an absent tier is not a failure — but it must not be mistaken for
+    // coverage. Record it where it will be read: the x86 CI legs build the
+    // avx512 tier, yet a runner whose CPU lacks AVX-512 exercises none of it,
+    // and the `avx512` job then proves only that it compiles.
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    {
+        use archmage::SimdToken;
+        eprintln!(
+            "cross-tier decode: avx512 tier {} on this host",
+            if archmage::X64V4Token::summon().is_some() {
+                "AVAILABLE and exercised"
+            } else {
+                "ABSENT — compiled but never executed here"
+            }
+        );
+    }
 }
 
 /// Decoding the same bytes twice must give the same bytes, including when the
