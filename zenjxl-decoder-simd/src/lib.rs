@@ -1414,9 +1414,11 @@ mod soundness_tests {
     fn scalar_i32_abs_of_min_wraps_like_the_vector_tiers() {
         use crate::I32SimdVec;
         let v = Wrapping::<i32>::splat(ScalarDescriptor, i32::MIN);
-        assert_eq!(v.abs(), Wrapping(i32::MIN));
+        // UFCS: `Wrapping::abs` is an unstable inherent method in std, so the
+        // method-call form trips `unstable_name_collisions`.
+        assert_eq!(I32SimdVec::abs(v), Wrapping(i32::MIN));
         let w = Wrapping::<i32>::splat(ScalarDescriptor, -7);
-        assert_eq!(w.abs(), Wrapping(7));
+        assert_eq!(I32SimdVec::abs(w), Wrapping(7));
     }
 
     use super::*;
