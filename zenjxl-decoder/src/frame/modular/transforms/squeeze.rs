@@ -146,33 +146,6 @@ fn smooth_tendency_impl<D: SimdDescriptor>(
 }
 
 #[inline(always)]
-fn smooth_tendency_scalar(b: i64, a: i64, n: i64) -> i64 {
-    let mut diff = 0;
-    if b >= a && a >= n {
-        diff = (4 * b - 3 * n - a + 6) / 12;
-        //      2c = a<<1 + diff - diff&1 <= 2b  so diff - diff&1 <= 2b - 2a
-        //      2d = a<<1 - diff - diff&1 >= 2n  so diff + diff&1 <= 2a - 2n
-        if diff - (diff & 1) > 2 * (b - a) {
-            diff = 2 * (b - a) + 1;
-        }
-        if diff + (diff & 1) > 2 * (a - n) {
-            diff = 2 * (a - n);
-        }
-    } else if b <= a && a <= n {
-        diff = (4 * b - 3 * n - a - 6) / 12;
-        //      2c = a<<1 + diff + diff&1 >= 2b  so diff + diff&1 >= 2b - 2a
-        //      2d = a<<1 - diff + diff&1 <= 2n  so diff - diff&1 >= 2a - 2n
-        if diff + (diff & 1) < 2 * (b - a) {
-            diff = 2 * (b - a) - 1;
-        }
-        if diff - (diff & 1) < 2 * (a - n) {
-            diff = 2 * (a - n);
-        }
-    }
-    diff
-}
-
-#[inline(always)]
 fn unsqueeze_impl<D: SimdDescriptor>(
     d: D,
     avg: D::I32Vec,
@@ -189,13 +162,45 @@ fn unsqueeze_impl<D: SimdDescriptor>(
     (a, b)
 }
 
+/// The scalar tail of `hsqueeze`/`vsqueeze`, delegating to the same
+/// [`unsqueeze_impl`] the vector body uses, instantiated at `LEN == 1`.
+///
+/// This used to be a second, independent implementation that widened to i64,
+/// did the arithmetic there, and narrowed back with `as i32`. It agreed with
+/// the vector body exactly as long as nothing overflowed i32 — which is why no
+/// fixture ever caught it — and disagreed as soon as something did, because
+/// `diff / 2` does not commute with wrapping: halving a value that wrapped is
+/// not the wrap of the halved value. For
+/// `(avg, res, next_avg, prev) = (0, i32::MAX, i32::MIN, i32::MAX)` the two
+/// returned `(1700091220, -1700091221)` and `(1073741823, -1073741824)`.
+///
+/// That mattered because `hsqueeze`/`vsqueeze` split at `h & !(lanes - 1)`,
+/// sending the leading rows through the vector body and the remainder through
+/// this tail. The split point is the CPU's lane count, so a single *lossless*
+/// image decoded to different pixels on different CPUs — and lossless is exact
+/// by definition.
+///
+/// Rather than reconcile two implementations, there is now only one, so they
+/// cannot drift apart again. Wrapping i32 is the semantics that survives,
+/// matching the crate's existing precedent for this class of bug (#54, where
+/// the scalar tier's `abs` was changed to `wrapping_abs` so it would agree with
+/// every vector tier's `abs` on `i32::MIN` instead of panicking). Streams that
+/// do not overflow — every stream a valid encoder produces — decode to exactly
+/// the same bytes as before.
 #[inline(always)]
 fn unsqueeze_scalar(avg: i32, res: i32, next_avg: i32, prev: i32) -> (i32, i32) {
-    let tendency = smooth_tendency_scalar(prev as i64, avg as i64, next_avg as i64);
-    let diff = (res as i64) + tendency;
-    let a = (avg as i64) + (diff / 2);
-    let b = a - diff;
-    (a as i32, b as i32)
+    let d = jxl_simd::ScalarDescriptor::new().expect("the scalar descriptor is always available");
+    let (a, b) = unsqueeze_impl(
+        d,
+        <jxl_simd::ScalarDescriptor as SimdDescriptor>::I32Vec::splat(d, avg),
+        <jxl_simd::ScalarDescriptor as SimdDescriptor>::I32Vec::splat(d, res),
+        <jxl_simd::ScalarDescriptor as SimdDescriptor>::I32Vec::splat(d, next_avg),
+        <jxl_simd::ScalarDescriptor as SimdDescriptor>::I32Vec::splat(d, prev),
+    );
+    let mut out = [0i32; 2];
+    a.store(&mut out[..1]);
+    b.store(&mut out[1..]);
+    (out[0], out[1])
 }
 
 #[inline(always)]
@@ -684,4 +689,83 @@ pub fn do_vsqueeze_step(
     // Otherwise: 2 or more rows
 
     vsqueeze(in_avg, in_res, in_next_avg, out_prev, out);
+}
+
+#[cfg(test)]
+mod cross_tier_tests {
+    use super::{unsqueeze_impl, unsqueeze_scalar};
+    use jxl_simd::{I32SimdVec, SimdDescriptor, test_all_instruction_sets};
+
+    /// Quadruples of `(avg, res, next_avg, prev)` that separate the scalar tail
+    /// from the SIMD body.
+    ///
+    /// The scalar path widens to i64 before doing any arithmetic and narrows
+    /// once at the end; the SIMD path works in wrapping i32 throughout. Those
+    /// agree exactly while nothing overflows — which is why no real fixture
+    /// catches the difference — and stop agreeing as soon as something does,
+    /// because `diff / 2` is not compatible with wrapping (halving a value that
+    /// wrapped is not the wrap of the halved value).
+    ///
+    /// A `hsqueeze`/`vsqueeze` pass splits at `h & !(lanes - 1)`, sending the
+    /// leading rows through the SIMD body and the remainder through the scalar
+    /// tail, so a single image can be decoded partly by each — meaning the
+    /// split point, and therefore the output, moves with the lane count of
+    /// whatever CPU is running.
+    const CASES: &[(i32, i32, i32, i32)] = &[
+        // Ordinary values: these must agree, and did before.
+        (0, 0, 0, 0),
+        (1, 2, 3, 4),
+        (-1, -2, -3, -4),
+        (100, -50, 25, -12),
+        (i16::MAX as i32, i16::MIN as i32, 0, 1),
+        // Overflow of `res + tendency`.
+        (0, i32::MAX, 0, 0),
+        (0, i32::MIN, 0, 0),
+        (0, i32::MAX, i32::MIN, i32::MAX),
+        // Overflow inside the tendency computation itself: `a - b`, `b - c`
+        // and `a - c` are i32 subtractions in the SIMD body.
+        (0, 0, i32::MIN, i32::MAX),
+        (0, 0, i32::MAX, i32::MIN),
+        (i32::MAX, 0, i32::MIN, i32::MAX),
+        (i32::MIN, 0, i32::MAX, i32::MIN),
+        // Overflow of `avg + diff / 2`.
+        (i32::MAX, i32::MAX, 0, 0),
+        (i32::MIN, i32::MIN, 0, 0),
+        // Monotonic runs at the extremes, where the tendency clamps engage.
+        (i32::MAX / 2, 7, i32::MIN / 2, i32::MAX),
+        (i32::MIN / 2, -7, i32::MAX / 2, i32::MIN),
+        (1 << 30, 1 << 30, 1 << 30, -(1 << 30)),
+        (-(1 << 30), -(1 << 30), 1 << 30, 1 << 30),
+    ];
+
+    /// The scalar tail and the SIMD body must return the same pair for the same
+    /// inputs, or the row at which a decode crosses from one to the other
+    /// becomes observable — and it is chosen by the CPU's lane count.
+    fn unsqueeze_agrees_with_scalar<D: SimdDescriptor>(d: D) {
+        for &(avg, res, next_avg, prev) in CASES {
+            let want = unsqueeze_scalar(avg, res, next_avg, prev);
+
+            let (va, vb) = unsqueeze_impl(
+                d,
+                D::I32Vec::splat(d, avg),
+                D::I32Vec::splat(d, res),
+                D::I32Vec::splat(d, next_avg),
+                D::I32Vec::splat(d, prev),
+            );
+            let mut sa = vec![0i32; D::I32Vec::LEN];
+            let mut sb = vec![0i32; D::I32Vec::LEN];
+            va.store(&mut sa);
+            vb.store(&mut sb);
+
+            assert_eq!(
+                want,
+                (sa[0], sb[0]),
+                "unsqueeze(avg={avg}, res={res}, next_avg={next_avg}, prev={prev}) \
+                 differs between the scalar tail and the LEN={} SIMD body",
+                D::I32Vec::LEN
+            );
+        }
+    }
+    test_all_instruction_sets!(unsqueeze_agrees_with_scalar);
+
 }
