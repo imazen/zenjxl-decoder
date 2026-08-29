@@ -19,8 +19,11 @@
 //! * The scalar tier rounded exact halves away from zero while all five SIMD
 //!   tiers rounded to even.
 //!
-//! None were reachable by the fuzzers, which build with
-//! `default-features = false` and therefore only ever exercise the scalar tier.
+//! None were reachable by the fuzzers, which pinned `default-features = false`
+//! and therefore compiled only the scalar tier into the fuzz binaries — the
+//! code carrying two of the three defects was not present to be fuzzed. The
+//! root fuzz package now builds with `all-simd`; this test covers the same
+//! ground deterministically and on every CI target rather than opportunistically.
 //!
 //! `archmage::testing::for_each_token_permutation` disables tokens
 //! process-wide, so `summon()` falls through to the next tier and the whole
@@ -189,6 +192,21 @@ fn fixture_root() -> PathBuf {
             .expect("download zenjxl-decoder test fixtures via codec-corpus");
     }
     local
+}
+
+/// Write a line that survives libtest's output capture.
+///
+/// The harness captures `print!`/`eprint!` for a *passing* test and only shows
+/// it under `--nocapture`, which CI does not pass — so a coverage summary
+/// emitted with `eprintln!` is invisible in exactly the case that matters, a
+/// green run that silently exercised fewer tiers than it looks like. The
+/// capture is installed for those macros only, so writing to the process's
+/// stderr handle directly bypasses it and lands in the CI log.
+fn report_uncaptured(line: &str) {
+    use std::io::Write;
+    let mut err = std::io::stderr();
+    let _ = writeln!(err, "{line}");
+    let _ = err.flush();
 }
 
 /// One decoded image, reduced to what has to match across tiers.
@@ -416,17 +434,19 @@ fn decode_is_identical_on_every_dispatch_tier() {
         }
     });
 
-    eprintln!(
+    report_uncaptured(&format!(
         "cross-tier decode: {} comparison(s) over {} permutation(s); \
-         worst per-byte difference {worst_diff}, worst differing fraction {:.4}%\n\
-         cross-tier decode: permutations: {}",
+         worst per-byte difference {worst_diff}, worst differing fraction {:.4}%",
         grid().len(),
         report.permutations_run,
         worst_fraction * 100.0,
-        labels.join(" | "),
-    );
+    ));
+    report_uncaptured(&format!(
+        "cross-tier decode: permutations: {}",
+        labels.join(" | ")
+    ));
     for warning in &report.warnings {
-        eprintln!("cross-tier decode: {warning}");
+        report_uncaptured(&format!("cross-tier decode: {warning}"));
     }
 
     // Anti-vacuity gate. `cargo test` captures stdout and stderr for passing
@@ -470,14 +490,14 @@ fn decode_is_identical_on_every_dispatch_tier() {
     #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
     {
         use archmage::SimdToken;
-        eprintln!(
+        report_uncaptured(&format!(
             "cross-tier decode: avx512 tier {} on this host",
             if archmage::X64V4Token::summon().is_some() {
                 "AVAILABLE and exercised"
             } else {
-                "ABSENT — compiled but never executed here"
+                "ABSENT - compiled but never executed here"
             }
-        );
+        ));
     }
 }
 
