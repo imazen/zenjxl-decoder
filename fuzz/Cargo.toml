@@ -17,7 +17,15 @@ default-features = false
 # `threads` for the decode_parallel target; the other targets set
 # `parallel = false` (decode_with_limits) or use the convenience API, whose
 # default `parallel = true` now also runs on the rayon pool.
-features = ["threads"]
+#
+# `all-simd` because without it the fuzzers only ever exercised the scalar
+# tier, and every tier is a separate hand-written implementation. That is
+# structurally why the avx512 negative-sample inversion and the squeeze
+# inverse's SIMD/scalar split were unreachable here: the code carrying them was
+# not compiled into the fuzz binary at all. The tiers are selected at runtime,
+# so a fuzzing host exercises whatever it supports — which on the x86 CI
+# runners is the avx/avx512 path, not scalar.
+features = ["threads", "all-simd"]
 
 # Prevent this from interfering with workspace resolution
 [workspace]

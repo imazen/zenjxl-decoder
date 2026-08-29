@@ -147,6 +147,16 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   companion `decode_is_deterministic_when_parallel` covers the parallel path by
   holding the tier fixed and varying nothing.
 
+- **The root fuzz package now builds with `all-simd`**, so fuzzing exercises the
+  SIMD tiers instead of only the scalar one. It pinned `default-features =
+  false`, which is the structural reason two of the three CPU-dependent decode
+  defects above were unreachable by fuzzing: the avx512 negative-sample
+  inversion and the squeeze inverse's vector body were not compiled into the
+  fuzz binaries at all. Tier selection is at runtime, so a fuzzing host now
+  reaches whatever it supports — on the x86 CI runners the avx/avx512 path. The
+  nested `zenjxl-decoder/fuzz/` package already used default features and needed
+  no change. All 21 committed regression seeds replay clean with SIMD enabled.
+
 - **A `Fuzz targets compile` gate covering all six fuzz targets, on push and on
   pull requests.** Three of them were reached by no workflow at all:
   `decode_parallel` was missing from the `Fuzz` campaign matrix, and the whole
