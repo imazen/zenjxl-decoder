@@ -15,6 +15,35 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   `JXL_DEC_SET_COALESCING(false)` does) or remove both. Documented as
   unimplemented in the meantime (#57).
 
+### Changed
+
+- **Third-party lockfile refreshed within the existing requirements** (`94007ef`).
+  `Cargo.lock` only — no manifest requirement moved. 69 packages advanced,
+  notably `lcms2` 6.1.1 → 6.2.0 and `lcms2-sys` 4.0.6 → 4.0.7 (the ICC path),
+  `brotli` 8.0.3 → 8.0.4 and `brotli-decompressor` 5.0.1 → 5.0.3 (JXL
+  metadata/ICC decompression), `libc` 0.2.186 → 0.2.189, `cc` 1.2.64 → 1.4.4,
+  `zerocopy` 0.8.52 → 0.8.56, `thiserror` 2.0.18 → 2.0.20 and `exr` 1.74.0 →
+  1.74.2. `getrandom` 0.4.2 → 0.4.3 drops its `wit-bindgen` / `wasm-*` backend
+  subtree; `flate2` 1.1.10 pulls in `zlib-rs` 0.6.7. `archmage` /
+  `archmage-macros` (0.9.26) and `zenbench` (0.1.8) were deliberately **held**
+  so this does not move the zen-family graph.
+
+  Verified on aarch64-apple-darwin: `--all-features` 1095 passed / 2 failed and
+  `--no-default-features` 973 passed / 2 failed, both clippy legs clean under
+  `-D warnings`, `cargo fmt --all --check` clean. The 2 failures are identical
+  in both configurations and are the pre-existing gaps
+  `PARITY_INVESTIGATION.md` line 338 already names — `test_debug_cmyk_layers`
+  and `test_debug_multiple_layers_noise_spline`. This change touches no source.
+
+  **Running the corpus-backed tests locally needs `CODEC_CORPUS_PATH`.** Without
+  it, 103 `feature_tests` fail the deliberate `ZENJXL_ALLOW_MISSING_CORPUS`
+  assertion (working as designed — a loud failure, not a silent skip). The
+  resolver in `zenjxl-decoder/src/tests/parity.rs` only probes
+  `../../codec-eval/codec-corpus/jxl` and `../../../codec-eval/…`, neither of
+  which exists in this workspace layout; the corpus actually lives at
+  `~/work/zen/codec-corpus/jxl` (87 MB), so
+  `CODEC_CORPUS_PATH=~/work/zen/codec-corpus` is what makes those 103 tests run.
+
 ### Fixed
 
 - **The same file decoded differently depending on the CPU, in three separate
