@@ -53,8 +53,19 @@ fn replayable_seeds(dir: &Path) -> usize {
 fn fuzz_regression() {
     // CARGO_MANIFEST_DIR is the inner crate; the fuzz workspace lives at
     // the repo root, alongside it.
+    //
+    // `.parent()`, not `.join("..")`: the latter leaves a literal `..`
+    // component in the path, and WASI's sandboxed path resolution refuses to
+    // traverse one even when the target is inside a preopened directory. Under
+    // `.cargo/wasm-runner.sh` (which preopens both the crate dir and the repo
+    // root at their host paths) the `..` form made `read_dir` fail, the seed
+    // count come back 0, and the assertion below fire — which is what turned
+    // both `test-wasm` legs red on 2026-08-29. `.parent()` yields the same
+    // directory with no `..` to resolve, so the corpus is reachable on wasm and
+    // the assertion keeps its teeth on every target.
     let seed_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .parent()
+        .expect("crate directory always has a parent")
         .join("fuzz")
         .join("regression");
 

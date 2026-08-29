@@ -22,6 +22,17 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   asserts at least `MIN_SEEDS` (21) *replayable* files, counted with the suite's
   own filters. Mutation-verified: removing the corpus and injecting a panic into
   the `decode` target each fail the test with exit code 101.
+- **Both `test-wasm` legs went red the moment that assertion landed**, because
+  the harness located the corpus with `CARGO_MANIFEST_DIR.join("..")` — a path
+  carrying a literal `..` component, which WASI's sandboxed resolution refuses
+  to traverse even though `.cargo/wasm-runner.sh` preopens both the crate
+  directory and the repo root. `read_dir` therefore failed under wasmtime, the
+  replayable count came back 0, and the new assertion fired. It had been hiding
+  behind the old no-op-on-missing-directory behaviour: the wasm legs were
+  replaying nothing and reporting green. The harness now uses `.parent()`,
+  which names the same directory with no `..` to resolve, so the corpus is
+  reachable on wasm too. Verified under wasmtime locally on both legs
+  (`--no-default-features` and `--features wasm128`): all 21 seeds replay.
 
 ### Added
 
