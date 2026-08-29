@@ -19,6 +19,11 @@ fn issue55_padded_output_buffer_is_charged_against_max_memory_bytes() {
         ),
         Err(err) => err,
     };
+    // 64-bit: the padded footprint is representable and exceeds the 1 GiB
+    // default budget. 32-bit: 15.1 GB does not fit `usize`, so the size check
+    // refuses it before the budget is even consulted. Either way the decode
+    // fails before the allocation is attempted.
+    #[cfg(target_pointer_width = "64")]
     assert!(
         matches!(
             err.error(),
@@ -28,5 +33,10 @@ fn issue55_padded_output_buffer_is_charged_against_max_memory_bytes() {
             }
         ),
         "expected LimitExceeded(memory_bytes), got {err:?}"
+    );
+    #[cfg(not(target_pointer_width = "64"))]
+    assert!(
+        matches!(err.error(), Error::ImageSizeTooLarge(..)),
+        "expected ImageSizeTooLarge, got {err:?}"
     );
 }

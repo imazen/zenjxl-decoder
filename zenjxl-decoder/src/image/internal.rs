@@ -439,11 +439,17 @@ mod allocation_len_tests {
         }
         assert_eq!(RawImageBuffer::allocation_len((0, 9)).unwrap(), 0);
         assert_eq!(RawImageBuffer::allocation_len((9, 0)).unwrap(), 0);
-        // The #55 shape: a 3-byte RGB row padded to a cache line, 235875981 rows.
-        assert_eq!(
-            RawImageBuffer::allocation_len((64, 235_875_981)).unwrap(),
-            235_875_980 * 64 + 64 + 63
-        );
+        // The #55 shape: a 3-byte RGB row padded to a cache line, 235875981 rows
+        // (15.1 GB). On a 32-bit target that footprint does not fit `usize`, and
+        // the size check must say so rather than wrap.
+        let expected: u64 = 235_875_980 * 64 + 64 + 63;
+        match RawImageBuffer::allocation_len((64, 235_875_981)) {
+            Ok(len) => assert_eq!(len as u64, expected),
+            Err(e) => assert!(
+                usize::try_from(expected).is_err(),
+                "footprint fits usize but allocation_len failed: {e:?}"
+            ),
+        }
         assert!(RawImageBuffer::allocation_len((usize::MAX / 2, 2)).is_err());
     }
 }
