@@ -30,6 +30,29 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- **Scalar `i32` `abs` panicked on `i32::MIN`** (#54). A corrupt stream can
+  leave `i32::MIN` in a quantized coefficient; `adjust_quant_bias` takes its
+  `abs`, and the scalar SIMD tier used `i32::abs`, which panics under overflow
+  checks (the fuzz build) where every vector tier wraps. Now `wrapping_abs`,
+  matching the vector tiers.
+- **Output buffers are charged against `max_memory_bytes`** (#55). The
+  convenience decoders (`decode`, `decode_with`, `reconstruct_jpeg*`) allocate
+  cache-line-padded output rows, so a stream that passes `max_pixels` could
+  still request far more than its pixel count suggests — the farm's seed is a
+  1×235875981 image (under the 256 MP default) whose padded RGB output is
+  64 B/row = 15.1 GB, and on an overcommitting kernel the allocation
+  "succeeded" and the prefault OOM-killed the process. The padded footprint
+  is now reserved from the decoder's memory tracker (shared with its internal
+  buffers) before the allocation; the seed fails with
+  `LimitExceeded { resource: "memory_bytes" }`.
+- **`ready_image_area` underflowed on an empty strip.** The low-memory
+  pipeline's readiness rectangle was built with `bool::then_some`, whose
+  argument is evaluated before the condition, so a strip with `x1 <= x0`
+  (a 3-px last group column inside a 7-px border) computed `x1 - x0` anyway:
+  a panic under overflow checks (debug builds, the fuzz build) and a
+  wrapped-then-discarded value in release. Now `then` (lazy), and the
+  remaining border subtractions saturate. Found by the `permuted_toc_tiny_
+  last_column_*` tests, which only ever ran in release on CI.
 - **JPEG-reconstruction writer could silently emit corrupt streams** (issue
   #56, 2026-08-26 ultracode sweep, adversarially verified): `write_huffman`
   wrote ZERO bits for any symbol missing from its DHT (the zenjpeg #194/#196

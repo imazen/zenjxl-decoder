@@ -51,6 +51,36 @@ impl OwnedRawImage {
         })
     }
 
+    /// [`Self::new_uninit`] with the allocation charged against `tracker`;
+    /// the budget is released when the image drops.
+    ///
+    /// Rows are cache-line padded, so the bytes really requested exceed
+    /// `byte_size.0 * byte_size.1` — by up to 64x for a 1-pixel-wide image.
+    /// Output buffers sized from a `max_pixels`-checked header must go through
+    /// here so `max_memory_bytes` sees the padded footprint: the
+    /// zenjxl-decoder#55 stream is 1x235875981 (under the 256 MP default) and
+    /// its padded RGB output is 15.1 GB.
+    pub(crate) fn new_uninit_tracked(
+        byte_size: (usize, usize),
+        tracker: &MemoryTracker,
+    ) -> Result<Self> {
+        let padded_row = byte_size
+            .0
+            .checked_next_multiple_of(CACHE_LINE_BYTE_SIZE)
+            .ok_or(crate::error::Error::ImageSizeTooLarge(
+                byte_size.0,
+                byte_size.1,
+            ))?;
+        let bytes = RawImageBuffer::allocation_len((padded_row, byte_size.1))? as u64;
+        tracker.try_allocate(bytes)?;
+        // Rolls the reservation back if the allocation itself fails.
+        let guard = MemoryGuard::new(tracker.clone(), bytes);
+        let mut image = Self::new_uninit(byte_size)?;
+        image.set_tracker(tracker.clone(), bytes);
+        guard.disarm();
+        Ok(image)
+    }
+
     pub fn new_zeroed_with_padding(
         byte_size: (usize, usize),
         offset: (usize, usize),
@@ -423,5 +453,37 @@ impl Debug for RawImageRectMut<'_> {
             self.byte_size().0,
             self.byte_size().1
         )
+    }
+}
+
+#[cfg(test)]
+mod tracked_output_tests {
+    use super::OwnedRawImage;
+    use crate::error::Error;
+    use crate::util::MemoryTracker;
+
+    /// A 3-byte row pads to 64 bytes; 1000 rows plus the alignment slack is
+    /// 999 * 64 + 64 + 63 = 64063 bytes, and that is what the budget must see.
+    #[test]
+    fn new_uninit_tracked_charges_the_padded_footprint() {
+        let tracker = MemoryTracker::with_limit(64_063);
+        let image = OwnedRawImage::new_uninit_tracked((3, 1000), &tracker).unwrap();
+        assert_eq!(tracker.allocated(), 64_063);
+        drop(image);
+        assert_eq!(tracker.allocated(), 0, "budget released on drop");
+
+        let tracker = MemoryTracker::with_limit(64_062);
+        let err = OwnedRawImage::new_uninit_tracked((3, 1000), &tracker).unwrap_err();
+        assert!(
+            matches!(
+                err.error(),
+                Error::LimitExceeded {
+                    resource: "memory_bytes",
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(tracker.allocated(), 0, "rejected reservation rolled back");
     }
 }

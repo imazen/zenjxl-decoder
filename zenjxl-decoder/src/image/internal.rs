@@ -151,6 +151,28 @@ impl RawImageBuffer {
         rows.get_rows_mut(self)
     }
 
+    /// The number of bytes [`Self::try_allocate`] requests from the allocator
+    /// for `byte_size`: rows are padded to a cache line and the buffer carries
+    /// one extra cache line of alignment slack. A memory budget must be charged
+    /// with this number, not `bytes_per_row * num_rows` — for a 1-pixel-wide
+    /// image the padding is a 16-64x multiplier (zenjxl-decoder#55).
+    pub(crate) fn allocation_len(byte_size: (usize, usize)) -> Result<usize> {
+        let (bytes_per_row, num_rows) = byte_size;
+        if bytes_per_row == 0 || num_rows == 0 {
+            return Ok(0);
+        }
+        if bytes_per_row as u64 >= i64::MAX as u64 / 4 || num_rows as u64 >= i64::MAX as u64 / 4 {
+            return Err(at!(Error::ImageSizeTooLarge(bytes_per_row, num_rows)));
+        }
+        let bytes_between_rows =
+            bytes_per_row.div_ceil(CACHE_LINE_BYTE_SIZE) * CACHE_LINE_BYTE_SIZE;
+        (num_rows - 1)
+            .checked_mul(bytes_between_rows)
+            .and_then(|v| v.checked_add(bytes_per_row))
+            .and_then(|v| v.checked_add(CACHE_LINE_BYTE_SIZE - 1))
+            .ok_or_else(|| at!(Error::ImageSizeTooLarge(bytes_per_row, num_rows)))
+    }
+
     /// Returns zeroed memory. The returned buffer is aligned to
     /// CACHE_LINE_BYTE_SIZE bytes via offset.
     pub(super) fn try_allocate(byte_size: (usize, usize), uninit: bool) -> Result<RawImageBuffer> {
@@ -388,5 +410,40 @@ mod tests {
         let mut data: Vec<u8> = (0..6).collect();
         let slices = get_distinct_slices(&mut data, [3..6]);
         assert_eq!(&*slices[0], [3, 4, 5].as_slice());
+    }
+}
+
+#[cfg(test)]
+mod allocation_len_tests {
+    use super::RawImageBuffer;
+
+    /// `allocation_len` must equal what `try_allocate` really asks for, or the
+    /// memory budget drifts from the allocation (#55).
+    #[test]
+    fn allocation_len_matches_try_allocate() {
+        for byte_size in [
+            (1, 1),
+            (3, 235),
+            (64, 1),
+            (65, 2),
+            (4, 7),
+            (200, 3),
+            (1, 4096),
+        ] {
+            let buf = RawImageBuffer::try_allocate(byte_size, false).unwrap();
+            assert_eq!(
+                buf.storage.len(),
+                RawImageBuffer::allocation_len(byte_size).unwrap(),
+                "{byte_size:?}"
+            );
+        }
+        assert_eq!(RawImageBuffer::allocation_len((0, 9)).unwrap(), 0);
+        assert_eq!(RawImageBuffer::allocation_len((9, 0)).unwrap(), 0);
+        // The #55 shape: a 3-byte RGB row padded to a cache line, 235875981 rows.
+        assert_eq!(
+            RawImageBuffer::allocation_len((64, 235_875_981)).unwrap(),
+            235_875_980 * 64 + 64 + 63
+        );
+        assert!(RawImageBuffer::allocation_len((usize::MAX / 2, 2)).is_err());
     }
 }

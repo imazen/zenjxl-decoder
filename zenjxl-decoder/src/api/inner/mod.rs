@@ -67,6 +67,24 @@ impl JxlDecoderInner {
     /// into a Frame, otherwise the in-progress frame's decoder state.
     #[cfg(test)]
     pub(crate) fn decoder_state_for_test(&self) -> Option<&crate::frame::DecoderState> {
+        self.decoder_state()
+    }
+
+    /// The memory tracker enforcing `limits.max_memory_bytes` for this decode:
+    /// the decoder's own once the codestream header has been parsed — so the
+    /// caller's output buffers and the decoder's internal buffers share one
+    /// budget — else a fresh tracker built from the options.
+    pub(crate) fn memory_tracker(&self) -> crate::util::MemoryTracker {
+        self.decoder_state()
+            .map(|state| state.memory_tracker.clone())
+            .unwrap_or_else(|| {
+                crate::util::MemoryTracker::from_limit(self.options.limits.max_memory_bytes)
+            })
+    }
+
+    /// The active [`crate::frame::DecoderState`]: the parser-owned state if it
+    /// has not yet been moved into a Frame, otherwise the in-progress frame's.
+    pub(crate) fn decoder_state(&self) -> Option<&crate::frame::DecoderState> {
         if let Some(state) = self.codestream_parser.decoder_state.as_ref() {
             Some(state)
         } else {

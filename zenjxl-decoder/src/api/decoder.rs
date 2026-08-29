@@ -100,6 +100,12 @@ pub struct VisibleFrameSeekTarget {
 }
 
 impl<S: JxlState> JxlDecoder<S> {
+    /// The tracker that charges this decode's `max_memory_bytes` budget; see
+    /// `JxlDecoderInner::memory_tracker`.
+    pub(crate) fn memory_tracker(&self) -> crate::util::MemoryTracker {
+        self.inner.memory_tracker()
+    }
+
     fn wrap_inner(inner: Box<JxlDecoderInner>) -> Self {
         Self {
             inner,

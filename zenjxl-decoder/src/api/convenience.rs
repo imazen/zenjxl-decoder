@@ -203,14 +203,17 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
         }
     };
 
-    // Allocate output buffers
+    // Allocate output buffers, charged against `max_memory_bytes`: the header's
+    // `max_pixels` check cannot see the per-row cache-line padding, which
+    // multiplies a 1-pixel-wide image's footprint by up to 64x (#55).
+    let tracker = decoder.memory_tracker();
     let row_bytes = width * channels; // 1 byte per sample for u8
-    let mut output = OwnedRawImage::new_uninit((row_bytes, height))?;
+    let mut output = OwnedRawImage::new_uninit_tracked((row_bytes, height), &tracker)?;
     #[cfg(feature = "threads")]
     output.prefault_parallel(parallel);
 
     let mut extra_outputs: Vec<OwnedRawImage> = (0..extra_count)
-        .map(|_| OwnedRawImage::new_uninit((width, height)))
+        .map(|_| OwnedRawImage::new_uninit_tracked((width, height), &tracker))
         .collect::<Result<_>>()?;
 
     // Phase 3: WithFrameInfo → decode pixels
@@ -367,11 +370,13 @@ pub fn reconstruct_jpeg_with(data: &[u8], options: JxlDecoderOptions) -> Result<
         ProcessingResult::NeedsMoreInput { .. } => return Err(at!(Error::OutOfBounds(0))),
     };
 
-    // Phase 3: decode the frame into throwaway buffers.
+    // Phase 3: decode the frame into throwaway buffers (charged against
+    // `max_memory_bytes` for the same reason as in `decode_with_inner`, #55).
+    let tracker = decoder.memory_tracker();
     let row_bytes = width * channels;
-    let mut output = OwnedRawImage::new_uninit((row_bytes, height))?;
+    let mut output = OwnedRawImage::new_uninit_tracked((row_bytes, height), &tracker)?;
     let mut extra_outputs: Vec<OwnedRawImage> = (0..extra_count)
-        .map(|_| OwnedRawImage::new_uninit((width, height)))
+        .map(|_| OwnedRawImage::new_uninit_tracked((width, height), &tracker))
         .collect::<Result<_>>()?;
     let mut bufs: Vec<JxlOutputBuffer<'_>> = core::iter::once(&mut output)
         .chain(extra_outputs.iter_mut())
