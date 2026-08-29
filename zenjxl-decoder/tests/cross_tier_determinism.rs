@@ -376,9 +376,20 @@ fn decode_is_identical_on_every_dispatch_tier() {
 
             let (want, have) = match (want, have) {
                 (Ok(w), Ok(h)) => (w, h),
-                _ if want == have => continue,
+                // Both failed the same way: agreeing on the rejection is the
+                // correct outcome for a stream that should not decode.
+                (Err(a), Err(b)) if a == b => continue,
+                (Err(_), Err(_)) => panic!(
+                    "{key}: both tiers rejected the stream but with different errors, so \
+                     which failure a caller sees depends on the CPU.\n  \
+                     '{base_label}': {}\n  '{}': {}",
+                    describe(want),
+                    perm.label,
+                    describe(have),
+                ),
                 _ => panic!(
-                    "{key}: decoding succeeded on one tier and not another.\n  \
+                    "{key}: the stream decoded on one tier and not the other, so whether \
+                     the file is accepted at all depends on the CPU.\n  \
                      '{base_label}': {}\n  '{}': {}",
                     describe(want),
                     perm.label,
