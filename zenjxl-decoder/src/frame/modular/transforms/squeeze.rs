@@ -767,5 +767,4 @@ mod cross_tier_tests {
         }
     }
     test_all_instruction_sets!(unsqueeze_agrees_with_scalar);
-
 }

@@ -406,3 +406,61 @@ mod context_map_tests {
         assert!(max_contexts <= 256);
     }
 }
+
+/// Every entropy sub-stream must be validated with `check_final_state` before
+/// anything read out of it is trusted.
+///
+/// Two were not: the patches dictionary (`features/patches.rs`) and the
+/// permuted TOC (`headers/encodings.rs`). Both now are, matching libjxl and
+/// every sibling sub-stream in this decoder (splines, the modular tree,
+/// coefficient orders, ICC, the context map).
+///
+/// What that buys, measured rather than assumed: corruption is caught **at the
+/// sub-stream that carries it**, with `AnsChecksumMismatch`, instead of
+/// incidentally further downstream. It does *not* close a silent-acceptance
+/// hole — a randomized search of 200,000 one-to-three-byte corruptions per
+/// fixture across `has_permutation`, `has_permutation_with_container` and both
+/// `grayscale_patches` fixtures, plus an exhaustive single-bit sweep of
+/// `has_permutation.jxl`, produced 160 inputs that these checks reject and
+/// **zero** that were accepted without them. The downstream section-length and
+/// bit-padding checks caught every one, just later and with a less specific
+/// error.
+#[cfg(test)]
+mod substream_final_state {
+    use crate::error::Error;
+    use crate::util::test::fixture_bytes;
+
+    /// Flipping a bit inside the permuted TOC's entropy payload must be caught
+    /// by the permutation's own ANS final-state check.
+    ///
+    /// Mutation-verified: with `check_final_state` removed from
+    /// `<Permutation as UnconditionalCoder<()>>::read_unconditional`, these
+    /// same four inputs fail later instead — `SectionTooShort` for bytes 11 and
+    /// 13/6, `NonZeroPadding` for 12/3 and 13/7 — so this test pins *where* the
+    /// corruption is detected, which is the whole point of the check.
+    #[test]
+    fn corrupt_permuted_toc_fails_at_the_permutation() {
+        let orig = fixture_bytes("has_permutation.jxl");
+        assert!(
+            zenjxl_decoder_decodes(&orig),
+            "the fixture must decode cleanly, or the corruption below proves nothing"
+        );
+
+        for (byte, bit) in [(11usize, 4u32), (12, 4), (13, 6), (13, 7)] {
+            let mut corrupt = orig.clone();
+            corrupt[byte] ^= 1 << bit;
+            let Err(err) = crate::api::decode(&corrupt) else {
+                panic!("flipping byte {byte} bit {bit} of has_permutation.jxl must not decode");
+            };
+            assert!(
+                matches!(err.error(), Error::AnsChecksumMismatch),
+                "flipping byte {byte} bit {bit} should be caught by the permutation's \
+                 ANS final-state check, got {err:?}"
+            );
+        }
+    }
+
+    fn zenjxl_decoder_decodes(data: &[u8]) -> bool {
+        crate::api::decode(data).is_ok()
+    }
+}

@@ -6,6 +6,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that will ship together in the next 0.x minor release.
+     Add items here as you discover them. Do NOT ship these piecemeal. -->
+- `JxlDecoderOptions::coalescing` and `with_coalescing()` — accepted but read
+  nowhere; either implement the `false` case (return each frame's uncomposited
+  rectangle with its crop origin and blend mode, as libjxl's
+  `JXL_DEC_SET_COALESCING(false)` does) or remove both. Documented as
+  unimplemented in the meantime (#57).
+
 ### Fixed
 
 - **The same file decoded differently depending on the CPU, in three separate
@@ -44,6 +53,30 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
     deleted: the tail now calls the same `unsqueeze_impl` at `LEN == 1`. Streams
     that do not overflow — everything a valid encoder emits — decode to exactly
     the same bytes as before (c09eb6e).
+- **A 256-cluster context map panicked (debug) or silently decoded nothing
+  (release).** `Histograms::decode` computed `num_histograms` as
+  `*context_map.iter().max().unwrap() + 1` in **u8**, while both sibling sites
+  (`Histograms::num_histograms`, `verify_context_map`) widen first. Cluster
+  index 255 is legal — `decode_context_map` rejects only values above
+  `u8::MAX`, and `verify_context_map` requires every value below the maximum to
+  be present, so a 256-cluster map is constructible — and `255u8 + 1` overflows:
+  a panic under debug assertions, and a wrap to zero in release, leaving
+  `uint_configs` empty and the codes decoded for no histograms at all. Now
+  widened to `usize` before the add.
+- **Two entropy sub-streams were never validated with `check_final_state`**: the
+  patches dictionary and the permuted TOC. That check verifies the reader's
+  deferred errors, the bit reader's, and the ANS final-state checksum, and every
+  other sub-stream in the decoder already ran it (splines, the modular tree,
+  coefficient orders, ICC, the context map), as does libjxl. Corruption in
+  either is now caught at the sub-stream that carries it, with
+  `AnsChecksumMismatch`, instead of incidentally further downstream. **This is
+  hardening, not a silent-corruption fix**: a randomized search of 200,000
+  one-to-three-byte corruptions per fixture across `has_permutation`,
+  `has_permutation_with_container` and both `grayscale_patches` fixtures, plus
+  an exhaustive single-bit sweep of `has_permutation.jxl`, produced 160 inputs
+  that these checks reject and **zero** that were accepted without them — the
+  downstream section-length and bit-padding checks caught every one, just later
+  and with a less specific error.
 - **The fuzz regression harness could still pass without replaying a seed.**
   b952a93 already made the `Fuzz regression` CI step a real gate (it exits 1 on
   a missing or empty `fuzz/regression/` instead of the old

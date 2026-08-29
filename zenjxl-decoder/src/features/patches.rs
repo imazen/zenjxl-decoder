@@ -644,6 +644,14 @@ impl PatchesDictionary {
             })
         }
 
+        // Validate the sub-stream before trusting anything read out of it. This
+        // checks the reader's deferred errors, the bit reader's, and the ANS
+        // final-state checksum — without it a corrupt patch dictionary is
+        // accepted silently. Every other entropy sub-stream in the decoder does
+        // this (splines, the modular tree, coefficient orders, ICC, the context
+        // map); patches was the one that did not.
+        patches_reader.check_final_state(&patches_histograms, br)?;
+
         let mut patches_dict = PatchesDictionary {
             positions,
             blendings,

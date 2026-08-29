@@ -635,18 +635,22 @@ impl Histograms {
         } else {
             br.read(2)? as usize + 5
         };
-        let num_histograms = *context_map.iter().max().unwrap() + 1;
+        // Widen before adding: `context_map` is `Vec<u8>`, and a cluster index
+        // of 255 is legal — `decode_context_map` only rejects values above
+        // `u8::MAX`, and `verify_context_map` requires every value below the
+        // maximum to be present, so a 256-cluster map is constructible. In u8
+        // that `+ 1` overflowed: a panic under debug assertions, and a wrap to
+        // zero in release, which left `uint_configs` empty and the codes
+        // decoded for no histograms at all. Both sibling sites already widen
+        // first (`Histograms::num_histograms`, `verify_context_map`).
+        let num_histograms = *context_map.iter().max().unwrap() as usize + 1;
         let uint_configs = ((0..num_histograms).map(|_| HybridUint::decode(log_alpha_size, br)))
             .collect::<Result<_, Error>>()?;
 
         let codes = if use_prefix_code {
-            Codes::Huffman(HuffmanCodes::decode(num_histograms as usize, br)?)
+            Codes::Huffman(HuffmanCodes::decode(num_histograms, br)?)
         } else {
-            Codes::Ans(AnsCodes::decode(
-                num_histograms as usize,
-                log_alpha_size,
-                br,
-            )?)
+            Codes::Ans(AnsCodes::decode(num_histograms, log_alpha_size, br)?)
         };
 
         Ok(Histograms {

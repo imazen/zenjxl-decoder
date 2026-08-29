@@ -150,6 +150,14 @@ struct Decoded {
     data: Vec<u8>,
 }
 
+/// One decoded grid entry: its label, how strictly it is compared, and either
+/// the decoded image or the error text.
+type GridResult = (String, Strictness, Result<Decoded, String>);
+
+/// A whole grid decoded under one token permutation, tagged with that
+/// permutation's label.
+type PermutationRun = (String, Vec<GridResult>);
+
 /// How strictly a given (fixture, option set) pair is compared.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Strictness {
@@ -207,9 +215,7 @@ fn grid() -> Vec<(&'static str, &'static str, JxlDecoderOptions, Strictness)> {
 /// A fixture that fails to decode records the error text instead of pixels:
 /// *whether* a stream decodes, and which error it reports, must also not depend
 /// on the CPU.
-fn decode_grid(
-    inputs: &[(&'static str, Vec<u8>)],
-) -> Vec<(String, Strictness, Result<Decoded, String>)> {
+fn decode_grid(inputs: &[(&'static str, Vec<u8>)]) -> Vec<GridResult> {
     let mut out = Vec::new();
     for (name, opt_name, opts, strictness) in grid() {
         let data = &inputs
@@ -279,7 +285,7 @@ fn decode_is_identical_on_every_dispatch_tier() {
         })
         .collect();
 
-    let mut baseline: Option<(String, Vec<(String, Strictness, Result<Decoded, String>)>)> = None;
+    let mut baseline: Option<PermutationRun> = None;
     let mut labels: Vec<String> = Vec::new();
     let mut worst_diff = 0u8;
     let mut worst_fraction = 0.0f64;

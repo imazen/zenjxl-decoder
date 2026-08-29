@@ -194,7 +194,7 @@ impl UnconditionalCoder<()> for Permutation {
                 .map_err(|e| e.decompose().0)?;
             let mut reader =
                 SymbolReader::new(&histograms, br, None).map_err(|e| e.decompose().0)?;
-            Permutation::decode(
+            let decoded = Permutation::decode(
                 size,
                 0,
                 &histograms,
@@ -202,7 +202,19 @@ impl UnconditionalCoder<()> for Permutation {
                 &mut reader,
                 &crate::util::MemoryTracker::default(),
             )
-            .map_err(|e| e.decompose().0)
+            .map_err(|e| e.decompose().0);
+            // `Permutation::decode` bounds-checks each Lehmer code, so a
+            // corrupt stream still yields a *valid* permutation — just the
+            // wrong one, silently reordering the sections this TOC addresses.
+            // The ANS final-state checksum is what catches that, and nothing
+            // else here does: `decode` checks the bit reader per symbol but
+            // never the reader's final state.
+            decoded.and_then(|permutation| {
+                reader
+                    .check_final_state(&histograms, br)
+                    .map(|()| permutation)
+                    .map_err(|e| e.decompose().0)
+            })
         } else {
             Ok(Permutation::default())
         };
