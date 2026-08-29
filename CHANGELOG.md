@@ -8,6 +8,42 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- **The same file decoded differently depending on the CPU, in three separate
+  places.** Six hand-written SIMD tiers dispatch at runtime, and nothing
+  checked that they agreed. The fuzzers could not have found any of this:
+  `fuzz/` builds with `default-features = false`, so it only ever exercises the
+  scalar tier.
+  - `round_store_u8`/`round_store_u16` documented out-of-range input as
+    "unspecified", and the tiers duly disagreed. A **negative sample stored 255
+    on avx512 and 0 on every other tier** — a black/white inversion selected by
+    the CPU — because `_mm512_cvtusepi32_epi8` (`vpmovusdb`) reads its i32 lanes
+    as unsigned. The reachable caller is the Gamma/DCI branch of
+    `XybToU8Stage`, which clamps the *absolute* value before the transfer
+    function and restores the sign with `copysign`; measured on
+    `3x3_srgb_lossy.jxl`, samples from **-44.6 to +262.3** reach that store, and
+    reproducing the avx512 conversion on neon flips 7 of its 36 output bytes.
+    A second divergence was found while writing the test: **large positive
+    samples stored 0 on sse42/avx and 255 on neon**, because `cvtps_epi32` maps
+    out-of-range floats (`+inf` included) to `INT_MIN` while `vcvtq_s32_f32`
+    saturates to `INT_MAX`. Both are fixed by clamping in float space *before*
+    the integer conversion, at the trait layer so every caller is covered
+    (5afe0d5).
+  - **Exact halves rounded away from zero on the scalar tier and to even on all
+    five SIMD tiers.** Ties-to-even is what the hardware rounding mode gives, so
+    the scalar outlier moved. This is the tier that runs on **i686**, on wasm
+    without simd128, and in the fuzzers, so the crate's "matches djxl
+    bit-for-bit" claim did not hold there (5afe0d5).
+  - **A lossless file decoded differently per CPU.** `hsqueeze`/`vsqueeze` split
+    at `h & !(lanes - 1)`, sending leading rows through the vector body and the
+    remainder through a scalar tail — two independent implementations, the body
+    in wrapping i32 and the tail in i64 narrowed with `as i32`. They agree until
+    something overflows i32 and then diverge, because `diff / 2` does not
+    commute with wrapping; for `(0, i32::MAX, i32::MIN, i32::MAX)` they returned
+    `(1700091220, -1700091221)` vs `(1073741823, -1073741824)`. Since the split
+    point is the lane count, the output moved with the CPU. The duplicate is
+    deleted: the tail now calls the same `unsqueeze_impl` at `LEN == 1`. Streams
+    that do not overflow — everything a valid encoder emits — decode to exactly
+    the same bytes as before (c09eb6e).
 - **The fuzz regression harness could still pass without replaying a seed.**
   b952a93 already made the `Fuzz regression` CI step a real gate (it exits 1 on
   a missing or empty `fuzz/regression/` instead of the old
@@ -35,6 +71,26 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   (`--no-default-features` and `--features wasm128`): all 21 seeds replay.
 
 ### Added
+
+- **A cross-tier differential decode gate** (`tests/cross_tier_determinism.rs`).
+  `archmage::testing::for_each_token_permutation` disables SIMD tokens
+  process-wide, so `summon()` falls through and the *whole decoder* — not one
+  kernel — runs on the lower tier; the test decodes a fixture grid under every
+  permutation the host supports and compares the results. Lossless fixtures
+  decoded with dithering off must be **byte-identical**, since the pipeline is
+  integer-valued there and lossless is exact by definition; float-pipeline
+  fixtures are held to an envelope of at most 1 per byte and 0.1% of the image,
+  because `mul_add` is fused on avx/avx512/neon and unfused on sse42/wasm128
+  (which have no FMA instruction), so those tiers round once versus twice. That
+  envelope is two orders of magnitude tighter than any of the defects above,
+  all of which move a byte between 0 and 255. Per-sample rules the envelope
+  cannot see are pinned exactly instead by `round_store_u8_contract` in
+  zenjxl-decoder-simd, which runs on every tier via
+  `test_all_instruction_sets!`. Measured on aarch64 across 25 permutations:
+  worst per-byte difference 1, worst differing fraction 0.0122%. Coverage is
+  bounded by the host — an aarch64 machine cannot execute the x86 tiers — so
+  the test prints the permutations it actually ran, making an absent tier
+  visible in the log rather than silently green (652b39c).
 
 - **A `Fuzz targets compile` gate covering all six fuzz targets, on push and on
   pull requests.** Three of them were reached by no workflow at all:
