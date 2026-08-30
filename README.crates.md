@@ -33,7 +33,7 @@ assert_eq!(image.data.len(), width * height * channels);
 
 Need only the dimensions? [`read_header(&data)`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/fn.read_header.html) parses the header (and ICC profile) without decoding pixels and returns a `JxlImageInfo`; the size is `header.info.size`.
 
-**Output format.** `decode` / `decode_with` always emit **8-bit interleaved** pixels with an alpha channel: `RGBA8` (4 channels) for color images, or `GrayAlpha8` (2 channels) when `image.is_grayscale` is `true`. Images with no source alpha get an opaque `255` alpha. Alpha is **straight (not premultiplied)** by default — set `premultiply_output` on the options for premultiplied output. Pixels are in the output color profile (`image.output_profile`); for XYB / wide-gamut sources this is sRGB with the sRGB transfer function applied, so HDR / float values are range-mapped into u8, not returned as floats. Only the first frame is decoded; for animation use the streaming [`JxlDecoder`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/struct.JxlDecoder.html) API.
+**Output format.** `decode` / `decode_with` always emit **8-bit interleaved** pixels with an alpha channel: `RGBA8` (4 channels) for color images, or `GrayAlpha8` (2 channels) when `image.is_grayscale` is `true`. Images with no source alpha get an opaque `255` alpha. Alpha is **straight (not premultiplied)** by default — set `premultiply_output` on the options for premultiplied output. Pixels are in the output color profile (`image.output_profile`); for XYB / wide-gamut sources this is sRGB with the sRGB transfer function applied, so HDR / float values are range-mapped into u8, not returned as floats. Only the first frame is decoded; for animation use the streaming [`JxlDecoder`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/struct.JxlDecoder.html) API. 8-bit output is **blue-noise dithered** like libjxl's `djxl` (a fixed, position-indexed pattern below half a code, so lossless 8-bit content is untouched and streamed and one-shot decodes agree); `JxlDecoderOptions::with_dither_u8(false)` gives plain round-to-nearest.
 
 ## Decoding untrusted input
 
@@ -63,7 +63,7 @@ let image = decode_with(&data, options)?;
 |-------|---------|-------------|
 | `max_pixels` | 2^28 (~256M) | 120M |
 | `max_extra_channels` | 256 | 16 |
-| `max_icc_size` | 256 MB | 1 MB |
+| `max_icc_size` | 256 MB | 16 MB |
 | `max_tree_size` | 4M nodes | 1M nodes |
 | `max_patches` | (derived from image size) | 64K |
 | `max_spline_points` | 1M | 64K |
@@ -209,21 +209,22 @@ This is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs) (BSD-3-Claus
 
 | | |
 |:--|:--|
-| **Codecs** ¹ | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zenbitmaps] · [heic] · [zentiff] · [zenpdf] · [zensvg] · [zenjp2] · [zenraw] · [ultrahdr] |
-| Codec internals | **zenjxl-decoder** · [jxl-encoder] · [zenrav1e] · [rav1d-safe] · [zenavif-parse] · [zenavif-serialize] |
+| **Codecs** ¹ | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · **zenjxl-decoder** · [jxl-encoder] · [zenbitmaps] · [heic] · [zentiff] · [zenpdf] · [zensvg] · [zenjp2] · [zenraw] · [ultrahdr] |
+| Codec internals | [zenrav1e] · [rav1d-safe] · [zenravif] · [zenavif-parse] · [zenavif-serialize] |
 | Compression | [zenflate] · [zenzop] · [zenzstd] |
 | Processing | [zenresize] · [zenquant] · [zenblend] · [zenfilters] · [zensally] · [zentone] |
-| Pixels & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] |
+| Pixels & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] · [zenyuv] |
 | Pipeline & framework | [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode] · [zenwasm] · [zentract] |
 | Metrics | [zensim] · [fast-ssim2] · [butteraugli] · [zenmetrics] · [resamplescope-rs] |
-| Pickers & ML | [zenanalyze] · [zenpredict] · [zenpicker] |
+| Pickers & ML | [zenanalyze] · [zenpredict] · [zenpicker] · [zenanalyze-api] |
+| Test corpora | [codec-corpus] · [imazen-26] |
 | Products | [Imageflow] image engine ([.NET][imageflow-dotnet] · [Node][imageflow-node] · [Go][imageflow-go]) · [Imageflow Server] · [ImageResizer] (C#) |
 
 <sub>¹ pure-Rust, `#![forbid(unsafe_code)]` codecs, as of 2026</sub>
 
 ### General Rust awesomeness
 
-[zenbench] · [archmage] · [magetypes] · [enough] · [whereat] · [cargo-copter]
+[zenbench] · [archmage] · [magetypes] · [enough] · [whereat] · [cargo-copter] · [zenutils]
 
 [Open source](https://www.imazen.io/open-source) · [@imazen](https://github.com/imazen) · [@lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith)
 
@@ -233,36 +234,38 @@ This is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs) (BSD-3-Claus
 [zengif]: https://github.com/imazen/zengif
 [zenavif]: https://github.com/imazen/zenavif
 [zenjxl]: https://github.com/imazen/zenjxl
+[jxl-encoder]: https://github.com/imazen/jxl-encoder
 [zenbitmaps]: https://github.com/imazen/zenbitmaps
 [heic]: https://github.com/imazen/heic
-[zentiff]: https://github.com/imazen/zentiff
-[zenpdf]: https://github.com/imazen/zenpdf
+[zentiff]: https://github.com/imazen/zenextras
+[zenpdf]: https://github.com/imazen/zenextras
 [zensvg]: https://github.com/imazen/zenextras
 [zenjp2]: https://github.com/imazen/zenextras
 [zenraw]: https://github.com/imazen/zenraw
 [ultrahdr]: https://github.com/imazen/ultrahdr
-[jxl-encoder]: https://github.com/imazen/jxl-encoder
 [zenrav1e]: https://github.com/imazen/zenrav1e
 [rav1d-safe]: https://github.com/imazen/rav1d-safe
-[zenavif-parse]: https://github.com/imazen/zenavif-parse
-[zenavif-serialize]: https://github.com/imazen/zenavif-serialize
+[zenravif]: https://github.com/imazen/cavif-rs
+[zenavif-parse]: https://github.com/imazen/zenavif
+[zenavif-serialize]: https://github.com/imazen/zenavif
 [zenflate]: https://github.com/imazen/zenflate
 [zenzop]: https://github.com/imazen/zenzop
 [zenzstd]: https://github.com/imazen/zenzstd
 [zenresize]: https://github.com/imazen/zenresize
 [zenquant]: https://github.com/imazen/zenquant
 [zenblend]: https://github.com/imazen/zenblend
-[zenfilters]: https://github.com/imazen/zenfilters
+[zenfilters]: https://github.com/imazen/zenpipe
 [zensally]: https://github.com/imazen/zensally
 [zentone]: https://github.com/imazen/zentone
 [zenpixels]: https://github.com/imazen/zenpixels
 [zenpixels-convert]: https://github.com/imazen/zenpixels
 [linear-srgb]: https://github.com/imazen/linear-srgb
 [garb]: https://github.com/imazen/garb
+[zenyuv]: https://github.com/imazen/zenjpeg
 [zenpipe]: https://github.com/imazen/zenpipe
 [zencodec]: https://github.com/imazen/zencodec
-[zencodecs]: https://github.com/imazen/zencodecs
-[zenlayout]: https://github.com/imazen/zenlayout
+[zencodecs]: https://github.com/imazen/zenpipe
+[zenlayout]: https://github.com/imazen/zenpipe
 [zennode]: https://github.com/imazen/zennode
 [zenwasm]: https://github.com/imazen/zenwasm
 [zentract]: https://github.com/imazen/zentract
@@ -274,12 +277,16 @@ This is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs) (BSD-3-Claus
 [zenanalyze]: https://github.com/imazen/zenanalyze
 [zenpredict]: https://github.com/imazen/zenanalyze
 [zenpicker]: https://github.com/imazen/zenanalyze
+[zenanalyze-api]: https://github.com/imazen/zenanalyze
+[codec-corpus]: https://github.com/imazen/codec-corpus
+[imazen-26]: https://github.com/imazen/imazen-26
 [zenbench]: https://github.com/imazen/zenbench
 [archmage]: https://github.com/imazen/archmage
 [magetypes]: https://github.com/imazen/archmage
 [enough]: https://github.com/imazen/enough
 [whereat]: https://github.com/lilith/whereat
 [cargo-copter]: https://github.com/imazen/cargo-copter
+[zenutils]: https://github.com/imazen/zenutils
 [Imageflow]: https://github.com/imazen/imageflow
 [Imageflow Server]: https://github.com/imazen/imageflow-dotnet-server
 [ImageResizer]: https://github.com/imazen/resizer
