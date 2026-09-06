@@ -46,12 +46,38 @@ macro_rules! bench_image {
         $group.throughput_unit("pixels");
         let label = $name.strip_suffix(".jxl").unwrap();
         $group.bench(label, move |b| {
+            #[cfg(target_arch = "aarch64")]
+            archmage::NeonToken::dangerously_disable_token_process_wide(false)
+                .expect("restore NEON for normal decode benchmarks");
             b.iter(|| zenjxl_decoder::decode(zenbench::black_box(&data)).unwrap())
         });
     }};
 }
 
 fn bench_decode(suite: &mut Suite) {
+    #[cfg(target_arch = "aarch64")]
+    for name in [
+        "cafe_web_q80.jxl",
+        "portrait_4k_q75.jxl",
+        "green_queen_modular_e3.jxl",
+        "gray_alpha_lossless.jxl",
+    ] {
+        let (data, pixels) = load_image(name);
+        suite.compare(format!("decode_tiers/{name}"), |g| {
+            g.throughput(Throughput::Elements(pixels));
+            for (label, enabled) in [("neon", true), ("scalar", false)] {
+                let data = data.clone();
+                g.bench(label, move |b| {
+                    b.with_input(move || {
+                        archmage::NeonToken::dangerously_disable_token_process_wide(!enabled)
+                            .expect("benchmark requires toggleable NEON");
+                    })
+                    .run(|_| zenjxl_decoder::decode(zenbench::black_box(&data)).unwrap())
+                });
+            }
+        });
+    }
+
     // 4K VarDCT images — main decode performance target
     suite.compare("vardct_4k", |group| {
         bench_image!(group, "portrait_4k_q75.jxl");
