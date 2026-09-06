@@ -414,7 +414,7 @@ pub struct WeightedPredictorState {
     pred: i64,
     // Position-major layout: errors for same position are contiguous
     // Layout: [pos0: p0,p1,p2,p3] [pos1: p0,p1,p2,p3] ...
-    pred_errors_buffer: Vec<u32>,
+    pred_errors_buffer: Vec<[u32; NUM_PREDICTORS]>,
     error: Vec<i32>,
     wp_header: WeightedHeader,
 }
@@ -428,7 +428,7 @@ impl WeightedPredictorState {
             // Position-major layout: errors for same position are contiguous
             // Layout: [pos0: p0,p1,p2,p3] [pos1: p0,p1,p2,p3] ...
             // This gives better cache locality when accessing all predictors for a position
-            pred_errors_buffer: Vec::try_from_elem(0u32, num_errors * NUM_PREDICTORS)
+            pred_errors_buffer: Vec::try_from_elem([0u32; NUM_PREDICTORS], num_errors)
                 .map_err(|e| at!(Error::from(e)))?,
             error: Vec::try_from_elem(0i32, num_errors).map_err(|e| at!(Error::from(e)))?,
             wp_header: wp_header.clone(),
@@ -438,21 +438,13 @@ impl WeightedPredictorState {
     /// Get all predictor errors for a given position (contiguous in memory)
     #[inline(always)]
     fn get_errors_at_pos(&self, pos: usize) -> &[u32; NUM_PREDICTORS] {
-        // Layout: position-major, NUM_PREDICTORS elements per position.
-        // Using array_chunks avoids try_into().unwrap() overhead on every call.
-        let start = pos * NUM_PREDICTORS;
-        self.pred_errors_buffer[start..start + NUM_PREDICTORS]
-            .first_chunk()
-            .unwrap()
+        &self.pred_errors_buffer[pos]
     }
 
     /// Get mutable reference to all predictor errors for a given position
     #[inline(always)]
     fn get_errors_at_pos_mut(&mut self, pos: usize) -> &mut [u32; NUM_PREDICTORS] {
-        let start = pos * NUM_PREDICTORS;
-        self.pred_errors_buffer[start..start + NUM_PREDICTORS]
-            .first_chunk_mut()
-            .unwrap()
+        &mut self.pred_errors_buffer[pos]
     }
 
     /// Persist the state needed to continue prediction on the next group
