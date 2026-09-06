@@ -1,0 +1,13 @@
+   Compiling zenjxl-decoder v0.4.0 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.49s
+     Running tests/cross_tier_determinism.rs (target/debug/deps/cross_tier_determinism-b017e6167707fab6)
+
+running 2 tests
+test decode_is_deterministic_when_parallel ... ok
+test decode_is_identical_on_every_dispatch_tier has been running for over 60 seconds
+cross-tier decode: 38 comparison(s) over 25 permutation(s); worst per-byte difference 1, worst differing fraction 0.0122%
+cross-tier decode: permutations: all enabled | NEON+AES disabled | NEON+SHA3 disabled | NEON+AES, NEON+SHA3 disabled | NEON+CRC disabled | NEON+AES, NEON+CRC disabled | NEON+SHA3, NEON+CRC disabled | NEON+AES, NEON+SHA3, NEON+CRC disabled | Arm64-v3 disabled | NEON+AES, Arm64-v3 disabled | NEON+SHA3, Arm64-v3 disabled | NEON+AES, NEON+SHA3, Arm64-v3 disabled | NEON+CRC, Arm64-v3 disabled | NEON+AES, NEON+CRC, Arm64-v3 disabled | NEON+SHA3, NEON+CRC, Arm64-v3 disabled | NEON+AES, NEON+SHA3, NEON+CRC, Arm64-v3 disabled | Arm64-v2, Arm64-v3 disabled | NEON+AES, Arm64-v2, Arm64-v3 disabled | NEON+SHA3, Arm64-v2, Arm64-v3 disabled | NEON+AES, NEON+SHA3, Arm64-v2, Arm64-v3 disabled | NEON+CRC, Arm64-v2, Arm64-v3 disabled | NEON+AES, NEON+CRC, Arm64-v2, Arm64-v3 disabled | NEON+SHA3, NEON+CRC, Arm64-v2, Arm64-v3 disabled | NEON+AES, NEON+SHA3, NEON+CRC, Arm64-v2, Arm64-v3 disabled | NEON, NEON+AES, NEON+SHA3, NEON+CRC, Arm64-v2, Arm64-v3 disabled
+test decode_is_identical_on_every_dispatch_tier ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 100.40s
+

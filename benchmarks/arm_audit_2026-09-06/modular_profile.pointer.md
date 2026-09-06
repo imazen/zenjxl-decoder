@@ -7,3 +7,5 @@ Production `17df9a31`, Apple M4 Pro, Rust 1.98 / LLVM 22. Built using `cargo bui
 - `/Users/lilith/tmp/arm-all-2026-09-06/jxl-wp-before.s` — SHA-256 `3456652af7ea79a200a2c596734b847158559a9ae30a4d4fe04a4bf550e48c6c`
 
 Command: `target/release/examples/heaptrack_decode zenjxl-decoder/resources/test/green_queen_modular_e3.jxl 2000`, with `/usr/bin/time -l`. Sampling: `sample <pid> 5 -file <sample path>`. No cloud/NAS mirror made.
+
+Array experiment `a8a46e2e`: `/Users/lilith/tmp/arm-all-2026-09-06/jxl-wp-after.s` — SHA-256 `24bc9fa5ff9c5c8488e6418dc7038673b509ac371dd374256766796c2a6084bb`. Same heaptrack_decode example build and otool -tvV extraction as the original. Original/experimental binaries retained in `/Users/lilith/work/codec-artifacts/zenjxl-decoder-arm-audit/heaptrack_decode-{before,after}-array`; no cloud/NAS mirror.

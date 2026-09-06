@@ -1,0 +1,4 @@
+    Checking zenjxl-decoder-simd v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-simd)
+   Compiling zenjxl-decoder-macros v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-macros)
+    Checking zenjxl-decoder v0.4.0 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.43s

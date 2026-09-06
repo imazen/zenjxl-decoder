@@ -40,16 +40,17 @@ fn load_image(name: &str) -> (Vec<u8>, u64) {
 }
 
 macro_rules! bench_image {
-    ($group:expr, $name:literal) => {{
+    ($suite:expr, $group:literal, $name:literal) => {{
         let (data, pixels) = load_image($name);
-        $group.throughput(Throughput::Elements(pixels));
-        $group.throughput_unit("pixels");
-        let label = $name.strip_suffix(".jxl").unwrap();
-        $group.bench(label, move |b| {
-            #[cfg(target_arch = "aarch64")]
-            archmage::NeonToken::dangerously_disable_token_process_wide(false)
-                .expect("restore NEON for normal decode benchmarks");
-            b.iter(|| zenjxl_decoder::decode(zenbench::black_box(&data)).unwrap())
+        $suite.compare(concat!($group, "/", $name), |group| {
+            group.throughput(Throughput::Elements(pixels));
+            group.throughput_unit("pixels");
+            group.bench("decode", move |b| {
+                #[cfg(target_arch = "aarch64")]
+                archmage::NeonToken::dangerously_disable_token_process_wide(false)
+                    .expect("restore NEON for normal decode benchmarks");
+                b.iter(|| zenjxl_decoder::decode(zenbench::black_box(&data)).unwrap())
+            });
         });
     }};
 }
@@ -79,16 +80,12 @@ fn bench_decode(suite: &mut Suite) {
     }
 
     // 4K VarDCT images — main decode performance target
-    suite.compare("vardct_4k", |group| {
-        bench_image!(group, "portrait_4k_q75.jxl");
-        bench_image!(group, "city_4k_q75.jxl");
-    });
+    bench_image!(suite, "vardct_4k", "portrait_4k_q75.jxl");
+    bench_image!(suite, "vardct_4k", "city_4k_q75.jxl");
 
     // Web-sized VarDCT images
-    suite.compare("vardct_web", |group| {
-        bench_image!(group, "cafe_web_q80.jxl");
-        bench_image!(group, "bicycles_web_q85.jxl");
-    });
+    bench_image!(suite, "vardct_web", "cafe_web_q80.jxl");
+    bench_image!(suite, "vardct_web", "bicycles_web_q85.jxl");
 
     // Modular images — where the biggest optimization gains are.
     //
@@ -98,22 +95,22 @@ fn bench_decode(suite: &mut Suite) {
     // grayscale_patches_modular, came out 14% SLOWER with SIMD on. Two images
     // could not distinguish "that image" from "the mode", so every modular
     // fixture in resources/test is now benched.
-    suite.compare("modular", |group| {
-        bench_image!(group, "green_queen_modular_e3.jxl");
-        bench_image!(group, "issue648_palette0.jxl");
-        bench_image!(group, "grayscale_patches_modular.jxl");
-        bench_image!(group, "small_grayscale_patches_modular.jxl");
-        bench_image!(group, "small_grayscale_patches_modular_with_icc.jxl");
-        bench_image!(group, "gray_alpha_lossless.jxl");
-        bench_image!(group, "3x3_srgb_lossless.jxl");
-        bench_image!(group, "3x3a_srgb_lossless.jxl");
-    });
+    bench_image!(suite, "modular", "green_queen_modular_e3.jxl");
+    bench_image!(suite, "modular", "issue648_palette0.jxl");
+    bench_image!(suite, "modular", "grayscale_patches_modular.jxl");
+    bench_image!(suite, "modular", "small_grayscale_patches_modular.jxl");
+    bench_image!(
+        suite,
+        "modular",
+        "small_grayscale_patches_modular_with_icc.jxl"
+    );
+    bench_image!(suite, "modular", "gray_alpha_lossless.jxl");
+    bench_image!(suite, "modular", "3x3_srgb_lossless.jxl");
+    bench_image!(suite, "modular", "3x3a_srgb_lossless.jxl");
 
     // Small images — tests overhead and fast paths
-    suite.compare("small", |group| {
-        bench_image!(group, "green_queen_vardct_e3.jxl");
-        bench_image!(group, "grayscale_patches_modular.jxl");
-    });
+    bench_image!(suite, "small", "green_queen_vardct_e3.jxl");
+    bench_image!(suite, "small", "grayscale_patches_modular.jxl");
 }
 
 zenbench::main!(bench_decode);

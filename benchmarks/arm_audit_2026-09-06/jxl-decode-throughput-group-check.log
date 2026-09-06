@@ -1,0 +1,26 @@
+   Compiling zenjxl-decoder v0.4.0 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 16.35s
+     Running benches/decode_bench.rs (target/release/deps/decode_bench-eb2c8b22e5af8b5a)
+[zenbench] calibration: int=0.27ns/iter mem_bw=116.6GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.22ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788699860-7334.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788699860-7334
+  git: 5777c5b740fa6010d7accdec095b620ca238bc7f
+═══════════════════════════════════════════════════════════════
+
+  modular/3x3_srgb_lossless.jxl  200 rounds × 101 calls
+              mean ±mad µs  95% CI vs base    pixels/s
+  ╰─ decode   34.3 ±4.5µs  [33.5–35.2]µs     262K
+
+  modular/3x3a_srgb_lossless.jxl  200 rounds × 92 calls
+              mean ±mad µs  95% CI vs base    pixels/s
+  ╰─ decode   37.2 ±4.3µs  [36.0–38.3]µs     242K [1]
+  [1] CV=23%
+
+  total: 48.9s  (2 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=modular/3x3_srgb_lossless.jxl benchmark=decode  |  vs_base=baseline  |  min=9.80µs mean=34.35µs median=34.79µs mad=4.46µs  |  throughput=262.02 Kpixels/s  |  n=200 cv=17.7% rounds=200 calls=101 mean_ci=[33.50µs 35.18µs] cold=10.25µs
+group=modular/3x3a_srgb_lossless.jxl benchmark=decode  |  vs_base=baseline  |  min=11.28µs mean=37.16µs median=38.51µs mad=4.34µs  |  throughput=242.19 Kpixels/s  |  n=200 cv=22.5% rounds=200 calls=92 mean_ci=[35.98µs 38.30µs] cold=11.38µs

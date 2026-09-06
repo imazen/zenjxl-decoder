@@ -1,0 +1,73 @@
+   Compiling zenjxl-decoder v0.4.0 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 31.64s
+     Running benches/decode_bench.rs (target/release/deps/decode_bench-eb2c8b22e5af8b5a)
+[zenbench] calibration: int=0.28ns/iter mem_bw=118.4GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.22ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788699588-7030.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788699588-7030
+  git: a8a46e2e2e87d02dda906f84df302676ce679e5e
+═══════════════════════════════════════════════════════════════
+
+  decode_tiers/green_queen_modular_e3.jxl  200 rounds × 1 calls
+             mean ±mad ms  95% CI vs base   ops/s
+  ├─ neon     17.7 ±0.5ms  [17.5–17.9]ms    14.5M
+  ╰─ scalar   17.8 ±2.0ms  [-1.8%–+2.4%]    14.5M [1]
+
+  neon    ██████████████████████████████████████████████████████████ 14.5 Mops/s
+  scalar  ██████████████████████████████████████████████████████████ 14.5 Mops/s
+  [1] CI crosses zero
+
+  modular  12 rounds × 7 calls
+                                  mean ±mad ms  95% CI vs base       pixels/s
+  ├─ green_queen_modular_e3        16.7 ±0.1ms  [16.6–16.7]ms          540
+  ├─ issue648_palette0            105.6 ±0.8ms  [+531.8%–+536.1%]     85.2
+  ├─ grayscale_patches_modular      7.1 ±0.0ms  [-58.2%–-56.8%]      1.27K
+  ├─ small_grayscale_patches_m…     0.7 ±0.0ms  [-96.3%–-95.2%]      12.8K
+  ├─ small_grayscale_patches_m…     0.7 ±0.0ms  [-96.4%–-95.4%]      13.1K
+  ├─ gray_alpha_lossless            0.2 ±0.0ms  [-99.2%–-98.6%]      49.0K
+  ├─ 3x3_srgb_lossless              0.0 ±0.0ms  [-100.4%–-99.5%]      677K [1]
+  ╰─ 3x3a_srgb_lossless             0.0 ±0.0ms  [-100.4%–-99.5%]      617K
+
+  3x3_srgb_lossless           ███████████████████████████████████ 677 Kpixels/s
+  3x3a_srgb_lossless          ████████████████████████████████ 617 Kpixels/s
+  gray_alpha_lossless         ███ 49.0 Kpixels/s
+  small_grayscale_patches_m…  █ 13.1 Kpixels/s
+  small_grayscale_patches_m…  █ 12.8 Kpixels/s
+  grayscale_patches_modular   █ 1.27 Kpixels/s
+  green_queen_modular_e3      █ 540 pixels/s
+  issue648_palette0           █ 85.2 pixels/s
+  [1] CV=22%
+
+  total: 43.1s  (5 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=decode_tiers/green_queen_modular_e3.jxl benchmark=neon  |  vs_base=baseline  |  min=16.24ms mean=17.74ms median=16.64ms mad=506.33µs  |  throughput=14.55 Mops/s  |  n=200 cv=7.7% rounds=200 calls=1 mean_ci=[17.55ms 17.93ms] cold=16.59ms
+group=decode_tiers/green_queen_modular_e3.jxl benchmark=scalar  |  vs_base_pct=+0.36 ci=[-1.75% +2.41%] significant=false effect=0.05 p=0.4288  |  min=16.24ms mean=17.80ms median=18.05ms mad=2.05ms  |  throughput=14.49 Mops/s  |  n=200 cv=7.5% rounds=200 calls=1 mean_ci=[17.61ms 17.99ms] cold=16.34ms
+group=modular benchmark=green_queen_modular_e3  |  vs_base=baseline  |  min=16.48ms mean=16.65ms median=16.61ms mad=128.63µs  |  throughput=540.44 pixels/s  |  n=12 cv=0.9% rounds=12 calls=7 mean_ci=[16.58ms 16.74ms] cold=16.68ms
+group=modular benchmark=issue648_palette0  |  vs_base_pct=+533.98 ci=[+531.84% +536.11%] significant=true effect=184.60 p=0.0025  |  min=104.51ms mean=105.58ms median=105.50ms mad=774.09µs  |  throughput=85.24 pixels/s  |  n=12 cv=0.6% rounds=12 calls=7 mean_ci=[105.21ms 105.93ms] cold=109.28ms
+group=modular benchmark=grayscale_patches_modular  |  vs_base_pct=-57.45 ci=[-58.17% -56.78%] significant=true effect=-72.60 p=0.0025  |  min=6.97ms mean=7.09ms median=7.02ms mad=39.44µs  |  throughput=1.27 Kpixels/s  |  n=12 cv=1.6% rounds=12 calls=7 mean_ci=[7.03ms 7.15ms] cold=7.03ms
+group=modular benchmark=small_grayscale_patches_modular  |  vs_base_pct=-95.73 ci=[-96.27% -95.20%] significant=true effect=-148.78 p=0.0039  |  min=632.01µs mean=705.47µs median=655.64µs mad=19.65µs  |  throughput=12.76 Kpixels/s  |  n=12 cv=11.9% rounds=12 calls=7 mean_ci=[662.51µs 750.36µs] cold=698.42µs
+group=modular benchmark=small_grayscale_patches_modular_with_icc  |  vs_base_pct=-95.86 ci=[-96.35% -95.42%] significant=true effect=-161.16 p=0.0039  |  min=650.19µs mean=686.86µs median=662.06µs mad=11.60µs  |  throughput=13.10 Kpixels/s  |  n=12 cv=9.0% rounds=12 calls=7 mean_ci=[659.13µs 724.84µs] cold=645.71µs
+group=modular benchmark=gray_alpha_lossless  |  vs_base_pct=-98.89 ci=[-99.21% -98.60%] significant=true effect=-247.20 p=0.0059  |  min=176.59µs mean=183.62µs median=178.44µs mad=1.54µs  |  throughput=49.01 Kpixels/s  |  n=12 cv=9.4% rounds=12 calls=7 mean_ci=[177.90µs 194.05µs] cold=182.54µs
+group=modular benchmark=3x3_srgb_lossless  |  vs_base_pct=-99.92 ci=[-100.42% -99.48%] significant=true effect=-160.61 p=0.0025  |  min=10.53µs mean=13.29µs median=11.94µs mad=1.34µs  |  throughput=677.44 Kpixels/s  |  n=12 cv=21.5% rounds=12 calls=7 mean_ci=[11.85µs 14.95µs] cold=12.67µs
+group=modular benchmark=3x3a_srgb_lossless  |  vs_base_pct=-99.91 ci=[-100.41% -99.47%] significant=true effect=-160.61 p=0.0025  |  min=12.38µs mean=14.58µs median=13.34µs mad=1.21µs  |  throughput=617.32 Kpixels/s  |  n=12 cv=15.9% rounds=12 calls=7 mean_ci=[13.41µs 15.91µs] cold=11.04µs
+       76.70 real        50.19 user         2.37 sys
+          1476608000  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              242194  page reclaims
+                1941  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   5  messages sent
+                   4  messages received
+                   6  signals received
+                 215  voluntary context switches
+               35534  involuntary context switches
+           999088520  instructions retired
+           315498794  cycles elapsed
+            53920368  peak memory footprint

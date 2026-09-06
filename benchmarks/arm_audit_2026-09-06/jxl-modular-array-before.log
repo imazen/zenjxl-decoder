@@ -1,0 +1,72 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.05s
+     Running benches/decode_bench.rs (target/release/deps/decode_bench-eb2c8b22e5af8b5a)
+[zenbench] calibration: int=0.28ns/iter mem_bw=117.8GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.22ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788699287-6bbb.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788699287-6bbb
+  git: 5777c5b740fa6010d7accdec095b620ca238bc7f
+═══════════════════════════════════════════════════════════════
+
+  decode_tiers/green_queen_modular_e3.jxl  200 rounds × 1 calls
+             mean ±mad ms  95% CI vs base   ops/s
+  ├─ neon     17.5 ±0.9ms  [17.3–17.7]ms    14.8M
+  ╰─ scalar   17.5 ±2.1ms  [-2.1%–+2.7%]    14.7M [1]
+
+  neon    ██████████████████████████████████████████████████████████ 14.8 Mops/s
+  scalar  ██████████████████████████████████████████████████████████ 14.7 Mops/s
+  [1] CI crosses zero
+
+  modular  12 rounds × 7 calls
+                                  mean ±mad ms  95% CI vs base       pixels/s
+  ├─ green_queen_modular_e3        16.3 ±0.1ms  [16.2–16.4]ms          552
+  ├─ issue648_palette0            102.3 ±0.4ms  [+526.5%–+529.1%]     88.0
+  ├─ grayscale_patches_modular      6.9 ±0.1ms  [-58.8%–-57.1%]      1.31K
+  ├─ small_grayscale_patches_m…     0.7 ±0.0ms  [-96.2%–-95.4%]      13.0K
+  ├─ small_grayscale_patches_m…     0.7 ±0.0ms  [-96.6%–-95.1%]      13.3K
+  ├─ gray_alpha_lossless            0.2 ±0.0ms  [-99.5%–-98.4%]      49.7K
+  ├─ 3x3_srgb_lossless              0.0 ±0.0ms  [-100.5%–-99.4%]      619K [1]
+  ╰─ 3x3a_srgb_lossless             0.0 ±0.0ms  [-100.4%–-99.5%]      623K
+
+  3x3a_srgb_lossless          ███████████████████████████████████ 623 Kpixels/s
+  3x3_srgb_lossless           ███████████████████████████████████ 619 Kpixels/s
+  gray_alpha_lossless         ███ 49.7 Kpixels/s
+  small_grayscale_patches_m…  █ 13.3 Kpixels/s
+  small_grayscale_patches_m…  █ 13.0 Kpixels/s
+  grayscale_patches_modular   █ 1.31 Kpixels/s
+  green_queen_modular_e3      █ 552 pixels/s
+  issue648_palette0           █ 88.0 pixels/s
+  [1] CV=33%
+
+  total: 42.6s  (6 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=decode_tiers/green_queen_modular_e3.jxl benchmark=neon  |  vs_base=baseline  |  min=15.53ms mean=17.48ms median=16.36ms mad=908.07µs  |  throughput=14.76 Mops/s  |  n=200 cv=8.6% rounds=200 calls=1 mean_ci=[17.27ms 17.69ms] cold=16.06ms
+group=decode_tiers/green_queen_modular_e3.jxl benchmark=scalar  |  vs_base_pct=+0.32 ci=[-2.07% +2.65%] significant=false effect=0.04 p=0.4453  |  min=15.52ms mean=17.53ms median=17.39ms mad=2.13ms  |  throughput=14.71 Mops/s  |  n=200 cv=8.7% rounds=200 calls=1 mean_ci=[17.32ms 17.74ms] cold=16.62ms
+group=modular benchmark=green_queen_modular_e3  |  vs_base=baseline  |  min=16.06ms mean=16.30ms median=16.23ms mad=119.83µs  |  throughput=552.27 pixels/s  |  n=12 cv=1.2% rounds=12 calls=7 mean_ci=[16.20ms 16.41ms] cold=16.23ms
+group=modular benchmark=issue648_palette0  |  vs_base_pct=+527.82 ci=[+526.50% +529.12%] significant=true effect=305.13 p=0.0025  |  min=101.72ms mean=102.31ms median=102.41ms mad=444.39µs  |  throughput=87.97 pixels/s  |  n=12 cv=0.3% rounds=12 calls=7 mean_ci=[102.12ms 102.50ms] cold=102.19ms
+group=modular benchmark=grayscale_patches_modular  |  vs_base_pct=-57.92 ci=[-58.82% -57.06%] significant=true effect=-56.33 p=0.0025  |  min=6.68ms mean=6.86ms median=6.80ms mad=80.52µs  |  throughput=1.31 Kpixels/s  |  n=12 cv=2.0% rounds=12 calls=7 mean_ci=[6.79ms 6.94ms] cold=6.88ms
+group=modular benchmark=small_grayscale_patches_modular  |  vs_base_pct=-95.77 ci=[-96.19% -95.42%] significant=true effect=-157.41 p=1.0000  |  min=616.88µs mean=690.18µs median=646.20µs mad=22.74µs  |  throughput=13.04 Kpixels/s  |  n=12 cv=11.8% rounds=12 calls=7 mean_ci=[649.87µs 736.75µs] cold=666.33µs
+group=modular benchmark=small_grayscale_patches_modular_with_icc  |  vs_base_pct=-95.84 ci=[-96.59% -95.13%] significant=true effect=-108.97 p=0.0025  |  min=623.24µs mean=678.10µs median=651.85µs mad=11.44µs  |  throughput=13.27 Kpixels/s  |  n=12 cv=9.9% rounds=12 calls=7 mean_ci=[646.90µs 718.62µs] cold=642.71µs
+group=modular benchmark=gray_alpha_lossless  |  vs_base_pct=-98.88 ci=[-99.47% -98.38%] significant=true effect=-145.20 p=0.0039  |  min=172.13µs mean=181.00µs median=176.27µs mad=639.8ns  |  throughput=49.72 Kpixels/s  |  n=12 cv=9.0% rounds=12 calls=7 mean_ci=[175.48µs 190.85µs] cold=177.54µs
+group=modular benchmark=3x3_srgb_lossless  |  vs_base_pct=-99.92 ci=[-100.48% -99.42%] significant=true effect=-147.54 p=0.0039  |  min=10.40µs mean=14.54µs median=12.22µs mad=2.10µs  |  throughput=619.11 Kpixels/s  |  n=12 cv=32.6% rounds=12 calls=7 mean_ci=[12.24µs 17.36µs] cold=12.54µs
+group=modular benchmark=3x3a_srgb_lossless  |  vs_base_pct=-99.91 ci=[-100.38% -99.51%] significant=true effect=-187.67 p=0.0059  |  min=11.62µs mean=14.45µs median=13.57µs mad=2.23µs  |  throughput=622.78 Kpixels/s  |  n=12 cv=17.2% rounds=12 calls=7 mean_ci=[13.19µs 15.87µs] cold=12.75µs
+       44.12 real        24.87 user         1.92 sys
+           399540224  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               65485  page reclaims
+                 151  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   1  signals received
+                  35  voluntary context switches
+               32878  involuntary context switches
+           936543376  instructions retired
+           283664494  cycles elapsed
+            53232240  peak memory footprint

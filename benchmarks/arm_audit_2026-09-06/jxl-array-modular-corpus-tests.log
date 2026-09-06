@@ -1,0 +1,74 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (target/debug/deps/zenjxl_decoder-74a2bfb69af56dee)
+
+running 37 tests
+test frame::modular::transforms::squeeze::cross_tier_tests::unsqueeze_agrees_with_scalar_scalar ... ok
+test frame::modular::transforms::squeeze::cross_tier_tests::unsqueeze_agrees_with_scalar_neon ... ok
+test frame::modular::predict::tests::predict_and_update_errors ... ok
+PASS: animation_modular decoded 60x105
+test tests::coverage_boost::test_animation_modular ... ok
+PASS: modular_colorspace_0 decoded 2268x1512
+test tests::coverage_boost::test_modular_colorspace_0 ... ok
+PASS: modular_colorspace_1 decoded 2268x1512
+test tests::coverage_boost::test_modular_colorspace_1 ... ok
+PASS: modular_colorspace_6 decoded 2268x1512
+test tests::coverage_boost::test_modular_colorspace_6 ... ok
+PASS: modular_group_size_0 decoded 2268x1512
+test tests::coverage_boost::test_modular_group_size_0 ... ok
+PASS: modular_group_size_1 decoded 2268x1512
+test tests::coverage_boost::test_modular_group_size_1 ... ok
+PASS: modular_group_size_2 decoded 2268x1512
+test tests::coverage_boost::test_modular_group_size_2 ... ok
+PASS: modular_group_size_3 decoded 2268x1512
+test tests::coverage_boost::test_modular_group_size_3 ... ok
+PASS: modular_predictor_0 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_0 ... ok
+PASS: modular_predictor_1 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_1 ... ok
+PASS: modular_predictor_14 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_14 ... ok
+PASS: modular_predictor_15 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_15 ... ok
+PASS: modular_predictor_2 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_2 ... ok
+PASS: modular_predictor_5 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_5 ... ok
+PASS Animation modular: 60x105 (animated)
+test tests::feature_tests::animation_feature_tests::test_animation_modular ... ok
+PASS: modular_predictor_6 decoded 2268x1512
+test tests::coverage_boost::test_modular_predictor_6 ... ok
+PASS Modular colorspace 0 (RGB): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_colorspace_0 ... ok
+PASS Modular colorspace 1: 2268x1512
+PASS Modular colorspace 6 (YCoCg): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_colorspace_1 ... ok
+test tests::feature_tests::modular_tests::test_modular_colorspace_6 ... ok
+PASS Modular group 128x128: 2268x1512
+PASS test tests::feature_tests::modular_tests::test_modular_group_size_0 ... ok
+Modular group 256x256: 2268x1512
+test tests::feature_tests::modular_tests::test_modular_group_size_1 ... ok
+PASS Modular group 512x512: 2268x1512
+PASS Modular group 1024x1024: 2268x1512
+test tests::feature_tests::modular_tests::test_modular_group_size_2 ... ok
+test tests::feature_tests::modular_tests::test_modular_group_size_3 ... ok
+PASS Modular predictor 1 (left): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_predictor_1 ... ok
+PASS Modular predictor 0 (zero): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_predictor_0 ... ok
+PASS Modular predictor 14: 2268x1512
+test tests::feature_tests::modular_tests::test_modular_predictor_14 ... ok
+PASS Modular predictor 15 (all): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_predictor_15 ... ok
+PASS Modular predictor 2 (top): 2268x1512
+PASS Modular predictor 5 (gradient): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_predictor_2 ... ok
+test tests::feature_tests::modular_tests::test_modular_predictor_5 ... ok
+PASS Modular predictor 6 (weighted): 2268x1512
+test tests::feature_tests::modular_tests::test_modular_predictor_6 ... ok
+test render::stages::convert::test::modular_to_f32_8bit_consistency ... ok
+test render::stages::convert::test::modular_to_f32_16bit_consistency ... ok
+test tests::modular_palette::delta_palette_unpatched_hash ... ok
+test tests::modular_palette::delta_palette_weighted_predictor_matches_reference ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 800 filtered out; finished in 0.89s
+
