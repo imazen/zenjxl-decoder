@@ -42,3 +42,12 @@ Benchmark clippy with `-D warnings` and scoped formatting also passed.
 Reproduce with `just arm-decode-tiers-macos` and
 `just arm-kernel-tiers-macos`. Results describe these fixtures and kernels,
 not a codec-wide speedup or a completed modular optimization.
+
+
+## Modular decode profile
+
+A five-second native sample of 2000 repeated Green Queen modular decodes captured 3697 main-thread samples. The collapsed top-of-stack table attributes 3558 samples to `decode_modular_channel_impl<WpOnlyLookupConfig420>`; the hot interior call is `channel.rs:155`. This combines weighted prediction, entropy decoding and predictor-error updates after inlining, so the sample does not separate their individual costs.
+
+The complete run decoded 515964000 pixels in 32.38 s wall / 31.63 s user time, with maximum RSS 18055168 bytes from `time -l`. It is one 438x589 image repeated, not a size-scaling result. The profiler’s own footprint display is not used as the memory measurement. Captures and provenance are in `modular_profile.pointer.md`.
+
+The weighted predictor keeps four errors per position in a flat `Vec<u32>` and forms a checked four-element slice on each lookup. The next codegen experiment is to store `Vec<[u32; 4]>` directly, preserving the layout and arithmetic while reducing each lookup to a position bound check. Adjacent pixel decoding depends on prior decoded symbols and predictor state, so a row-wide SIMD conversion is not assumed from this profile.
