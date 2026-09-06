@@ -1,0 +1,58 @@
+   Compiling zenjxl-decoder v0.4.0 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 15.82s
+     Running benches/decode_bench.rs (target/release/deps/decode_bench-eb2c8b22e5af8b5a)
+[zenbench] calibration: int=0.27ns/iter mem_bw=117.8GiB/s mem_lat=7.4ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.22ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788673930-119e4.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788673930-119e4
+  git: 2187821e007ffba5cd0bfc5007abf43cd960574d
+═══════════════════════════════════════════════════════════════
+
+  decode_tiers/cafe_web_q80.jxl  30 rounds × 1 calls
+             mean ±mad ms  95% CI vs base     ops/s
+  ├─ neon     40.3 ±1.7ms  [39.8–40.7]ms      50.9M
+  ╰─ scalar   55.9 ±1.5ms  [+36.8%–+41.0%]    36.6M
+
+  neon    ██████████████████████████████████████████████████████████ 50.9 Mops/s
+  scalar  ██████████████████████████████████████████ 36.6 Mops/s
+
+  decode_tiers/portrait_4k_q75.jxl  7 rounds × 1 calls ⚠ only 7 rounds
+               mean ±mad ms  95% CI vs base       ops/s
+  ├─ neon      456.2 ±2.6ms  [454.3–458.0]ms      55.1M
+  ╰─ scalar   1094.0 ±7.7ms  [+139.1%–+140.5%]    23.0M [1]
+
+  neon    ██████████████████████████████████████████████████████████ 55.1 Mops/s
+  scalar  ████████████████████████ 23.0 Mops/s
+  [1] drift r=0.75 — later rounds slower
+
+  decode_tiers/green_queen_modular_e3.jxl  200 rounds × 1 calls
+             mean ±mad ms  95% CI vs base   ops/s
+  ├─ neon     17.2 ±0.7ms  [17.0–17.4]ms    15.0M
+  ╰─ scalar   17.2 ±2.0ms  [-1.8%–+2.5%]    15.0M [1]
+
+  neon    ██████████████████████████████████████████████████████████ 15.0 Mops/s
+  scalar  ██████████████████████████████████████████████████████████ 15.0 Mops/s
+  [1] CI crosses zero
+
+  decode_tiers/gray_alpha_lossless.jxl  200 rounds × 28 calls
+                mean ±mad µs  95% CI vs base      ops/s
+  ├─ neon     279.5 ±28.1µs  [276.0–283.1]µs     14.7M
+  ╰─ scalar   282.3 ±27.2µs  [-0.7%–+2.6%]       14.5M [1]
+
+  neon    ██████████████████████████████████████████████████████████ 14.7 Mops/s
+  scalar  █████████████████████████████████████████████████████████ 14.5 Mops/s
+  [1] CI crosses zero
+
+  total: 71.8s  (9 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=decode_tiers/cafe_web_q80.jxl benchmark=neon  |  vs_base=baseline  |  min=38.42ms mean=40.26ms median=40.79ms mad=1.69ms  |  throughput=50.87 Mops/s  |  n=30 cv=3.3% rounds=30 calls=1 mean_ci=[39.79ms 40.72ms] cold=39.44ms
+group=decode_tiers/cafe_web_q80.jxl benchmark=scalar  |  vs_base_pct=+38.89 ci=[+36.81% +41.01%] significant=true effect=12.77 p=0.0000  |  min=54.49ms mean=55.91ms median=55.75ms mad=1.53ms  |  throughput=36.63 Mops/s  |  n=30 cv=2.0% rounds=30 calls=1 mean_ci=[55.52ms 56.31ms] cold=55.30ms
+group=decode_tiers/portrait_4k_q75.jxl benchmark=neon  |  vs_base=baseline  |  min=452.53ms mean=456.23ms median=456.69ms mad=2.64ms  |  throughput=55.10 Mops/s  |  n=7 cv=0.6% rounds=7 calls=1 mean_ci=[454.28ms 458.03ms] cold=460.40ms
+group=decode_tiers/portrait_4k_q75.jxl benchmark=scalar  |  vs_base_pct=+139.79 ci=[+139.12% +140.46%] significant=true effect=143.20 p=1.0000  |  min=1.09s mean=1.09s median=1.09s mad=7.74ms  |  throughput=22.98 Mops/s  |  n=7 cv=0.5% rounds=7 calls=1 mean_ci=[1.09s 1.10s] cold=1.09s
+group=decode_tiers/green_queen_modular_e3.jxl benchmark=neon  |  vs_base=baseline  |  min=15.59ms mean=17.17ms median=16.15ms mad=705.04µs  |  throughput=15.03 Mops/s  |  n=200 cv=7.8% rounds=200 calls=1 mean_ci=[16.98ms 17.36ms] cold=16.14ms
+group=decode_tiers/green_queen_modular_e3.jxl benchmark=scalar  |  vs_base_pct=+0.37 ci=[-1.75% +2.47%] significant=false effect=0.05 p=0.7710  |  min=15.60ms mean=17.23ms median=17.33ms mad=1.98ms  |  throughput=14.97 Mops/s  |  n=200 cv=7.6% rounds=200 calls=1 mean_ci=[17.05ms 17.41ms] cold=16.14ms
+group=decode_tiers/gray_alpha_lossless.jxl benchmark=neon  |  vs_base=baseline  |  min=198.72µs mean=279.55µs median=279.30µs mad=28.13µs  |  throughput=14.65 Mops/s  |  n=200 cv=9.3% rounds=200 calls=28 mean_ci=[275.99µs 283.09µs] cold=168.42µs
+group=decode_tiers/gray_alpha_lossless.jxl benchmark=scalar  |  vs_base_pct=+0.99 ci=[-0.68% +2.63%] significant=false effect=0.10 p=0.1205  |  min=189.84µs mean=282.33µs median=280.70µs mad=27.21µs  |  throughput=14.51 Mops/s  |  n=200 cv=9.7% rounds=200 calls=28 mean_ci=[278.57µs 286.14µs] cold=179.21µs

@@ -1,0 +1,299 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling bitflags v2.13.1
+   Compiling serde_core v1.0.229
+   Compiling utf8parse v0.2.2
+   Compiling zerocopy v0.8.56
+   Compiling syn v2.0.119
+   Compiling syn v3.0.4
+   Compiling zerocopy-derive v0.8.56
+   Compiling anstyle-parse v1.0.0
+   Compiling serde v1.0.229
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling zmij v1.0.23
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling rustix v1.1.4
+   Compiling colorchoice v1.0.5
+   Compiling crossbeam-utils v0.8.22
+   Compiling anstream v1.0.0
+   Compiling serde_derive v1.0.229
+   Compiling errno v0.3.14
+   Compiling crossbeam-epoch v0.9.20
+   Compiling memchr v2.8.3
+   Compiling regex-syntax v0.8.11
+   Compiling autocfg v1.5.1
+   Compiling serde_json v1.0.151
+   Compiling num-traits v0.2.19
+   Compiling regex-automata v0.4.18
+   Compiling simd-adler32 v0.3.10
+   Compiling rand_core v0.10.1
+   Compiling crossbeam-deque v0.8.7
+   Compiling itoa v1.0.18
+   Compiling find-msvc-tools v0.1.11
+   Compiling once_cell v1.21.4
+   Compiling shlex v2.0.1
+   Compiling log v0.4.34
+   Compiling tracing-core v0.1.36
+   Compiling cc v1.4.4
+   Compiling strsim v0.11.1
+   Compiling heck v0.5.0
+   Compiling either v1.18.0
+   Compiling adler2 v2.0.1
+   Compiling crc32fast v1.5.1
+   Compiling paste v1.0.15
+   Compiling clap_lex v1.1.0
+   Compiling rayon-core v1.13.0
+   Compiling clap_builder v4.6.6
+   Compiling clap_derive v4.6.4
+   Compiling alloca v0.4.0
+   Compiling half v2.7.1
+   Compiling equator-macro v0.4.2
+   Compiling archmage-macros v0.9.26
+   Compiling objc2-core-foundation v0.3.2
+   Compiling getrandom v0.4.3
+   Compiling option-ext v0.2.0
+   Compiling safe_unaligned_simd v0.2.5
+   Compiling pin-project-lite v0.2.17
+   Compiling lazy_static v1.5.0
+   Compiling plotters-backend v0.3.7
+   Compiling ciborium-io v0.2.2
+   Compiling thiserror v2.0.20
+   Compiling ciborium-ll v0.2.2
+   Compiling plotters-svg v0.3.7
+   Compiling sharded-slab v0.1.7
+   Compiling tracing v0.1.44
+   Compiling clap v4.6.6
+   Compiling archmage v0.9.26
+   Compiling dirs-sys v0.5.0
+   Compiling objc2-io-kit v0.3.2
+   Compiling equator v0.4.2
+   Compiling itertools v0.13.0
+   Compiling miniz_oxide v0.9.1
+   Compiling tracing-log v0.2.0
+   Compiling env_filter v2.0.0
+   Compiling matchers v0.2.0
+   Compiling bytemuck_derive v1.12.0
+   Compiling thiserror-impl v2.0.20
+   Compiling test-log-core v0.2.21
+   Compiling thread_local v1.1.10
+   Compiling same-file v1.0.6
+   Compiling nu-ansi-term v0.50.3
+   Compiling enough v0.4.4
+   Compiling cast v0.3.0
+   Compiling criterion-plot v0.8.2
+   Compiling bytemuck v1.25.2
+   Compiling tracing-subscriber v0.3.23
+   Compiling walkdir v2.5.0
+   Compiling test-log-macros v0.2.21
+   Compiling env_logger v0.11.11
+   Compiling aligned-vec v0.6.4
+   Compiling flate2 v1.1.10
+   Compiling zenjxl-decoder-simd v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-simd)
+   Compiling rayon v1.12.0
+   Compiling sysinfo v0.36.1
+   Compiling dirs v6.0.0
+   Compiling ciborium v0.2.2
+   Compiling plotters v0.3.7
+   Compiling miniz_oxide v0.8.9
+   Compiling tinytemplate v1.2.1
+   Compiling chacha20 v0.10.2
+   Compiling fdeflate v0.3.7
+   Compiling fd-lock v4.0.4
+   Compiling terminal_size v0.4.4
+   Compiling fs4 v1.1.0
+   Compiling regex v1.13.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling zenjxl-decoder-macros v0.3.9 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder-macros)
+   Compiling num-derive v0.4.2
+   Compiling page_size v0.6.0
+   Compiling whereat v0.1.5
+   Compiling atomic_refcell v0.1.14
+   Compiling anes v0.1.6
+   Compiling oorandom v11.1.5
+   Compiling byteorder v1.5.0
+   Compiling array-init v2.1.0
+   Compiling smallvec v1.15.2
+   Compiling arbitrary v1.4.2
+   Compiling criterion v0.8.2
+   Compiling zenjxl-decoder v0.4.0 (/Users/lilith/work/zen/zenjxl-decoder/zenjxl-decoder)
+   Compiling arbtest v0.3.2
+   Compiling rand_chacha v0.10.0
+   Compiling zenbench v0.1.8
+   Compiling png v0.18.1
+   Compiling codec-corpus v1.1.0
+   Compiling rand v0.10.2
+   Compiling almost-enough v0.4.4
+   Compiling rand_xorshift v0.5.0
+   Compiling zenutils-fuzz v0.1.0
+   Compiling test-log v0.2.21
+    Finished `bench` profile [optimized + debuginfo] target(s) in 27.29s
+     Running benches/kernel_tiers.rs (target/release/deps/kernel_tiers-5057c7f5cf4815be)
+[kernel_tiers] comparing NeonDescriptor vs ScalarDescriptor per kernel
+[zenbench] calibration: int=0.36ns/iter mem_bw=90.1GiB/s mem_lat=7.5ns
+[zenbench] timer resolution: 41ns, loop overhead: 0.38ns/iter, TSC: 1.000 ticks/ns (invariant)
+[zenbench] results → /Users/lilith/tmp/zenbench/zenbench-1788673140-11464.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1788673140-11464
+  git: 2187821e007ffba5cd0bfc5007abf43cd960574d
+═══════════════════════════════════════════════════════════════
+
+  idct2d_2_2  200 rounds × 76K calls
+             mean ±mad ns  95% CI vs base   ops/s
+  ├─ neon     19.5 ±2.1ns  [19.2–19.8]ns    206M
+  ╰─ scalar   19.6 ±2.1ns  [-1.1%–+2.1%]    205M [1]
+
+  neon    ███████████████████████████████████████████████████████████ 206 Mops/s
+  scalar  ███████████████████████████████████████████████████████████ 205 Mops/s
+  [1] CI crosses zero
+
+  idct2d_4_4  200 rounds × 66K calls
+             mean ±mad ns  95% CI vs base     ops/s
+  ├─ neon     31.3 ±3.1ns  [30.8–31.8]ns      511M
+  ╰─ scalar   37.5 ±5.0ns  [+17.6%–+21.8%]    427M
+
+  neon    ███████████████████████████████████████████████████████████ 511 Mops/s
+  scalar  █████████████████████████████████████████████████ 427 Mops/s
+
+  idct2d_4_8  60 rounds × 55K calls
+             mean ±mad ns  95% CI vs base     ops/s
+  ├─ neon     36.3 ±4.4ns  [34.8–37.7]ns      882M
+  ╰─ scalar   58.4 ±5.9ns  [+54.3%–+65.2%]    547M
+
+  neon    ███████████████████████████████████████████████████████████ 882 Mops/s
+  scalar  █████████████████████████████████████ 547 Mops/s
+
+  idct2d_8_4  30 rounds × 50K calls
+             mean ±mad ns  95% CI vs base     ops/s
+  ├─ neon     34.9 ±3.4ns  [32.9–36.8]ns      916M
+  ╰─ scalar   62.7 ±7.5ns  [+71.8%–+87.4%]    511M
+
+  neon    ███████████████████████████████████████████████████████████ 916 Mops/s
+  scalar  █████████████████████████████████ 511 Mops/s
+
+  idct2d_8_8  60 rounds × 23K calls
+              mean ±mad ns  95% CI vs base     ops/s
+  ├─ neon      51.2 ±6.5ns  [49.0–53.2]ns      1.25G
+  ╰─ scalar   93.8 ±10.8ns  [+70.3%–+79.8%]     682M [1]
+
+  neon    ██████████████████████████████████████████████████████████ 1.25 Gops/s
+  scalar  ████████████████████████████████ 682 Mops/s
+  [1] CV=21%
+
+  idct2d_8_16  100 rounds × 19K calls
+              mean ±mad ns  95% CI vs base     ops/s
+  ├─ neon      76.9 ±6.1ns  [75.6–78.3]ns      1.66G
+  ╰─ scalar   97.8 ±10.9ns  [+24.5%–+29.7%]    1.31G
+
+  neon    ██████████████████████████████████████████████████████████ 1.66 Gops/s
+  scalar  ██████████████████████████████████████████████ 1.31 Gops/s
+
+  idct2d_8_32  30 rounds × 6K calls
+             mean ±mad ns  95% CI vs base      ops/s
+  ├─ neon     179 ±31ns  [168–188]ns         1.43G
+  ╰─ scalar   371 ±34ns  [+99.6%–+115.6%]     690M
+
+  neon    ██████████████████████████████████████████████████████████ 1.43 Gops/s
+  scalar  ████████████████████████████ 690 Mops/s
+
+  idct2d_16_8  30 rounds × 11K calls
+               mean ±mad ns  95% CI vs base       ops/s
+  ├─ neon       87.1 ±9.0ns  [82.7–91.2]ns        1.47G
+  ╰─ scalar   181.9 ±25.7ns  [+100.9%–+116.7%]     703M
+
+  neon    ██████████████████████████████████████████████████████████ 1.47 Gops/s
+  scalar  ████████████████████████████ 703 Mops/s
+
+  idct2d_16_16  30 rounds × 6K calls
+             mean ±mad ns  95% CI vs base       ops/s
+  ├─ neon     147 ±28ns  [135–158]ns          1.75G [1]
+  ╰─ scalar   324 ±74ns  [+109.0%–+132.6%]     791M [2]
+
+  neon    ██████████████████████████████████████████████████████████ 1.75 Gops/s
+  scalar  ██████████████████████████ 791 Mops/s
+  [1] CV=22%
+  [2] CV=24%
+
+  idct2d_16_32  30 rounds × 2K calls
+             mean ±mad ns  95% CI vs base     ops/s
+  ├─ neon     438 ±70ns  [411–463]ns        1.17G
+  ╰─ scalar   784 ±52ns  [+71.9%–+83.6%]     653M
+
+  neon    ██████████████████████████████████████████████████████████ 1.17 Gops/s
+  scalar  ████████████████████████████████ 653 Mops/s
+
+  idct2d_32_8  30 rounds × 5K calls
+             mean ±mad ns  95% CI vs base       ops/s
+  ├─ neon     174 ±20ns  [165–182]ns          1.47G
+  ╰─ scalar   431 ±49ns  [+142.1%–+157.6%]     593M
+
+  neon    ██████████████████████████████████████████████████████████ 1.47 Gops/s
+  scalar  ███████████████████████ 593 Mops/s
+
+  idct2d_32_16  30 rounds × 2K calls
+             mean ±mad ns  95% CI vs base       ops/s
+  ├─ neon      395 ±31ns  [372–417]ns          1.30G
+  ╰─ scalar   949 ±103ns  [+129.4%–+151.3%]     539M
+
+  neon    ██████████████████████████████████████████████████████████ 1.30 Gops/s
+  scalar  ████████████████████████ 539 Mops/s
+
+  idct2d_32_32  30 rounds × 1K calls
+             mean ±mad ns  95% CI vs base       ops/s
+  ├─ neon      970 ±198ns  [906–1028]ns         1.06G
+  ╰─ scalar   2259 ±227ns  [+124.2%–+141.7%]     453M
+
+  neon    ██████████████████████████████████████████████████████████ 1.06 Gops/s
+  scalar  █████████████████████████ 453 Mops/s
+
+  total: 108.9s  (18 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=idct2d_2_2 benchmark=neon  |  vs_base=baseline  |  min=8.8ns mean=19.5ns median=19.1ns mad=2.1ns  |  throughput=205.55 Mops/s  |  n=200 cv=11.2% rounds=200 calls=76923 mean_ci=[19.2ns 19.8ns]
+group=idct2d_2_2 benchmark=scalar  |  vs_base_pct=+0.51 ci=[-1.06% +2.06%] significant=false effect=0.04 p=0.4682  |  min=8.2ns mean=19.6ns median=19.7ns mad=2.1ns  |  throughput=204.51 Mops/s  |  n=200 cv=11.6% rounds=200 calls=76923 mean_ci=[19.2ns 19.9ns]
+group=idct2d_4_4 benchmark=neon  |  vs_base=baseline  |  min=17.0ns mean=31.3ns median=31.4ns mad=3.1ns  |  throughput=511.32 Mops/s  |  n=200 cv=11.6% rounds=200 calls=66666 mean_ci=[30.8ns 31.8ns]
+group=idct2d_4_4 benchmark=scalar  |  vs_base_pct=+19.69 ci=[+17.60% +21.77%] significant=true effect=1.42 p=0.0000  |  min=18.8ns mean=37.5ns median=37.5ns mad=5.0ns  |  throughput=427.20 Mops/s  |  n=200 cv=13.2% rounds=200 calls=66666 mean_ci=[36.8ns 38.1ns]
+group=idct2d_4_8 benchmark=neon  |  vs_base=baseline  |  min=17.5ns mean=36.3ns median=36.2ns mad=4.4ns  |  throughput=881.82 Mops/s  |  n=60 cv=15.6% rounds=60 calls=55555 mean_ci=[34.8ns 37.7ns] cold=42.0ns
+group=idct2d_4_8 benchmark=scalar  |  vs_base_pct=+59.72 ci=[+54.34% +65.23%] significant=true effect=2.79 p=0.0000  |  min=28.1ns mean=58.4ns median=59.8ns mad=5.9ns  |  throughput=547.48 Mops/s  |  n=60 cv=17.0% rounds=60 calls=55555 mean_ci=[56.0ns 60.9ns]
+group=idct2d_8_4 benchmark=neon  |  vs_base=baseline  |  min=18.6ns mean=34.9ns median=35.8ns mad=3.4ns  |  throughput=916.20 Mops/s  |  n=30 cv=15.7% rounds=30 calls=50000 mean_ci=[32.9ns 36.8ns]
+group=idct2d_8_4 benchmark=scalar  |  vs_base_pct=+79.42 ci=[+71.76% +87.45%] significant=true effect=3.61 p=0.0000  |  min=35.1ns mean=62.7ns median=62.9ns mad=7.5ns  |  throughput=510.64 Mops/s  |  n=30 cv=14.9% rounds=30 calls=50000 mean_ci=[59.3ns 65.9ns]
+group=idct2d_8_8 benchmark=neon  |  vs_base=baseline  |  min=24.8ns mean=51.2ns median=52.0ns mad=6.5ns  |  throughput=1.25 Gops/s  |  n=60 cv=16.9% rounds=60 calls=23809 mean_ci=[49.0ns 53.2ns]
+group=idct2d_8_8 benchmark=scalar  |  vs_base_pct=+74.95 ci=[+70.33% +79.80%] significant=true effect=3.10 p=0.0000  |  min=44.8ns mean=93.8ns median=91.8ns mad=10.8ns  |  throughput=682.30 Mops/s  |  n=60 cv=20.8% rounds=60 calls=23809 mean_ci=[88.8ns 98.7ns] cold=41.0ns
+group=idct2d_8_16 benchmark=neon  |  vs_base=baseline  |  min=53.8ns mean=76.9ns median=76.7ns mad=6.1ns  |  throughput=1.66 Gops/s  |  n=100 cv=8.9% rounds=100 calls=19607 mean_ci=[75.6ns 78.3ns] cold=333.0ns
+group=idct2d_8_16 benchmark=scalar  |  vs_base_pct=+27.09 ci=[+24.47% +29.74%] significant=true effect=2.59 p=0.0000  |  min=62.8ns mean=97.8ns median=96.9ns mad=10.9ns  |  throughput=1.31 Gops/s  |  n=100 cv=9.3% rounds=100 calls=19607 mean_ci=[96.0ns 99.6ns] cold=42.0ns
+group=idct2d_8_32 benchmark=neon  |  vs_base=baseline  |  min=106.2ns mean=178.7ns median=179.5ns mad=31.0ns  |  throughput=1.43 Gops/s  |  n=30 cv=15.5% rounds=30 calls=6250 mean_ci=[168.4ns 188.0ns] cold=625.0ns
+group=idct2d_8_32 benchmark=scalar  |  vs_base_pct=+107.76 ci=[+99.55% +115.61%] significant=true effect=4.12 p=0.0000  |  min=211.9ns mean=371.3ns median=393.8ns mad=33.6ns  |  throughput=689.53 Mops/s  |  n=30 cv=16.1% rounds=30 calls=6250 mean_ci=[349.0ns 391.0ns] cold=167.0ns
+group=idct2d_16_8 benchmark=neon  |  vs_base=baseline  |  min=52.4ns mean=87.1ns median=90.5ns mad=9.0ns  |  throughput=1.47 Gops/s  |  n=30 cv=13.8% rounds=30 calls=11627 mean_ci=[82.7ns 91.2ns] cold=250.0ns
+group=idct2d_16_8 benchmark=scalar  |  vs_base_pct=+108.85 ci=[+100.92% +116.70%] significant=true effect=4.47 p=0.0000  |  min=106.5ns mean=181.9ns median=187.7ns mad=25.7ns  |  throughput=703.49 Mops/s  |  n=30 cv=15.1% rounds=30 calls=11627 mean_ci=[172.0ns 191.3ns] cold=84.0ns
+group=idct2d_16_16 benchmark=neon  |  vs_base=baseline  |  min=80.2ns mean=146.5ns median=157.3ns mad=28.4ns  |  throughput=1.75 Gops/s  |  n=30 cv=22.4% rounds=30 calls=6211 mean_ci=[134.6ns 157.7ns] cold=250.0ns
+group=idct2d_16_16 benchmark=scalar  |  vs_base_pct=+120.95 ci=[+108.96% +132.65%] significant=true effect=2.97 p=0.0000  |  min=176.7ns mean=323.8ns median=350.0ns mad=73.6ns  |  throughput=790.66 Mops/s  |  n=30 cv=24.0% rounds=30 calls=6211 mean_ci=[295.9ns 350.1ns] cold=167.0ns
+group=idct2d_16_32 benchmark=neon  |  vs_base=baseline  |  min=251.6ns mean=437.9ns median=459.8ns mad=69.6ns  |  throughput=1.17 Gops/s  |  n=30 cv=16.7% rounds=30 calls=2994 mean_ci=[411.5ns 462.7ns] cold=666.0ns
+group=idct2d_16_32 benchmark=scalar  |  vs_base_pct=+77.61 ci=[+71.91% +83.56%] significant=true effect=3.62 p=0.0000  |  min=454.0ns mean=783.5ns median=833.0ns mad=51.6ns  |  throughput=653.45 Mops/s  |  n=30 cv=14.8% rounds=30 calls=2994 mean_ci=[740.7ns 821.8ns] cold=334.0ns
+group=idct2d_32_8 benchmark=neon  |  vs_base=baseline  |  min=100.5ns mean=173.7ns median=175.6ns mad=20.5ns  |  throughput=1.47 Gops/s  |  n=30 cv=14.1% rounds=30 calls=5291 mean_ci=[164.9ns 181.7ns] cold=417.0ns
+group=idct2d_32_8 benchmark=scalar  |  vs_base_pct=+149.93 ci=[+142.07% +157.62%] significant=true effect=6.68 p=0.0000  |  min=245.4ns mean=431.4ns median=441.5ns mad=48.9ns  |  throughput=593.43 Mops/s  |  n=30 cv=14.9% rounds=30 calls=5291 mean_ci=[407.7ns 453.0ns] cold=209.0ns
+group=idct2d_32_16 benchmark=neon  |  vs_base=baseline  |  min=217.9ns mean=395.0ns median=408.4ns mad=30.6ns  |  throughput=1.30 Gops/s  |  n=30 cv=16.4% rounds=30 calls=2551 mean_ci=[371.5ns 416.9ns] cold=792.0ns
+group=idct2d_32_16 benchmark=scalar  |  vs_base_pct=+140.33 ci=[+129.37% +151.26%] significant=true effect=4.30 p=0.0000  |  min=523.3ns mean=949.3ns median=969.5ns mad=102.7ns  |  throughput=539.35 Mops/s  |  n=30 cv=17.9% rounds=30 calls=2551 mean_ci=[888.6ns 1.01µs] cold=375.0ns
+group=idct2d_32_32 benchmark=neon  |  vs_base=baseline  |  min=478.5ns mean=969.8ns median=962.9ns mad=198.0ns  |  throughput=1.06 Gops/s  |  n=30 cv=18.0% rounds=30 calls=1132 mean_ci=[906.0ns 1.03µs] cold=666.0ns
+group=idct2d_32_32 benchmark=scalar  |  vs_base_pct=+133.00 ci=[+124.22% +141.70%] significant=true effect=4.80 p=0.0000  |  min=1.09µs mean=2.26µs median=2.26µs mad=226.9ns  |  throughput=453.29 Mops/s  |  n=30 cv=18.3% rounds=30 calls=1132 mean_ci=[2.11µs 2.40µs] cold=959.0ns
+      136.54 real        44.90 user        13.69 sys
+           986185728  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1004209  page reclaims
+                3511  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                 228  messages sent
+                 334  messages received
+                 243  signals received
+                1168  voluntary context switches
+              162330  involuntary context switches
+          3319253110  instructions retired
+          1371830345  cycles elapsed
+            55984752  peak memory footprint
