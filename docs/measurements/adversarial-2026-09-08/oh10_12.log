@@ -1,0 +1,4 @@
+file                    one-shot  chunk@<=10%  max-call  speedup vs 1-shot maxcall  overhead
+p12mp_d1                   31.5ms        256KiB     15.6ms                       2.0x      8.9%
+p12mp_d3                   39.3ms        256KiB     28.6ms                       1.4x      2.5%
+p12mp_lossless            119.4ms       2048KiB     36.0ms                       3.3x      7.0%

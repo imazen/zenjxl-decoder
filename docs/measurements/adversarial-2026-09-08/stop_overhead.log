@@ -1,0 +1,4 @@
+p12mp_d1.jxl             no-stop median 32.8 ms | with-stop median 32.5 ms | overhead -0.8 %
+p20mp_d1.jxl             no-stop median 51.6 ms | with-stop median 51.8 ms | overhead +0.3 %
+p108mp_d1.jxl            no-stop median 241.4 ms | with-stop median 243.2 ms | overhead +0.7 %
+p108mp_lossless.jxl      no-stop median 1441.7 ms | with-stop median 1444.2 ms | overhead +0.2 %

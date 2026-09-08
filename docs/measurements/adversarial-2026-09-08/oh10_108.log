@@ -1,0 +1,4 @@
+file                    one-shot  chunk@<=10%  max-call  speedup vs 1-shot maxcall  overhead
+p108mp_d1                 239.4ms       1024KiB     43.5ms                       5.3x      5.4%
+p108mp_d3                 332.2ms        512KiB    143.3ms                       2.3x      4.9%
+p108mp_lossless           934.4ms       2048KiB     51.1ms                      18.1x      9.8%

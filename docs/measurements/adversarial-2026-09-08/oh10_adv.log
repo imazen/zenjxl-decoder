@@ -1,0 +1,4 @@
+file                    one-shot  chunk@<=10%  max-call  speedup vs 1-shot maxcall  overhead
+adv108_d1_stream          235.4ms      16384KiB    230.0ms                       1.0x     -0.8%
+m12mp_stream               34.1ms      16384KiB     32.7ms                       1.0x     -2.3%
+adv108_ups                 79.4ms        512KiB     76.6ms                       1.0x     -0.9%

@@ -1,0 +1,4 @@
+file                    one-shot  chunk@<=10%  max-call  speedup vs 1-shot maxcall  overhead
+p20mp_d1                   48.5ms        512KiB     17.1ms                       2.8x      6.0%
+p20mp_d3                   66.1ms        256KiB     44.8ms                       1.5x      8.3%
+p20mp_lossless            190.8ms       4096KiB     65.6ms                       2.9x      3.6%
