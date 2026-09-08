@@ -1,0 +1,7 @@
+file: /Users/lilith/tmp/mpsweep/p108mp_lossless.jxl  runner: rayon
+       chunk   total ms  max call ms    calls  size
+   unlimited      890.3        888.2        3  12000x9000
+     1048576     1043.2         26.5       63  12000x9000
+       65536     5356.5          8.4      964  12000x9000
+        4096     8269.1          8.6    15390  12000x9000
+           606846976  maximum resident set size

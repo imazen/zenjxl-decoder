@@ -1,0 +1,36 @@
+===== p12mp_d1.jxl  1476969 bytes
+file: /Users/lilith/tmp/mpsweep/p12mp_d1.jxl  runner: rayon
+       chunk   total ms  max call ms    calls  size
+   unlimited       31.6         31.3        3  4000x3000
+     1048576       32.5         27.0        4  4000x3000
+       65536       66.0          8.6       25  4000x3000
+  runner.run() invocations=27 task closure invocations=105
+        4096      157.9          5.7      362  4000x3000
+         512      213.8          5.6     2885  4000x3000
+      65536*       66.2          8.8       25  4000x3000
+  runner.run() invocations=27 task closure invocations=105
+       4096*      158.5          5.6      362  4000x3000
+===== p12mp_d3.jxl  538171 bytes
+file: /Users/lilith/tmp/mpsweep/p12mp_d3.jxl  runner: rayon
+       chunk   total ms  max call ms    calls  size
+   unlimited       42.8         42.4        3  4000x3000
+     1048576       43.7         43.3        3  4000x3000
+       65536       54.8         23.5       11  4000x3000
+  runner.run() invocations=16 task closure invocations=80
+        4096      117.0         11.8      133  4000x3000
+         512      139.1          6.7     1052  4000x3000
+      65536*       55.8         24.3       11  4000x3000
+  runner.run() invocations=16 task closure invocations=80
+       4096*      117.8         12.0      133  4000x3000
+===== p12mp_lossless.jxl  9960407 bytes
+file: /Users/lilith/tmp/mpsweep/p12mp_lossless.jxl  runner: rayon
+       chunk   total ms  max call ms    calls  size
+   unlimited      128.8        128.5        3  4000x3000
+     1048576      151.7         25.8       12  4000x3000
+       65536      854.0          8.1      154  4000x3000
+  runner.run() invocations=2 task closure invocations=16
+        4096     1071.0          8.0     2433  4000x3000
+         512     1080.1          8.1    19454  4000x3000
+      65536*      868.9          8.1      154  4000x3000
+  runner.run() invocations=2 task closure invocations=16
+       4096*     1255.0         21.2     2433  4000x3000

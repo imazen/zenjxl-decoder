@@ -1,0 +1,16 @@
+===== p108mp_d1.jxl  12277110 bytes
+file: /Users/lilith/tmp/mpsweep/p108mp_d1.jxl  runner: rayon
+       chunk   total ms  max call ms    calls  size
+   unlimited      223.2        220.9        3  12000x9000
+     1048576      238.7         40.1       14  12000x9000
+       65536      451.3         12.5      190  12000x9000
+        4096     1585.0          9.4     2999  12000x9000
+           589348864  maximum resident set size
+===== p108mp_d3.jxl  4245591 bytes
+file: /Users/lilith/tmp/mpsweep/p108mp_d3.jxl  runner: rayon
+       chunk   total ms  max call ms    calls  size
+   unlimited      313.4        310.9        3  12000x9000
+     1048576      320.2        182.8        7  12000x9000
+       65536      457.9         43.1       67  12000x9000
+        4096      908.6          7.3     1038  12000x9000
+           542605312  maximum resident set size

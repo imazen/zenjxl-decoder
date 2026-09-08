@@ -1,0 +1,28 @@
+/Users/lilith/tmp/mpsweep/p12mp_d1.jxl: 1476969 bytes -> 4000x3000, full decode 48.7 ms
+  cancel at    0% (   0.0 ms): call returned     0.7 ms after cancel, total    0.7 ms, Cancelled
+  cancel at   10% (   4.9 ms): call returned     0.3 ms after cancel, total    7.6 ms, Cancelled
+  cancel at   25% (  12.2 ms): call returned     1.0 ms after cancel, total   19.7 ms, Cancelled
+  cancel at   50% (  24.3 ms): call returned     1.1 ms after cancel, total   37.1 ms, Cancelled
+  cancel at   75% (  36.5 ms): call returned     0.0 ms after cancel, total   46.4 ms, completed
+
+/Users/lilith/tmp/mpsweep/p20mp_d1.jxl: 2451619 bytes -> 5164x3873, full decode 67.2 ms
+  cancel at    0% (   0.0 ms): call returned     1.0 ms after cancel, total    1.0 ms, Cancelled
+  cancel at   10% (   6.7 ms): call returned     3.2 ms after cancel, total   13.0 ms, Cancelled
+  cancel at   25% (  16.8 ms): call returned     0.9 ms after cancel, total   32.8 ms, Cancelled
+  cancel at   50% (  33.6 ms): call returned     0.9 ms after cancel, total   52.1 ms, Cancelled
+  cancel at   75% (  50.4 ms): call returned     0.9 ms after cancel, total   61.3 ms, completed
+
+/Users/lilith/tmp/mpsweep/p108mp_d1.jxl: 12277110 bytes -> 12000x9000, full decode 309.7 ms
+  cancel at    0% (   0.0 ms): call returned     4.8 ms after cancel, total    4.8 ms, Cancelled
+  cancel at   10% (  31.0 ms): call returned     0.9 ms after cancel, total   51.2 ms, Cancelled
+  cancel at   25% (  77.4 ms): call returned     3.5 ms after cancel, total  112.0 ms, Cancelled
+  cancel at   50% ( 154.8 ms): call returned     2.3 ms after cancel, total  167.2 ms, Cancelled
+  cancel at   75% ( 232.3 ms): call returned     6.0 ms after cancel, total  248.3 ms, Cancelled
+
+/Users/lilith/tmp/mpsweep/p108mp_lossless.jxl: 63034742 bytes -> 12000x9000, full decode 1273.9 ms
+  cancel at    0% (   0.0 ms): call returned     5.8 ms after cancel, total    5.9 ms, Cancelled
+  cancel at   10% ( 127.4 ms): call returned     6.6 ms after cancel, total  144.0 ms, Cancelled
+  cancel at   25% ( 318.5 ms): call returned     8.7 ms after cancel, total  337.3 ms, Cancelled
+  cancel at   50% ( 636.9 ms): call returned     9.2 ms after cancel, total  656.2 ms, Cancelled
+  cancel at   75% ( 955.4 ms): call returned    11.0 ms after cancel, total  976.4 ms, Cancelled
+

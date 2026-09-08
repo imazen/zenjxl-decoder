@@ -1,0 +1,21 @@
+p108mp_d1.jxl  (12277110 bytes)
+     chunk  total ms  maxcall ms   calls  productive   no-op  hit rate  HF groups
+ unlimited     301.1       291.9       3           1       0      100%       1692
+   1048576     292.7        51.2      14          10       0      100%       1692
+     65536     494.0        13.3     190         154       0      100%       1692
+      4096    3502.0        55.2    2999        1457     993       59%       1692
+
+p108mp_d3.jxl  (4245591 bytes)
+     chunk  total ms  maxcall ms   calls  productive   no-op  hit rate  HF groups
+ unlimited     506.5       495.0       3           1       0      100%       1692
+   1048576     492.0       283.9       7           4       0      100%       1692
+     65536     777.4        49.8      67          43       0      100%       1692
+      4096    2231.6        25.7    1038         635      37       94%       1692
+
+p108mp_lossless.jxl  (63034742 bytes)
+     chunk  total ms  maxcall ms   calls  productive   no-op  hit rate  HF groups
+ unlimited    2080.0      2072.2       3           1       0      100%       1692
+   1048576    3105.7       108.0      63          61       0      100%       1692
+     65536   18409.1       194.2     964         947      15       98%       1692
+      4096   39437.5       206.7   15390        1692   13696       11%       1692
+

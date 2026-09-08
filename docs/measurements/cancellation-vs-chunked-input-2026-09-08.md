@@ -4,6 +4,13 @@ Measured 2026-09-08 on an Apple M4 Pro (12 threads, macOS 25.5), against
 **upstream libjxl/jxl-rs `main` @ `9e6b9f9` (v0.7.1)** and this fork at
 `17dc3030`.
 
+> **Correction (same day):** the "chunking buys nothing" floor documented in
+> Result 1 below is **encoder-dependent, not universal**. It reproduces on this
+> repo's older `resources/test` fixtures, which place `HfGlobal` last. On
+> `cjxl 0.12.0` output, chunking does buy granularity — at a 1.9-7.3x throughput
+> cost. See `cancellation-real-photo-sweep-2026-09-08.md` for the real-photo
+> sweep at 12 / 20 / 108 MP. Results 2, 3 and 4 below are unaffected.
+
 ## Question
 
 libjxl/jxl-rs#897 proposed cooperative cancellation. The maintainer's response:
