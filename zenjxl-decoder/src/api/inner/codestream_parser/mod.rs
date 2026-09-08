@@ -686,14 +686,34 @@ impl CodestreamParser {
                             break;
                         }
                     }
-                    match self.process_sections(decode_options, &mut output_buffers, do_flush) {
-                        Ok(None) => Ok(()),
-                        Ok(Some(missing)) => Err(at!(Error::OutOfBounds(missing))),
+                    let missing = match self.process_sections(
+                        decode_options,
+                        &mut output_buffers,
+                        do_flush,
+                    ) {
+                        Ok(missing) => missing,
                         Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {
-                            Err(at!(Error::SectionTooShort))
+                            return Err(at!(Error::SectionTooShort));
                         }
-                        Err(err) => Err(err),
-                    }?;
+                        Err(err) => return Err(err),
+                    };
+                    if let Some(missing) = missing {
+                        // No section could be completed from what this round read.
+                        // That is not the same as being out of data: a section may
+                        // span several `jxlp` boxes (`available_codestream` above
+                        // stops at the end of the current one), and the bytes that
+                        // finish it are in the next box or in a buffered
+                        // out-of-order `jxlp` payload. Keep reading while this call
+                        // can still obtain codestream bytes; requiring that the
+                        // round read something keeps the loop finite.
+                        if self.ready_section_data != ready_before
+                            && (input.available_bytes().unwrap_or(0) > 0
+                                || box_parser.buffered_leftover() > 0)
+                        {
+                            continue;
+                        }
+                        return Err(at!(Error::OutOfBounds(missing)));
+                    }
                     self.record_file_length(box_parser);
                     // If no section data was read and sections are still pending,
                     // the input is truncated — return an error instead of looping

@@ -46,6 +46,17 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- **Codestream sections spanning a `jxlp` box boundary failed to decode.** A
+  round of section reading stops at the end of the current codestream box; if
+  it could not finish a single section it reported `NeedsMoreInput` and the
+  caller saw "Source file truncated", even though the bytes that finish the
+  section were in the very next box. Any container whose `jxlp` boxes are
+  smaller than a section was undecodable, **in index order too** -- `djxl
+  0.12.0` and upstream jxl-rs decode those. The read loop now continues to the
+  next box while the round made progress. Regression test
+  `small_in_order_jxlp_boxes_decode` builds the container in-test at 4/16/64
+  bytes per box, so no fixture is committed.
+
 - **The same file decoded differently depending on the CPU, in three separate
   places.** Six hand-written SIMD tiers dispatch at runtime, and nothing
   checked that they agreed. The fuzzers could not have found any of this:

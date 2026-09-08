@@ -230,3 +230,59 @@ fn duplicate_ooo_jxlp_index_is_rejected() {
     }
     assert!(crate::decode(&out).is_err());
 }
+
+// ---- `jxlp` boxes smaller than a codestream section ----------------------
+
+/// A version-1 container (out-of-order `jxlp` allowed) whose codestream is
+/// `parts[i]` concatenated in index order, with the boxes written in `order`.
+/// The highest index carries the "last" flag; a part may be empty, which is a
+/// legal 12-byte `jxlp` box that carries only an index.
+fn jxlp_stream(parts: &[Vec<u8>], order: &[usize]) -> Vec<u8> {
+    let last = parts.len() - 1;
+    let mut v = Vec::new();
+    v.extend_from_slice(&[
+        0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a,
+    ]);
+    v.extend_from_slice(&box_(b"ftyp", b"jxl \0\0\0\x01jxl "));
+    for &i in order {
+        let mut payload = (i as u32 | if i == last { 0x8000_0000 } else { 0 })
+            .to_be_bytes()
+            .to_vec();
+        payload.extend_from_slice(&parts[i]);
+        v.extend_from_slice(&box_(b"jxlp", &payload));
+    }
+    v
+}
+
+/// `codestream` cut into `chunk`-byte pieces.
+fn split(codestream: &[u8], chunk: usize) -> Vec<Vec<u8>> {
+    codestream.chunks(chunk).map(<[u8]>::to_vec).collect()
+}
+
+/// Decode `data` (one-shot and in small chunks) and require it to match what
+/// the bare `codestream` decodes to.
+fn decodes_like_bare_codestream(data: &[u8], codestream: &[u8]) {
+    let reference = frames(codestream, usize::MAX);
+    assert_same_frames(&frames(data, usize::MAX), &reference, "one-shot");
+    for chunk in [1usize, 7, 64, 1000] {
+        assert_same_frames(&frames(data, chunk), &reference, &format!("chunk {chunk}"));
+    }
+    let a = crate::decode(data).unwrap_or_else(|e| panic!("decode failed: {e:?}"));
+    let b = crate::decode(codestream).unwrap();
+    assert_eq!((a.width, a.height), (b.width, b.height));
+    assert_eq!(a.data, b.data, "streamed container changed the pixels");
+}
+
+/// `jxlp` boxes smaller than a codestream section, in index order. The fork
+/// stopped as soon as a round could not finish a section, even though the
+/// bytes that finish it were in the next box; `djxl` and upstream jxl-rs
+/// decode these. Unrelated to box *ordering* -- this file is in order.
+#[test]
+fn small_in_order_jxlp_boxes_decode() {
+    let codestream = crate::util::test::fixture_bytes("3x3_srgb_lossy.jxl");
+    for chunk in [4usize, 16, 64] {
+        let parts = split(&codestream, chunk);
+        let data = jxlp_stream(&parts, &(0..parts.len()).collect::<Vec<_>>());
+        decodes_like_bare_codestream(&data, &codestream);
+    }
+}
