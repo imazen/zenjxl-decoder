@@ -6,6 +6,42 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+
+### Added
+
+- **`container_boxes` fuzz target** — structure-aware fuzzing of the container
+  layer. Raw-byte fuzzing essentially never produces a well-formed out-of-order
+  container, so the fuzzer input is a *recipe* (how many `jxlp` boxes, where to
+  cut the codestream, which boxes are empty, what order they appear in the file)
+  wrapped around a fixed valid codestream. The oracle is differential: splitting
+  and reordering a codestream across `jxlp` boxes must not change a single
+  output pixel, and a legal layout that fails to decode is a finding. 142754
+  runs in 91 s, no crashes. The five out-of-order `jxlp` defects fixed in
+  `0ca74c1..fe2ab2e` were all found by hand; this is the target that would have
+  found them.
+
+### Documentation
+
+- `docs/measurements/cancellation-latency-decomposition-2026-09-08.md` —
+  **corrects** an earlier claim in this series. Worst-case cancellation latency
+  on 108 MP VarDCT is *not* caused by sparse `check_cancelled()`: with every
+  check site instrumented (including the `stop.check()` calls inside the rayon
+  closures, which do not go through `check_cancelled`) the longest span with no
+  check is ~3 ms. The tail is rayon draining in-flight group tasks after the
+  short-circuit — max latency rises from 12.0 ms at 1 thread to 21.3 ms at 12
+  while the decode gets 7x faster. Median 1.1-1.5 ms, p95 5-9 ms. No code
+  change; the earlier proposal to add per-group checks was withdrawn.
+- `docs/measurements/streaming-container-guidance-for-jxl-encoder-2026-09-08.md`
+  — decoder-side constraints on the encoder's streaming-output container shape
+  (jxl-encoder streaming refactor #11, chunk 8). Out-of-order `jxlp` is readable
+  by libjxl alone today (`jxl-oxide 0.12.6` rejects every such file); empty
+  `jxlp` boxes are correct and mandatory if out-of-order is used at all; and a
+  permuted TOC must keep `HfGlobal` ahead of the AC groups or decoders lose
+  mid-frame cancellation and progressive rendering. Staged here because that
+  repo was out of scope; it belongs in `jxl-encoder/docs/JXL_ENCODER_LEARNINGS.md`.
+- `docs/UPSTREAM_SYNC.md` records libjxl/jxl-rs#956 against the #752 row, and
+  which of the five out-of-order `jxlp` defects are fork-only.
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next 0.x minor release.
      Add items here as you discover them. Do NOT ship these piecemeal. -->

@@ -54,3 +54,8 @@ doc = false
 name = "decode_parallel"
 path = "fuzz_targets/decode_parallel.rs"
 doc = false
+
+[[bin]]
+name = "container_boxes"
+path = "fuzz_targets/container_boxes.rs"
+doc = false
