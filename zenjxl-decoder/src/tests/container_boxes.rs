@@ -286,3 +286,37 @@ fn small_in_order_jxlp_boxes_decode() {
         decodes_like_bare_codestream(&data, &codestream);
     }
 }
+
+// ---- the `cjxl --output_mode=2` streaming layout -------------------------
+//
+// `cjxl -e 7 --output_mode=2` writes its `jxlp` boxes in the order the encoder
+// finishes them, not in index order: the boxes that carry the *start* of the
+// codestream (image header, ICC, TOC) are patched up last and land at the very
+// end of the file, after the box whose index has the "last" bit set, and the
+// encoder leaves empty placeholder boxes for indices it never filled. libjxl's
+// `djxl` decodes such files.
+
+/// Every index except 0 and 1 first, then index 1 -- so the box that completes
+/// the beginning of the codestream is the physically last box in the file and
+/// the whole input is consumed before the image header is complete. This is
+/// the shape `cjxl --output_mode=2` produces.
+fn head_last_order(n: usize) -> Vec<usize> {
+    let mut order = vec![0];
+    order.extend(2..n);
+    order.push(1);
+    order
+}
+
+/// The header is only complete once the physically last box has been read and
+/// the buffered boxes behind it have been spliced in. The fork used
+/// `input.available_bytes() > 0` as its sole "can I get more data" test, so at
+/// end of input it reported a truncated file while holding every remaining
+/// byte in its own out-of-order buffer.
+#[test]
+fn ooo_jxlp_header_completed_after_input_eof() {
+    let codestream = crate::util::test::fixture_bytes("3x3_srgb_lossy.jxl");
+    let parts = split(&codestream, 4);
+    assert!(parts.len() > 8, "header must span several boxes");
+    let data = jxlp_stream(&parts, &head_last_order(parts.len()));
+    decodes_like_bare_codestream(&data, &codestream);
+}

@@ -877,15 +877,30 @@ impl CodestreamParser {
                     if let Some(needed) = self.header_needed_bytes.as_mut() {
                         *needed = needed.saturating_sub(c);
                         if *needed > 0 {
-                            if !self.non_section_buf.can_read_more() {
+                            let enlarged = if !self.non_section_buf.can_read_more() {
                                 self.non_section_buf.enlarge();
-                            }
+                                true
+                            } else {
+                                false
+                            };
                             // Check if input still has data - if so, refill and retry
                             if input.available_bytes().unwrap_or(0) > 0 {
                                 continue;
-                            } else {
-                                return Err(at!(Error::OutOfBounds(*needed as usize)));
                             }
+                            // The caller's input is exhausted, but the box parser
+                            // may still hold codestream: container bytes it
+                            // over-read, and out-of-order `jxlp` payloads not yet
+                            // spliced in. `cjxl --output_mode=2` writes the boxes
+                            // that complete the header near the *end* of the file,
+                            // so the input is drained long before the header is.
+                            // Retry only while the round made progress (or the
+                            // buffer was just enlarged, which lets the next refill
+                            // read), so a file that can never be completed still
+                            // terminates.
+                            if box_parser.buffered_leftover() > 0 && (c > 0 || enlarged) {
+                                continue;
+                            }
+                            return Err(at!(Error::OutOfBounds(*needed as usize)));
                         }
                     }
 
@@ -909,9 +924,17 @@ impl CodestreamParser {
                             // Check if input still has data - if so, refill and retry
                             if input.available_bytes().unwrap_or(0) > 0 {
                                 continue;
-                            } else {
-                                return Err(at!(Error::OutOfBounds(n)));
                             }
+                            // Same as above: bytes held by the box parser (over-read
+                            // container bytes and buffered out-of-order `jxlp`
+                            // payloads) outlive the caller's input. `header_needed_bytes`
+                            // is set to a non-zero `n` here, so the refill check at the
+                            // top of the loop is what stops the retry once a round can
+                            // no longer make progress.
+                            if n > 0 && box_parser.buffered_leftover() > 0 {
+                                continue;
+                            }
+                            return Err(at!(Error::OutOfBounds(n)));
                         }
                         Err(e) => return Err(e),
                     }

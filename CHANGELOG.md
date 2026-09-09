@@ -46,6 +46,18 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- **The decoder gave up while it still held the rest of the codestream.** Both
+  header-refill paths used `input.available_bytes()` as their only "can I get
+  more data" test. With `cjxl -e 7 --output_mode=2` the boxes that complete the
+  image header are written at the *end* of the file, so the caller's input is
+  drained long before the header is and the remaining bytes sit in the box
+  parser's out-of-order `jxlp` buffer; the decoder reported a truncated file
+  while holding them. Both paths now also consult
+  `BoxParser::buffered_leftover()`, and only retry after a round that made
+  progress so a file that can never be completed still terminates. Regression
+  tests `ooo_jxlp_header_completed_after_input_eof` and
+  `truncated_ooo_jxlp_file_still_fails`.
+
 - **Codestream sections spanning a `jxlp` box boundary failed to decode.** A
   round of section reading stops at the end of the current codestream box; if
   it could not finish a single section it reported `NeedsMoreInput` and the
