@@ -1,0 +1,39 @@
+min-8192x128-lossless-oo-FAIL        OK       OK       0
+pair-6145x256-4dcgroups-FAIL         OK       OK       0
+pair-6144x256-3dcgroups-OK           OK       OK       0
+square-2049x2049-lossless-oo-FAIL    OK       OK       0
+control-8192x128-lossy-oo-OK         OK       OK       0.410458
+tll_1024                             OK       OK       0
+tll_2048                             OK       OK       0
+tll_3072                             OK       OK       0
+tll_4096                             OK       OK       0
+t12_ll_s                             OK       OK       0
+t20_ll_s                             OK       OK       0
+adv108_ll_stream                     OK       OK       0
+m12mp_stream                         OK       OK       6.83137
+adv108_d1_stream                     OK       OK       55.7255
+
+# Independent verification of the out-of-order-jxlp fixes, 2026-09-08.
+# Built from a clean `cargo clean --release -p zenjxl-decoder -p zenjxl-decoder-cli`
+# on main@origin fe2ab2e (commits 0ca74c1, ed1fa3d, c977405, fe2ab2e).
+# AE = ImageMagick `compare -metric AE` against djxl 0.12.0.
+#
+# All 11 LOSSLESS files: AE = 0 (pixel-identical to djxl).
+# The 3 lossy files differ, but by exactly the same amount as the SAME source
+# encoded WITHOUT --output_mode=2, so the difference is the pre-existing VarDCT
+# rounding gap and not a regression from these commits:
+#   m12mp_stream      AE=6.83137   ==  p12mp_d1   AE=6.83137
+#   adv108_d1_stream  AE=55.7255   ==  p108mp_d1  AE=55.7255
+#   p108mp_lossless   AE=0
+#
+# Regression tests present and passing (cargo test --release):
+#   small_in_order_jxlp_boxes_decode
+#   ooo_jxlp_empty_box_does_not_stop_the_injection_chain
+#   ooo_jxlp_header_completed_after_input_eof
+#   ooo_jxlp_buffers_more_than_a_thousand_boxes
+#   truncated_ooo_jxlp_file_still_fails
+#   duplicate_ooo_jxlp_index_is_rejected (pre-existing)
+#
+# The 2 `just ci` failures (test_debug_cmyk_layers,
+# test_debug_multiple_layers_noise_spline) are pre-existing and documented at
+# PARITY_INVESTIGATION.md line 31.

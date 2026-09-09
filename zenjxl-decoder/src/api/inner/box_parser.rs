@@ -102,9 +102,10 @@ struct OooJxlp {
 
 impl OooJxlp {
     /// libjxl's `kNumBuffersLimit`: a file cannot make us hold more than this
-    /// many boxes ahead of the one we are decoding. Read from a libjxl 0.13.0
-    /// tree: `lib/jxl/decode.cc:558`, `static constexpr size_t
-    /// kNumBuffersLimit = size_t{1 << 20};`, enforced at `decode.cc:1996`.
+    /// many boxes ahead of the one we are decoding. `lib/jxl/decode.cc:558`,
+    /// `static constexpr size_t kNumBuffersLimit = size_t{1 << 20};`, enforced
+    /// at `decode.cc:1996` -- verified byte-for-byte at both the `v0.12.0` tag
+    /// (the release that produced our test files) and in a 0.13.0 tree.
     /// The count scales with image size -- a 12000x9000 `cjxl -e 7
     /// --output_mode=2` file measured here holds 1727 `jxlp` boxes and needs
     /// 1724 of them buffered at once -- while every buffered box costs at
