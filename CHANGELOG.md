@@ -46,6 +46,22 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- **An empty out-of-order `jxlp` box was treated as end of input.** `cjxl
+  --output_mode=2` emits 12-byte `jxlp` boxes that carry an index and no
+  payload. Two bugs followed: (1) `BufferingOooJxlp` with nothing left to read
+  still asked the input for bytes, and a zero-length read returns `Ok(0)` --
+  which every reader here treats as end of input -- so the box was never
+  stored and every later call failed with `OutOfBounds(0)` (in the chunked
+  path this showed up as a hang, not an error); (2)
+  `try_inject_next_buffered_jxlp` spliced in one buffered payload and
+  returned, so an empty one left the parser looking for the next box *in the
+  file* while later indices were still buffered -- at end of file an
+  unsatisfiable read. A box with no payload is complete as soon as its header
+  is consumed, and injection now continues until a non-empty payload lands.
+  Same root cause as upstream libjxl/jxl-rs#956, in this fork's diverged
+  shape. Regression test
+  `ooo_jxlp_empty_box_does_not_stop_the_injection_chain`.
+
 - **The decoder gave up while it still held the rest of the codestream.** Both
   header-refill paths used `input.available_bytes()` as their only "can I get
   more data" test. With `cjxl -e 7 --output_mode=2` the boxes that complete the

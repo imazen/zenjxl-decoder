@@ -320,3 +320,43 @@ fn ooo_jxlp_header_completed_after_input_eof() {
     let data = jxlp_stream(&parts, &head_last_order(parts.len()));
     decodes_like_bare_codestream(&data, &codestream);
 }
+
+/// An empty `jxlp` box in the middle of the buffered run advances the expected
+/// index without producing codestream bytes. The fork stopped injecting there
+/// and went looking for the next box in the *file*, which at end of file is an
+/// unsatisfiable read reported as a truncated file. A box with no payload also
+/// used to wedge the parser mid-buffering, which showed up as a hang.
+#[test]
+fn ooo_jxlp_empty_box_does_not_stop_the_injection_chain() {
+    let codestream = crate::util::test::fixture_bytes("3x3_srgb_lossy.jxl");
+    let mut parts = split(&codestream, 4);
+    // Two adjacent placeholder boxes, plus one more later in the run.
+    parts.insert(2, Vec::new());
+    parts.insert(3, Vec::new());
+    parts.insert(9, Vec::new());
+    let data = jxlp_stream(&parts, &head_last_order(parts.len()));
+    decodes_like_bare_codestream(&data, &codestream);
+}
+
+/// A genuinely truncated out-of-order file must still fail, promptly. The
+/// retry paths that keep reading while the box parser still holds buffered
+/// `jxlp` payloads only continue after a round that made progress, so a file
+/// that can never be completed terminates instead of spinning. (If it did
+/// spin, this test would hang rather than fail.)
+#[test]
+fn truncated_ooo_jxlp_file_still_fails() {
+    let codestream = crate::util::test::fixture_bytes("3x3_srgb_lossy.jxl");
+    let mut parts = split(&codestream, 4);
+    parts.insert(2, Vec::new());
+    let full = jxlp_stream(&parts, &head_last_order(parts.len()));
+    assert!(crate::decode(&full).is_ok(), "the complete file decodes");
+    // Cutting anywhere before the end drops the boxes that carry the start of
+    // the codestream, so every prefix is undecodable.
+    for num in [1usize, 2, 3, 5, 6, 8] {
+        let cut = full.len() * num / 10;
+        assert!(
+            crate::decode(&full[..cut]).is_err(),
+            "{num}0% prefix ({cut} bytes) must not decode"
+        );
+    }
+}

@@ -200,25 +200,34 @@ impl BoxParser {
     /// If the next expected `jxlp` index was received out of order, splice
     /// its payload in front of the container input as the next codestream
     /// box.
+    ///
+    /// A `jxlp` box may legally be empty (a 12-byte box that carries only an
+    /// index); `cjxl --output_mode=2` emits such boxes as placeholders it
+    /// never fills in. An empty box advances the expected index but yields no
+    /// codestream bytes, so keep injecting until a non-empty payload lands in
+    /// the box buffer or nothing more is buffered. Stopping on an empty box
+    /// would leave the parser looking for the *next box in the file* while the
+    /// following indices are still held here -- at end of file that is an
+    /// unsatisfiable read, reported as a truncated file.
     fn try_inject_next_buffered_jxlp(&mut self) {
-        let Some(next) = self.next_expected_jxlp_index() else {
+        while let Some(next) = self.next_expected_jxlp_index() {
+            let Some((payload, is_last)) = self.ooo_jxlp.buffered.remove(&next) else {
+                return;
+            };
+            self.box_type = if is_last {
+                CodestreamBoxType::LastJxlp
+            } else {
+                CodestreamBoxType::Jxlp(next)
+            };
+            if payload.is_empty() {
+                self.state = ParseState::BoxNeeded;
+                continue;
+            }
+            let len = payload.len() as u64;
+            self.box_buffer.inject_bytes_front(payload);
+            self.state = ParseState::CodestreamBox(len);
             return;
-        };
-        let Some((payload, is_last)) = self.ooo_jxlp.buffered.remove(&next) else {
-            return;
-        };
-        let len = payload.len() as u64;
-        self.box_buffer.inject_bytes_front(payload);
-        self.box_type = if is_last {
-            CodestreamBoxType::LastJxlp
-        } else {
-            CodestreamBoxType::Jxlp(next)
-        };
-        self.state = if len == 0 {
-            ParseState::BoxNeeded
-        } else {
-            ParseState::CodestreamBox(len)
-        };
+        }
     }
 
     /// Take the accumulated JBRD box data, if any was found.
@@ -378,32 +387,42 @@ impl BoxParser {
                     idx,
                     last,
                 } => {
-                    let num = remaining.min(usize::MAX as u64) as usize;
-                    let buf = &mut self.ooo_jxlp.pending;
-                    if !self.box_buffer.is_empty() {
-                        let take = num.min(self.box_buffer.len());
-                        buf.try_reserve(take).map_err(|e| at!(Error::from(e)))?;
-                        buf.extend_from_slice(&self.box_buffer[..take]);
-                        self.box_buffer.consume(take);
-                        remaining -= take as u64;
-                    } else {
-                        let step = num.min(OooJxlp::GROW_STEP);
-                        let old_len = buf.len();
-                        buf.try_reserve(step).map_err(|e| at!(Error::from(e)))?;
-                        buf.resize(old_len + step, 0);
-                        let read = input
-                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
-                            .map_err(|e| at!(Error::from(e)))?;
-                        buf.truncate(old_len + read);
-                        if read == 0 {
-                            self.state = ParseState::BufferingOooJxlp {
-                                remaining,
-                                idx,
-                                last,
-                            };
-                            return Err(at!(Error::OutOfBounds(num)));
+                    // A `jxlp` box may carry only an index and no payload, and
+                    // `cjxl --output_mode=2` emits such placeholders. Such a box
+                    // is complete the moment its header has been consumed: there
+                    // is nothing left to read, and asking the input for zero
+                    // bytes returns `Ok(0)`, which the read below (like every
+                    // other reader here) has to treat as end of input. Reading
+                    // at all in that case wedged the parser in this state,
+                    // failing every later call with `OutOfBounds(0)`.
+                    if remaining > 0 {
+                        let num = remaining.min(usize::MAX as u64) as usize;
+                        let buf = &mut self.ooo_jxlp.pending;
+                        if !self.box_buffer.is_empty() {
+                            let take = num.min(self.box_buffer.len());
+                            buf.try_reserve(take).map_err(|e| at!(Error::from(e)))?;
+                            buf.extend_from_slice(&self.box_buffer[..take]);
+                            self.box_buffer.consume(take);
+                            remaining -= take as u64;
+                        } else {
+                            let step = num.min(OooJxlp::GROW_STEP);
+                            let old_len = buf.len();
+                            buf.try_reserve(step).map_err(|e| at!(Error::from(e)))?;
+                            buf.resize(old_len + step, 0);
+                            let read = input
+                                .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+                                .map_err(|e| at!(Error::from(e)))?;
+                            buf.truncate(old_len + read);
+                            if read == 0 {
+                                self.state = ParseState::BufferingOooJxlp {
+                                    remaining,
+                                    idx,
+                                    last,
+                                };
+                                return Err(at!(Error::OutOfBounds(num)));
+                            }
+                            remaining -= read as u64;
                         }
-                        remaining -= read as u64;
                     }
                     if remaining == 0 {
                         let payload = std::mem::take(&mut self.ooo_jxlp.pending);
