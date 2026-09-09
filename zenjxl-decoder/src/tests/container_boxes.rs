@@ -360,3 +360,21 @@ fn truncated_ooo_jxlp_file_still_fails() {
         );
     }
 }
+
+/// The number of boxes held ahead of the one being decoded scales with image
+/// size: a 12000x9000 `cjxl -e 7 --output_mode=2` file measured here needs
+/// 1724 buffered at once. The fork capped it at 1024 and rejected such files
+/// as an invalid container; libjxl's limit is `kNumBuffersLimit = 1 << 20`.
+#[test]
+fn ooo_jxlp_buffers_more_than_a_thousand_boxes() {
+    let codestream = crate::util::test::fixture_bytes("8x8_noise.jxl");
+    let mut parts = split(&codestream, 4);
+    let tail = parts.split_off(2);
+    // 1100 placeholder indices between the head and the rest of the stream:
+    // every one of them is buffered before index 1 arrives at end of file.
+    parts.resize(parts.len() + 1100, Vec::new());
+    parts.extend(tail);
+    let data = jxlp_stream(&parts, &head_last_order(parts.len()));
+    assert!(data.len() < 32 * 1024, "synthetic file stays small");
+    decodes_like_bare_codestream(&data, &codestream);
+}

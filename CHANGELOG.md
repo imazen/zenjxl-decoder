@@ -46,6 +46,16 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- **Large `cjxl --output_mode=2` files were rejected as "Invalid ISOBMMF
+  container".** `MAX_BUFFERED_BOXES` was 1024; the number of `jxlp` boxes held
+  ahead of the one being decoded scales with image size, and a 12000x9000
+  `-e 7 --output_mode=2` file needs 1724 of them at once. libjxl's limit is
+  `kNumBuffersLimit = 1 << 20` (read from a libjxl 0.13.0 tree,
+  `lib/jxl/decode.cc:558`, enforced at `decode.cc:1996`); upstream jxl-rs has
+  no cap at all, so this one was a fork-only regression. The payload bytes are
+  still allocated fallibly, which is what actually bounds the memory.
+  Regression test `ooo_jxlp_buffers_more_than_a_thousand_boxes`.
+
 - **An empty out-of-order `jxlp` box was treated as end of input.** `cjxl
   --output_mode=2` emits 12-byte `jxlp` boxes that carry an index and no
   payload. Two bugs followed: (1) `BufferingOooJxlp` with nothing left to read
