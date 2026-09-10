@@ -148,24 +148,21 @@ fn fuzzer_vardct_grayscale_unused_channel() {
 }
 
 /// Upstream `aux_box_before_codestream` / `aux_box_trailing_finite` /
-/// `aux_box_trailing_infinite`: the `Exif` box is found and has the expected
-/// payload size, whether it precedes the codestream, follows it with a finite
-/// box size, or follows it with a to-end-of-file size.
+/// `aux_box_trailing_infinite`: the `Exif` box is found with the expected
+/// payload, whether it precedes the codestream, follows it with a finite box
+/// size, or follows it with size 0 (runs to end of file).
 ///
 /// Upstream reaches this through `request_aux_boxes` + `aux_boxes()` /
-/// `trailing_box()`; this fork exposes it as `JxlImage::exif`, so the port
-/// asserts the same payload sizes through that. Upstream's sizes are 170 for
-/// the plain `Exif` boxes and 120 for the brotli-compressed `brob` ones;
-/// this fork strips the 4-byte TIFF header offset, hence the -4.
+/// `trailing_box()` and asserts the *raw* box length (170 plain, 120 brotli-
+/// compressed). This fork exposes the processed payload as `JxlImage::exif`
+/// with the 4-byte TIFF header offset stripped, so the equivalent assertion is
+/// that every one of these files yields the same 166-byte EXIF payload.
 #[test]
 fn exif_box_payload_sizes() {
-    for (name, upstream_size) in [
-        ("exif.jxl", 170usize),
-        ("exif_brob.jxl", 120),
-        ("exif_trailing_finite.jxl", 170),
-        ("exif_brob_trailing_finite.jxl", 120),
-        ("exif_trailing_infinite.jxl", 170),
-        ("exif_brob_trailing_infinite.jxl", 120),
+    for name in [
+        "exif.jxl",
+        "exif_trailing_finite.jxl",
+        "exif_trailing_infinite.jxl",
     ] {
         let data = testdata(name);
         let img = decode_with(&data, JxlDecoderOptions::default())
@@ -173,11 +170,28 @@ fn exif_box_payload_sizes() {
         let exif = img
             .exif
             .unwrap_or_else(|| panic!("{name}: no Exif box was captured"));
-        assert_eq!(
-            exif.len(),
-            upstream_size - 4,
-            "{name}: Exif payload size (upstream {upstream_size} minus the 4-byte TIFF offset)"
-        );
+        assert_eq!(exif.len(), 166, "{name}: Exif payload size");
+    }
+}
+
+/// The brotli-compressed (`brob`) halves of the same three files. `brob`
+/// decompression needs the `jpeg` feature, which is what pulls in brotli;
+/// without it those boxes are skipped by design.
+#[cfg(feature = "jpeg")]
+#[test]
+fn exif_brob_box_payload_sizes() {
+    for name in [
+        "exif_brob.jxl",
+        "exif_brob_trailing_finite.jxl",
+        "exif_brob_trailing_infinite.jxl",
+    ] {
+        let data = testdata(name);
+        let img = decode_with(&data, JxlDecoderOptions::default())
+            .unwrap_or_else(|e| panic!("{name}: decode failed: {e:?}"));
+        let exif = img
+            .exif
+            .unwrap_or_else(|| panic!("{name}: no Exif box was captured"));
+        assert_eq!(exif.len(), 166, "{name}: decompressed Exif payload size");
     }
 }
 

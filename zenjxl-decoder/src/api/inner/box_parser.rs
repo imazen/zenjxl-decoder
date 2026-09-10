@@ -554,26 +554,10 @@ impl BoxParser {
                         self.state = ParseState::BufferingGainMap(remaining, buf);
                     }
                 }
-                ParseState::BufferingExif(mut remaining, mut buf) => {
-                    let num = remaining.min(usize::MAX as u64) as usize;
-                    if !self.box_buffer.is_empty() {
-                        let take = num.min(self.box_buffer.len());
-                        buf.extend_from_slice(&self.box_buffer[..take]);
-                        self.box_buffer.consume(take);
-                        remaining -= take as u64;
-                    } else {
-                        let old_len = buf.len();
-                        buf.resize(old_len + num, 0);
-                        let read = input
-                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
-                            .map_err(|e| at!(Error::from(e)))?;
-                        if read == 0 {
-                            return Err(at!(Error::OutOfBounds(num)));
-                        }
-                        buf.truncate(old_len + read);
-                        remaining -= read as u64;
-                    }
-                    if remaining == 0 {
+                ParseState::BufferingExif(remaining, mut buf) => {
+                    let (remaining, done) =
+                        fill_metadata_box(&mut self.box_buffer, input, remaining, &mut buf)?;
+                    if done {
                         // Exif box payload starts with a 4-byte TIFF header offset
                         // (big-endian u32). Strip it to return raw EXIF/TIFF data.
                         if buf.len() >= 4 {
@@ -584,26 +568,10 @@ impl BoxParser {
                         self.state = ParseState::BufferingExif(remaining, buf);
                     }
                 }
-                ParseState::BufferingXmp(mut remaining, mut buf) => {
-                    let num = remaining.min(usize::MAX as u64) as usize;
-                    if !self.box_buffer.is_empty() {
-                        let take = num.min(self.box_buffer.len());
-                        buf.extend_from_slice(&self.box_buffer[..take]);
-                        self.box_buffer.consume(take);
-                        remaining -= take as u64;
-                    } else {
-                        let old_len = buf.len();
-                        buf.resize(old_len + num, 0);
-                        let read = input
-                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
-                            .map_err(|e| at!(Error::from(e)))?;
-                        if read == 0 {
-                            return Err(at!(Error::OutOfBounds(num)));
-                        }
-                        buf.truncate(old_len + read);
-                        remaining -= read as u64;
-                    }
-                    if remaining == 0 {
+                ParseState::BufferingXmp(remaining, mut buf) => {
+                    let (remaining, done) =
+                        fill_metadata_box(&mut self.box_buffer, input, remaining, &mut buf)?;
+                    if done {
                         self.xmp = Some(buf);
                         self.state = ParseState::BoxNeeded;
                     } else {
@@ -611,26 +579,10 @@ impl BoxParser {
                     }
                 }
                 #[cfg(feature = "jpeg")]
-                ParseState::BufferingBrob(mut remaining, mut buf) => {
-                    let num = remaining.min(usize::MAX as u64) as usize;
-                    if !self.box_buffer.is_empty() {
-                        let take = num.min(self.box_buffer.len());
-                        buf.extend_from_slice(&self.box_buffer[..take]);
-                        self.box_buffer.consume(take);
-                        remaining -= take as u64;
-                    } else {
-                        let old_len = buf.len();
-                        buf.resize(old_len + num, 0);
-                        let read = input
-                            .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
-                            .map_err(Error::from)?;
-                        if read == 0 {
-                            return Err(at!(Error::OutOfBounds(num)));
-                        }
-                        buf.truncate(old_len + read);
-                        remaining -= read as u64;
-                    }
-                    if remaining == 0 {
+                ParseState::BufferingBrob(remaining, mut buf) => {
+                    let (remaining, done) =
+                        fill_metadata_box(&mut self.box_buffer, input, remaining, &mut buf)?;
+                    if done {
                         // brob payload = [4-byte inner box type][brotli stream].
                         if buf.len() >= 4
                             && let Some(out) = brotli_decompress_box(&buf[4..])
@@ -808,8 +760,12 @@ impl BoxParser {
                             }
                         }
                         b"Exif" => {
+                            // A size-0 box runs to end of file; buffer it that way
+                            // instead of rejecting it (ISOBMFF, and libjxl accepts it).
                             if content_len == u64::MAX {
-                                return Err(at!(Error::InvalidBox));
+                                self.state = ParseState::BufferingExif(u64::MAX, Vec::new());
+                                self.box_buffer.consume(min_len + extra_len);
+                                continue;
                             }
                             // Reasonable size limit for EXIF data (16 MB).
                             if content_len > 16 * 1024 * 1024 {
@@ -823,8 +779,12 @@ impl BoxParser {
                             }
                         }
                         b"xml " => {
+                            // A size-0 box runs to end of file; buffer it that way
+                            // instead of rejecting it (ISOBMFF, and libjxl accepts it).
                             if content_len == u64::MAX {
-                                return Err(at!(Error::InvalidBox));
+                                self.state = ParseState::BufferingXmp(u64::MAX, Vec::new());
+                                self.box_buffer.consume(min_len + extra_len);
+                                continue;
                             }
                             // Reasonable size limit for XMP data (16 MB).
                             if content_len > 16 * 1024 * 1024 {
@@ -842,7 +802,14 @@ impl BoxParser {
                         // and route by inner box type. Needs brotli (jpeg feat).
                         #[cfg(feature = "jpeg")]
                         b"brob" => {
-                            if content_len == u64::MAX || content_len > 16 * 1024 * 1024 {
+                            // A size-0 box runs to end of file; buffer it that way
+                            // instead of skipping it.
+                            if content_len == u64::MAX {
+                                self.state = ParseState::BufferingBrob(u64::MAX, Vec::new());
+                                self.box_buffer.consume(min_len + extra_len);
+                                continue;
+                            }
+                            if content_len > 16 * 1024 * 1024 {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
                                 self.state = ParseState::BufferingBrob(
@@ -905,6 +872,69 @@ impl BoxParser {
             unreachable!()
         }
     }
+}
+
+/// One round of filling a metadata box's payload.
+///
+/// `remaining == u64::MAX` means the box declared size 0, i.e. "extends to the
+/// end of the file" (ISOBMFF; libjxl accepts this for any box type). Such a box
+/// has no length to count down, so it is read in bounded chunks and ends when
+/// the input does — a zero-length read is the normal terminator there, not the
+/// truncation it would be for a sized box.
+///
+/// Returns `(new_remaining, done)`. `MAX_METADATA_BOX` caps an unsized box so a
+/// file cannot make us buffer without bound.
+fn fill_metadata_box(
+    box_buffer: &mut SmallBuffer,
+    input: &mut dyn JxlBitstreamInput,
+    remaining: u64,
+    buf: &mut Vec<u8>,
+) -> Result<(u64, bool)> {
+    /// Same 16 MB ceiling the sized paths use.
+    const MAX_METADATA_BOX: usize = 16 * 1024 * 1024;
+    const EOF_CHUNK: usize = 64 * 1024;
+
+    let to_eof = remaining == u64::MAX;
+    let num = if to_eof {
+        EOF_CHUNK.min(MAX_METADATA_BOX.saturating_sub(buf.len()))
+    } else {
+        remaining.min(usize::MAX as u64) as usize
+    };
+    if to_eof && num == 0 {
+        // Hit the cap; keep what we have rather than growing forever.
+        return Ok((0, true));
+    }
+
+    if !box_buffer.is_empty() {
+        let take = num.min(box_buffer.len());
+        buf.extend_from_slice(&box_buffer[..take]);
+        box_buffer.consume(take);
+        let remaining = if to_eof {
+            u64::MAX
+        } else {
+            remaining - take as u64
+        };
+        return Ok((remaining, !to_eof && remaining == 0));
+    }
+
+    let old_len = buf.len();
+    buf.resize(old_len + num, 0);
+    let read = input
+        .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
+        .map_err(|e| at!(Error::from(e)))?;
+    buf.truncate(old_len + read);
+    if read == 0 {
+        if to_eof {
+            return Ok((0, true));
+        }
+        return Err(at!(Error::OutOfBounds(num)));
+    }
+    let remaining = if to_eof {
+        u64::MAX
+    } else {
+        remaining - read as u64
+    };
+    Ok((remaining, !to_eof && remaining == 0))
 }
 
 /// Brotli-decompress a `brob` box payload (the bytes after the 4-byte inner box

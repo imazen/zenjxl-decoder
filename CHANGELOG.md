@@ -8,6 +8,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 
 ### Fixed
+- **Metadata boxes declared with size 0 ("extends to end of file") were rejected or dropped.** ISOBMFF lets any box declare size 0, meaning it runs to EOF, and libjxl accepts that — the box-size comment in `box_parser.rs` even said "every consumer below treats `u64::MAX` as until EOF", but none of them did: `Exif`, `xml ` and `jxli` returned `InvalidBox`, and `brob` was silently skipped, so a trailing `Exif` box written that way was lost. The four buffering paths now share one `fill_metadata_box` helper that reads an unsized box in bounded 64 KB chunks, treats a zero-length read as the normal terminator rather than truncation, and keeps the same 16 MB ceiling so a file cannot make the decoder buffer without bound. Regression tests `exif_box_payload_sizes` and (behind the `jpeg` feature, which supplies brotli) `exif_brob_box_payload_sizes` — all six upstream EXIF fixtures now yield the same 166-byte payload, whether the box precedes the codestream, follows it with a finite size, or follows it with size 0.
+
+### Fixed
 - **A 61-byte file could panic the decoder.** `group_size_for_channel` in `render/internal.rs` did `ty.unwrap()` on a channel's pipeline type. Channels no stage consumes have no type at all, and callers legitimately ask for their scratch buffers — VarDCT always decodes three colour channels while a grayscale pipeline only ever reads the first — so a grayscale non-XYB VarDCT frame crashed with `Option::unwrap()` on `None`. The data written to such a buffer is discarded, so any type is acceptable; the check now only fires when a type is actually present and disagrees. Ported from upstream jxl-rs. Regression test `fuzzer_vardct_grayscale_unused_channel` on `tests/testdata/vardct_grayscale_unused_channel.jxl`. Predates the 2026-09-08 out-of-order fixes.
 
 ### Fixed
