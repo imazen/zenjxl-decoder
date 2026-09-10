@@ -16,6 +16,11 @@
 //! Known failures are tracked in `docs/UPSTREAM_SYNC.md`; see the "testdata
 //! sync" section. Do not weaken an assertion to make one pass.
 //!
+//! `zero_length_skippable_box.jxl` is exercised in
+//! `api::inner::box_parser`'s own test module instead, where upstream keeps
+//! it: the fixture holds no `jxlc`/`jxlp` at all, so there is nothing to
+//! decode and the assertion is that draining the parser terminates.
+//!
 //! Tests that expect an error use [`decode_with`], not the `decode` helper in
 //! `api::decoder::tests`: that helper `unwrap()`s the `process` result
 //! internally, so it panics where upstream's `decode_internal` returns `Err`,
@@ -72,17 +77,6 @@ fn ooo_jxlp_with_trailing_bytes_does_not_hang() {
         matches!(res, Err(ref e) if matches!(e.error(), Error::OutOfBounds(_))),
         "expected an out-of-input result, got {res:?}"
     );
-}
-
-/// Upstream `zero_length_skippable_box_does_not_hang`: a zero-length
-/// skippable box must not wedge the parser; all input is consumed.
-#[test]
-fn zero_length_skippable_box_is_consumed() {
-    let data = testdata("zero_length_skippable_box.jxl");
-    let res = with_deadline(20, "zero_length_skippable_box", move || {
-        decode_with(&data, JxlDecoderOptions::default()).map(|_| ())
-    });
-    assert!(res.is_ok(), "expected the file to decode, got {res:?}");
 }
 
 /// Upstream `test_fuzzer_context_map_num_histograms_overflow`: must not panic

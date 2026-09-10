@@ -919,3 +919,57 @@ fn brotli_decompress_box(compressed: &[u8]) -> Option<Vec<u8>> {
         .ok()?;
     Some(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::BoxParser;
+
+    /// Ported from upstream jxl-rs `zero_length_skippable_box_does_not_hang`.
+    ///
+    /// The fixture is a container with a zero-payload `junk` box followed by
+    /// bytes that parse as a box declaring `0xffffffff`. There is no `jxlc` or
+    /// `jxlp` in it at all, so nothing decodes — the point is that draining the
+    /// parser terminates and consumes the input rather than wedging on the
+    /// zero-length box.
+    ///
+    /// Upstream drives `CodestreamInput::read` until it returns 0; this fork
+    /// has no such type, so the equivalent is to pump `get_more_codestream`
+    /// until it stops yielding bytes.
+    #[test]
+    fn zero_length_skippable_box_does_not_hang() {
+        let data = include_bytes!("../../../tests/testdata/zero_length_skippable_box.jxl");
+        let mut parser = BoxParser::new();
+        let mut input = data.as_slice();
+
+        // Bounded so a wedged parser fails here instead of hanging the suite.
+        // Each round must consume input or hand out codestream; 4096 rounds is
+        // far more than the handful this 168-byte file needs.
+        let mut rounds = 0;
+        loop {
+            rounds += 1;
+            assert!(
+                rounds < 4096,
+                "parser made no progress for {rounds} rounds on a 168-byte file"
+            );
+            let before_input = input.len();
+            let before_read = parser.total_file_read;
+            let got = match parser.get_more_codestream(&mut input) {
+                Ok(n) => n,
+                // Clean end of input, or an incomplete trailing box.
+                Err(e) if matches!(e.error(), crate::error::Error::OutOfBounds(_)) => break,
+                Err(e) => panic!("unexpected error: {e:?}"),
+            };
+            let consumed = parser.box_buffer.len();
+            parser.box_buffer.consume(consumed);
+            if got == 0 && input.len() == before_input && parser.total_file_read == before_read {
+                break;
+            }
+        }
+
+        assert!(
+            input.is_empty(),
+            "{} input bytes left unconsumed",
+            input.len()
+        );
+    }
+}

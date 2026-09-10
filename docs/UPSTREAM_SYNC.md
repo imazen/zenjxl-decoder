@@ -332,9 +332,9 @@ real gaps, deliberately left red rather than weakened:
 
 | ported test | upstream expects | this fork does |
 |---|---|---|
-| `ooo_jxlp_with_trailing_bytes_does_not_hang` | `NeedsMoreInput` | **hangs** — no return after 20 s, also via `--info`, so it is in header parsing |
-| `fuzzer_vardct_grayscale_unused_channel` | decodes to a 1x1 frame | **panics** — `Option::unwrap()` on `None` at `render/internal.rs:160` |
-| `zero_length_skippable_box_is_consumed` | all input consumed | `OutOfBounds(0)` |
+| `ooo_jxlp_with_trailing_bytes_does_not_hang` | `NeedsMoreInput` | **FIXED** (`a8e10b2`) — was an unguarded retry loop |
+| `fuzzer_vardct_grayscale_unused_channel` | decodes to a 1x1 frame | **FIXED** — was `Option::unwrap()` on `None` at `render/internal.rs:160` |
+| ~~`zero_length_skippable_box_is_consumed`~~ | all input consumed | **not a fork bug — my port was wrong.** The fixture holds no `jxlc`/`jxlp` at all, so `OutOfBounds` is correct and "the file decodes" was never upstream's assertion. Upstream drains the box parser and checks the input is consumed; ported faithfully to `api::inner::box_parser`'s own test module, where it passes. |
 | `fuzzer_patches_ec_upsampling_dim_shift_rejected` | `PatchesUnsupportedMixedUpsampling` | `OutOfBounds(0)` |
 | `exif_box_payload_sizes` | `Exif` payload found in all 6 files | `exif_brob.jxl` yields no `Exif` — brotli-compressed `brob` EXIF is not decompressed |
 | `invalid_animated_ooo_jxlp_is_rejected` | `Err(InvalidBox)` | decodes the file |
