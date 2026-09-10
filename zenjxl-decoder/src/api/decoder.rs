@@ -772,7 +772,12 @@ pub(crate) mod tests {
     }
 
     #[allow(dead_code)] // used by integration tests
-    fn compare_frames(_path: &Path, fc: usize, f: &[Image<f32>], sf: &[Image<f32>]) -> Result<()> {
+    pub(crate) fn compare_frames(
+        _path: &Path,
+        fc: usize,
+        f: &[Image<f32>],
+        sf: &[Image<f32>],
+    ) -> Result<()> {
         assert_eq!(
             f.len(),
             sf.len(),

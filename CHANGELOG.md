@@ -8,6 +8,11 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 
 ### Added
+- **Synced all 18 missing upstream jxl-rs regression fixtures** and ported their tests (`src/tests/jxlrs_testdata_ports.rs`). `issue865_large_toc.jxl` and `ooo_jxlp_empty_dc_group_boxes.jxl` went into `resources/test/`, where `all_jxl_fixtures()` sweeps them automatically — both pass all six sweeps. The other 16 went into `tests/testdata/`, which is not swept, so each got a ported test asserting upstream's expectation.
+
+  **3 of the 9 ported tests pass; 6 fail, and are left failing on purpose** — see `docs/UPSTREAM_SYNC.md` "testdata sync (2026-09-09)" for the table. The two that matter most are robustness bugs on untrusted input: `ooo_jxlp_with_trailing_bytes.jxl` (153 B) **hangs** the decoder indefinitely, in header parsing — upstream fixed exactly this and keeps the fixture to prevent it — and `vardct_grayscale_unused_channel.jxl` (61 B) **panics** with `Option::unwrap()` on `None` at `render/internal.rs:160`. Neither is caused by the 2026-09-08 out-of-order fixes; both predate them.
+
+### Added
 
 - **`container_boxes` fuzz target** — structure-aware fuzzing of the container
   layer. Raw-byte fuzzing essentially never produces a well-formed out-of-order

@@ -136,7 +136,11 @@ an Apple M-series (aarch64/NEON) machine. Commands are reproducible with
 2. **Upstream fixtures we lack:** `issue728_minimal`, `strategic_solid_blue`
    (#731/#735 regression cases — ported fixes, fixtures never copied),
    `issue865_large_toc`, `issue772_blendbug`: all decode, bit-identical to
-   upstream; `invalid_animated_ooo_jxlp` is rejected by both.
+   upstream. **Correction 2026-09-09:** `invalid_animated_ooo_jxlp` is
+   rejected by upstream but *decoded* by this fork — verified against a
+   pre-fix build at `8e3edef`, so it is a long-standing divergence, not a
+   regression from the 2026-09-08 out-of-order fixes. See the testdata sync
+   section below.
 3. **Upstream's July fuzzer crashes** (#822 #823 #824 #825, POCs downloaded):
    all five are rejected cleanly by the fork with the same error upstream now
    returns. They were introduced by #812, which we do not have.
@@ -310,3 +314,41 @@ Then, for each unported upstream commit, read `git show <hash>` against the
 fork's matching file (`jxl/src/X` ↔ `zenjxl-decoder/src/X`) and record the
 disposition here. Upstream release notes:
 <https://github.com/libjxl/jxl-rs/releases>.
+
+
+## testdata sync (2026-09-09)
+
+Upstream keeps regression fixtures in two places. `resources/test/` is swept
+automatically here by `all_jxl_fixtures()`, but `tests/testdata/` is not, so
+those fixtures need a test each. All 18 missing fixtures were synced and the
+upstream tests ported to `src/tests/jxlrs_testdata_ports.rs`, asserting
+*upstream's* expectations rather than this fork's behaviour.
+
+Two `resources/test/` fixtures dropped straight in and pass all six sweeps:
+`issue865_large_toc.jxl` and `ooo_jxlp_empty_dc_group_boxes.jxl`.
+
+Of the ported `tests/testdata/` tests, **3 pass and 6 fail**. The failures are
+real gaps, deliberately left red rather than weakened:
+
+| ported test | upstream expects | this fork does |
+|---|---|---|
+| `ooo_jxlp_with_trailing_bytes_does_not_hang` | `NeedsMoreInput` | **hangs** — no return after 20 s, also via `--info`, so it is in header parsing |
+| `fuzzer_vardct_grayscale_unused_channel` | decodes to a 1x1 frame | **panics** — `Option::unwrap()` on `None` at `render/internal.rs:160` |
+| `zero_length_skippable_box_is_consumed` | all input consumed | `OutOfBounds(0)` |
+| `fuzzer_patches_ec_upsampling_dim_shift_rejected` | `PatchesUnsupportedMixedUpsampling` | `OutOfBounds(0)` |
+| `exif_box_payload_sizes` | `Exif` payload found in all 6 files | `exif_brob.jxl` yields no `Exif` — brotli-compressed `brob` EXIF is not decompressed |
+| `invalid_animated_ooo_jxlp_is_rejected` | `Err(InvalidBox)` | decodes the file |
+
+Two notes for whoever picks these up:
+
+- The hang and the panic are robustness bugs on untrusted input (153 bytes and
+  61 bytes respectively) and should be fixed first.
+- `zero_length_skippable_box` and `patches_ec_upsampling_dim_shift` both fail
+  with `OutOfBounds(0)`, and the first is literally a zero-length box. That is
+  the same shape as the empty-`jxlp` bug fixed in `c977405` (a zero-byte read
+  taken for end of input), so one root cause may clear both.
+
+Tests that expect an error must use `decode_with`, not the `decode` helper in
+`api::decoder::tests`: that helper `unwrap()`s the `process` result
+(`api/decoder.rs:548`), so it panics where upstream's `decode_internal` returns
+`Err`, and a test built on it cannot tell a graceful rejection from a crash.
