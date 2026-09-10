@@ -850,6 +850,7 @@ impl CodestreamParser {
                 // Loop to handle incremental parsing (e.g. large ICC profiles) that may need
                 // multiple buffer refills to complete.
                 loop {
+                    let file_read_before = box_parser.total_file_read;
                     let available_codestream = match box_parser.get_more_codestream(input) {
                         Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => 0,
                         Ok(c) => c as usize,
@@ -883,21 +884,26 @@ impl CodestreamParser {
                             } else {
                                 false
                             };
-                            // Check if input still has data - if so, refill and retry
-                            if input.available_bytes().unwrap_or(0) > 0 {
-                                continue;
-                            }
-                            // The caller's input is exhausted, but the box parser
-                            // may still hold codestream: container bytes it
-                            // over-read, and out-of-order `jxlp` payloads not yet
-                            // spliced in. `cjxl --output_mode=2` writes the boxes
-                            // that complete the header near the *end* of the file,
-                            // so the input is drained long before the header is.
-                            // Retry only while the round made progress (or the
-                            // buffer was just enlarged, which lets the next refill
-                            // read), so a file that can never be completed still
-                            // terminates.
-                            if box_parser.buffered_leftover() > 0 && (c > 0 || enlarged) {
+                            // Retry only if this round actually moved: it added
+                            // codestream, or it drew bytes out of the caller's
+                            // input, or the buffer just grew (which lets the next
+                            // refill read more). `input.available_bytes() > 0` is
+                            // NOT progress on its own -- trailing container bytes
+                            // that the box parser will never turn into codestream
+                            // keep it positive forever, and retrying on that alone
+                            // spun until killed on a 153-byte file
+                            // (`tests/testdata/ooo_jxlp_with_trailing_bytes.jxl`,
+                            // upstream jxl-rs `ooo_jxlp_with_trailing_bytes_does_not_hang`).
+                            //
+                            // Bytes may still be reachable after the caller's input
+                            // runs dry -- container bytes the box parser over-read,
+                            // and out-of-order `jxlp` payloads not yet spliced in;
+                            // `cjxl --output_mode=2` puts the boxes that complete
+                            // the header near the end of the file. Those show up as
+                            // `c > 0` on the round that injects them, so the same
+                            // progress test covers them.
+                            let consumed_input = box_parser.total_file_read > file_read_before;
+                            if c > 0 || consumed_input || enlarged {
                                 continue;
                             }
                             return Err(at!(Error::OutOfBounds(*needed as usize)));

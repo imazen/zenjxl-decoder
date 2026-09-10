@@ -7,6 +7,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ## [Unreleased]
 
 
+### Fixed
+- **A 153-byte file could hang the decoder forever.** `tests/testdata/ooo_jxlp_with_trailing_bytes.jxl` — an out-of-order `jxlp` stream whose header needs more codestream than its boxes carry, followed by trailing container bytes — spun until killed, in header parsing (`--info` hung too). The non-section refill loop retried on `input.available_bytes() > 0` alone, with no progress requirement: the trailing bytes parse as a box claiming ~3 GB that the box parser never turns into codestream, so `available_bytes()` stayed positive forever and the loop never exited. The retry now requires that the round actually moved — it added codestream, drew bytes from the caller's input, or grew the buffer — and otherwise returns `OutOfBounds`, which is what upstream returns. Bytes that only become reachable after the caller's input runs dry (over-read container bytes, out-of-order `jxlp` payloads not yet spliced in) surface as `c > 0` on the round that injects them, so the same test covers them; the separate `buffered_leftover()` retry added in `ed1fa3d` is subsumed and gone. Predates the 2026-09-08 out-of-order fixes — verified against a build at `8e3edef`. Regression test `ooo_jxlp_with_trailing_bytes_does_not_hang` (upstream jxl-rs has the same fixture and test name); the module now runs in 0.02 s instead of timing out at 20 s. All ten out-of-order repro files still decode, pixel-identical to `djxl 0.12.0`.
+
 ### Added
 - **Synced all 18 missing upstream jxl-rs regression fixtures** and ported their tests (`src/tests/jxlrs_testdata_ports.rs`). `issue865_large_toc.jxl` and `ooo_jxlp_empty_dc_group_boxes.jxl` went into `resources/test/`, where `all_jxl_fixtures()` sweeps them automatically — both pass all six sweeps. The other 16 went into `tests/testdata/`, which is not swept, so each got a ported test asserting upstream's expectation.
 
