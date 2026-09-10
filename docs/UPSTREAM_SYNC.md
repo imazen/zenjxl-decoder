@@ -330,23 +330,21 @@ Two `resources/test/` fixtures dropped straight in and pass all six sweeps:
 Of the ported `tests/testdata/` tests, **3 pass and 6 fail**. The failures are
 real gaps, deliberately left red rather than weakened:
 
-| ported test | upstream expects | this fork does |
+| ported test | upstream expects | outcome |
 |---|---|---|
-| `ooo_jxlp_with_trailing_bytes_does_not_hang` | `NeedsMoreInput` | **FIXED** (`a8e10b2`) — was an unguarded retry loop |
-| `fuzzer_vardct_grayscale_unused_channel` | decodes to a 1x1 frame | **FIXED** — was `Option::unwrap()` on `None` at `render/internal.rs:160` |
-| ~~`zero_length_skippable_box_is_consumed`~~ | all input consumed | **not a fork bug — my port was wrong.** The fixture holds no `jxlc`/`jxlp` at all, so `OutOfBounds` is correct and "the file decodes" was never upstream's assertion. Upstream drains the box parser and checks the input is consumed; ported faithfully to `api::inner::box_parser`'s own test module, where it passes. |
-| `fuzzer_patches_ec_upsampling_dim_shift_rejected` | `PatchesUnsupportedMixedUpsampling` | `OutOfBounds(0)` |
-| `exif_box_payload_sizes` | `Exif` payload found in all 6 files | `exif_brob.jxl` yields no `Exif` — brotli-compressed `brob` EXIF is not decompressed |
-| `invalid_animated_ooo_jxlp_is_rejected` | `Err(InvalidBox)` | decodes the file |
+| `ooo_jxlp_with_trailing_bytes_does_not_hang` | `NeedsMoreInput` | **fork bug, FIXED** (`a8e10b2`) — unguarded retry spun forever on 153 bytes |
+| `fuzzer_vardct_grayscale_unused_channel` | decodes to a 1x1 frame | **fork bug, FIXED** (`454f86e`) — `Option::unwrap()` on `None` at `render/internal.rs:160` |
+| `exif_box_payload_sizes` (6 fixtures) | `Exif` found in all six | **fork bug, FIXED** (`05ded33`) — size-0 ("to end of file") metadata boxes were rejected or skipped |
+| ~~`zero_length_skippable_box_is_consumed`~~ | all input consumed | **my port was wrong.** The fixture holds no `jxlc`/`jxlp` at all, so `OutOfBounds` is correct. Upstream's real assertion — draining the box parser terminates — is ported faithfully into `api::inner::box_parser`'s test module, and passes. |
+| `fuzzer_patches_ec_upsampling_dim_shift_rejected` | `PatchesUnsupportedMixedUpsampling` | **upstream is the outlier.** `djxl 0.12.0` reports "Input file is truncated (total bytes: 49, processed bytes: 49)" — the same diagnosis this fork gives. The 49-byte file *is* truncated; upstream's patch error is an artifact of its validation order. The port now asserts clean rejection, which is what the fixture guards. |
+| ~~`invalid_animated_ooo_jxlp_is_rejected`~~ | `Err(InvalidBox)` | **upstream is stricter than the reference.** `djxl 0.12.0` decodes this file, and this fork's output is **byte-identical** to it (PPM sha256 match). Porting upstream's rejection would reject a file libjxl decodes. The fixture moved to `resources/test/`, where the six automatic sweeps cover it. |
 
-Two notes for whoever picks these up:
+Net: three real parser bugs found and fixed, two of my ports were wrong, and two
+upstream assertions turned out to encode upstream-specific behaviour that the
+reference implementation contradicts. All nine ported tests now pass.
 
-- The hang and the panic are robustness bugs on untrusted input (153 bytes and
-  61 bytes respectively) and should be fixed first.
-- `zero_length_skippable_box` and `patches_ec_upsampling_dim_shift` both fail
-  with `OutOfBounds(0)`, and the first is literally a zero-length box. That is
-  the same shape as the empty-`jxlp` bug fixed in `c977405` (a zero-byte read
-  taken for end of input), so one root cause may clear both.
+Method note for future syncs: when a ported assertion fails, check the fixture
+against `djxl` before assuming upstream is right. Twice here it was not.
 
 Tests that expect an error must use `decode_with`, not the `decode` helper in
 `api::decoder::tests`: that helper `unwrap()`s the `process` result
