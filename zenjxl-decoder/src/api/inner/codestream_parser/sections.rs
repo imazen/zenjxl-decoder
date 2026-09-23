@@ -134,7 +134,7 @@ impl CodestreamParser {
                 processed_section = true;
             } else {
                 let section_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
-                let t0 = std::time::Instant::now();
+                let t0 = crate::util::clock::Instant::now();
 
                 if let Some(lf_global) = self.lf_global_section.take() {
                     frame.decode_lf_global(&mut BitReader::new_padded(
@@ -245,7 +245,7 @@ impl CodestreamParser {
                     // Already decoded via overlap path
                     true
                 } else if let Some(hf_global) = self.hf_global_section.take() {
-                    let t = std::time::Instant::now();
+                    let t = crate::util::clock::Instant::now();
                     frame.decode_hf_global(&mut BitReader::new_padded(
                         &hf_global.data,
                         hf_global.len,
@@ -258,7 +258,7 @@ impl CodestreamParser {
                     false
                 };
                 if hf_newly_done && frame.render_pipeline_not_ready() {
-                    let t = std::time::Instant::now();
+                    let t = crate::util::clock::Instant::now();
 
                     #[cfg(feature = "threads")]
                     {
@@ -274,7 +274,7 @@ impl CodestreamParser {
                         )?;
                         pipeline_dur = t.elapsed();
 
-                        let t = std::time::Instant::now();
+                        let t = crate::util::clock::Instant::now();
                         frame.finalize_lf()?;
                         finalize_lf_dur = t.elapsed();
                     }
@@ -293,7 +293,7 @@ impl CodestreamParser {
                         )?;
                         pipeline_dur = t.elapsed();
 
-                        let t = std::time::Instant::now();
+                        let t = crate::util::clock::Instant::now();
                         frame.finalize_lf()?;
                         finalize_lf_dur = t.elapsed();
                     }
@@ -302,7 +302,7 @@ impl CodestreamParser {
                     break 'process;
                 }
 
-                let prep_start = std::time::Instant::now();
+                let prep_start = crate::util::clock::Instant::now();
                 let mut group_readers = vec![];
                 let mut processed_groups = vec![];
 

@@ -914,12 +914,12 @@ impl Frame {
         }
 
         let phase_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
-        let join_start = std::time::Instant::now();
+        let join_start = crate::util::clock::Instant::now();
 
         // Run LF group decode and HF global parse in parallel.
         let (lf_result, hf_result) = rayon::join(
             || -> Result<(Vec<LfGroupOutput>, std::time::Duration)> {
-                let par_start = std::time::Instant::now();
+                let par_start = crate::util::clock::Instant::now();
                 let results: Vec<LfGroupOutput> = lf_sections
                     .into_par_iter()
                     .map(|(group, data, len)| -> Result<LfGroupOutput> {
@@ -1057,7 +1057,7 @@ impl Frame {
                 Ok((results, par_start.elapsed()))
             },
             || -> Result<(HfGlobalOutput, std::time::Duration)> {
-                let hf_start = std::time::Instant::now();
+                let hf_start = crate::util::clock::Instant::now();
                 decoder_state.check_cancelled()?;
                 let mut br = BitReader::new_padded(&hf_data, hf_len)?;
                 let dequant_matrices =
@@ -1132,7 +1132,7 @@ impl Frame {
         let join_dur = join_start.elapsed();
 
         // Sequential copy-back for LF group results.
-        let copyback_start = std::time::Instant::now();
+        let copyback_start = crate::util::clock::Instant::now();
         let lf_image = lf_image.as_mut().unwrap();
         let hf_meta = hf_meta.as_mut().unwrap();
 

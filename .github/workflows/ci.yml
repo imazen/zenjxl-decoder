@@ -123,7 +123,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1
+          targets: wasm32-wasip1, wasm32-unknown-unknown
 
       - uses: bytecodealliance/actions/wasmtime/setup@v1
 
@@ -138,6 +138,12 @@ jobs:
           else
             cargo test --release -p zenjxl-decoder --no-fail-fast --no-default-features --features ${{ matrix.features }} --target wasm32-wasip1
           fi
+
+      # Browsers run wasm32-unknown-unknown, where std has no clock: the phase
+      # timers go through util::clock (a stand-in there), and this build keeps
+      # that stand-in in step with how the decoder uses it.
+      - name: Build for the browser target
+        run: cargo build --release -p zenjxl-decoder --target wasm32-unknown-unknown
 
   test-i686:
     runs-on: ubuntu-latest

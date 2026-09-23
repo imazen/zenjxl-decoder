@@ -211,7 +211,7 @@ impl Frame {
         };
 
         let frame_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
-        let frame_start = std::time::Instant::now();
+        let frame_start = crate::util::clock::Instant::now();
 
         pipeline!(self, p, p.check_buffer_sizes(&mut buffers[..])?);
 
@@ -298,7 +298,7 @@ impl Frame {
 
         #[cfg_attr(not(feature = "threads"), allow(unused_mut))]
         let mut parallel_rendered = false;
-        let hf_start = std::time::Instant::now();
+        let hf_start = crate::util::clock::Instant::now();
         if use_parallel {
             // A flush-only call brings no new groups; there is nothing to
             // batch (and `decode_groups_parallel` would step by zero).
@@ -328,7 +328,7 @@ impl Frame {
         // STEP 4: process all modular transforms that can now be processed,
         // flushing buffers that will not be used again, if either we are forcing a render now
         // or we are done with the file.
-        let flush_start = std::time::Instant::now();
+        let flush_start = crate::util::clock::Instant::now();
         // Skip intermediate flush for parallel path — the parallel decode already renders
         // each batch correctly. Intermediate STEP 4+5 re-rendering causes partial-readiness
         // bugs with border-dependent stages (EPF, Gaborish). Only process when all groups
@@ -567,7 +567,7 @@ impl Frame {
         // Phase 1: Sequential — compute render decisions (NO pixel allocation).
         // Pixel buffers are allocated on-demand in Phase 2 (parallel) to avoid
         // the sequential allocation bottleneck that caused the 0.59x regression.
-        let phase1_start = std::time::Instant::now();
+        let phase1_start = crate::util::clock::Instant::now();
         let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
         let mut num_needs_pixels = 0usize;
         for (group, passes) in groups {
@@ -674,7 +674,7 @@ impl Frame {
             let batch_end = (batch_start + decode_batch_size).min(num_groups);
 
             // Re-seed pixel pool from scratch between batches.
-            let setup_start = std::time::Instant::now();
+            let setup_start = crate::util::clock::Instant::now();
             if batch_start > 0 {
                 let batch_needs = work[batch_start..batch_end]
                     .iter()
@@ -699,7 +699,7 @@ impl Frame {
             setup_dur += setup_start.elapsed();
 
             // Phase 2: Parallel decode this batch.
-            let phase2_start = std::time::Instant::now();
+            let phase2_start = crate::util::clock::Instant::now();
             {
                 let lf_global = self.lf_global.as_ref().unwrap();
                 let header = &self.header;
@@ -791,7 +791,7 @@ impl Frame {
             phase2_dur += phase2_start.elapsed();
 
             // Collect VarDCT pixels for parallel storage.
-            let collect_start = std::time::Instant::now();
+            let collect_start = crate::util::clock::Instant::now();
             let mut pending_stores: Vec<Option<([OwnedRawImage; 3], bool)>> = if is_vardct {
                 let num_groups = lmp_ref!().num_groups();
                 let mut stores: Vec<Option<([OwnedRawImage; 3], bool)>> =
@@ -809,7 +809,7 @@ impl Frame {
             collect_dur += collect_start.elapsed();
 
             // Phase 3a-store: Sequential — store decoded buffers and run process_output.
-            let phase3a_start = std::time::Instant::now();
+            let phase3a_start = crate::util::clock::Instant::now();
             let mut groups_stored: Vec<(usize, bool, bool)> =
                 Vec::with_capacity(batch_end - batch_start);
             let mut modular_channels_output: Vec<(usize, usize)> = Vec::new();
@@ -958,7 +958,7 @@ impl Frame {
             }
 
             phase3a_store_dur += phase3a_start.elapsed();
-            let phase3a_prep_start = std::time::Instant::now();
+            let phase3a_prep_start = crate::util::clock::Instant::now();
 
             // Phase 3a-prepare: Parallel — extract borders and emit work items.
             // When batching, groups from previous batches have is_ready=true,
@@ -1017,7 +1017,7 @@ impl Frame {
             //
             // Falls back to two-phase (owned buffers + copy-back) when band
             // splitting isn't possible (single gy band with overlapping rows).
-            let phase3b_start = std::time::Instant::now();
+            let phase3b_start = crate::util::clock::Instant::now();
             if !all_items.is_empty() {
                 any_rendered |= has_output;
                 let p = lmp_ref!();
@@ -1339,7 +1339,7 @@ impl Frame {
             // can store data to groups from previous batches, re-readying them
             // for rendering. Their neighbors' border buffers must stay alive.
             // Center data IS recycled to refill the pixel pool for next batch.
-            let phase3c_start = std::time::Instant::now();
+            let phase3c_start = crate::util::clock::Instant::now();
             for ri in &render_infos {
                 if ri.has_items {
                     lmp_mut!().recycle_group_buffers(ri.group, !is_batched);

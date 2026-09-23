@@ -9,6 +9,7 @@ pub mod test;
 // Re-export AtomicRefCell from the atomic_refcell crate (replaces custom implementation)
 mod bits;
 mod cacheline;
+pub(crate) mod clock;
 mod concat_slice;
 mod fast_math;
 mod float16;
