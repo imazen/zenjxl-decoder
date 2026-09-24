@@ -76,3 +76,15 @@ predates completion of the remote baseline build, Cargo can reuse that baseline
 binary after the copy. Refresh changed source timestamps in the exported tree
 and confirm a compile occurs before treating an after-run as evidence. The
 invalid first after-run is retained as `decoder-ci-i686-stale-binary.log`.
+
+
+## Full CI confirmation — 2026-09-24
+
+[CI run 36009778067](https://github.com/imazen/zenjxl-decoder/actions/runs/36009778067)
+passes all 19 jobs at `420d38859ab6ee9ed9a9c213d8b301fb8afe0b38`:
+both WASI configurations, i686 no/all features, Windows ARM64, Linux x64/ARM64,
+macOS Intel, formatting and Clippy. This independently verifies the WASI
+deadline repair (`440cc002`) and 32-bit fixture serialization (`420d3885`).
+Remote `main` was verified at that commit after the run. The earlier preserved
+`940d2c51` work remains in its ancestry. CI's configured corpus policy remains
+in effect; a green job is not a claim that every external corpus was present.
