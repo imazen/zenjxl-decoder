@@ -103,6 +103,11 @@ pub fn write_jpeg(jpeg: &JpegData) -> Result<Vec<u8>> {
                     // whole SOF segment and corrupted the marker stream.
                     writer.write_sof(jpeg, marker)?;
                 }
+                0xD0..=0xD7 => {
+                    // Standalone restart markers (including after the final MCU)
+                    // are recorded in JBRD marker_order, outside scan entropy.
+                    writer.write_marker(marker)?;
+                }
                 0xDD => {
                     // DRI
                     writer.write_dri(jpeg.restart_interval)?;
@@ -1112,5 +1117,41 @@ impl BitWriter {
         // Any remaining bits should have been padded already
         debug_assert!(self.bits_in_buffer == 0);
         std::mem::take(&mut self.buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standalone_restart_markers_keep_original_order() {
+        // Marker serialization alone: no scan coefficients are needed here.
+        // Restart markers inside scans are emitted by write_sos instead.
+        let jpeg = JpegData {
+            width: 0,
+            height: 0,
+            restart_interval: 0,
+            app_data: Vec::new(),
+            app_marker_type: Vec::new(),
+            com_data: Vec::new(),
+            quant: Vec::new(),
+            huffman_code: Vec::new(),
+            components: Vec::new(),
+            scan_info: Vec::new(),
+            marker_order: vec![0xD3, 0xD0, 0xD7, 0xD1, 0xD6, 0xD2, 0xD5, 0xD4, 0xD9],
+            inter_marker_data: Vec::new(),
+            tail_data: vec![0x12, 0x34],
+            has_zero_padding_bit: false,
+            padding_bits: Vec::new(),
+            component_type: JpegComponentType::Gray,
+        };
+        assert_eq!(
+            write_jpeg(&jpeg).unwrap(),
+            [
+                0xFF, 0xD8, 0xFF, 0xD3, 0xFF, 0xD0, 0xFF, 0xD7, 0xFF, 0xD1, 0xFF, 0xD6, 0xFF, 0xD2,
+                0xFF, 0xD5, 0xFF, 0xD4, 0xFF, 0xD9, 0x12, 0x34,
+            ]
+        );
     }
 }

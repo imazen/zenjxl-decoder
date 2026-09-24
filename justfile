@@ -51,3 +51,12 @@ arm-kernel-tiers-macos:
 arm-modular-macos:
     mkdir -p "$HOME/tmp"
     CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench --locked -p zenjxl-decoder --bench decode_bench -- --group=modular --format=llm > "$HOME/tmp/zenjxl-modular.log" 2>&1
+
+# JPEG reconstruction regression gate, including standalone terminal restart markers.
+jpeg-reconstruction-check label:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 RUST_TEST_THREADS=4
+    mkdir -p "$HOME/tmp/zenjxl-decoder"
+    nice -n 19 cargo test --locked --release -p zenjxl-decoder --features jpeg --lib > "$HOME/tmp/zenjxl-decoder/jpeg-{{label}}.log" 2>&1
+    rg 'test result:' "$HOME/tmp/zenjxl-decoder/jpeg-{{label}}.log"
