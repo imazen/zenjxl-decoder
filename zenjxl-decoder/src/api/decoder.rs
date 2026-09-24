@@ -683,6 +683,14 @@ pub(crate) mod tests {
         use std::sync::Mutex;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
+        // Libtest's --test-threads does not constrain this helper's workers.
+        // On 32-bit, serialize sweeps as well as their individual fixtures so
+        // simultaneous full-image decodes cannot exhaust the address space.
+        #[cfg(target_pointer_width = "32")]
+        static SWEEP_LOCK: Mutex<()> = Mutex::new(());
+        #[cfg(target_pointer_width = "32")]
+        let _sweep_guard = SWEEP_LOCK.lock().unwrap();
+
         let fixtures = crate::util::test::all_jxl_fixtures();
         let next = AtomicUsize::new(0);
         let ran = AtomicUsize::new(0);
@@ -699,7 +707,12 @@ pub(crate) mod tests {
         let cores = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4);
-        let workers = cores.min(8).min(fixtures.len().max(1));
+        let worker_cap = if cfg!(target_pointer_width = "32") {
+            1
+        } else {
+            8
+        };
+        let workers = cores.min(worker_cap).min(fixtures.len().max(1));
 
         let worker = || {
             loop {

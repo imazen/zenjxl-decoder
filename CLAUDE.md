@@ -42,6 +42,37 @@ pass. Local runs use `ARBTEST_BUDGET_MS=100` and CI's explicit missing-corpus
 policy; these counts do not imply external-corpus coverage. An intentional
 infinite-loop module run through the same runner traps with `interrupt` at
 the configured deadline.
+Both WASI jobs also pass on commit `440cc002` in
+[CI run 36008146603](https://github.com/imazen/zenjxl-decoder/actions/runs/36008146603).
 `just wasm-ci-check <label>` runs both CI feature configurations and saves
 complete logs under `~/tmp/zenjxl-decoder/` with CI's explicit missing-corpus
 policy.
+
+## i686 fixture sweep memory — 2026-09-24
+
+[PROVEN] `run_fixture_sweep` creates up to eight workers independently of
+libtest's `--test-threads=1`. The exported Linux i686 baseline (executed through QEMU on WSL) reproduces CI's
+`compare_pipelines_sweep` failure at `ImageOutOfMemory(42048, 5377)`, plus two
+`ImageOutOfMemory(32512, 2704)` failures. The comparison helper deliberately disables decoder request limits
+and renders full f64 reference planes. The baseline's process peak RSS was
+2.16 GiB under `run-heavy --mem 12G --jobs 4`; address-space allocation failed
+without reaching the host memory ceiling.
+
+The correction serializes fixtures and sweeps on 32-bit targets.
+It retains the current fixture selection, including the large TOC fixture,
+and all pixel-hash comparisons. The duplicate `issue865_large_toc.jxl` in
+`resources/test/` is byte-identical to the dedicated `tests/testdata/jxlrs-865/`
+copy; neither is removed. Before/after logs are under
+`~/tmp/jxl-backlog/decoder-ci-i686-*.log`.
+The rebuilt comparison passes every selected fixture on the same target, with
+2.63 GiB process peak RSS and 15,562 MiB minimum host available RAM under
+`run-heavy`. The failing baseline peaked lower because it could not complete;
+this is not a claimed reduction in completed-decode memory.
+`just i686-ci-check <label>` reproduces both CI feature configurations on a
+Linux multilib host; invoke through `run-heavy` on shared hosts.
+
+Source-export trap: `rsync -a` preserves source timestamps. When a local edit
+predates completion of the remote baseline build, Cargo can reuse that baseline
+binary after the copy. Refresh changed source timestamps in the exported tree
+and confirm a compile occurs before treating an after-run as evidence. The
+invalid first after-run is retained as `decoder-ci-i686-stale-binary.log`.

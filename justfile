@@ -74,3 +74,18 @@ wasm-ci-check label:
         nice -n 19 cargo test --locked --release -p zenjxl-decoder --no-fail-fast --no-default-features "${args[@]}" --target wasm32-wasip1 > "$HOME/tmp/zenjxl-decoder/wasm-{{label}}-$features.log" 2>&1
         rg 'test result:' "$HOME/tmp/zenjxl-decoder/wasm-{{label}}-$features.log"
     done
+
+# Native Linux with multilib, matching CI's i686 test selection. Invoke through
+# run-heavy on shared Linux hosts to bound the build's memory and CPU use.
+i686-ci-check label:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4
+    export ZENJXL_ALLOW_MISSING_CORPUS=1
+    mkdir -p "$HOME/tmp/zenjxl-decoder"
+    for features in none all; do
+        args=(--no-default-features)
+        if [[ "$features" == all ]]; then args=(--all-features); fi
+        nice -n 19 cargo test --locked --release --workspace --no-fail-fast "${args[@]}" --target i686-unknown-linux-gnu -- --test-threads=1 > "$HOME/tmp/zenjxl-decoder/i686-{{label}}-$features.log" 2>&1
+        rg 'test result:' "$HOME/tmp/zenjxl-decoder/i686-{{label}}-$features.log"
+    done
