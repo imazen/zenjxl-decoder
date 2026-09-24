@@ -6,6 +6,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Fixed
+- JPEG reconstruction retains standalone RST0–RST7 markers, including terminal restarts after the final MCU (`b0fb20db`).
+
 
 ### Changed
 - **`invalid_animated_ooo_jxlp.jxl` moved into the swept corpus.** Upstream jxl-rs rejects this container with `InvalidBox` (its out-of-order `jxlp` boxes arrive 0, 2, 1, 3, so a frame starts in a box that does not have all logically-earlier boxes physically before it). `djxl 0.12.0` decodes it, and this fork's decode is **byte-identical** to djxl's — so upstream is stricter than the reference implementation and porting that rejection would refuse a file libjxl reads. The fixture now lives in `resources/test/` where the six automatic sweeps exercise it. Likewise `patches_ec_upsampling_dim_shift.jxl`: upstream expects `PatchesUnsupportedMixedUpsampling`, but `djxl` calls the 49-byte file truncated, which is exactly what this fork reports, so the ported test asserts clean rejection rather than upstream's validation-order artifact.
