@@ -26,3 +26,22 @@ standalone-marker regression execute and pass. Logs are under
 `just jpeg-reconstruction-check <label>` reproduces the release library gate;
 set the corpus policy explicitly at invocation, as CI does.
 Workspace all-target, all-feature Clippy and scoped formatting also pass.
+
+## WASI regression deadlines — 2026-09-24
+
+[PROVEN] The two deadline regressions in `jxlrs_testdata_ports` used
+`std::thread::spawn`, which traps on wasm32-wasip1. They now live in the
+`regression_deadlines` integration binary with unchanged decode assertions.
+Native execution keeps each 20-second worker deadline. The WASI runner applies
+Wasmtime's `-W timeout=20s` to the entire dedicated binary, including both
+regressions; the guest refuses to run without the runner's deadline marker.
+This also bounds a decoder that never returns or polls cancellation. The
+WASI suites pass with no features (767 library tests reported) and `wasm128`
+(808), each with 37 existing ignores; all integration and doctest binaries
+pass. Local runs use `ARBTEST_BUDGET_MS=100` and CI's explicit missing-corpus
+policy; these counts do not imply external-corpus coverage. An intentional
+infinite-loop module run through the same runner traps with `interrupt` at
+the configured deadline.
+`just wasm-ci-check <label>` runs both CI feature configurations and saves
+complete logs under `~/tmp/zenjxl-decoder/` with CI's explicit missing-corpus
+policy.

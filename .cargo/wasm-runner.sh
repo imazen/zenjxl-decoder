@@ -17,5 +17,12 @@
 # is what turned the wasm legs red from 2026-08-27 on.
 set -eu
 here=$(pwd)
+case "$(basename "$1")" in
+  regression_deadlines-*.wasm)
+    # Both hang regressions share this process budget; neither may exceed its
+    # native 20-second deadline. The guest refuses an unbounded invocation.
+    set -- -W timeout=20s --env ZENJXL_TEST_DEADLINE_SECS=20 "$@"
+    ;;
+esac
 exec wasmtime --dir="$here::$here" --dir="$(dirname "$here")::$(dirname "$here")" \
   --dir=.::. --env ARBTEST_BUDGET_MS --env ZENJXL_ALLOW_MISSING_CORPUS "$@"
