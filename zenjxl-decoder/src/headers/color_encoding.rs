@@ -196,9 +196,65 @@ impl ColorEncoding {
             || self.tf.transfer_function == TransferFunction::Unknown
             || self.color_space == ColorSpace::XYB
         {
-            Err(Error::InvalidColorEncoding)
-        } else {
-            Ok(())
+            return Err(Error::InvalidColorEncoding);
         }
+        // A custom white point or custom primaries that cannot produce an ICC
+        // profile (degenerate chromaticities, or matrices outside s15Fixed16)
+        // are rejected at the header instead of later. `white` is only
+        // meaningful when `white_point == Custom`, so the check goes through
+        // `JxlColorEncoding`, which resolves the named white points.
+        // Upstream jxl-rs 0f41860 + 96b0be3.
+        if !self.want_icc
+            && (self.white_point == WhitePoint::Custom || self.primaries == Primaries::Custom)
+        {
+            crate::api::JxlColorEncoding::from_internal(self)
+                .map_err(|e| e.decompose().0)?
+                .validate_icc_matrix()?;
+        }
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_custom_primaries_with_standard_white_point() {
+        let mut encoding = ColorEncoding::default(&Empty {});
+        encoding.primaries = Primaries::Custom;
+        encoding.white_point = WhitePoint::D65;
+        // Set standard sRGB-like primaries
+        encoding.custom_primaries = [
+            CustomXY::from_f32_coords(0.64, 0.33),
+            CustomXY::from_f32_coords(0.30, 0.60),
+            CustomXY::from_f32_coords(0.15, 0.06),
+        ];
+        assert!(encoding.check(&Empty {}).is_ok());
+    }
+
+    #[test]
+    fn test_custom_white_point_invalid() {
+        let mut encoding = ColorEncoding::default(&Empty {});
+        encoding.white_point = WhitePoint::Custom;
+        encoding.white = CustomXY::from_f32_coords(0.3127, 0.0);
+        assert!(encoding.check(&Empty {}).is_err());
+    }
+
+    #[test]
+    fn test_degenerate_primaries_cannot_create_icc() {
+        let mut encoding = ColorEncoding::default(&Empty {});
+        encoding.white_point = WhitePoint::DCI;
+        encoding.primaries = Primaries::Custom;
+        encoding.custom_primaries = [
+            CustomXY::from_f32_coords(0.333093, 0.28672),
+            CustomXY::from_f32_coords(1.6e-5, 8e-6),
+            CustomXY::from_f32_coords(0.0, 0.0),
+        ];
+        encoding.tf = CustomTransferFunction {
+            have_gamma: false,
+            transfer_function: TransferFunction::HLG,
+            gamma: 0,
+        };
+        assert!(encoding.check(&Empty {}).is_err());
     }
 }

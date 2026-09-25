@@ -30,7 +30,10 @@ pub(super) fn read_tag_list(
     num_tags: u32,
     output_size: u64,
 ) -> Result<()> {
-    let mut prev_tagstart = num_tags * 12 + ICC_HEADER_SIZE as u32;
+    let mut prev_tagstart = num_tags
+        .checked_mul(12)
+        .and_then(|v| v.checked_add(ICC_HEADER_SIZE as u32))
+        .ok_or(Error::InvalidIccStream)?;
     let mut prev_tagsize = 0u32;
 
     loop {
@@ -56,10 +59,15 @@ pub(super) fn read_tag_list(
                 .checked_add(prev_tagsize)
                 .ok_or(Error::InvalidIccStream)?
         } else {
-            read_varint_from_reader(commands_stream)? as u32
+            // `as u32` truncated a 64-bit varint, so a huge offset wrapped to
+            // a small one and passed the bounds check below. Upstream jxl-rs
+            // 0f41860.
+            u32::try_from(read_varint_from_reader(commands_stream)?)
+                .map_err(|_| Error::InvalidIccStream)?
         };
         let tagsize = match &tag {
-            _ if command & 128 != 0 => read_varint_from_reader(commands_stream)? as u32,
+            _ if command & 128 != 0 => u32::try_from(read_varint_from_reader(commands_stream)?)
+                .map_err(|_| Error::InvalidIccStream)?,
             b"rXYZ" | b"gXYZ" | b"bXYZ" | b"kXYZ" | b"wtpt" | b"bkpt" | b"lumi" => 20,
             _ => prev_tagsize,
         };
@@ -249,4 +257,52 @@ pub(super) fn read_single_command(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn varint(mut v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let byte = (v & 127) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(byte);
+                return out;
+            }
+            out.push(byte | 128);
+        }
+    }
+
+    fn run(commands: Vec<u8>, num_tags: u32) -> Result<()> {
+        let mut data = IccStream::new(Vec::new());
+        let mut commands = Cursor::new(commands);
+        let mut profile = vec![0u8; 1024];
+        let mut profile = Cursor::new(&mut profile[..]);
+        read_tag_list(&mut data, &mut commands, &mut profile, num_tags, 1024)
+    }
+
+    #[test]
+    fn tag_start_above_u32_is_rejected() {
+        // rXYZ (tag code 3) with an explicit start of 2^32 + 128. Truncating
+        // the varint to u32 turned it into 128, which fits a 1024-byte profile.
+        let mut commands = vec![3 | 64];
+        commands.extend(varint((1 << 32) + 128));
+        assert!(run(commands.clone(), 1).is_err());
+        commands[0] = 3 | 64 | 128;
+        commands.truncate(1);
+        commands.extend(varint(128));
+        commands.extend(varint((1 << 32) + 20));
+        assert!(run(commands, 1).is_err());
+        let mut ok = vec![3 | 64];
+        ok.extend(varint(128));
+        assert!(run(ok, 1).is_ok());
+    }
+
+    #[test]
+    fn tag_count_overflow_is_rejected() {
+        assert!(run(vec![0], u32::MAX / 4).is_err());
+    }
 }

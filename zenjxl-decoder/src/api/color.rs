@@ -449,6 +449,47 @@ impl fmt::Display for JxlColorEncoding {
 }
 
 impl JxlColorEncoding {
+    /// Checks that a custom white point and custom primaries give a
+    /// well-conditioned chromatic adaptation and RGB-to-XYZ matrix whose
+    /// entries fit ICC s15Fixed16.
+    pub(crate) fn validate_icc_matrix(&self) -> Result<(), Error> {
+        let check = |value: f32| {
+            if (-32767.995..=32767.995).contains(&value) {
+                Ok(())
+            } else {
+                Err(Error::IccValueOutOfRangeS15Fixed16(value))
+            }
+        };
+        match self {
+            JxlColorEncoding::GrayscaleColorSpace { white_point, .. } => {
+                let (wx, wy) = white_point.to_xy_coords();
+                for val in cie_xyz_from_white_cie_xy(wx, wy)? {
+                    check(val)?;
+                }
+            }
+            JxlColorEncoding::RgbColorSpace {
+                white_point,
+                primaries,
+                ..
+            } => {
+                let (wx, wy) = white_point.to_xy_coords();
+                for row in &adapt_to_xyz_d50(wx, wy)? {
+                    for &val in row {
+                        check(val as f32)?;
+                    }
+                }
+                let [r, g, b] = primaries.to_xy_coords();
+                for row in &create_icc_rgb_matrix(r.0, r.1, g.0, g.1, b.0, b.1, wx, wy)? {
+                    for &val in row {
+                        check(val)?;
+                    }
+                }
+            }
+            JxlColorEncoding::XYB { .. } => {}
+        }
+        Ok(())
+    }
+
     pub fn from_internal(internal: &ColorEncoding) -> Result<Self> {
         let rendering_intent = internal.rendering_intent;
         if internal.color_space == ColorSpace::XYB {
