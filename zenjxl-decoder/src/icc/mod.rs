@@ -28,21 +28,38 @@ use tag::{read_single_command, read_tag_list};
 const ICC_CONTEXTS: usize = 41;
 const ICC_HEADER_SIZE: u64 = 128;
 
+/// Upper bound on the encoded size of the two preamble varints.
+const PREAMBLE_SIZE: usize = 20;
+
+/// Validates the ICC stream preamble. Shared by the full parse and by the
+/// incremental reader, which runs it as soon as the preamble has been decoded
+/// rather than after the whole (up to 16 MB) stream. Upstream jxl-rs a72cbc0.
+fn check_preamble(
+    output_size: u64,
+    commands_size: u64,
+    bytes_read: u64,
+    total_len: u64,
+) -> Result<()> {
+    if bytes_read.saturating_add(commands_size) > total_len {
+        return Err(at!(Error::InvalidIccStream));
+    }
+    // Avoid allocating too large a buffer, and reject streams far larger than
+    // the profile they claim to produce.
+    if output_size > (1 << 28) || output_size.saturating_add(65536) < total_len {
+        return Err(at!(Error::IccTooLarge));
+    }
+    Ok(())
+}
+
 fn read_icc_inner(stream: &mut IccStream) -> Result<Vec<u8>> {
     let output_size = stream.read_varint()?;
     let commands_size = stream.read_varint()?;
-    if stream.bytes_read().saturating_add(commands_size) > stream.len() {
-        return Err(at!(Error::InvalidIccStream));
-    }
-
-    // Simple check to avoid allocating too large buffer.
-    if output_size > (1 << 28) {
-        return Err(at!(Error::IccTooLarge));
-    }
-
-    if output_size + 65536 < stream.len() {
-        return Err(at!(Error::IccTooLarge));
-    }
+    check_preamble(
+        output_size,
+        commands_size,
+        stream.bytes_read(),
+        stream.len(),
+    )?;
 
     // Extract command stream first.
     let commands = stream.read_to_vec_exact(commands_size as usize)?;
@@ -194,6 +211,19 @@ impl IncrementalIccReader {
     /// produce unbounded output from minimal input.
     const MAX_AMPLIFICATION: usize = 1024;
 
+    /// Validates the preamble from the first decoded bytes, so an impossible
+    /// preamble fails after 20 bytes instead of after decoding the whole
+    /// stream.
+    fn check_preamble(&self) -> Result<()> {
+        let mut cursor = &self.out_buf[..];
+        let output_size =
+            read_varint_from_reader(&mut cursor).map_err(|_| at!(Error::InvalidIccStream))?;
+        let commands_size =
+            read_varint_from_reader(&mut cursor).map_err(|_| at!(Error::InvalidIccStream))?;
+        let bytes_read = (self.out_buf.len() - cursor.len()) as u64;
+        check_preamble(output_size, commands_size, bytes_read, self.len as u64)
+    }
+
     pub fn read_one(&mut self, br: &mut BitReader) -> Result<()> {
         let ctx = self.get_icc_ctx() as usize;
         let checkpoint = self.reader.checkpoint::<1>();
@@ -211,6 +241,9 @@ impl IncrementalIccReader {
         let b = sym as u8;
         self.out_buf.push(b);
         self.prev_bytes = [b, self.prev_bytes[0]];
+        if self.len > PREAMBLE_SIZE && self.out_buf.len() == PREAMBLE_SIZE {
+            self.check_preamble()?;
+        }
 
         // Track cumulative input bits consumed. In incremental mode the
         // BitReader is recreated per chunk, so we track the delta from
