@@ -16,7 +16,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 |---|---|
 | Fork point (merge-base) | upstream `da89c6c` — "Make feature `all-simd` enabled by default", 2026-03-07 (jxl-rs 0.3.0 line, pre-0.4.0) |
 | Last port sweep | **2026-08-23** (fork commits `784a545`..`15ccc9e`, see "Port log 2026-08-22/23" below). Before that: 2026-06-01 (`7c7ee08`..`f8b3e85`, upstream through `841842a` / #784). |
-| Upstream HEAD audited | `2fab17c` — "Make number of worker threads configurable in cli (#904)", 2026-08-25; release **v0.6.0** (2026-08-18). Perf comparisons below were measured against `088ec7f`. |
+| Upstream HEAD audited | `fce6e28` for correctness fixes (2026-09-25; see "Upstream 2fab17c..fce6e28 correctness audit"). The perf and feature sections below still describe the `2fab17c` audit (2026-08-25, release **v0.6.0**); perf comparisons were measured against `088ec7f`. |
 | Upstream commits since fork point | **161** (verified with `git merge-base` on a scratch clone) |
 | Already ported (cherry-ported, re-implemented) | 24 of them, plus 5 perf items from the never-merged upstream draft PR #705 |
 | Fork output vs upstream HEAD | **bit-identical** on all 116 fixtures that both decode (58 small + 22 large + 36 conformance, 16-bit output, 1 thread) — see "Verification" |
@@ -375,3 +375,60 @@ ported in the same batch. With that fixed the fork reaches the frame body,
 flushes, and does not panic; the ported test now requires a flush, so it
 guards `00c67ce` as well. Found while porting the fixes below, not by the
 fixture sync itself.
+
+## Upstream 2fab17c..fce6e28 correctness audit (2026-09-24/25)
+
+Each correctness or hardening commit in the range was compared against this
+fork's source, not by diff application: the code has diverged enough that
+"the removed lines are absent here" says nothing on its own. Where a port
+lands a test, the test was run against the old code and failed there unless
+noted.
+
+**Ported**
+
+| upstream | fork commit | notes |
+|---|---|---|
+| `21804e1` | `5bae22c` | saturating `get_grid_rect`; zero-size grids get no group data |
+| `760c9d6` | `21a32c1` | LF-group upsampling height and edge padding; `45abc97` does not apply (packed LF layout) |
+| `8d71a02` | `4740a5e` | `downsampling_bracket` partitions `[0, 3)` |
+| `964211a` | `2521979` | monotonic `ready_image_area` strip boundaries |
+| `ee7c7c5` | `d1846f0` | saturating spline area estimate; overflow-free `shrc` |
+| `29bf689` | `91d6bd4` | wrapping `fast_pow2f`/xorshift; debug asserts |
+| `f809996` | `cff9da3` | `skip` counts short reads; no backwards seek |
+| `838d865` | `01e12cf` | Huffman duplicates, context-map holes, LZ77 overflow |
+| `f809cce` | `c2d7a64` | squeeze of empty channels; zero-grid modulo |
+| `00c67ce` + `9763730` | `e584d6d` | exact TOC shortfall with the permutation gate; `fd40f84` without the gate broke 1-byte chunking and was reverted (`736506c`) |
+| `c1e2e3d` | `616f308` | duplicate ICC assembly; huge `BufReader` skip seeks to end |
+| `a72cbc0` | `c203954` | ICC preamble validated after 20 bytes |
+| `0f41860` + `96b0be3` (+ `2f46629`) | `67908db` | colour encodings that cannot yield an ICC profile; ICC tag offsets/sizes not truncated. `0f41860` alone validated custom primaries against an unset white point, so it was ported through `96b0be3` |
+| `b0ae00b` | `4ee9702` | `abs()` base-correlation limit; per-channel overrun check. Debug asserts and `lf_preview` unwrap cleanup not ported (fork already checks first) |
+| `d71c785` + `ba34f3f` | `2abebee`, `322090c` | restoration-filter validation, Save-stage downsampling check (could never fire before), fallible patch table, simple-pipeline input sizing, `u64` section sums. Also found a fork-only bug: `file_length()` after skipping the last frame (31 instead of 88,995 bytes) |
+| `9e7caa4` (part) | `2b238a7` | O(patches + rows) patch row counts; checked spline point total. The Level 5 patch-area limit is pending (below) |
+| `3e46b76` | `67d3f5a` | upsampling weights broadcast at use; bit-identical |
+| `d13a505` | `8f9cd22` | preview dimensions ≤ 4096; bounded initial TOC reservation. The main-image half was already covered by the 2^30-pixel check |
+| `c07c7d5` | `db92c64` | per-frame pixel limit uses the upsampled size |
+| `895d743`, `0ed1c44` | `9726eb9` | overlapping VarDCT blocks rejected; Lehmer codes ≤ 2^30. No dedicated tests |
+| `75483fc`, `32d61f4` | `1b7f174` | x86 `as_i32` truncates like the other backends; AVX-512 table zero-extends. Tested on Zen 5 (all four x86 tiers) |
+| `cc4d214` | `5ea001c` | 64x128..256x256 IDCT rows on the heap |
+
+**Already covered or not applicable**
+
+| upstream | reason |
+|---|---|
+| `1bf44e6` | allocation size arithmetic here was already checked and returns errors |
+| `11587ae`, `f7725bc` | every buffered read here truncates to the bytes read; the seek path already subtracts the in-box offset. Checking them found a fork-only bug: metadata boxes were zero-filled to their declared size (`907cf93`) |
+| `4a6c614` | Exif/XMP are single `Option`s here; re-reading after a seek rewrites identical data, it cannot duplicate |
+| `e937780` | upstream's aux-box API redesign; this fork's metadata API differs |
+| `1677f5f` | no buffer recycler here; modular buffers are always zeroed |
+| `a5ac008` | the dither table is a `const` here |
+| `45abc97` | coordinate remap for upstream's padded LF layout |
+| `249e8c5` | **not ported, deliberately**: a speed change that keeps 16 of the 23 random noise mantissa bits, moving noise away from libjxl. No correctness fix in it |
+
+**Pending a decision (public API or default behaviour)**
+
+| upstream | what it needs |
+|---|---|
+| `7dad7ef`, `accec18`, `9e7caa4` (area limit) | Level 5 limits on by default for splines, patches and modular channel counts, with new `force_level5_*` options; also a palette sample limit. Would reject valid Level 10 files by default |
+| `97e233d` | a new `Error` variant so a complete-but-short codestream fails instead of returning `NeedsMoreInput` forever |
+| `d7ecec1` | `set_pixel_format` returning `Result` and rejecting calls after the first frame header |
+
