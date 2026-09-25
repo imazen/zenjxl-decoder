@@ -767,6 +767,33 @@ mod test {
     }
     test_all_instruction_sets!(test_neg);
 
+    /// `as_i32` truncates toward zero on every backend, like `f32 as i32`.
+    /// The x86 backends used `cvtps` (round to nearest under the default
+    /// MXCSR), so 1.75 became 2 there and 1 on scalar, NEON and WASM.
+    /// Upstream jxl-rs 75483fc.
+    fn test_as_i32_scalar_equivalent<D: SimdDescriptor>(d: D) {
+        let len = D::F32Vec::LEN;
+        arbtest::arbtest(|u| {
+            let mut input = vec![0.0f32; len];
+            for v in input.iter_mut() {
+                *v = u.arbitrary::<i16>()? as f32 + (u.arbitrary::<u8>()? as f32 / 256.0);
+            }
+            let simd_i32 = D::F32Vec::load(d, &input).as_i32();
+            let mut output = vec![0i32; len];
+            simd_i32.store(&mut output);
+            for i in 0..len {
+                let expected = input[i] as i32;
+                assert_eq!(
+                    output[i], expected,
+                    "as_i32 mismatch for input {}: expected {expected}, got {}",
+                    input[i], output[i]
+                );
+            }
+            Ok(())
+        });
+    }
+    test_all_instruction_sets!(test_as_i32_scalar_equivalent);
+
     fn test_transpose_square<D: SimdDescriptor>(d: D) {
         // Test square matrix transpose
         let len = D::F32Vec::LEN;

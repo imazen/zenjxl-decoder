@@ -608,7 +608,7 @@ impl F32SimdVec for F32VecAvx512 {
     });
 
     fn_avx!(this: F32VecAvx512, fn as_i32() -> I32VecAvx512 {
-        I32VecAvx512(_mm512_cvtps_epi32(this.0), this.1)
+        I32VecAvx512(_mm512_cvttps_epi32(this.0), this.1)
     });
 
     fn_avx!(this: F32VecAvx512, fn bitcast_to_i32() -> I32VecAvx512 {
@@ -621,8 +621,10 @@ impl F32SimdVec for F32VecAvx512 {
         #[inline(always)]
         fn impl_(_: archmage::X64V4Token, table: &[f32; 8]) -> __m512 {
             let table_256 = _mm256_loadu_ps(table[..8].first_chunk::<8>().unwrap());
-            // Zero-extend to 512-bit; vpermutexvar with indices 0-7 only reads first 256 bits
-            _mm512_castps256_ps512(table_256)
+            // Zero-extend to 512-bit. `castps256_ps512` leaves the upper half
+            // undefined; vpermutexvar with indices 0-7 never reads it, but the
+            // comment promised zeros. Upstream jxl-rs 32d61f4.
+            _mm512_zextps256_ps512(table_256)
         }
         Bf16Table8Avx512(impl_(d.token(), table))
     }
