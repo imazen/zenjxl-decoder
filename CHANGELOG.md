@@ -7,6 +7,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ## [Unreleased]
 
 ### Fixed
+- **Incremental decoding could panic with a slice index out of range** (`render/low_memory_pipeline/render_group.rs:278`, "range end index 1244 out of range for slice of length 1216"). The low-memory pipeline sized its input and per-stage row buffers to `chunk_size`, but one `process_row_chunk` call can see `chunk_size + 2 * border_size` columns and `BufferFiller::fill` writes `xsize + 2 * input_border`. `RowBuffer`'s padding hid this until the border outgrew it — an extra channel with 8x upsampling (border 16) does. Both buffers now include the border. Ported from upstream jxl-rs `5dfeb9e` (#960) + `744d818`; found by syncing their fixture `ec_upsampling8_multi_group.jxl`, which panicked the `compare_incremental` sweep. Also synced `narrow_edge_group.jxl` (`450fef0`) and `upsampling2_permuted_toc.jxl` (`96c5dc0`), which pass.
+
+### Fixed
 - JPEG reconstruction retains standalone RST0–RST7 markers, including terminal restarts after the final MCU (`b0fb20db`).
 
 

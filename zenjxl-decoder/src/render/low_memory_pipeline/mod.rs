@@ -223,32 +223,6 @@ impl RenderPipeline for LowMemoryRenderPipeline {
             }
         }
 
-        let mut initial_buffers = vec![];
-        for chan in 0..nc {
-            initial_buffers.push(RowBuffer::new(
-                shared.channel_info[0][chan].ty.unwrap_or(DataTypeTag::U8),
-                next_border_and_cur_downsample[0][chan].0 as usize,
-                0,
-                0,
-                shared.chunk_size >> shared.channel_info[0][chan].downsample.0,
-            )?);
-        }
-        let mut row_buffers = vec![initial_buffers];
-
-        // Allocate buffers.
-        for (i, stage) in shared.stages.iter().enumerate() {
-            let mut stage_buffers = vec![];
-            for (next_y_border, (dsx, _)) in next_border_and_cur_downsample[i + 1].iter() {
-                stage_buffers.push(RowBuffer::new(
-                    stage.output_type().unwrap(),
-                    *next_y_border as usize,
-                    stage.shift().1 as usize,
-                    stage.shift().0 as usize,
-                    shared.chunk_size >> *dsx,
-                )?);
-            }
-            row_buffers.push(stage_buffers);
-        }
         // Compute information to be used to compute sub-rects for "save" stages to operate on
         // rects.
         let mut save_buffer_info = vec![];
@@ -384,6 +358,43 @@ impl RenderPipeline for LowMemoryRenderPipeline {
             border_size.1 = border_size
                 .1
                 .max(border_pixels_per_stage[s].1 << downsampling_for_stage[s].1);
+        }
+
+        let mut initial_buffers = vec![];
+        for chan in 0..nc {
+            initial_buffers.push(RowBuffer::new(
+                shared.channel_info[0][chan].ty.unwrap_or(DataTypeTag::U8),
+                next_border_and_cur_downsample[0][chan].0 as usize,
+                0,
+                0,
+                // `BufferFiller::fill` writes `xsize + 2 * input_border` pixels,
+                // and a rect from `ready_image_area` can be `chunk_size + 2 *
+                // border_size` wide, so sizing to `chunk_size` alone runs off
+                // the end once the border outgrows `RowBuffer`'s padding (an
+                // extra channel with 8x upsampling, border 16, does it).
+                (shared.chunk_size + 2 * border_size.0)
+                    >> shared.channel_info[0][chan].downsample.0,
+            )?);
+        }
+        let mut row_buffers = vec![initial_buffers];
+
+        // Allocate buffers. Placed after `border_size` is known: row widths
+        // include the border on each side (see below).
+        for (i, stage) in shared.stages.iter().enumerate() {
+            let mut stage_buffers = vec![];
+            for (next_y_border, (dsx, _)) in next_border_and_cur_downsample[i + 1].iter() {
+                stage_buffers.push(RowBuffer::new(
+                    stage.output_type().unwrap(),
+                    *next_y_border as usize,
+                    stage.shift().1 as usize,
+                    stage.shift().0 as usize,
+                    // One `process_row_chunk` call can see up to
+                    // `chunk_size + 2 * border_size` columns (progressive
+                    // decoding with unusual group orders reaches it).
+                    (shared.chunk_size + 2 * border_size.0) >> *dsx,
+                )?);
+            }
+            row_buffers.push(stage_buffers);
         }
 
         let local_states: Vec<_> = shared
