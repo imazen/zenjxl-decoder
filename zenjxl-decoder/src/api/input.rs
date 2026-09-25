@@ -26,9 +26,15 @@ pub trait JxlBitstreamInput {
         let mut skipped = 0;
         while bytes > 0 {
             let num = bytes.min(BUF_SIZE);
-            self.read(&mut [IoSliceMut::new(&mut skip_buf[..num])])?;
-            bytes -= num;
-            skipped += num;
+            // Count what `read` actually returned: a short read (normal for
+            // sockets and pipes) used to be counted as a full `num`, so the
+            // skip reported more than it consumed and the stream desynced.
+            let n = self.read(&mut [IoSliceMut::new(&mut skip_buf[..num])])?;
+            if n == 0 {
+                break;
+            }
+            bytes -= n;
+            skipped += n;
         }
         Ok(skipped)
     }
@@ -64,7 +70,61 @@ impl<R: Read + Seek> JxlBitstreamInput for BufReader<R> {
 
     fn skip(&mut self, bytes: usize) -> Result<usize, Error> {
         let cur = self.stream_position()?;
-        self.seek(SeekFrom::Current(bytes as i64))
+        // `bytes as i64` turned very large skips negative -- `usize::MAX`
+        // became a one-byte seek *backwards*.
+        let offset = i64::try_from(bytes).unwrap_or(i64::MAX);
+        self.seek(SeekFrom::Current(offset))
             .map(|x| x.saturating_sub(cur) as usize)
+    }
+}
+
+#[cfg(test)]
+mod skip_tests {
+    use super::JxlBitstreamInput;
+    use std::io::{BufReader, Cursor, Error, IoSliceMut, Read, Seek};
+
+    /// Returns at most 3 bytes per read, like a socket delivering small
+    /// packets.
+    struct Trickle<'a>(&'a [u8]);
+    impl JxlBitstreamInput for Trickle<'_> {
+        fn available_bytes(&mut self) -> Result<usize, Error> {
+            Ok(self.0.len())
+        }
+        fn read(&mut self, bufs: &mut [IoSliceMut]) -> Result<usize, Error> {
+            let n = bufs[0].len().min(3).min(self.0.len());
+            bufs[0][..n].copy_from_slice(&self.0[..n]);
+            self.0 = &self.0[n..];
+            Ok(n)
+        }
+    }
+
+    /// The default `skip` must report and consume exactly what the reader
+    /// delivered. It used to count every short read as a full chunk. Upstream
+    /// jxl-rs f809996.
+    #[test]
+    fn default_skip_counts_short_reads() {
+        let data: Vec<u8> = (0..100).collect();
+        let mut t = Trickle(&data);
+        assert_eq!(t.skip(10).unwrap(), 10);
+        let mut next = [0u8; 1];
+        t.read(&mut [IoSliceMut::new(&mut next)]).unwrap();
+        assert_eq!(next[0], 10, "the byte after a 10-byte skip");
+
+        let short = [1u8, 2, 3, 4, 5];
+        assert_eq!(Trickle(&short).skip(1000).unwrap(), 5, "only 5 bytes exist");
+    }
+
+    /// `usize::MAX` must seek forwards (to EOF), not one byte backwards.
+    #[test]
+    fn bufreader_skip_huge_does_not_seek_backwards() {
+        let mut r = BufReader::new(Cursor::new(vec![0u8; 64]));
+        let mut b = [0u8; 16];
+        r.read_exact(&mut b).unwrap();
+        let before = r.stream_position().unwrap();
+        let _ = r.skip(usize::MAX);
+        assert!(
+            r.stream_position().unwrap() >= before,
+            "skip must never move backwards"
+        );
     }
 }
