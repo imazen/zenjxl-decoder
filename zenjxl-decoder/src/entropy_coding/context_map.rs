@@ -46,13 +46,20 @@ pub fn decode_context_map(num_contexts: usize, br: &mut BitReader) -> Result<Vec
     let is_simple = br.read(1)? != 0;
     if is_simple {
         let bits_per_entry = br.read(2)? as usize;
-        if bits_per_entry != 0 {
+        let ctx_map: Vec<u8> = if bits_per_entry != 0 {
             (0..num_contexts)
                 .map(|_| Ok(br.read(bits_per_entry)? as u8))
-                .collect()
+                .collect::<Result<_>>()?
         } else {
-            Ok(Vec::try_from_elem(0u8, num_contexts).map_err(|e| at!(Error::from(e)))?)
+            Vec::try_from_elem(0u8, num_contexts).map_err(|e| at!(Error::from(e)))?
+        };
+        // The simple form skipped the hole check the entropy-coded form runs,
+        // so a map naming histograms 0 and 2 but not 1 was accepted here.
+        // Upstream jxl-rs 838d865.
+        if !ctx_map.is_empty() {
+            verify_context_map(&ctx_map)?;
         }
+        Ok(ctx_map)
     } else {
         let use_mtf = br.read(1)? != 0;
         let histograms = Histograms::decode(1, br, /*allow_lz77=*/ num_contexts > 2)?;
@@ -74,5 +81,32 @@ pub fn decode_context_map(num_contexts: usize, br: &mut BitReader) -> Result<Vec
         }
         verify_context_map(&ctx_map[..])?;
         Ok(ctx_map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_context_map;
+    use crate::bit_reader::BitReader;
+    use crate::error::Error;
+
+    /// The simple (fixed-width) form must reject a map with a hole, as the
+    /// entropy-coded form does. Upstream jxl-rs 838d865.
+    #[test]
+    fn simple_context_map_rejects_holes() {
+        // LSB-first: is_simple = 1, bits_per_entry = 2, entries 0 and 2 --
+        // histogram 1 is never named.
+        let bits = [1u8, 0, 1, 0, 0, 0, 1];
+        let byte = bits
+            .iter()
+            .enumerate()
+            .fold(0u8, |acc, (i, b)| acc | (b << i));
+        let data = [byte, 0, 0, 0];
+        let mut br = BitReader::new(&data);
+        let res = decode_context_map(2, &mut br);
+        assert!(
+            matches!(res, Err(ref e) if matches!(e.error(), Error::InvalidContextMapHole(..))),
+            "a context map with a hole must be rejected, got {res:?}"
+        );
     }
 }

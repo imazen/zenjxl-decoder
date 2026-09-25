@@ -82,7 +82,10 @@ impl Table {
             }
             *symbol = sym as u16;
         }
-        if (0..num_symbols - 1).any(|i| symbols[..i].contains(&symbols[i + 1])) {
+        // `..=i`, not `..i`: the half-open range never compared a symbol with
+        // the one just before it, so adjacent duplicates such as [0, 0] were
+        // accepted. Upstream jxl-rs 838d865.
+        if (0..num_symbols - 1).any(|i| symbols[..=i].contains(&symbols[i + 1])) {
             return Err(at!(Error::InvalidHuffman));
         }
 
@@ -621,6 +624,22 @@ mod test {
             [2, 0, 0, 0, 0, 4, 3, 4, 3, 0, 0, 4, 4, 4, 0, 0, 4, 3],
             1791,
             &mut br,
+        );
+    }
+
+    /// A simple Huffman table whose two symbols are both 0 is invalid. The
+    /// duplicate check used to miss adjacent duplicates. Upstream jxl-rs
+    /// 838d865.
+    #[test]
+    fn test_simple_table_duplicate_symbols() {
+        // num_symbols - 1 = 1 (bits '01'), then symbols 0 and 0 (8 bits each
+        // for a 256-symbol alphabet).
+        let data = [0b00000001, 0b00000000, 0b00000000];
+        let mut br = BitReader::new(&data);
+        let res = Table::decode_simple_table(256, &mut br);
+        assert!(
+            matches!(res, Err(ref e) if matches!(e.error(), Error::InvalidHuffman)),
+            "duplicate symbols must be rejected"
         );
     }
 }
