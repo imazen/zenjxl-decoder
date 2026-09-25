@@ -362,17 +362,16 @@ Upstream added seven decoder fixtures in this range that the fork lacked.
 | `450fef0` | `narrow_edge_group.jxl` | passes all six sweeps |
 | `96c5dc0` | `upsampling2_permuted_toc.jxl` | passes all six sweeps |
 | `45abc97` | `red_420.jxl`, `red_422.jxl`, `red_440.jxl` | pass all six sweeps; **not committed** — 114-131 KB each, over the 30 KB fixture limit, held at `~/tmp/upstream-fixtures-pending/` pending approval |
-| `82b981a` | `truncated_squeeze_flush_missing_tiles.jxl` | **N/A by design** — see below |
-| `fce6e28` | `truncated_squeeze_missing_avg.jxl` | **N/A by design** — see below |
+| `82b981a` | `truncated_squeeze_flush_missing_tiles.jxl` | passes; truncated inside the TOC, so neither decoder reaches the frame body (both ask for 291 more bytes) |
+| `fce6e28` | `truncated_squeeze_missing_avg.jxl` | passes; reaches the frame body and flushes **after porting `00c67ce`** |
 
-The two truncated-squeeze fixes patch panics inside upstream's partial
-LF-global render, which this fork does not have (progressive preview is N/A
-above, "the fork kept the pre-March flush design"). On `missing_avg` upstream
-completes the frame header with the bytes present and renders partial LF;
-this fork asks for 167 more bytes and renders nothing, so it cannot reach the
-fixed code. The ported tests assert only that chunked, flushing decode of
-each truncated file returns without panicking. A first draft of the port also
-asserted that a flush happened; that made the test pass vacuously before the
-assertion was added and fail after, which is how the design gap surfaced.
-The same frame-header behaviour explains `patches_ec_upsampling_dim_shift`
-above.
+**Correction (same day).** An earlier version of this section called both
+truncated-squeeze fixtures "N/A by design", reasoning that the fork stalled
+at the frame header because it kept the pre-March flush design. That was
+wrong. The stall on `missing_avg` (this fork asked for 167 more bytes where
+upstream completed the frame header) was the TOC reader padding its
+`OutOfBounds` count by 2 bytes per remaining entry — upstream `00c67ce`,
+ported in the same batch. With that fixed the fork reaches the frame body,
+flushes, and does not panic; the ported test now requires a flush, so it
+guards `00c67ce` as well. Found while porting the fixes below, not by the
+fixture sync itself.

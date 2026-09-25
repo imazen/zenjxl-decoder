@@ -85,14 +85,34 @@ impl IncrementalTocReader {
             },
         );
         let entry = u32::read_unconditional(&entry_coder, br, &Empty {})?;
-        self.entries.push(entry);
         // Entries may have been read optimistically past the end of the
         // buffered input; surface that so the incremental parser retries with
-        // more data instead of committing a misaligned position (jxl-rs #811).
-        br.check_for_error().map_err(|e| at!(e))
+        // more data (jxl-rs #811). Check BEFORE recording the entry: pushing
+        // first left a garbage entry behind on retry, misaligning every entry
+        // after it.
+        br.check_for_error().map_err(|e| at!(e))?;
+        self.entries.push(entry);
+        Ok(())
     }
 
     fn read_permutation(&mut self, br: &mut BitReader) -> Result<()> {
+        // A permuted TOC's permutation is entropy-coded. Wait until a lower
+        // bound for the whole TOC is buffered (2 bits of permutation + 10 bits
+        // of size per entry) before decoding it. Upstream jxl-rs 9763730.
+        //
+        // This is load-bearing, not just an optimisation: without it, the
+        // conformance progressive images fed one byte at a time fail with
+        // AlphabetTooLargeHuff raised exactly at the buffer boundary (16 of 16
+        // bits read, so not an overrun). Root cause not yet identified; files
+        // whose permutation needs more than this bound may still hit it.
+        if self.permuted {
+            const MIN_BITS_PER_ENTRY: usize = 2 + 10;
+            let needed = (self.num_entries as usize).saturating_mul(MIN_BITS_PER_ENTRY);
+            let available = br.total_bits_available();
+            if needed > available {
+                return Err(at!(Error::OutOfBounds((needed - available).div_ceil(8))));
+            }
+        }
         let permutation = Permutation::read_unconditional(
             &(),
             br,
@@ -101,9 +121,13 @@ impl IncrementalTocReader {
                 permuted: self.permuted,
             },
         )?;
-        self.permutation = Some(permutation);
         // The permutation's entropy-coded symbols are read optimistically.
-        br.check_for_error().map_err(|e| at!(e))
+        // Check BEFORE storing it: storing first kept a permutation decoded
+        // from zero-padding, so the retry skipped re-reading it and parsed the
+        // entries from the wrong position.
+        br.check_for_error().map_err(|e| at!(e))?;
+        self.permutation = Some(permutation);
+        Ok(())
     }
 
     pub fn finalize(self) -> Toc {

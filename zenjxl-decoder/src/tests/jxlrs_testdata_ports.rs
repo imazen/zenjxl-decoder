@@ -269,14 +269,10 @@ fn decode_partial_with_flush(data: &[u8], chunk_size: usize) -> crate::error::Re
 /// smooth-squeeze upsample step read a tile whose channel had not been
 /// decoded yet.
 ///
-/// The panicking code is upstream's partial LF-global render, which this fork
-/// does not have: progressive preview is recorded as N/A in
-/// `docs/UPSTREAM_SYNC.md` ("the fork kept the pre-March flush design"). Here
-/// the decoder stops for input at the frame header and flushes nothing, so the
-/// upstream regression cannot occur. The test pins what does apply -- chunked,
-/// flushing decode of this truncated file returns without panicking -- and
-/// deliberately does not require a flush, which would assert a feature the
-/// fork chose not to implement.
+/// This file is truncated inside the TOC, so neither decoder gets past the
+/// frame header (both ask for 291 more bytes) and nothing is flushed. The
+/// test pins what applies: chunked, flushing decode returns without
+/// panicking.
 #[test]
 fn flush_truncated_squeeze_missing_tiles() {
     let data = testdata("truncated_squeeze_flush_missing_tiles.jxl");
@@ -288,14 +284,21 @@ fn flush_truncated_squeeze_missing_tiles() {
 
 /// Upstream `flush_truncated_squeeze_missing_avg` (jxl-rs `fce6e28`): the same
 /// partial decode when the squeeze residuals are present but the averages are
-/// not. Same N/A reasoning as above: upstream completes the frame header here
-/// and renders partial LF-global; this fork waits for the section (167 more
-/// bytes) and so never reaches the code that upstream fixed.
+/// not.
+///
+/// This one reaches the frame body and must flush. It used to stall at the
+/// frame header asking for 167 more bytes, because the TOC reader padded its
+/// `OutOfBounds` count by 2 bytes per remaining entry (upstream `00c67ce`);
+/// requiring a flush guards that fix too.
 #[test]
 fn flush_truncated_squeeze_missing_avg() {
     let data = testdata("truncated_squeeze_missing_avg.jxl");
     for chunk_size in [64, 256, usize::MAX] {
-        decode_partial_with_flush(&data, chunk_size)
+        let flushes = decode_partial_with_flush(&data, chunk_size)
             .unwrap_or_else(|e| panic!("chunk_size {chunk_size}: {e:?}"));
+        assert!(
+            flushes > 0,
+            "chunk_size {chunk_size}: stalled before the frame body"
+        );
     }
 }
