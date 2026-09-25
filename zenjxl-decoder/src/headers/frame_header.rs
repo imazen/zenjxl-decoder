@@ -163,6 +163,7 @@ pub struct RestorationFilterNonserialized {
 
 #[derive(UnconditionalCoder, Debug, PartialEq)]
 #[nonserialized(RestorationFilterNonserialized)]
+#[validate]
 pub struct RestorationFilter {
     #[all_default]
     all_default: bool,
@@ -252,6 +253,26 @@ pub struct RestorationFilter {
 
     #[default(Extensions::default())]
     extensions: Extensions,
+}
+
+impl RestorationFilter {
+    /// Rejects Gaborish weights whose normalisation divides by (nearly) zero
+    /// and non-positive modular EPF sigmas, which the EPF divides by. Both
+    /// would otherwise turn every filtered pixel into inf/NaN. Upstream
+    /// jxl-rs d71c785.
+    fn check(&self, _nonserialized: &RestorationFilterNonserialized) -> Result<(), Error> {
+        let degenerate = |w1: f32, w2: f32| (1.0 + (w1 + w2) * 4.0).abs() < 1e-6;
+        if degenerate(self.gab_x_weight1, self.gab_x_weight2)
+            || degenerate(self.gab_y_weight1, self.gab_y_weight2)
+            || degenerate(self.gab_b_weight1, self.gab_b_weight2)
+        {
+            return Err(Error::FloatNaNOrInf);
+        }
+        if !self.epf_sigma_for_modular.is_finite() || self.epf_sigma_for_modular <= 0.0 {
+            return Err(Error::FloatNaNOrInf);
+        }
+        Ok(())
+    }
 }
 
 pub struct PermutationNonserialized {
@@ -1041,5 +1062,26 @@ mod test_frame_header {
         assert_eq!(frame_header.frame_type, FrameType::RegularFrame);
         assert_eq!(frame_header.name, "TestFrameName");
         assert_eq!(frame_header.name.len(), 13);
+    }
+
+    #[test]
+    fn restoration_filter_rejects_degenerate_weights() {
+        let nonserialized = RestorationFilterNonserialized {
+            encoding: Encoding::Modular,
+        };
+        let valid = RestorationFilter::default(&nonserialized);
+        assert!(valid.check(&nonserialized).is_ok());
+
+        // 1 + 4 * (w1 + w2) == 0: Gaborish would divide by zero.
+        let mut rf = RestorationFilter::default(&nonserialized);
+        rf.gab_y_weight1 = -0.125;
+        rf.gab_y_weight2 = -0.125;
+        assert!(rf.check(&nonserialized).is_err());
+
+        for sigma in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let mut rf = RestorationFilter::default(&nonserialized);
+            rf.epf_sigma_for_modular = sigma;
+            assert!(rf.check(&nonserialized).is_err(), "sigma {sigma}");
+        }
     }
 }

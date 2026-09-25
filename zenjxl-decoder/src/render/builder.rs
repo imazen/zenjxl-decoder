@@ -274,14 +274,17 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                 // Arithmetic overflows here should be very uncommon, so custom error variants
                 // are probably unwarranted.
                 let cur_downsample = &mut cur_downsamples[chan];
-                if matches!(stage, Stage::Save(_))
-                    && save_downsample.is_some_and(|x| x != *cur_downsample)
-                {
-                    save_downsample = Some(*cur_downsample);
-                    return Err(at!(Error::SaveDifferentDownsample(
-                        save_downsample.unwrap(),
-                        *cur_downsample,
-                    )));
+                // All channels a Save stage writes must share one downsampling.
+                // The old check never recorded the first channel's value, so it
+                // could not fire. Upstream jxl-rs d71c785 + ba34f3f.
+                if matches!(stage, Stage::Save(_)) && uses_channel {
+                    let expected = *save_downsample.get_or_insert(*cur_downsample);
+                    if expected != *cur_downsample {
+                        return Err(at!(Error::SaveDifferentDownsample(
+                            expected,
+                            *cur_downsample,
+                        )));
+                    }
                 }
                 let next_downsample = &mut next_chan.downsample;
                 let next_total_downsample = *cur_downsample;
@@ -324,5 +327,49 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
         }
 
         Ok(Box::new(Pipeline::new_from_shared(self.shared)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::simple_pipeline::SimpleRenderPipeline;
+    use crate::render::stages::HorizontalChromaUpsample;
+
+    /// Save(first) -> horizontal upsample of channel 1 -> Save(0, 1).
+    /// Relative to the final output, the first Save sees channel 1 at half
+    /// width and channel 0 at full width.
+    fn build(first_save: &[usize]) -> Result<Box<SimpleRenderPipeline>> {
+        RenderPipelineBuilder::<SimpleRenderPipeline>::new(2, (64, 64), 0, 8)
+            .add_save_stage(
+                first_save,
+                Orientation::Identity,
+                0,
+                JxlColorType::Grayscale,
+                JxlDataFormat::f32(),
+                false,
+            )
+            .add_inout_stage(HorizontalChromaUpsample::new(1))
+            .add_save_stage(
+                &[0, 1],
+                Orientation::Identity,
+                1,
+                JxlColorType::GrayscaleAlpha,
+                JxlDataFormat::f32(),
+                false,
+            )
+            .build()
+    }
+
+    #[test]
+    fn save_stage_rejects_mixed_downsampling() {
+        // The old check never recorded a first value, so this was accepted.
+        let err = build(&[0, 1]).err().expect("mixed downsampling accepted");
+        assert!(
+            matches!(err.error(), Error::SaveDifferentDownsample(..)),
+            "{err:?}"
+        );
+        // Channels the Save stage does not write do not count (ba34f3f).
+        assert!(build(&[0]).is_ok());
     }
 }

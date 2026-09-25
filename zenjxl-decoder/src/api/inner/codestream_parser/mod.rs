@@ -723,20 +723,25 @@ impl CodestreamParser {
                         && input.available_bytes().unwrap_or(0) == 0
                         && box_parser.box_buffer.is_empty()
                     {
-                        let total_needed: usize = self.sections.iter().map(|s| s.len).sum();
+                        let total_needed: u64 = self.sections.iter().map(|s| s.len as u64).sum();
                         return Err(at!(Error::OutOfBounds(
-                            total_needed.saturating_sub(self.ready_section_data),
+                            total_needed
+                                .saturating_sub(self.ready_section_data as u64)
+                                .min(usize::MAX as u64) as usize,
                         )));
                     }
                 } else {
-                    let total_size = self.sections.iter().map(|x| x.len).sum::<usize>();
+                    // TOC entries are u32 each, so their sum can exceed usize on
+                    // 32-bit targets. Upstream jxl-rs d71c785.
+                    let total_size = self.sections.iter().map(|x| x.len as u64).sum::<u64>();
                     loop {
-                        let to_skip = total_size - self.ready_section_data;
+                        let to_skip = total_size - self.ready_section_data as u64;
                         if to_skip == 0 {
                             break;
                         }
-                        let available_codestream = box_parser.get_more_codestream(input)? as usize;
-                        let to_skip = to_skip.min(available_codestream);
+                        let available_codestream = box_parser.get_more_codestream(input)?;
+                        let to_skip =
+                            to_skip.min(available_codestream).min(usize::MAX as u64) as usize;
                         let skipped = if !box_parser.box_buffer.is_empty() {
                             box_parser.box_buffer.consume(to_skip)
                         } else {
@@ -750,12 +755,16 @@ impl CodestreamParser {
                             break;
                         }
                     }
-                    if self.ready_section_data < total_size {
+                    if (self.ready_section_data as u64) < total_size {
                         return Err(at!(Error::OutOfBounds(
-                            total_size - self.ready_section_data
+                            (total_size - self.ready_section_data as u64).min(usize::MAX as u64)
+                                as usize
                         )));
                     } else {
                         self.sections.clear();
+                        // The skipped bytes are consumed, not buffered; leaving them
+                        // counted made `record_file_length` subtract them again.
+                        self.ready_section_data = 0;
                         // Finalize the skipped frame, mirroring what process_sections does
                         let frame = self
                             .frame

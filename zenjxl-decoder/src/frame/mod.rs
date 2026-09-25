@@ -288,11 +288,6 @@ impl Frame {
         self.render_pipeline.is_none()
     }
 
-    #[allow(dead_code)] // Part of Frame public API
-    pub fn total_bytes_in_toc(&self) -> usize {
-        self.toc.entries.iter().map(|x| *x as usize).sum()
-    }
-
     #[instrument(level = "debug", skip(self), ret)]
     pub fn get_section_idx(&self, section: Section) -> usize {
         if self.header.num_toc_entries() == 1 {

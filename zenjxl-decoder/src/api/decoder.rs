@@ -1821,6 +1821,39 @@ pub(crate) mod tests {
         }
     }
 
+    /// Skipping every frame (including the last) must still report the full
+    /// file length: skipped section bytes are consumed, not buffered.
+    #[test]
+    fn file_length_after_skipping_last_frame() {
+        for fixture in ["green_queen_vardct_e3.jxl", "candle.jxl"] {
+            let data = crate::util::test::fixture_bytes(fixture);
+            let mut options = JxlDecoderOptions::default();
+            options.limits.max_memory_bytes = None;
+            let mut input: &[u8] = &data;
+            let mut decoder = match JxlDecoder::<states::Initialized>::new(options)
+                .process(&mut input)
+                .unwrap()
+            {
+                ProcessingResult::Complete { result } => result,
+                ProcessingResult::NeedsMoreInput { .. } => panic!("{fixture}: header"),
+            };
+            loop {
+                let with_frame_info = match decoder.process(&mut input).unwrap() {
+                    ProcessingResult::Complete { result } => result,
+                    ProcessingResult::NeedsMoreInput { .. } => panic!("{fixture}: frame header"),
+                };
+                decoder = match with_frame_info.skip_frame(&mut input).unwrap() {
+                    ProcessingResult::Complete { result } => result,
+                    ProcessingResult::NeedsMoreInput { .. } => panic!("{fixture}: skip"),
+                };
+                if !decoder.has_more_frames() {
+                    break;
+                }
+            }
+            assert_eq!(decoder.file_length(), Some(data.len() as u64), "{fixture}");
+        }
+    }
+
     /// `flush_pixels` returns `true` only when new pixels were rendered since
     /// the previous call (upstream jxl-rs #755): a second back-to-back flush
     /// with no new input must report `false`, and a chunked decode of a
