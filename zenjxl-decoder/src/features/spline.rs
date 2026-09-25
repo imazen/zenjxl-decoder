@@ -307,20 +307,28 @@ impl QuantizedSpline {
             result.color_dct[2].0[i] += y_to_b * result.color_dct[1].0[i];
         }
 
-        let mut width_estimate = 0;
+        // Saturating throughout: every input here is attacker-controlled, and
+        // `i32::abs` overflows on `i32::MIN` while the u64 products overflow on
+        // large coefficients. The estimate only feeds an area limit, so
+        // saturating to MAX makes an oversized spline fail that limit instead
+        // of wrapping to a small value that passes it. Ported from upstream
+        // jxl-rs ee7c7c5.
+        let mut width_estimate = 0u64;
         let mut color = [0u64; 3];
 
         for (c, color_val) in color.iter_mut().enumerate() {
             for i in 0..32 {
-                *color_val += (inv_quant * self.color_dct[c][i].abs() as f32).ceil() as u64;
+                *color_val = color_val.saturating_add(
+                    (inv_quant * self.color_dct[c][i].unsigned_abs() as f32).ceil() as u64,
+                );
             }
         }
 
-        color[0] += y_to_x.abs().ceil() as u64 * color[1];
-        color[2] += y_to_b.abs().ceil() as u64 * color[1];
+        color[0] = color[0].saturating_add((y_to_x.abs().ceil() as u64).saturating_mul(color[1]));
+        color[2] = color[2].saturating_add((y_to_b.abs().ceil() as u64).saturating_mul(color[1]));
 
         let max_color = color[0].max(color[1]).max(color[2]);
-        let logcolor = 1u64.max((1u64 + max_color).ceil_log2());
+        let logcolor = 1u64.max(1u64.saturating_add(max_color).ceil_log2());
 
         let weight_limit =
             (((area_limit as f32 / logcolor as f32) / manhattan_distance.max(1) as f32).sqrt())
@@ -331,12 +339,13 @@ impl QuantizedSpline {
             result.sigma_dct.0[i] =
                 self.sigma_dct[i] as f32 * inv_dct_factor * CHANNEL_WEIGHT[3] * inv_quant;
 
-            let weight_f = (inv_quant * self.sigma_dct[i].abs() as f32).ceil();
+            let weight_f = (inv_quant * self.sigma_dct[i].unsigned_abs() as f32).ceil();
             let weight = weight_limit.min(weight_f.max(1.0)) as u64;
-            width_estimate += weight * weight * logcolor;
+            width_estimate = width_estimate
+                .saturating_add(weight.saturating_mul(weight).saturating_mul(logcolor));
         }
 
-        result.estimated_area_reached = width_estimate * manhattan_distance;
+        result.estimated_area_reached = width_estimate.saturating_mul(manhattan_distance);
 
         Ok(result)
     }
@@ -942,6 +951,29 @@ mod test_splines {
                 .map(|(multiplier, coeff)| SQRT_2 * coeff * fast_cos(multiplier * tandhalf))
                 .sum()
         }
+    }
+
+    /// Hostile coefficients: `i32::MIN` overflowed `i32::abs`, and huge colour
+    /// magnitudes overflowed the u64 products in the area estimate, which could
+    /// wrap to a small value. An oversized spline must instead report an
+    /// estimate above the area limit, so the caller rejects it. Upstream jxl-rs
+    /// ee7c7c5.
+    #[test]
+    fn dequantize_saturates_area_estimate_on_extreme_coefficients() {
+        let spline = QuantizedSpline {
+            control_points: vec![(1 << 20, 1 << 20), (-(1 << 20), 1 << 20)],
+            color_dct: [[i32::MIN; 32], [i32::MAX; 32], [i32::MIN; 32]],
+            sigma_dct: [i32::MIN; 32],
+        };
+        let got = spline
+            .dequantize(&Point { x: 0.0, y: 0.0 }, 0, 1e30, -1e30, 2u64 << 30)
+            .expect("dequantize must not fail on extreme but well-formed values");
+        let limit = super::area_limit(2u64 << 30);
+        assert!(
+            got.estimated_area_reached > limit,
+            "estimate {} must exceed the area limit {limit}",
+            got.estimated_area_reached
+        );
     }
 
     #[test]
