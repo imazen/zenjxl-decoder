@@ -194,7 +194,14 @@ impl QuantizedSpline {
     ) -> Result<QuantizedSpline> {
         let num_control_points =
             splines_reader.read_unsigned(splines_histograms, br, NUM_CONTROL_POINTS_CONTEXT);
-        *total_num_control_points += num_control_points;
+        // A second spline claiming ~u32::MAX points wrapped the running total
+        // below the limit in release builds. Upstream jxl-rs 9e7caa4.
+        *total_num_control_points = total_num_control_points
+            .checked_add(num_control_points)
+            .ok_or(Error::SplinesTooManyControlPoints(
+                u32::MAX,
+                max_control_points,
+            ))?;
         if *total_num_control_points > max_control_points {
             return Err(at!(Error::SplinesTooManyControlPoints(
                 *total_num_control_points,

@@ -277,10 +277,19 @@ impl PatchesDictionary {
             .try_reserve(max_y1)
             .map_err(|e| at!(Error::from(e)))?;
         self.num_patches.resize(max_y1, 0);
+        // Difference array: O(patches + rows) instead of O(patches * rows),
+        // which tall overlapping patches made quadratic. Upstream jxl-rs 9e7caa4.
+        let mut diff: Vec<isize> =
+            Vec::new_with_capacity(max_y1 + 1).map_err(|e| at!(Error::from(e)))?;
+        diff.resize(max_y1 + 1, 0);
         for iv in &intervals {
-            for y in iv.y0..iv.y1 {
-                self.num_patches[y] += 1;
-            }
+            diff[iv.y0] += 1;
+            diff[iv.y1] -= 1;
+        }
+        let mut count = 0isize;
+        for (diff, num) in diff.iter().zip(self.num_patches.iter_mut()) {
+            count += *diff;
+            *num = count as usize;
         }
 
         let root = PatchTreeNode {
