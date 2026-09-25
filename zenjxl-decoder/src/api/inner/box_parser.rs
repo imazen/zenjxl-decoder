@@ -9,7 +9,6 @@ use whereat::at;
 use crate::container::frame_index::FrameIndexBox;
 use crate::container::gain_map::GainMapBundle;
 use crate::error::{Error, Result};
-use crate::util::NewWithCapacity;
 
 use crate::api::{
     JxlBitstreamInput, JxlSignatureType, check_signature_internal, inner::process::SmallBuffer,
@@ -509,7 +508,9 @@ impl BoxParser {
                         remaining -= take as u64;
                     } else {
                         let old_len = buf.len();
-                        buf.resize(old_len + num, 0);
+                        let step = metadata_grow_step(old_len, num);
+                        buf.try_reserve(step).map_err(|e| at!(Error::from(e)))?;
+                        buf.resize(old_len + step, 0);
                         let read = input
                             .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
                             .map_err(|e| at!(Error::from(e)))?;
@@ -536,7 +537,9 @@ impl BoxParser {
                         remaining -= take as u64;
                     } else {
                         let old_len = buf.len();
-                        buf.resize(old_len + num, 0);
+                        let step = metadata_grow_step(old_len, num);
+                        buf.try_reserve(step).map_err(|e| at!(Error::from(e)))?;
+                        buf.resize(old_len + step, 0);
                         let read = input
                             .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
                             .map_err(|e| at!(Error::from(e)))?;
@@ -737,11 +740,7 @@ impl BoxParser {
                                 // 256 MB and a global allocator that can't
                                 // satisfy the request must surface as a graceful
                                 // error, never an `abort()` on the parser thread.
-                                self.state = ParseState::BufferingGainMap(
-                                    content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)
-                                        .map_err(|e| at!(Error::from(e)))?,
-                                );
+                                self.state = ParseState::BufferingGainMap(content_len, Vec::new());
                             }
                         }
                         b"jxli" => {
@@ -752,11 +751,8 @@ impl BoxParser {
                             if content_len > 16 * 1024 * 1024 {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
-                                self.state = ParseState::BufferingFrameIndex(
-                                    content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)
-                                        .map_err(|e| at!(Error::from(e)))?,
-                                );
+                                self.state =
+                                    ParseState::BufferingFrameIndex(content_len, Vec::new());
                             }
                         }
                         b"Exif" => {
@@ -771,11 +767,7 @@ impl BoxParser {
                             if content_len > 16 * 1024 * 1024 {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
-                                self.state = ParseState::BufferingExif(
-                                    content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)
-                                        .map_err(|e| at!(Error::from(e)))?,
-                                );
+                                self.state = ParseState::BufferingExif(content_len, Vec::new());
                             }
                         }
                         b"xml " => {
@@ -790,11 +782,7 @@ impl BoxParser {
                             if content_len > 16 * 1024 * 1024 {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
-                                self.state = ParseState::BufferingXmp(
-                                    content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)
-                                        .map_err(|e| at!(Error::from(e)))?,
-                                );
+                                self.state = ParseState::BufferingXmp(content_len, Vec::new());
                             }
                         }
                         // Brotli-compressed metadata box. The encoder wraps EXIF
@@ -812,11 +800,7 @@ impl BoxParser {
                             if content_len > 16 * 1024 * 1024 {
                                 self.state = ParseState::SkippableBox(content_len);
                             } else {
-                                self.state = ParseState::BufferingBrob(
-                                    content_len,
-                                    Vec::<u8>::new_with_capacity(content_len as usize)
-                                        .map_err(Error::from)?,
-                                );
+                                self.state = ParseState::BufferingBrob(content_len, Vec::new());
                             }
                         }
                         _ => {
@@ -882,6 +866,16 @@ impl BoxParser {
 /// the input does — a zero-length read is the normal terminator there, not the
 /// truncation it would be for a sized box.
 ///
+/// How far to grow a metadata box buffer before the next read: what is left
+/// of the box, but at most the bytes already buffered (and at least 64 KiB).
+/// Box sizes are untrusted; sizing the buffer to the declared length made a
+/// few-byte file claiming a 256 MB `jhgm` box allocate and zero 256 MB.
+/// Doubling bounds the waste to the data actually delivered.
+fn metadata_grow_step(buffered: usize, remaining: usize) -> usize {
+    const MIN_STEP: usize = 64 * 1024;
+    remaining.min(buffered.max(MIN_STEP))
+}
+
 /// Returns `(new_remaining, done)`. `MAX_METADATA_BOX` caps an unsized box so a
 /// file cannot make us buffer without bound.
 fn fill_metadata_box(
@@ -918,7 +912,9 @@ fn fill_metadata_box(
     }
 
     let old_len = buf.len();
-    buf.resize(old_len + num, 0);
+    let step = metadata_grow_step(old_len, num);
+    buf.try_reserve(step).map_err(|e| at!(Error::from(e)))?;
+    buf.resize(old_len + step, 0);
     let read = input
         .read(&mut [IoSliceMut::new(&mut buf[old_len..])])
         .map_err(|e| at!(Error::from(e)))?;
@@ -1001,5 +997,43 @@ mod tests {
             "{} input bytes left unconsumed",
             input.len()
         );
+    }
+
+    /// A box's declared size is untrusted: a few hundred bytes claiming a
+    /// 200 MB gain map must not allocate 200 MB. The buffer grows with the
+    /// data actually delivered.
+    #[test]
+    fn truncated_large_metadata_box_does_not_allocate_declared_size() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 12, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A]);
+        data.extend_from_slice(&[0, 0, 0, 20]);
+        data.extend_from_slice(b"ftypjxl \0\0\0\0jxl ");
+        let declared: u32 = 200 << 20;
+        data.extend_from_slice(&(declared + 8).to_be_bytes());
+        data.extend_from_slice(b"jhgm");
+        data.extend_from_slice(&[0x55; 100]);
+
+        let mut parser = BoxParser::new();
+        let mut input = data.as_slice();
+        for _ in 0..16 {
+            match parser.get_more_codestream(&mut input) {
+                Err(e) if matches!(e.error(), crate::error::Error::OutOfBounds(_)) => break,
+                other => {
+                    other.unwrap();
+                }
+            }
+        }
+        match &parser.state {
+            super::ParseState::BufferingGainMap(remaining, buf) => {
+                assert_eq!(*remaining, declared as u64 - 100);
+                assert_eq!(buf.len(), 100);
+                assert!(
+                    buf.capacity() <= 1 << 20,
+                    "capacity {} for 100 buffered bytes",
+                    buf.capacity()
+                );
+            }
+            _ => panic!("expected to be buffering the gain map box"),
+        }
     }
 }
