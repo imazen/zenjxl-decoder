@@ -35,6 +35,33 @@ pub(crate) struct RenderWorkItem {
 /// be keyed on the group index, see render_group.rs) and, for a tiny last
 /// group, `x1 - x0` underflowed into an absurd rectangle that sent
 /// `mirror()` into an endless loop. Upstream jxl-rs #845 / #873.
+/// Boundaries `[p0, p1, p2, p3]` of a group's three strips along one axis:
+/// `p0..p1` is the leading border, `p1..p2` the centre and `p2..p3` the
+/// trailing border. Always monotonic, so strips never overlap or reach past
+/// the group into a neighbour's interior.
+fn boundary_points(
+    origin: usize,
+    end: usize,
+    is_first: bool,
+    is_last: bool,
+    border: usize,
+    input_size: usize,
+) -> [usize; 4] {
+    let p0 = if is_first {
+        origin
+    } else {
+        origin.saturating_sub(border)
+    };
+    let p1 = (origin + border).min(end);
+    let p2 = end.saturating_sub(border).max(p1);
+    let p3 = if is_last {
+        end
+    } else {
+        (end + border).min(input_size)
+    };
+    [p0, p1, p2, p3]
+}
+
 fn ready_image_area(
     group_rect: Rect,
     (gx, gy): (usize, usize),
@@ -44,36 +71,31 @@ fn ready_image_area(
     xrange: Range<u8>,
     yrange: Range<u8>,
 ) -> Option<Rect> {
-    let y0 = match (gy == 0, yrange.start) {
-        (true, 0) => group_rect.origin.1,
-        (false, 0) => group_rect.origin.1.saturating_sub(border_size.1),
-        (_, 1) => group_rect.origin.1 + border_size.1,
-        // (_, 2)
-        _ => group_rect.end().1.saturating_sub(border_size.1),
-    };
-    let x0 = match (gx == 0, xrange.start) {
-        (true, 0) => group_rect.origin.0,
-        (false, 0) => group_rect.origin.0.saturating_sub(border_size.0),
-        (_, 1) => group_rect.origin.0 + border_size.0,
-        // (_, 2)
-        _ => group_rect.end().0.saturating_sub(border_size.0),
-    };
-    let y1 = match (gy + 1 == group_count.1, yrange.end) {
-        (true, 3) => group_rect.end().1,
-        (false, 3) => group_rect.end().1 + border_size.1,
-        (_, 2) => group_rect.end().1.saturating_sub(border_size.1),
-        // (_, 1)
-        _ => group_rect.origin.1 + border_size.1,
-    }
-    .min(input_size.1);
-    let x1 = match (gx + 1 == group_count.0, xrange.end) {
-        (true, 3) => group_rect.end().0,
-        (false, 3) => group_rect.end().0 + border_size.0,
-        (_, 2) => group_rect.end().0.saturating_sub(border_size.0),
-        // (_, 1)
-        _ => group_rect.origin.0 + border_size.0,
-    }
-    .min(input_size.0);
+    // The four boundaries of the (left border, centre, right border) strips.
+    // Clamping keeps them monotonic even when the group is narrower than two
+    // borders: the old per-strip `match` let the left strip run past the
+    // group's end into a neighbour that might not be decoded yet, and overlap
+    // the right strip. Ported from upstream jxl-rs 964211a.
+    let xs = boundary_points(
+        group_rect.origin.0,
+        group_rect.end().0,
+        gx == 0,
+        gx + 1 == group_count.0,
+        border_size.0,
+        input_size.0,
+    );
+    let ys = boundary_points(
+        group_rect.origin.1,
+        group_rect.end().1,
+        gy == 0,
+        gy + 1 == group_count.1,
+        border_size.1,
+        input_size.1,
+    );
+    let x0 = xs[xrange.start as usize];
+    let x1 = xs[xrange.end as usize];
+    let y0 = ys[yrange.start as usize];
+    let y1 = ys[yrange.end as usize];
     // `then` (lazy), not `then_some`: the argument of `then_some` is evaluated
     // before the condition is consulted, so an empty strip (`x1 <= x0`, e.g. a
     // 3-px last column inside a 7-px border) underflowed `x1 - x0` -- a panic
@@ -977,5 +999,39 @@ mod tests {
             area.is_none(),
             "centre strip of a 3-px group inside a 7-px border is empty"
         );
+    }
+
+    /// An interior group narrower than two borders (a 16-px group, border 10,
+    /// as in a downsampled channel): the three strips must tile the span
+    /// without overlapping. The old per-strip math gave the leading strip
+    /// [6, 26) and the trailing strip [22, 42), so columns 22..26 were claimed
+    /// by both. Upstream jxl-rs 964211a.
+    #[test]
+    fn ready_image_area_strips_do_not_overlap_in_narrow_group() {
+        let strip = |r: std::ops::Range<u8>| {
+            ready_image_area(
+                Rect {
+                    origin: (16, 0),
+                    size: (16, 64),
+                },
+                (1, 0),
+                (3, 1),
+                (48, 64),
+                (10, 0),
+                r,
+                0..3,
+            )
+            .map(|a| (a.origin.0, a.end().0))
+        };
+        let lead = strip(0..1).unwrap();
+        let centre = strip(1..2);
+        let trail = strip(2..3).unwrap();
+        assert_eq!(lead, (6, 26));
+        assert_eq!(centre, None, "no centre strip inside two borders");
+        assert_eq!(
+            trail.0, lead.1,
+            "trailing strip must start where the leading one ends"
+        );
+        assert_eq!(trail, (26, 42));
     }
 }
