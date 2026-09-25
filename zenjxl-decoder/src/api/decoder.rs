@@ -1854,6 +1854,112 @@ pub(crate) mod tests {
         }
     }
 
+    /// Decodes `data` in `chunk`-byte steps, choosing the pixel format before
+    /// each frame with `pick(frame_index)` (0 = RGBA8, 1 = RGB f32); returns
+    /// each frame's format index and bytes.
+    fn decode_with_per_frame_formats(
+        data: &[u8],
+        chunk: usize,
+        pick: impl Fn(usize) -> usize,
+    ) -> Vec<(usize, Vec<u8>)> {
+        let mut options = JxlDecoderOptions::default();
+        options.limits.max_memory_bytes = None;
+        let mut input: &[u8] = data;
+        let mut fed = 0usize;
+        macro_rules! step {
+            ($dec:ident $(, $extra:expr)?) => {{
+                fed = (fed + chunk).min(input.len());
+                let mut slice = &input[..fed];
+                let before = slice.len();
+                let r = $dec.process(&mut slice $(, $extra)?).unwrap();
+                let used = before - slice.len();
+                input = &input[used..];
+                fed -= used;
+                r
+            }};
+        }
+        let mut d = JxlDecoder::<states::Initialized>::new(options);
+        let mut info = loop {
+            match step!(d) {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => d = fallback,
+            }
+        };
+        let nec = info.current_pixel_format().extra_channel_format.len();
+        let (w, h) = info.basic_info().size;
+        let formats = [JxlPixelFormat::rgba8(nec), JxlPixelFormat::rgb_f32(nec)];
+        let mut out = vec![];
+        loop {
+            let f = pick(out.len());
+            let mut fi = loop {
+                info.set_pixel_format(formats[f].clone());
+                match step!(info) {
+                    ProcessingResult::Complete { result } => break result,
+                    ProcessingResult::NeedsMoreInput { fallback, .. } => info = fallback,
+                }
+            };
+            let bpp = [4, 12][f];
+            let mut px = Image::<u8>::new((w * bpp, h)).unwrap();
+            let size = px.size();
+            {
+                let mut bufs = [JxlOutputBuffer::from_image_rect_mut(
+                    px.get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size,
+                    })
+                    .into_raw(),
+                )];
+                info = loop {
+                    match step!(fi, &mut bufs) {
+                        ProcessingResult::Complete { result } => break result,
+                        ProcessingResult::NeedsMoreInput { fallback, .. } => fi = fallback,
+                    }
+                };
+            }
+            let mut bytes = vec![];
+            for y in 0..h {
+                bytes.extend_from_slice(&px.row(y)[..w * bpp]);
+            }
+            out.push((f, bytes));
+            if !info.has_more_frames() {
+                break;
+            }
+        }
+        out
+    }
+
+    /// The pixel format may change between frames, including while
+    /// `process()` has already parsed into reference frames: each frame's
+    /// pipeline is built for the format current at its header. Upstream
+    /// jxl-rs d7ecec1 forbids changes after the first frame header because
+    /// its pipelines panicked; here every toggled frame matches a
+    /// fixed-format decode byte for byte.
+    #[test]
+    fn pixel_format_can_change_between_frames() {
+        for fixture in [
+            "conformance_test_images/animation_icos4d.jxl",
+            "conformance_test_images/animation_newtons_cradle.jxl",
+            "conformance_test_images/animation_spline.jxl",
+            "conformance_test_images/blendmodes.jxl",
+        ] {
+            let data = crate::util::test::fixture_bytes(fixture);
+            for chunk in [64usize, 4096, usize::MAX / 2] {
+                let refs = [
+                    decode_with_per_frame_formats(&data, chunk, |_| 0),
+                    decode_with_per_frame_formats(&data, chunk, |_| 1),
+                ];
+                let toggled = decode_with_per_frame_formats(&data, chunk, |i| i % 2);
+                assert_eq!(toggled.len(), refs[0].len(), "{fixture} chunk={chunk}");
+                for (i, (f, bytes)) in toggled.iter().enumerate() {
+                    assert!(
+                        *bytes == refs[*f][i].1,
+                        "{fixture} chunk={chunk}: frame {i} differs from the fixed-format decode"
+                    );
+                }
+            }
+        }
+    }
+
     /// `flush_pixels` returns `true` only when new pixels were rendered since
     /// the previous call (upstream jxl-rs #755): a second back-to-back flush
     /// with no new input must report `false`, and a chunked decode of a
