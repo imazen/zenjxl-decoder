@@ -350,3 +350,29 @@ Tests that expect an error must use `decode_with`, not the `decode` helper in
 `api::decoder::tests`: that helper `unwrap()`s the `process` result
 (`api/decoder.rs:548`), so it panics where upstream's `decode_internal` returns
 `Err`, and a test built on it cannot tell a graceful rejection from a crash.
+
+
+## Upstream 2fab17c..fce6e28 fixture sync (2026-09-24)
+
+Upstream added seven decoder fixtures in this range that the fork lacked.
+
+| upstream | fixture | outcome here |
+|---|---|---|
+| `5dfeb9e` (#960) + `744d818` | `ec_upsampling8_multi_group.jxl` | **fork bug, FIXED** (`bd4f47e`) — panicked the `compare_incremental` sweep with a slice index out of range; low-memory row buffers were sized to `chunk_size` without the border |
+| `450fef0` | `narrow_edge_group.jxl` | passes all six sweeps |
+| `96c5dc0` | `upsampling2_permuted_toc.jxl` | passes all six sweeps |
+| `45abc97` | `red_420.jxl`, `red_422.jxl`, `red_440.jxl` | pass all six sweeps; **not committed** — 114-131 KB each, over the 30 KB fixture limit, held at `~/tmp/upstream-fixtures-pending/` pending approval |
+| `82b981a` | `truncated_squeeze_flush_missing_tiles.jxl` | **N/A by design** — see below |
+| `fce6e28` | `truncated_squeeze_missing_avg.jxl` | **N/A by design** — see below |
+
+The two truncated-squeeze fixes patch panics inside upstream's partial
+LF-global render, which this fork does not have (progressive preview is N/A
+above, "the fork kept the pre-March flush design"). On `missing_avg` upstream
+completes the frame header with the bytes present and renders partial LF;
+this fork asks for 167 more bytes and renders nothing, so it cannot reach the
+fixed code. The ported tests assert only that chunked, flushing decode of
+each truncated file returns without panicking. A first draft of the port also
+asserted that a flush happened; that made the test pass vacuously before the
+assertion was added and fail after, which is how the design gap surfaced.
+The same frame-header behaviour explains `patches_ec_upsampling_dim_shift`
+above.

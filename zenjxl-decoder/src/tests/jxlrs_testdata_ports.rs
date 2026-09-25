@@ -144,3 +144,158 @@ fn exif_brob_box_payload_sizes() {
         assert_eq!(exif.len(), 166, "{name}: decompressed Exif payload size");
     }
 }
+
+/// Decodes `data` in `chunk_size` pieces, flushing pixels whenever the decoder
+/// stops for input, and treats running out of input as the end of a partial
+/// image rather than an error. Mirrors upstream jxl-rs `decode_internal` with
+/// `do_flush: true, allow_partial: true`: the file is truncated on purpose,
+/// and the point is that flushing what exists never panics.
+///
+/// Returns how many times it flushed, so callers can prove the partial-render
+/// path actually ran rather than the file bailing out before the frame body.
+fn decode_partial_with_flush(data: &[u8], chunk_size: usize) -> crate::error::Result<usize> {
+    let mut flushes = 0usize;
+    use crate::api::{
+        JxlDataFormat, JxlDecoder, JxlOutputBuffer, JxlPixelFormat, ProcessingResult, states,
+    };
+    use crate::image::{Image, Rect};
+
+    let mut options = JxlDecoderOptions::default();
+    options.limits.max_memory_bytes = None;
+    let mut remaining = data;
+    let mut fed = &remaining[0..0];
+    // Hands the decoder the next chunk on top of whatever it has not consumed.
+    macro_rules! feed {
+        () => {{
+            fed = &remaining[..(fed.len().saturating_add(chunk_size)).min(remaining.len())];
+        }};
+    }
+
+    let mut dec = JxlDecoder::<states::Initialized>::new(options);
+    let mut info = loop {
+        feed!();
+        let before = fed.len();
+        let r = dec.process(&mut fed)?;
+        remaining = &remaining[(before - fed.len())..];
+        match r {
+            ProcessingResult::Complete { result } => break result,
+            ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                if remaining.is_empty() {
+                    return Ok(flushes); // truncated before the image header: nothing to flush
+                }
+                dec = fallback;
+            }
+        }
+    };
+
+    let (w, h) = info.basic_info().size;
+    let fmt = info.current_pixel_format().clone();
+    info.set_pixel_format(JxlPixelFormat {
+        color_type: fmt.color_type,
+        color_data_format: Some(JxlDataFormat::f32()),
+        extra_channel_format: fmt
+            .extra_channel_format
+            .iter()
+            .map(|_| Some(JxlDataFormat::f32()))
+            .collect(),
+    });
+    let fmt = info.current_pixel_format().clone();
+    let mut buffers = vec![Image::<f32>::new((
+        w * fmt.color_type.samples_per_pixel(),
+        h,
+    ))?];
+    for ecf in fmt.extra_channel_format.iter().flatten() {
+        let _ = ecf;
+        buffers.push(Image::<f32>::new((w, h))?);
+    }
+    let mut out: Vec<_> = buffers
+        .iter_mut()
+        .map(|b| {
+            let size = b.size();
+            JxlOutputBuffer::from_image_rect_mut(
+                b.get_rect_mut(Rect {
+                    origin: (0, 0),
+                    size,
+                })
+                .into_raw(),
+            )
+        })
+        .collect();
+
+    loop {
+        let mut frame = loop {
+            feed!();
+            let before = fed.len();
+            let r = info.process(&mut fed)?;
+            remaining = &remaining[(before - fed.len())..];
+            match r {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    if remaining.is_empty() {
+                        return Ok(flushes);
+                    }
+                    info = fallback;
+                }
+            }
+        };
+        info = loop {
+            feed!();
+            let before = fed.len();
+            let r = frame.process(&mut fed, &mut out)?;
+            remaining = &remaining[(before - fed.len())..];
+            match r {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { mut fallback, .. } => {
+                    // Flush whatever has arrived, including at the very end of
+                    // a truncated file -- that final flush is the one the
+                    // upstream bugs panicked in.
+                    fallback.flush_pixels(&mut out)?;
+                    flushes += 1;
+                    if remaining.is_empty() {
+                        return Ok(flushes);
+                    }
+                    frame = fallback;
+                }
+            }
+        };
+        if !info.has_more_frames() {
+            return Ok(flushes);
+        }
+    }
+}
+
+/// Upstream `flush_truncated_squeeze_missing_tiles` (jxl-rs `82b981a`,
+/// chromium issue 562761172): flushing a truncated image used to panic when a
+/// smooth-squeeze upsample step read a tile whose channel had not been
+/// decoded yet.
+///
+/// The panicking code is upstream's partial LF-global render, which this fork
+/// does not have: progressive preview is recorded as N/A in
+/// `docs/UPSTREAM_SYNC.md` ("the fork kept the pre-March flush design"). Here
+/// the decoder stops for input at the frame header and flushes nothing, so the
+/// upstream regression cannot occur. The test pins what does apply -- chunked,
+/// flushing decode of this truncated file returns without panicking -- and
+/// deliberately does not require a flush, which would assert a feature the
+/// fork chose not to implement.
+#[test]
+fn flush_truncated_squeeze_missing_tiles() {
+    let data = testdata("truncated_squeeze_flush_missing_tiles.jxl");
+    for chunk_size in [64, 256, usize::MAX] {
+        decode_partial_with_flush(&data, chunk_size)
+            .unwrap_or_else(|e| panic!("chunk_size {chunk_size}: {e:?}"));
+    }
+}
+
+/// Upstream `flush_truncated_squeeze_missing_avg` (jxl-rs `fce6e28`): the same
+/// partial decode when the squeeze residuals are present but the averages are
+/// not. Same N/A reasoning as above: upstream completes the frame header here
+/// and renders partial LF-global; this fork waits for the section (167 more
+/// bytes) and so never reaches the code that upstream fixed.
+#[test]
+fn flush_truncated_squeeze_missing_avg() {
+    let data = testdata("truncated_squeeze_missing_avg.jxl");
+    for chunk_size in [64, 256, usize::MAX] {
+        decode_partial_with_flush(&data, chunk_size)
+            .unwrap_or_else(|e| panic!("chunk_size {chunk_size}: {e:?}"));
+    }
+}
