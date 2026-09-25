@@ -196,6 +196,17 @@ impl BoxParser {
         }
     }
 
+    /// Whether the container's last codestream box (`jxlc`, or the `jxlp`
+    /// marked last) has been handed out in full. A size-0 `jxlc` runs to end
+    /// of file (`CodestreamBox(u64::MAX)`) and a bare codestream has no box,
+    /// so neither ever reports an end.
+    pub(super) fn codestream_ended(&self) -> bool {
+        matches!(
+            self.box_type,
+            CodestreamBoxType::Jxlc | CodestreamBoxType::LastJxlp
+        ) && !matches!(self.state, ParseState::CodestreamBox(n) if n > 0)
+    }
+
     fn next_expected_jxlp_index(&self) -> Option<u32> {
         match self.box_type {
             CodestreamBoxType::None => Some(0),

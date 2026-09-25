@@ -64,6 +64,13 @@ pub enum Error {
     SizeOverflow,
     #[error("Invalid ISOBMMF container")]
     InvalidBox,
+    /// The container's last codestream box (`jxlc`, or the `jxlp` marked
+    /// last) was fully read but the codestream inside it is incomplete. More
+    /// input cannot help: the file is damaged. Set
+    /// [`JxlDecoderOptions::recover_partial_image`](crate::api::JxlDecoderOptions::recover_partial_image)
+    /// to keep the decoder and flush what was decoded instead.
+    #[error("Unexpected end of codestream box: the file's codestream is incomplete")]
+    UnexpectedCodestreamBoxEnd,
     #[error("ICC is too large")]
     IccTooLarge,
     #[error("Invalid ICC stream: unexpected end of stream")]

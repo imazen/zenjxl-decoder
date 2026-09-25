@@ -49,22 +49,21 @@ fn with_deadline<T: Send + 'static>(
     }
 }
 
-/// Upstream `ooo_jxlp_with_trailing_bytes_does_not_hang`: an out-of-order
-/// `jxlp` stream with trailing container bytes used to spin forever when
-/// header parsing needed more codestream than the boxes provided. Upstream
-/// asserts a single `process()` call returns `NeedsMoreInput`.
+/// Upstream `ooo_jxlp_with_trailing_bytes_does_not_hang`, renamed
+/// `incomplete_ooo_jxlp` in jxl-rs 97e233d: an out-of-order `jxlp` stream
+/// with trailing container bytes used to spin forever when header parsing
+/// needed more codestream than the boxes provided. The last `jxlp` box is
+/// complete, so the codestream can never finish: the decode must return,
+/// with `UnexpectedCodestreamBoxEnd` (as upstream now reports).
 #[test]
 fn ooo_jxlp_with_trailing_bytes_does_not_hang() {
     let data = testdata("ooo_jxlp_with_trailing_bytes.jxl");
     let res = with_deadline(20, "ooo_jxlp_with_trailing_bytes", move || {
         decode_with(&data, JxlDecoderOptions::default()).map(|_| ())
     });
-    // Upstream stops with "needs more input"; reaching a decoded image or any
-    // other error is a divergence, but the point of the fixture is that the
-    // call returns at all.
     assert!(
-        matches!(res, Err(ref e) if matches!(e.error(), Error::OutOfBounds(_))),
-        "expected an out-of-input result, got {res:?}"
+        matches!(res, Err(ref e) if matches!(e.error(), Error::UnexpectedCodestreamBoxEnd)),
+        "expected an incomplete-codestream error, got {res:?}"
     );
 }
 

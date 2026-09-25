@@ -142,13 +142,33 @@ impl JxlDecoderInner {
         input: &mut dyn JxlBitstreamInput,
         buffers: Option<&mut [JxlOutputBuffer]>,
     ) -> Result<ProcessingResult<(), ()>> {
-        ProcessingResult::new(self.codestream_parser.process(
+        let result = self.codestream_parser.process(
             &mut self.box_parser,
             input,
             &self.options,
             buffers,
             false,
-        ))
+        );
+        // A complete last codestream box with frames still outstanding is a
+        // damaged file, not a stream still arriving. Upstream jxl-rs 97e233d.
+        let result = match result {
+            Err(e)
+                if matches!(e.error(), crate::error::Error::OutOfBounds(_))
+                    && self.codestream_ended()
+                    && !self.options.recover_partial_image =>
+            {
+                Err(whereat::at!(
+                    crate::error::Error::UnexpectedCodestreamBoxEnd
+                ))
+            }
+            other => other,
+        };
+        ProcessingResult::new(result)
+    }
+
+    /// See [`JxlDecoder::codestream_ended`](crate::api::JxlDecoder::codestream_ended).
+    pub(crate) fn codestream_ended(&self) -> bool {
+        self.codestream_parser.has_more_frames && self.box_parser.codestream_ended()
     }
 
     /// Draws all the pixels we have data for. Returns `true` if any new pixels

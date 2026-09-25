@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 670 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 112 lines (124 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 674 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 112 lines (124 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,9 +15,9 @@
 #   pub consts/statics                          3
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          194
-#   struct fields                             127
-#   enum variants                             218
+#   inherent methods                          196
+#   struct fields                             128
+#   enum variants                             219
 #   re-exports                                  3
 #   trait roster entries (type × trait)       151
 #   auto-trait-complete types                  35
@@ -25,9 +25,9 @@
 #
 # per-module pub lines:
 #   (root)                            8
-#   api                             602
+#   api                             606
 
-## items (606 lines)
+## items (610 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -201,6 +201,7 @@ pub api::Error::TreeMultiplierTooLarge(u32, u32)
 pub api::Error::TreeSplitOnEmptyRange(u8, i32, i32, i32)
 pub api::Error::TreeTooLarge(usize, usize)
 pub api::Error::TreeTooTall(usize, usize)
+pub api::Error::UnexpectedCodestreamBoxEnd
 pub api::Error::UnexpectedLz77Repeat
 pub api::Error::WrongBufferCount(usize, usize)
 pub fn api::Error::kind(&self) -> api::ErrorClass
@@ -428,6 +429,7 @@ pub fn api::JxlDecoder<api::states::WithImageInfo>::process(self, &mut impl api:
 pub fn api::JxlDecoder<api::states::WithImageInfo>::set_output_color_profile(&mut self, api::JxlColorProfile) -> api::Result<()>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::set_pixel_format(&mut self, api::JxlPixelFormat)
 pub fn api::JxlDecoder<api::states::WithImageInfo>::start_new_frame(&mut self, api::VisibleFrameSeekTarget)
+pub fn api::JxlDecoder<S>::codestream_ended(&self) -> bool
 pub fn api::JxlDecoder<S>::exif(&self) -> core::option::Option<&[u8]>
 pub fn api::JxlDecoder<S>::frame_index(&self) -> core::option::Option<&container::frame_index::FrameIndexBox>
 pub fn api::JxlDecoder<S>::gain_map(&self) -> core::option::Option<&api::GainMapBundle>
@@ -493,6 +495,7 @@ pub api::JxlDecoderOptions::high_precision: bool
 pub api::JxlDecoderOptions::limits: api::JxlDecoderLimits
 pub api::JxlDecoderOptions::parallel: bool
 pub api::JxlDecoderOptions::premultiply_output: bool
+pub api::JxlDecoderOptions::recover_partial_image: bool
 pub api::JxlDecoderOptions::reject_progressive: bool
 pub api::JxlDecoderOptions::render_spot_colors: bool
 pub api::JxlDecoderOptions::scan_frames_only: bool
@@ -507,6 +510,7 @@ pub fn api::JxlDecoderOptions::with_high_precision(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_limits(self, api::JxlDecoderLimits) -> Self
 pub fn api::JxlDecoderOptions::with_parallel(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_premultiply_output(self, bool) -> Self
+pub fn api::JxlDecoderOptions::with_recover_partial_image(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_reject_progressive(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_render_spot_colors(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_scan_frames_only(self, bool) -> Self

@@ -100,6 +100,16 @@ pub struct VisibleFrameSeekTarget {
 }
 
 impl<S: JxlState> JxlDecoder<S> {
+    /// `true` when the container's last codestream box has been read in full
+    /// while the image is still incomplete: further input cannot help. Only
+    /// observable with
+    /// [`JxlDecoderOptions::recover_partial_image`](crate::api::JxlDecoderOptions::recover_partial_image);
+    /// otherwise `process` fails with
+    /// [`Error::UnexpectedCodestreamBoxEnd`](crate::error::Error::UnexpectedCodestreamBoxEnd).
+    pub fn codestream_ended(&self) -> bool {
+        self.inner.codestream_ended()
+    }
+
     /// The tracker that charges this decode's `max_memory_bytes` budget; see
     /// `JxlDecoderInner::memory_tracker`.
     pub(crate) fn memory_tracker(&self) -> crate::util::MemoryTracker {
@@ -290,6 +300,18 @@ impl JxlDecoder<WithImageInfo> {
     ///
     /// Setting this may also change output color profile in some cases, if the profile was not set
     /// manually before.
+    ///
+    /// The format may be changed between frames, including after `process` has
+    /// already decoded reference frames internally: each frame's render pipeline
+    /// is built for the format current when that frame's header is decoded, and
+    /// the output matches a decode that used that format throughout
+    /// (`pixel_format_can_change_between_frames` checks this byte for byte).
+    ///
+    /// Upstream jxl-rs (d7ecec1) instead makes this return `Result` and rejects
+    /// changes after the first frame header, because its pipelines could panic
+    /// in that case. This crate does not have that failure, so the signature
+    /// stays infallible for now; adopting upstream's signature is listed under
+    /// queued breaking changes in the changelog.
     pub fn set_pixel_format(&mut self, pixel_format: JxlPixelFormat) {
         self.inner.set_pixel_format(pixel_format);
     }
@@ -1956,6 +1978,118 @@ pub(crate) mod tests {
                         "{fixture} chunk={chunk}: frame {i} differs from the fixed-format decode"
                     );
                 }
+            }
+        }
+    }
+
+    /// Wraps a bare codestream in a minimal container: signature, `ftyp`, and
+    /// one sized `jxlc` box holding `codestream`.
+    fn wrap_in_jxlc(codestream: &[u8]) -> Vec<u8> {
+        let mut out = vec![0, 0, 0, 12, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A];
+        out.extend_from_slice(&[0, 0, 0, 20]);
+        out.extend_from_slice(b"ftypjxl \0\0\0\0jxl ");
+        out.extend_from_slice(&(codestream.len() as u32 + 8).to_be_bytes());
+        out.extend_from_slice(b"jxlc");
+        out.extend_from_slice(codestream);
+        out
+    }
+
+    type FirstFrameResult = Result<
+        ProcessingResult<JxlDecoder<states::WithImageInfo>, JxlDecoder<states::WithFrameInfo>>,
+    >;
+
+    /// Feeds all of `data` and drives the decoder to the first frame's pixel
+    /// stage. Returns the result of that `process` call and the RGB8 buffer.
+    fn process_first_frame(
+        data: &[u8],
+        options: JxlDecoderOptions,
+    ) -> (FirstFrameResult, Image<u8>) {
+        let mut input = data;
+        let mut info = match JxlDecoder::<states::Initialized>::new(options)
+            .process(&mut input)
+            .unwrap()
+        {
+            ProcessingResult::Complete { result } => result,
+            ProcessingResult::NeedsMoreInput { .. } => panic!("header should be complete"),
+        };
+        let nec = info.current_pixel_format().extra_channel_format.len();
+        info.set_pixel_format(JxlPixelFormat::rgb8(nec));
+        let (w, h) = info.basic_info().size;
+        let mut pixels = Image::<u8>::new((w * 3, h)).unwrap();
+        let frame = match info.process(&mut input).unwrap() {
+            ProcessingResult::Complete { result } => result,
+            ProcessingResult::NeedsMoreInput { .. } => panic!("frame header should be complete"),
+        };
+        let size = pixels.size();
+        let mut bufs = [JxlOutputBuffer::from_image_rect_mut(
+            pixels
+                .get_rect_mut(Rect {
+                    origin: (0, 0),
+                    size,
+                })
+                .into_raw(),
+        )];
+        let result = frame.process(&mut input, &mut bufs);
+        (result, pixels)
+    }
+
+    /// A container whose `jxlc` box is complete but whose codestream is cut
+    /// short can never finish. By default that is an error rather than an
+    /// endless `NeedsMoreInput` (upstream jxl-rs 97e233d); with
+    /// `recover_partial_image` the decoder is kept, reports
+    /// `codestream_ended()`, and `flush_pixels` renders what was decoded.
+    #[test]
+    fn truncated_codestream_in_complete_box() {
+        let full = crate::util::test::fixture_bytes("green_queen_vardct_e3.jxl");
+        let cut = &full[..full.len() * 6 / 10];
+        let damaged = wrap_in_jxlc(cut);
+
+        let (result, _) = process_first_frame(&damaged, JxlDecoderOptions::default());
+        let err = result
+            .err()
+            .expect("damaged file must not ask for more input");
+        assert!(
+            matches!(err.error(), Error::UnexpectedCodestreamBoxEnd),
+            "{err:?}"
+        );
+
+        let options = JxlDecoderOptions::default().with_recover_partial_image(true);
+        let (result, mut pixels) = process_first_frame(&damaged, options);
+        let mut decoder = match result.unwrap() {
+            ProcessingResult::NeedsMoreInput { fallback, .. } => fallback,
+            ProcessingResult::Complete { .. } => panic!("a truncated frame cannot complete"),
+        };
+        assert!(decoder.codestream_ended());
+        let size = pixels.size();
+        let mut bufs = [JxlOutputBuffer::from_image_rect_mut(
+            pixels
+                .get_rect_mut(Rect {
+                    origin: (0, 0),
+                    size,
+                })
+                .into_raw(),
+        )];
+        decoder.flush_pixels(&mut bufs).unwrap();
+        let (w, h) = (size.0, size.1);
+        let nonzero = (0..h).any(|y| pixels.row(y)[..w].iter().any(|&v| v != 0));
+        assert!(nonzero, "flush_pixels recovered no pixels");
+    }
+
+    /// Streams that may still be arriving keep asking for input: a bare
+    /// codestream, and a container whose `jxlc` box is itself cut short.
+    #[test]
+    fn truncated_download_still_needs_more_input() {
+        let full = crate::util::test::fixture_bytes("green_queen_vardct_e3.jxl");
+        let cut_bare = &full[..full.len() * 6 / 10];
+        let wrapped = wrap_in_jxlc(&full);
+        let cut_container = &wrapped[..wrapped.len() * 6 / 10];
+        for (name, data) in [("bare", cut_bare), ("container", cut_container)] {
+            let (result, _) = process_first_frame(data, JxlDecoderOptions::default());
+            match result.unwrap() {
+                ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                    assert!(!fallback.codestream_ended(), "{name}")
+                }
+                ProcessingResult::Complete { .. } => panic!("{name}: cannot complete"),
             }
         }
     }

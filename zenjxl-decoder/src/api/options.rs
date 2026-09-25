@@ -277,6 +277,31 @@ pub struct JxlDecoderOptions {
     ///
     /// Default: `false`.
     pub scan_frames_only: bool,
+
+    /// Keep the decoder when a container file's codestream ends early, so
+    /// the pixels decoded so far can be recovered.
+    ///
+    /// When the container's last codestream box (`jxlc`, or the `jxlp`
+    /// marked last) has been read in full but the codestream inside it is
+    /// incomplete, no amount of further input can finish the image. By
+    /// default `process` then fails with
+    /// [`Error::UnexpectedCodestreamBoxEnd`](crate::error::Error::UnexpectedCodestreamBoxEnd),
+    /// which consumes the decoder.
+    ///
+    /// With this set, `process` instead returns `NeedsMoreInput` as it does
+    /// for a stream that is still arriving, and
+    /// [`JxlDecoder::codestream_ended`](crate::api::JxlDecoder::codestream_ended)
+    /// returns `true`. Call `flush_pixels` on the returned decoder to render
+    /// what was decoded, then stop feeding input.
+    ///
+    /// Truncated *downloads* are unaffected either way: until the last
+    /// codestream box is complete, the decoder cannot tell a damaged file
+    /// from one still arriving, and keeps asking for input. Bare codestreams
+    /// (no container) and a `jxlc` box that runs to end of file never
+    /// report an ended codestream.
+    ///
+    /// Default: `false`.
+    pub recover_partial_image: bool,
 }
 
 impl Default for JxlDecoderOptions {
@@ -296,6 +321,7 @@ impl Default for JxlDecoderOptions {
             stop: Arc::new(enough::Unstoppable),
             parallel: cfg!(feature = "threads"),
             scan_frames_only: false,
+            recover_partial_image: false,
         }
     }
 }
@@ -396,6 +422,14 @@ impl JxlDecoderOptions {
     #[must_use]
     pub fn with_scan_frames_only(mut self, v: bool) -> Self {
         self.scan_frames_only = v;
+        self
+    }
+
+    /// Keep the decoder when a container's codestream ends early (see
+    /// [`recover_partial_image`](Self::recover_partial_image)).
+    #[must_use]
+    pub fn with_recover_partial_image(mut self, v: bool) -> Self {
+        self.recover_partial_image = v;
         self
     }
 

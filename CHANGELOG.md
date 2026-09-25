@@ -7,6 +7,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ## [Unreleased]
 
 ### Added
+- **Damaged container files no longer ask for input forever.** When the last codestream box (`jxlc`, or the `jxlp` marked last) is complete but the codestream inside is short, `process` returns the new `Error::UnexpectedCodestreamBoxEnd` instead of `NeedsMoreInput`, which no amount of input could satisfy (upstream jxl-rs `97e233d`). Partial-image recovery stays possible but explicit: with `JxlDecoderOptions::recover_partial_image` (`with_recover_partial_image`) the decoder keeps returning `NeedsMoreInput`, `JxlDecoder::codestream_ended()` reports `true`, and `flush_pixels` renders what was decoded. Truncated downloads, bare codestreams and size-0 `jxlc` boxes are unaffected. Tests `truncated_codestream_in_complete_box` and `truncated_download_still_needs_more_input`; `ooo_jxlp_with_trailing_bytes_does_not_hang` now expects the new error, as upstream does.
 - Upstream jxl-rs fixtures `red_420.jxl`, `red_422.jxl` and `red_440.jxl` (chroma-subsampled VarDCT) join the auto-swept `resources/test/` set; all six sweeps pass. Not shipped in the crate package.
 
 ### Fixed
@@ -102,6 +103,11 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   rectangle with its crop origin and blend mode, as libjxl's
   `JXL_DEC_SET_COALESCING(false)` does) or remove both. Documented as
   unimplemented in the meantime (#57).
+- Consider upstream jxl-rs `d7ecec1`'s `set_pixel_format(..) -> Result`,
+  which rejects format changes after the first frame header. Not needed for
+  safety here: format changes between frames decode correctly
+  (`pixel_format_can_change_between_frames`), so this would only be for
+  upstream API parity, and it would remove per-frame format switching.
 
 ### Changed
 
