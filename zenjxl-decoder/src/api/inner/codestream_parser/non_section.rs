@@ -327,9 +327,11 @@ impl CodestreamParser {
 
             let mut frame_header = FrameHeader::read_unconditional(&(), &mut br, &nonserialized)?;
             frame_header.postprocess(&nonserialized);
+            // The frame is rendered at its upsampled size (up to 8x per axis),
+            // so that is what the pixel limit must bound. Upstream jxl-rs c07c7d5.
             check_size_limit(
                 &decode_options.limits,
-                frame_header.size(),
+                frame_header.size_upsampled(),
                 frame_header.num_extra_channels as usize,
             )?;
 
