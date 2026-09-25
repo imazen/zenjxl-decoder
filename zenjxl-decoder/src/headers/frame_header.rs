@@ -73,23 +73,40 @@ pub struct Passes {
 }
 
 impl Passes {
+    /// The inclusive range of downsampling shifts whose modular channels are
+    /// decoded in `pass`. Across passes the brackets partition `[0, 3)`
+    /// without overlap (shift 3 and up belongs to the LF section); a pass that
+    /// owns no shifts gets the empty bracket `(1, 0)`.
+    ///
+    /// The previous form let two passes share shift 0 whenever a `downsample`
+    /// entry of 1 ended an earlier pass, so those channels were decoded twice
+    /// and the second pass misread the stream. Matches upstream jxl-rs
+    /// `8d71a02` and the spec.
     pub fn downsampling_bracket(&self, pass: usize) -> (usize, usize) {
-        let mut max_shift = 2;
+        let mut max_shift = 3;
         let mut min_shift = 3;
-        for i in 0..pass + 1 {
+        for i in 0..=pass {
+            max_shift = min_shift;
+            let mut found = false;
             for j in 0..self.num_ds as usize {
                 if i == self.last_pass[j] as usize {
                     min_shift = self.downsample[j].floor_log2();
+                    found = true;
                 }
             }
             if i + 1 == self.num_passes as usize {
                 min_shift = 0;
+                found = true;
             }
-            if i != pass {
-                max_shift = min_shift.saturating_sub(1);
+            if !found {
+                min_shift = max_shift;
             }
         }
-        (min_shift as usize, max_shift as usize)
+        if min_shift < max_shift {
+            (min_shift as usize, (max_shift - 1) as usize)
+        } else {
+            (1, 0)
+        }
     }
 }
 
@@ -776,6 +793,58 @@ impl FrameHeader {
 
 #[cfg(test)]
 mod test_frame_header {
+    fn passes(num_passes: u32, downsample: &[u32], last_pass: &[u32]) -> Passes {
+        Passes {
+            num_passes,
+            num_ds: downsample.len() as u32,
+            shift: vec![0; num_passes as usize - 1],
+            downsample: downsample.to_vec(),
+            last_pass: last_pass.to_vec(),
+        }
+    }
+
+    /// Every shift in `0..3` must be decoded in exactly one pass.
+    fn assert_partition(p: &Passes) {
+        for shift in 0..3usize {
+            let owners: Vec<_> = (0..p.num_passes as usize)
+                .filter(|&pass| {
+                    let (lo, hi) = p.downsampling_bracket(pass);
+                    lo <= shift && shift <= hi
+                })
+                .collect();
+            assert_eq!(
+                owners.len(),
+                1,
+                "shift {shift} owned by passes {owners:?} ({p:?})"
+            );
+        }
+    }
+
+    /// A downsample factor of 1 ending pass 0 of a 2-pass frame: shift 0 is
+    /// finished in pass 0, so pass 1 must own nothing. The old bracket also
+    /// gave pass 1 the range (0, 0), decoding shift-0 channels twice.
+    #[test]
+    fn downsampling_bracket_does_not_reuse_shift_zero() {
+        let p = passes(2, &[1], &[0]);
+        assert_eq!(p.downsampling_bracket(0), (0, 2));
+        assert_eq!(p.downsampling_bracket(1), (1, 0), "pass 1 must be empty");
+        assert_partition(&p);
+    }
+
+    #[test]
+    fn downsampling_bracket_partitions_common_layouts() {
+        for (n, ds, lp) in [
+            (1, &[][..], &[][..]),
+            (2, &[2][..], &[0][..]),
+            (3, &[4, 2][..], &[0, 1][..]),
+            (3, &[2][..], &[0][..]),
+            (4, &[8, 4, 2][..], &[0, 1, 2][..]),
+            (2, &[1][..], &[0][..]),
+        ] {
+            assert_partition(&passes(n, ds, lp));
+        }
+    }
+
     use super::super::bit_depth::BitDepth;
     use super::super::extra_channels::{ExtraChannel, ExtraChannelInfo};
     use super::super::permutation::Permutation;
