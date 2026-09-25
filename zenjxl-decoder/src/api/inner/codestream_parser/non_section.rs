@@ -402,10 +402,12 @@ impl CodestreamParser {
                         };
                         self.non_section_buf.consume(bits / 8);
                         self.non_section_bit_offset = (bits % 8) as u8;
-                        // Estimate >= 16 bits per remaining entry to read.
-                        return Err(at!(Error::OutOfBounds(
-                            c + toc_parser.remaining_entries() as usize * 2,
-                        )));
+                        // Report exactly what this step is missing. Padding the
+                        // count by 2 bytes per remaining TOC entry made the
+                        // refill loop wait for bytes the TOC does not need, so a
+                        // file whose entries are shorter than that stalled at
+                        // the frame header. Upstream jxl-rs 00c67ce.
+                        return Err(at!(Error::OutOfBounds(c)));
                     }
                     Err(e) => return Err(e),
                 }
