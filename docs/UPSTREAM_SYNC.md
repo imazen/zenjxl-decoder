@@ -361,7 +361,7 @@ Upstream added seven decoder fixtures in this range that the fork lacked.
 | `5dfeb9e` (#960) + `744d818` | `ec_upsampling8_multi_group.jxl` | **fork bug, FIXED** (`bd4f47e`) — panicked the `compare_incremental` sweep with a slice index out of range; low-memory row buffers were sized to `chunk_size` without the border |
 | `450fef0` | `narrow_edge_group.jxl` | passes all six sweeps |
 | `96c5dc0` | `upsampling2_permuted_toc.jxl` | passes all six sweeps |
-| `45abc97` | `red_420.jxl`, `red_422.jxl`, `red_440.jxl` | pass all six sweeps; **not committed** — 114-131 KB each, over the 30 KB fixture limit, held at `~/tmp/upstream-fixtures-pending/` pending approval |
+| `45abc97` | `red_420.jxl`, `red_422.jxl`, `red_440.jxl` | pass all six sweeps; committed to `resources/test/` on 2026-09-25 with approval (114-131 KB each, over the 30 KB fixture guideline; byte-identical to upstream `fce6e28`) |
 | `82b981a` | `truncated_squeeze_flush_missing_tiles.jxl` | passes; truncated inside the TOC, so neither decoder reaches the frame body (both ask for 291 more bytes) |
 | `fce6e28` | `truncated_squeeze_missing_avg.jxl` | passes; reaches the frame body and flushes **after porting `00c67ce`** |
 

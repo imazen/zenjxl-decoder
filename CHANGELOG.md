@@ -6,6 +6,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Added
+- Upstream jxl-rs fixtures `red_420.jxl`, `red_422.jxl` and `red_440.jxl` (chroma-subsampled VarDCT) join the auto-swept `resources/test/` set; all six sweeps pass. Not shipped in the crate package.
+
 ### Fixed
 - The 64x128 through 256x256 inverse DCTs keep their two row buffers on the heap instead of the stack (up to 32 KB per call with AVX-512). Ported from upstream jxl-rs `cc4d214`; same arithmetic, so output is unchanged.
 - **zenjxl-decoder-simd: `F32SimdVec::as_i32` rounded on x86.** SSE4.2/AVX2/AVX-512 used `cvtps` (round to nearest), while scalar, NEON and WASM truncate like `f32 as i32`; -23277.535 gave -23278 on SSE4.2 and -23277 elsewhere. All x86 backends now truncate (`cvttps`). The decoder's only caller passes already-floored values, so decoded pixels do not change. The AVX-512 bf16 table load now zero-extends instead of leaving the upper half undefined (unread by its permute). Ported from upstream jxl-rs `75483fc` and `32d61f4`; test `test_as_i32_scalar_equivalent` passes on all four x86 backends (Zen 5) and fails on the old SSE4.2 instruction.
