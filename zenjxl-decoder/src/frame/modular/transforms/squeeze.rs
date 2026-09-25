@@ -38,6 +38,13 @@ pub fn check_squeeze_params(
     if channels[params.begin_channel as usize].1.is_meta() && !params.in_place {
         return Err(at!(Error::MetaSqueezeRequiresInPlace));
     }
+    // Squeezing an empty channel is how repeated squeezes run out of pixels;
+    // downstream it divides by zero. Reject it here. Upstream jxl-rs f809cce.
+    for c in &channels[params.begin_channel as usize..end_channel] {
+        if c.1.size.0 == 0 || c.1.size.1 == 0 {
+            return Err(at!(Error::TooManySqueezes));
+        }
+    }
     Ok(())
 }
 
@@ -767,4 +774,46 @@ mod cross_tier_tests {
         }
     }
     test_all_instruction_sets!(unsqueeze_agrees_with_scalar);
+}
+
+#[cfg(test)]
+mod empty_channel_tests {
+    use super::check_squeeze_params;
+    use crate::error::Error;
+    use crate::frame::modular::ChannelInfo;
+    use crate::headers::bit_depth::BitDepth;
+    use crate::headers::modular::SqueezeParams;
+
+    fn chan(w: usize, h: usize) -> (usize, ChannelInfo) {
+        (
+            0,
+            ChannelInfo {
+                output_channel_idx: None,
+                size: (w, h),
+                shift: Some((0, 0)),
+                bit_depth: BitDepth::integer_samples(8),
+            },
+        )
+    }
+
+    /// A squeeze over an empty channel must be rejected up front; repeated
+    /// squeezes shrink a channel to nothing and the transform then divides
+    /// by zero. Upstream jxl-rs f809cce.
+    #[test]
+    fn squeeze_of_empty_channel_is_rejected() {
+        let params = SqueezeParams {
+            horizontal: true,
+            in_place: true,
+            begin_channel: 0,
+            num_channels: 1,
+        };
+        for size in [(0, 8), (8, 0)] {
+            let res = check_squeeze_params(&[chan(size.0, size.1)], &params);
+            assert!(
+                matches!(res, Err(ref e) if matches!(e.error(), Error::TooManySqueezes)),
+                "{size:?}: {res:?}"
+            );
+        }
+        assert!(check_squeeze_params(&[chan(8, 8)], &params).is_ok());
+    }
 }

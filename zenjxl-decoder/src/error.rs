@@ -220,7 +220,7 @@ pub enum Error {
     MixingDifferentChannels,
     #[error("Invalid transform: squeezing meta-channels needs an in-place transform")]
     MetaSqueezeRequiresInPlace,
-    #[error("Invalid transform: too many squeezes (shift > 30)")]
+    #[error("Invalid transform: too many squeezes")]
     TooManySqueezes,
     #[error("Invalid BlockConextMap: too big: num_lf_context: {0}, num_qf_thresholds: {1}")]
     BlockContextMapSizeTooBig(usize, usize),
