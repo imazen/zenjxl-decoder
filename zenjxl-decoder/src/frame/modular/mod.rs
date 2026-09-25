@@ -1323,6 +1323,17 @@ pub(crate) fn decode_hf_metadata_into_rects(
             if x + cx > min(r.size.0, next_group.0) || y + cy > min(r.size.1, next_group.1) {
                 return Err(at!(Error::HFBlockOutOfBounds));
             }
+            // A tall block placed on an earlier row can reach into this row
+            // to the right of `x`; a wide block here must not overwrite it.
+            // libjxl rejects overlapping blocks. Upstream jxl-rs 895d743.
+            for iy in 0..cy {
+                if transform_map_rect.row(y + iy)[x..x + cx]
+                    .iter()
+                    .any(|&t| t != HfTransformType::INVALID_TRANSFORM)
+                {
+                    return Err(at!(Error::InvalidVarDCTTransformMap));
+                }
+            }
             let transform_id = raw_transform as u8;
             for iy in 0..cy {
                 for ix in 0..cx {

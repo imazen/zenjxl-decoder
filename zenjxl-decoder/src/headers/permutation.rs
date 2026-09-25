@@ -111,9 +111,11 @@ impl Permutation {
 #[instrument(level = "debug", ret, err)]
 fn decode_lehmer_code(code: &[u32], permutation_slice: &[u32]) -> Result<Vec<u32>> {
     let n = permutation_slice.len();
-    if n == 0 {
+    // `(n as u32).next_power_of_two()` below overflows past 2^31, and the
+    // tree arithmetic assumes headroom. Upstream jxl-rs 0ed1c44.
+    if n == 0 || n > (1 << 30) {
         return Err(at!(Error::InvalidPermutationLehmerCode {
-            size: 0,
+            size: n as u32,
             idx: 0,
             lehmer: 0,
         }));
