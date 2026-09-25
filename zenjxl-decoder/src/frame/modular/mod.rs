@@ -320,8 +320,10 @@ impl ModularBufferInfo {
         let bx = output_grid_pos.0 * grid_dim.0;
         let by = output_grid_pos.1 * grid_dim.1;
         let size = (
-            (chan_size.0 - bx).min(grid_dim.0),
-            (chan_size.1 - by).min(grid_dim.1),
+            // A shifted channel can be smaller than the grid position it is
+            // asked about; plain subtraction wrapped in release builds.
+            chan_size.0.saturating_sub(bx).min(grid_dim.0),
+            chan_size.1.saturating_sub(by).min(grid_dim.1),
         );
         let origin = match (output_grid_kind, self.grid_kind) {
             (ModularGridKind::Lf, ModularGridKind::Lf)
@@ -516,7 +518,16 @@ impl FullModularImage {
                         .info
                         .is_meta_or_small(frame_header.group_dim())
                 })
-                .filter(|x| buffer_info[x.1].info.is_shift_in_range(3, usize::MAX))
+                .filter(|x| {
+                    // A channel whose LF grid collapses to zero width or height
+                    // has no LF-group data; assigning it one misreads the stream.
+                    let info = &buffer_info[x.1].info;
+                    info.is_shift_in_range(3, usize::MAX) && {
+                        let shift = info.shift.unwrap();
+                        let dim = ModularGridKind::Lf.grid_dim(frame_header, shift);
+                        dim.0 > 0 && dim.1 > 0
+                    }
+                })
                 .map(|x| x.1)
                 .collect(),
         );
@@ -532,9 +543,12 @@ impl FullModularImage {
                             .is_meta_or_small(frame_header.group_dim())
                     })
                     .filter(|x| {
-                        buffer_info[x.1]
-                            .info
-                            .is_shift_in_range(min_shift, max_shift)
+                        let info = &buffer_info[x.1].info;
+                        info.is_shift_in_range(min_shift, max_shift) && {
+                            let shift = info.shift.unwrap();
+                            let dim = ModularGridKind::Hf.grid_dim(frame_header, shift);
+                            dim.0 > 0 && dim.1 > 0
+                        }
                     })
                     .map(|x| x.1)
                     .collect(),
