@@ -148,7 +148,12 @@ impl Preview {
     }
 
     fn check(&self, _: &encodings::Empty) -> Result<(), Error> {
-        self.compute_xsize()?;
+        // The spec caps preview dimensions at 4096. Upstream jxl-rs d13a505.
+        let xsize = self.compute_xsize()?;
+        let ysize = self.ysize();
+        if xsize > 4096 || ysize > 4096 {
+            return Err(Error::ImageDimensionTooLarge(xsize.max(ysize) as u64));
+        }
         Ok(())
     }
 
@@ -156,5 +161,31 @@ impl Preview {
         // Validation happens during struct decoding via #[validate].
         // If we reach here, compute_xsize() is guaranteed to succeed.
         self.compute_xsize().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preview(ysize: u32, ratio: AspectRatio) -> Preview {
+        Preview {
+            div8: false,
+            ysize_div8: None,
+            ysize: Some(ysize),
+            ratio,
+            xsize_div8: None,
+            xsize: None,
+        }
+    }
+
+    #[test]
+    fn preview_dimensions_capped_at_4096() {
+        let e = encodings::Empty {};
+        assert!(preview(4096, AspectRatio::Ratio1Over1).check(&e).is_ok());
+        // The header coder admits heights up to 5440.
+        assert!(preview(4097, AspectRatio::Ratio1Over1).check(&e).is_err());
+        // Width from the aspect ratio: 2 * 2049 = 4098.
+        assert!(preview(2049, AspectRatio::Ratio2Over1).check(&e).is_err());
     }
 }

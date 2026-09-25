@@ -46,8 +46,11 @@ impl IncrementalTocReader {
     pub fn new(num_entries: u32, br: &mut BitReader) -> Result<Self> {
         let permuted = bool::read_unconditional(&(), br, &Empty {})?;
         let mut entries = Vec::new();
+        // `num_entries` comes from the frame header before any TOC bytes are
+        // read; reserve a bounded amount and grow as entries arrive. Upstream
+        // jxl-rs d13a505.
         entries
-            .try_reserve(num_entries as usize)
+            .try_reserve(num_entries.min(4096) as usize)
             .map_err(|e| at!(Error::from(e)))?;
         Ok(Self {
             num_entries,
@@ -91,6 +94,9 @@ impl IncrementalTocReader {
         // first left a garbage entry behind on retry, misaligning every entry
         // after it.
         br.check_for_error().map_err(|e| at!(e))?;
+        self.entries
+            .try_reserve(1)
+            .map_err(|e| at!(Error::from(e)))?;
         self.entries.push(entry);
         Ok(())
     }
