@@ -72,9 +72,16 @@ impl<R: Read + Seek> JxlBitstreamInput for BufReader<R> {
         let cur = self.stream_position()?;
         // `bytes as i64` turned very large skips negative -- `usize::MAX`
         // became a one-byte seek *backwards*.
-        let offset = i64::try_from(bytes).unwrap_or(i64::MAX);
-        self.seek(SeekFrom::Current(offset))
-            .map(|x| x.saturating_sub(cur) as usize)
+        if let Ok(offset) = i64::try_from(bytes) {
+            self.seek(SeekFrom::Current(offset))
+                .map(|x| x.saturating_sub(cur) as usize)
+        } else {
+            // Beyond i64::MAX: skipping that far means "to the end"; a clamped
+            // Current(i64::MAX) seek fails with EINVAL on file descriptors.
+            // Upstream jxl-rs c1e2e3d.
+            self.seek(SeekFrom::End(0))
+                .map(|x| x.saturating_sub(cur) as usize)
+        }
     }
 }
 
