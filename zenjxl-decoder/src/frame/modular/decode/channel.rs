@@ -21,6 +21,7 @@ use crate::{
     image::Image,
     util::tracing_wrappers::*,
 };
+use whereat::at;
 
 const SMALL_CHANNEL_THRESHOLD: usize = 64;
 
@@ -168,6 +169,21 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
 
 #[instrument(level = "debug", skip(buffers, reader, tree))]
 pub(super) fn decode_modular_channel(
+    buffers: &mut [&mut ModularChannel],
+    chan: usize,
+    stream_id: usize,
+    header: &GroupHeader,
+    tree: &Tree,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+) -> Result<()> {
+    decode_modular_channel_inner(buffers, chan, stream_id, header, tree, reader, br)?;
+    // Stop at the channel that overran the section instead of decoding the
+    // remaining channels from padding. Upstream jxl-rs b0ae00b.
+    br.check_for_error().map_err(|e| at!(e))
+}
+
+fn decode_modular_channel_inner(
     buffers: &mut [&mut ModularChannel],
     chan: usize,
     stream_id: usize,
