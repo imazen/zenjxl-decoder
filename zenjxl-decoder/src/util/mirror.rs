@@ -5,6 +5,7 @@
 
 /// Mirror-reflects a value v to fit in a [0; s) range.
 pub fn mirror(mut v: isize, s: usize) -> usize {
+    debug_assert_ne!(s, 0, "mirror size must be greater than 0");
     // An empty range has nothing to mirror into; the loop below would never
     // terminate (v flips between -1 and 0 forever). Callers must not pass
     // s == 0, so fail loudly in debug builds and stay finite in release.

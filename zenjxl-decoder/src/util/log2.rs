@@ -41,8 +41,10 @@ where
     T: std::cmp::PartialEq,
     T: From<u8>,
     T: Copy,
+    T: std::fmt::Debug,
 {
     fn ceil_log2(&self) -> Self {
+        debug_assert_ne!(*self, 0.into());
         if (*self & (*self - 1.into())) != 0.into() {
             self.floor_log2() + 1.into()
         } else {
