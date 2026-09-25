@@ -1622,6 +1622,7 @@ impl Frame {
                 frame_header.size(),
                 &lf_global.color_correlation_params.unwrap_or_default(),
                 decoder_state.high_precision,
+                decoder_state.limits.max_codestream_level,
             )?)
         }
 

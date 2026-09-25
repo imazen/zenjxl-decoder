@@ -7,6 +7,65 @@ use crate::api::JxlCms;
 
 use std::sync::Arc;
 
+/// The JPEG XL conformance level (ISO/IEC 18181-2) whose bounds on
+/// feature use the decoder enforces; see
+/// [`JxlDecoderLimits::max_codestream_level`].
+///
+/// Level 5 is what encoders produce for ordinary images; Level 10 allows far
+/// heavier use of splines, patches and modular channels. A file may declare
+/// Level 10 in a `jxll` box, but that declaration is not trusted: the level
+/// is the caller's choice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum JxlCodestreamLevel {
+    /// Level 5 bounds:
+    /// - total spline area estimate at most `min(8 · pixels + 2^25, 2^30)`;
+    /// - total patch area at most `max(8 · pixels, 2^20)`;
+    /// - at most 256 modular channels after transforms.
+    #[default]
+    Level5,
+    /// Level 10 bounds:
+    /// - total spline area estimate at most `min(1024 · pixels + 2^32, 2^42)`;
+    /// - total patch area at most `max(1024 · pixels, 2^20)`;
+    /// - at most 65,536 modular channels after transforms.
+    Level10,
+}
+
+impl JxlCodestreamLevel {
+    /// Upper bound on the spline area estimate for an image of
+    /// `image_area` pixels.
+    pub(crate) fn spline_area_limit(self, image_area: u64) -> u64 {
+        match self {
+            Self::Level5 => 8u64
+                .saturating_mul(image_area)
+                .saturating_add(1 << 25)
+                .min(1 << 30),
+            Self::Level10 => 1024u64
+                .saturating_mul(image_area)
+                .saturating_add(1 << 32)
+                .min(1 << 42),
+        }
+    }
+
+    /// Upper bound on the summed area of all patch placements.
+    pub(crate) fn patch_area_limit(self, num_pixels: usize) -> usize {
+        let mult: usize = match self {
+            Self::Level5 => 8,
+            Self::Level10 => 1024,
+        };
+        mult.saturating_mul(num_pixels).max(1 << 20)
+    }
+
+    /// Upper bound on the number of modular channels, counted after
+    /// transforms (squeeze and palette add channels).
+    pub(crate) fn max_modular_channels(self) -> usize {
+        match self {
+            Self::Level5 => 256,
+            Self::Level10 => 1 << 16,
+        }
+    }
+}
+
 /// Security limits for the JXL decoder to prevent resource exhaustion attacks.
 ///
 /// These limits protect against "JXL bombs" - maliciously crafted files designed
@@ -59,6 +118,15 @@ pub struct JxlDecoderLimits {
     /// When set, the decoder tracks allocations and fails if budget exceeded.
     /// This provides defense-in-depth against memory exhaustion attacks.
     pub max_memory_bytes: Option<u64>,
+
+    /// Highest JPEG XL conformance level accepted: files that use splines,
+    /// patches or modular channels beyond this level's bounds are rejected
+    /// with [`Error::LimitExceeded`](crate::error::Error::LimitExceeded) (see
+    /// [`JxlCodestreamLevel`] for the bounds). Default and
+    /// [`restrictive`](Self::restrictive): Level 5. [`unlimited`](Self::unlimited):
+    /// Level 10, the specification's maximum. Set Level 10 to decode files
+    /// that need it.
+    pub max_codestream_level: JxlCodestreamLevel,
 }
 
 impl Default for JxlDecoderLimits {
@@ -80,6 +148,7 @@ impl Default for JxlDecoderLimits {
             max_spline_points: Some(1 << 20), // 1M points
             max_reference_frames: Some(4),    // 4 reference frames
             max_memory_bytes: Some(max_memory),
+            max_codestream_level: JxlCodestreamLevel::Level5,
         }
     }
 }
@@ -97,6 +166,7 @@ impl JxlDecoderLimits {
             max_spline_points: None,
             max_reference_frames: None,
             max_memory_bytes: None,
+            max_codestream_level: JxlCodestreamLevel::Level10,
         }
     }
 
@@ -114,6 +184,7 @@ impl JxlDecoderLimits {
             max_spline_points: Some(1 << 16), // 64K points
             max_reference_frames: Some(2),    // 2 reference frames
             max_memory_bytes: Some(1 << 30),  // 1 GB total memory
+            max_codestream_level: JxlCodestreamLevel::Level5,
         }
     }
 
@@ -170,6 +241,14 @@ impl JxlDecoderLimits {
     #[must_use]
     pub fn with_max_memory_bytes(mut self, max: u64) -> Self {
         self.max_memory_bytes = Some(max);
+        self
+    }
+
+    /// Set the highest conformance level accepted (see
+    /// [`max_codestream_level`](Self::max_codestream_level)).
+    #[must_use]
+    pub fn with_max_codestream_level(mut self, level: JxlCodestreamLevel) -> Self {
+        self.max_codestream_level = level;
         self
     }
 }

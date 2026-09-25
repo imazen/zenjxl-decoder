@@ -18,12 +18,14 @@ impl SplinesStage {
         frame_size: (usize, usize),
         color_correlation_params: &ColorCorrelationParams,
         high_precision: bool,
+        level: crate::api::JxlCodestreamLevel,
     ) -> Result<Self> {
         splines.initialize_draw_cache(
             frame_size.0 as u64,
             frame_size.1 as u64,
             color_correlation_params,
             high_precision,
+            level,
         )?;
         Ok(SplinesStage { splines })
     }
@@ -108,6 +110,7 @@ mod test {
                 size,
                 &ColorCorrelationParams::default(),
                 true,
+                crate::api::JxlCodestreamLevel::Level5,
             )
             .unwrap(),
             &target_images,
@@ -164,6 +167,7 @@ mod test {
                     (500, 500),
                     &ColorCorrelationParams::default(),
                     false,
+                    crate::api::JxlCodestreamLevel::Level5,
                 )
                 .unwrap()
             },

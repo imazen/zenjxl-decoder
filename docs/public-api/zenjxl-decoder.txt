@@ -6,28 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 674 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 112 lines (124 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 680 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 114 lines (126 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)        51
+#   pub types (struct/enum/trait/alias)        52
 #   pub consts/statics                          3
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          196
-#   struct fields                             128
-#   enum variants                             219
+#   inherent methods                          197
+#   struct fields                             129
+#   enum variants                             221
 #   re-exports                                  3
-#   trait roster entries (type × trait)       151
-#   auto-trait-complete types                  35
+#   trait roster entries (type × trait)       158
+#   auto-trait-complete types                  36
 #   auto-trait exceptions                      10
 #
 # per-module pub lines:
 #   (root)                            8
-#   api                             606
+#   api                             611
 
-## items (610 lines)
+## items (615 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -239,6 +239,9 @@ pub api::JxlBitDepth::Float::exponent_bits_per_sample: u32
 pub api::JxlBitDepth::Int
 pub api::JxlBitDepth::Int::bits_per_sample: u32
 pub fn api::JxlBitDepth::bits_per_sample(&self) -> u32
+#[non_exhaustive] pub enum api::JxlCodestreamLevel
+pub api::JxlCodestreamLevel::Level10
+pub api::JxlCodestreamLevel::Level5
 pub enum api::JxlColorEncoding
 pub api::JxlColorEncoding::GrayscaleColorSpace
 pub api::JxlColorEncoding::GrayscaleColorSpace::rendering_intent: api::RenderingIntent
@@ -467,6 +470,7 @@ pub fn api::JxlDecoderInner::xmp(&self) -> core::option::Option<&[u8]>
 pub fn api::JxlDecoderInner::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<bool>
 pub fn api::JxlDecoderInner::process(&mut self, &mut dyn api::JxlBitstreamInput, core::option::Option<&mut [api::JxlOutputBuffer<'_>]>) -> api::Result<api::ProcessingResult<(), ()>>
 #[non_exhaustive] pub struct api::JxlDecoderLimits
+pub api::JxlDecoderLimits::max_codestream_level: api::JxlCodestreamLevel
 pub api::JxlDecoderLimits::max_extra_channels: core::option::Option<usize>
 pub api::JxlDecoderLimits::max_icc_size: core::option::Option<usize>
 pub api::JxlDecoderLimits::max_memory_bytes: core::option::Option<u64>
@@ -477,6 +481,7 @@ pub api::JxlDecoderLimits::max_spline_points: core::option::Option<u32>
 pub api::JxlDecoderLimits::max_tree_size: core::option::Option<usize>
 pub fn api::JxlDecoderLimits::restrictive() -> Self
 pub fn api::JxlDecoderLimits::unlimited() -> Self
+pub fn api::JxlDecoderLimits::with_max_codestream_level(self, api::JxlCodestreamLevel) -> Self
 pub fn api::JxlDecoderLimits::with_max_extra_channels(self, usize) -> Self
 pub fn api::JxlDecoderLimits::with_max_icc_size(self, usize) -> Self
 pub fn api::JxlDecoderLimits::with_max_memory_bytes(self, u64) -> Self
@@ -640,7 +645,7 @@ pub fn decode_with(&[u8], api::JxlDecoderOptions) -> api::Result<api::JxlImage, 
 pub fn read_header(&[u8]) -> api::Result<api::JxlImageInfo> [also: api]
 pub fn read_header_with(&[u8], api::JxlDecoderLimits) -> api::Result<api::JxlImageInfo> [also: api]
 
-## trait impls (53 types)
+## trait impls (54 types)
 
 &[u8]: api::JxlBitstreamInput
 alloc::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
@@ -657,6 +662,7 @@ api::ImageRectMut<'_, T>: Debug
 api::JxlAnimation: Clone, Debug, Eq, PartialEq
 api::JxlBasicInfo: Clone
 api::JxlBitDepth: Clone, Debug, Eq, PartialEq
+api::JxlCodestreamLevel: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
 api::JxlColorEncoding: Clone, Debug, Display, PartialEq
 api::JxlColorProfile: Clone, Debug, Display, PartialEq
 api::JxlColorType: Clone, Copy, Debug, Eq, PartialEq
@@ -698,7 +704,7 @@ u8: api::ImageDataType
 
 ## auto traits
 
-35 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+36 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 api::Error: !RefUnwindSafe !UnwindSafe
 api::Image<T>: !RefUnwindSafe !Unpin !UnwindSafe
 api::ImageRect<'a, T>: !RefUnwindSafe !Unpin !UnwindSafe

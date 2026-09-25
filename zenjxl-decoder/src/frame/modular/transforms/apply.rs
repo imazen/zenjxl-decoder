@@ -444,12 +444,42 @@ fn check_equal_channels(
     Ok(())
 }
 
+/// Bounds on what a transform list may create (upstream jxl-rs 7dad7ef,
+/// accec18).
+#[derive(Clone, Copy, Debug)]
+pub struct TransformLimits {
+    /// Channels present after any transform (see
+    /// `JxlCodestreamLevel::max_modular_channels`).
+    pub max_channels: usize,
+    /// Summed samples over all palette meta-channels of one transform list.
+    pub max_palette_samples: usize,
+}
+
+impl TransformLimits {
+    /// Palette bound for group-local transforms, whatever the level: local
+    /// palettes cover one group, so this is far above any real use.
+    pub const LOCAL_MAX_PALETTE_SAMPLES: usize = 1 << 26;
+
+    fn check_channels(&self, channels: usize) -> Result<()> {
+        if channels > self.max_channels {
+            return Err(at!(Error::LimitExceeded {
+                resource: "modular channels",
+                actual: channels as u64,
+                limit: self.max_channels as u64,
+            }));
+        }
+        Ok(())
+    }
+}
+
 fn meta_apply_single_transform(
     transform: &headers::modular::Transform,
     header: &headers::modular::GroupHeader,
     channels: &mut Vec<(usize, ChannelInfo)>,
     transform_steps: &mut Vec<TransformStep>,
     mut add_transform_buffer: impl FnMut(ChannelInfo, String) -> usize,
+    limits: TransformLimits,
+    palette_samples: &mut usize,
 ) -> Result<()> {
     match transform.id {
         TransformId::Rct => {
@@ -557,6 +587,7 @@ fn meta_apply_single_transform(
                     }
                     channels[begin_channel + ic] = (buf_0, new_0);
                     channels.insert(new_chan_offset + ic, (buf_1, new_1));
+                    limits.check_channels(channels.len())?;
                     trace!("applied squeeze: {channels:?}");
                 }
             }
@@ -569,6 +600,15 @@ fn meta_apply_single_transform(
             let pred = Predictor::from_u32(transform.predictor_id)
                 .expect("header decoding should ensure a valid predictor");
             check_equal_channels(channels, begin_channel, num_channels)?;
+            *palette_samples = palette_samples
+                .saturating_add((num_colors + num_deltas).saturating_mul(num_channels));
+            if *palette_samples > limits.max_palette_samples {
+                return Err(at!(Error::LimitExceeded {
+                    resource: "palette samples",
+                    actual: *palette_samples as u64,
+                    limit: limits.max_palette_samples as u64,
+                }));
+            }
             // We already checked the bit_depth for all channels from `begin_channel` is
             // equal in the line above.
             let bit_depth = channels[begin_channel].1.bit_depth;
@@ -622,7 +662,9 @@ fn meta_apply_single_transform(
 pub fn meta_apply_transforms(
     channels: &[ChannelInfo],
     header: &headers::modular::GroupHeader,
+    limits: TransformLimits,
 ) -> Result<(Vec<ModularBufferInfo>, Vec<TransformStep>)> {
+    limits.check_channels(channels.len())?;
     let mut buffer_info = vec![];
     let mut transform_steps = vec![];
     // (buffer id, channel info)
@@ -658,6 +700,7 @@ pub fn meta_apply_transforms(
     };
 
     // Apply transforms to the channel list.
+    let mut palette_samples = 0;
     for transform in &header.transforms {
         meta_apply_single_transform(
             transform,
@@ -665,7 +708,10 @@ pub fn meta_apply_transforms(
             &mut channels,
             &mut transform_steps,
             &mut add_transform_buffer,
+            limits,
+            &mut palette_samples,
         )?;
+        limits.check_channels(channels.len())?;
     }
 
     // All the channels left over at the end of applying transforms are the channels that are
@@ -739,7 +785,13 @@ pub fn meta_apply_local_transforms<'a, 'b>(
     channels_in: Vec<&'a mut ModularChannel>,
     buffer_storage: &'b mut Vec<LocalTransformBuffer<'a>>,
     header: &headers::modular::GroupHeader,
+    max_channels: usize,
 ) -> Result<(Vec<&'b mut ModularChannel>, Vec<TransformStep>)> {
+    let limits = TransformLimits {
+        max_channels,
+        max_palette_samples: TransformLimits::LOCAL_MAX_PALETTE_SAMPLES,
+    };
+    limits.check_channels(channels_in.len())?;
     let mut transform_steps = vec![];
 
     // (buffer id, channel info)
@@ -762,6 +814,7 @@ pub fn meta_apply_local_transforms<'a, 'b>(
     };
 
     // Apply transforms to the channel list.
+    let mut palette_samples = 0;
     for transform in &header.transforms {
         meta_apply_single_transform(
             transform,
@@ -769,7 +822,10 @@ pub fn meta_apply_local_transforms<'a, 'b>(
             &mut channels,
             &mut transform_steps,
             &mut add_transform_buffer,
+            limits,
+            &mut palette_samples,
         )?;
+        limits.check_channels(channels.len())?;
     }
 
     debug!(?channels, ?buffer_storage, "channels after transforms");
@@ -1007,5 +1063,126 @@ impl TransformStep {
         };
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+    use crate::api::JxlCodestreamLevel;
+    use crate::headers::{
+        bit_depth::BitDepth,
+        encodings::Empty,
+        modular::{GroupHeader, Transform, TransformId, WeightedHeader},
+    };
+
+    fn channels(n: usize) -> Vec<ChannelInfo> {
+        sized_channels(n, 8)
+    }
+
+    fn sized_channels(n: usize, dim: usize) -> Vec<ChannelInfo> {
+        vec![
+            ChannelInfo {
+                output_channel_idx: None,
+                size: (dim, dim),
+                shift: Some((0, 0)),
+                bit_depth: BitDepth::integer_samples(8),
+            };
+            n
+        ]
+    }
+
+    fn transform(id: TransformId) -> Transform {
+        Transform {
+            id,
+            begin_channel: 0,
+            rct_type: 6,
+            num_channels: 3,
+            num_colors: 256,
+            num_deltas: 0,
+            predictor_id: 0,
+            squeezes: Vec::new(),
+        }
+    }
+
+    fn header(transforms: Vec<Transform>) -> GroupHeader {
+        GroupHeader {
+            use_global_tree: false,
+            wp_header: WeightedHeader::default(&Empty {}),
+            transforms,
+        }
+    }
+
+    fn limits(level: JxlCodestreamLevel, max_palette_samples: usize) -> TransformLimits {
+        TransformLimits {
+            max_channels: level.max_modular_channels(),
+            max_palette_samples,
+        }
+    }
+
+    fn is_limit(r: Result<(Vec<ModularBufferInfo>, Vec<TransformStep>)>, what: &str) -> bool {
+        matches!(r, Err(e) if matches!(e.error(), Error::LimitExceeded { resource, .. } if *resource == what))
+    }
+
+    /// Level 5 allows 256 modular channels, Level 10 65,536 (upstream
+    /// jxl-rs 7dad7ef / accec18).
+    #[test]
+    fn channel_count_bounded_by_level() {
+        let h = header(vec![]);
+        let l5 = limits(JxlCodestreamLevel::Level5, usize::MAX);
+        let l10 = limits(JxlCodestreamLevel::Level10, usize::MAX);
+        assert!(meta_apply_transforms(&channels(256), &h, l5).is_ok());
+        assert!(is_limit(
+            meta_apply_transforms(&channels(257), &h, l5),
+            "modular channels"
+        ));
+        assert!(meta_apply_transforms(&channels(257), &h, l10).is_ok());
+    }
+
+    /// A squeeze that pushes the channel count past the bound is rejected
+    /// while the channel list grows, not after.
+    #[test]
+    fn squeeze_growth_bounded_by_level() {
+        let squeeze = transform(TransformId::Squeeze);
+        // Default squeeze parameters split 64x64 channels repeatedly.
+        let h = header(vec![squeeze]);
+        let l5 = limits(JxlCodestreamLevel::Level5, usize::MAX);
+        let l10 = limits(JxlCodestreamLevel::Level10, usize::MAX);
+        let (grown, _) = meta_apply_transforms(&sized_channels(4, 64), &h, l10).unwrap();
+        assert!(grown.len() > 4, "squeeze should add channels");
+        assert!(is_limit(
+            meta_apply_transforms(&sized_channels(200, 64), &h, l5),
+            "modular channels"
+        ));
+        assert!(meta_apply_transforms(&sized_channels(200, 64), &h, l10).is_ok());
+    }
+
+    /// Palette meta-channel samples are summed across the transform list
+    /// and bounded (upstream jxl-rs 7dad7ef).
+    #[test]
+    fn palette_samples_bounded() {
+        let mut palette = transform(TransformId::Palette);
+        palette.num_channels = 3;
+        palette.num_colors = 1000;
+        palette.num_deltas = 0;
+        let h = header(vec![palette]);
+        let level = JxlCodestreamLevel::Level5;
+        assert!(meta_apply_transforms(&channels(3), &h, limits(level, 3000)).is_ok());
+        assert!(is_limit(
+            meta_apply_transforms(&channels(3), &h, limits(level, 2999)),
+            "palette samples"
+        ));
+    }
+
+    #[test]
+    fn level_area_bounds() {
+        use JxlCodestreamLevel::*;
+        assert_eq!(Level5.patch_area_limit(0), 1 << 20);
+        assert_eq!(Level5.patch_area_limit(1 << 20), 8 << 20);
+        assert_eq!(Level10.patch_area_limit(1 << 20), 1024 << 20);
+        assert_eq!(Level5.spline_area_limit(0), 1 << 25);
+        assert_eq!(Level5.spline_area_limit(1 << 40), 1 << 30);
+        assert_eq!(Level10.spline_area_limit(0), 1 << 32);
+        assert_eq!(Level10.spline_area_limit(1 << 40), 1 << 42);
     }
 }

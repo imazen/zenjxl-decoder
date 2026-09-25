@@ -7,7 +7,7 @@
 
 use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use jxl::api::JxlDecoderOptions;
+use jxl::api::{JxlCodestreamLevel, JxlDecoderOptions};
 use std::fs;
 use std::io::{BufReader, Read, Seek};
 use std::path::PathBuf;
@@ -76,9 +76,15 @@ struct Opt {
     #[clap(long)]
     data_type: Option<OutputDataType>,
 
-    /// Allow partial files (flush pixels on EOF)
+    /// Allow partial files (flush pixels on EOF). Also recovers the partial
+    /// image of a container whose codestream box ends early.
     #[clap(long)]
     allow_partial_files: bool,
+
+    /// Accept files that use splines, patches or modular channels beyond
+    /// JPEG XL Level 5 bounds, up to Level 10 (the default is Level 5).
+    #[clap(long)]
+    allow_level10: bool,
 
     /// Force a partial render every `render_interval` bytes.
     #[clap(long)]
@@ -143,6 +149,10 @@ fn main() -> Result<()> {
         options.render_spot_colors = !matches!(output_format, Some(OutputFormat::Npy));
         options.skip_preview = skip_preview;
         options.high_precision = high_precision;
+        options.recover_partial_image = opt.allow_partial_files;
+        if opt.allow_level10 {
+            options.limits.max_codestream_level = JxlCodestreamLevel::Level10;
+        }
         if !opt.no_cms {
             options.cms = Some(Box::new(Lcms2Cms));
         }

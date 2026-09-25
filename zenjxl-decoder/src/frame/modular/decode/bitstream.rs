@@ -23,6 +23,7 @@ pub fn decode_modular_subbitstream(
     global_tree: &Option<Tree>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
+    max_channels: usize,
 ) -> Result<()> {
     // Skip decoding if all grids are zero-sized.
     let is_empty = buffers
@@ -45,7 +46,7 @@ pub fn decode_modular_subbitstream(
                 // applying transforms later.
                 let new_bufs;
                 (new_bufs, transform_steps) =
-                    meta_apply_local_transforms(buffers, &mut buffer_storage, &h)?;
+                    meta_apply_local_transforms(buffers, &mut buffer_storage, &h, max_channels)?;
                 (h, new_bufs)
             } else {
                 (h, buffers)

@@ -3,6 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use crate::api::JxlCodestreamLevel;
 use std::{
     f32::consts::{FRAC_1_SQRT_2, PI, SQRT_2},
     iter::{self, zip},
@@ -175,14 +176,6 @@ fn validate_spline_point_pos<T: num_traits::ToPrimitive>(x: T, y: T) -> Result<(
 
 const CHANNEL_WEIGHT: [f32; 4] = [0.0042, 0.075, 0.07, 0.3333];
 
-fn area_limit(image_size: u64) -> u64 {
-    // Use saturating arithmetic to prevent overflow
-    1024u64
-        .saturating_mul(image_size)
-        .saturating_add(1u64 << 32)
-        .min(1u64 << 42)
-}
-
 impl QuantizedSpline {
     #[instrument(level = "debug", skip(br), ret, err)]
     pub fn read(
@@ -251,10 +244,8 @@ impl QuantizedSpline {
         quantization_adjustment: i32,
         y_to_x: f32,
         y_to_b: f32,
-        image_size: u64,
+        area_limit: u64,
     ) -> Result<Spline> {
-        let area_limit = area_limit(image_size);
-
         let mut result = Spline {
             control_points: Vec::new_with_capacity(self.control_points.len() + 1)
                 .map_err(|e| at!(Error::from(e)))?,
@@ -759,19 +750,20 @@ impl Splines {
         image_ysize: u64,
         color_correlation_params: &ColorCorrelationParams,
         high_precision: bool,
+        level: JxlCodestreamLevel,
     ) -> Result<()> {
         let mut total_estimated_area_reached = 0u64;
         let mut splines = Vec::new();
         // Use saturating_mul to prevent overflow with malicious image dimensions
         let image_area = image_xsize.saturating_mul(image_ysize);
-        let area_limit = area_limit(image_area);
+        let area_limit = level.spline_area_limit(image_area);
         for (index, qspline) in self.splines.iter().enumerate() {
             let spline = qspline.dequantize(
                 &self.starting_points[index],
                 self.quantization_adjustment,
                 color_correlation_params.y_to_x_lf(),
                 color_correlation_params.y_to_b_lf(),
-                image_area,
+                area_limit,
             )?;
             total_estimated_area_reached += spline.estimated_area_reached;
             if total_estimated_area_reached > area_limit {
@@ -782,15 +774,6 @@ impl Splines {
             }
             spline.validate_adjacent_point_coincidence()?;
             splines.push(spline);
-        }
-
-        if total_estimated_area_reached
-            > (8 * image_xsize * image_ysize + (1u64 << 25)).min(1u64 << 30)
-        {
-            warn!(
-                "Large total_estimated_area_reached, expect slower decoding:{}",
-                total_estimated_area_reached
-            );
         }
 
         let mut segments_by_y = Vec::new();
@@ -933,6 +916,7 @@ impl Splines {
 #[cfg(test)]
 #[allow(clippy::excessive_precision)]
 mod test_splines {
+    use crate::api::JxlCodestreamLevel;
     use std::{f32::consts::SQRT_2, iter::zip};
     use test_log::test;
 
@@ -973,9 +957,15 @@ mod test_splines {
             sigma_dct: [i32::MIN; 32],
         };
         let got = spline
-            .dequantize(&Point { x: 0.0, y: 0.0 }, 0, 1e30, -1e30, 2u64 << 30)
+            .dequantize(
+                &Point { x: 0.0, y: 0.0 },
+                0,
+                1e30,
+                -1e30,
+                JxlCodestreamLevel::Level10.spline_area_limit(2u64 << 30),
+            )
             .expect("dequantize must not fail on extreme but well-formed values");
-        let limit = super::area_limit(2u64 << 30);
+        let limit = JxlCodestreamLevel::Level10.spline_area_limit(2u64 << 30);
         assert!(
             got.estimated_area_reached > limit,
             "estimate {} must exceed the area limit {limit}",
@@ -1549,7 +1539,7 @@ mod test_splines {
                 0,
                 0.0,
                 1.0,
-                2u64 << 30,
+                JxlCodestreamLevel::Level10.spline_area_limit(2u64 << 30),
             )?;
             assert_eq!(
                 got_dequantized.control_points.len(),
@@ -1976,18 +1966,24 @@ mod test_splines {
             starting_points: vec![Point { x: 10.0, y: 20.0 }, Point { x: 5.0, y: 40.0 }],
             ..Default::default()
         };
-        splines.initialize_draw_cache(
-            1 << 15,
-            1 << 15,
-            &ColorCorrelationParams {
-                color_factor: 1,
-                base_correlation_x: 0.0,
-                base_correlation_b: 0.0,
-                ytox_lf: 0,
-                ytob_lf: 0,
-            },
-            true,
-        )?;
+        // These splines exceed the Level 5 area bound; they decode only at
+        // Level 10. Upstream jxl-rs 7dad7ef.
+        let ccp = ColorCorrelationParams {
+            color_factor: 1,
+            base_correlation_x: 0.0,
+            base_correlation_b: 0.0,
+            ytox_lf: 0,
+            ytob_lf: 0,
+        };
+        let err = splines
+            .clone()
+            .initialize_draw_cache(1 << 15, 1 << 15, &ccp, true, JxlCodestreamLevel::Level5)
+            .unwrap_err();
+        assert!(
+            matches!(err.error(), crate::error::Error::SplinesAreaTooLarge(..)),
+            "{err:?}"
+        );
+        splines.initialize_draw_cache(1 << 15, 1 << 15, &ccp, true, JxlCodestreamLevel::Level10)?;
         assert_eq!(splines.segments.len(), 1940);
         let want_segments_sample = [
             (

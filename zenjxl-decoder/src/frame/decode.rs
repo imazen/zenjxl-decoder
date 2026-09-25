@@ -332,6 +332,7 @@ impl Frame {
                 self.decoder_state.extra_channel_info().len(),
                 &self.decoder_state.reference_frames[..],
                 self.decoder_state.limits.max_patches,
+                self.decoder_state.limits.max_codestream_level,
                 &self.decoder_state.memory_tracker,
             )?)
         } else {
@@ -410,6 +411,7 @@ impl Frame {
             &tree,
             br,
             &self.decoder_state.memory_tracker,
+            self.decoder_state.transform_limits(),
         )?;
 
         self.lf_global = Some(LfGlobalState {
@@ -455,6 +457,7 @@ impl Frame {
                 &mut self.quant_lf,
                 br,
                 &self.decoder_state.memory_tracker,
+                lf_global.modular_global.max_channels(),
             )?;
         }
         lf_global.modular_global.read_stream(
@@ -475,6 +478,7 @@ impl Frame {
                 hf_meta,
                 br,
                 &self.decoder_state.memory_tracker,
+                lf_global.modular_global.max_channels(),
             )?;
         }
         Ok(())
@@ -538,6 +542,7 @@ impl Frame {
         let modular = &lf_global.modular_global;
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
         let memory_tracker = &self.decoder_state.memory_tracker;
+        let max_channels = modular.max_channels();
         let has_lf_frame = header.has_lf_frame();
         let used_hf_types = AtomicU32::new(0);
 
@@ -592,6 +597,7 @@ impl Frame {
                         tree,
                         &mut br,
                         memory_tracker,
+                        max_channels,
                     )?;
 
                     // Allocate local images for this group's rect.
@@ -679,6 +685,7 @@ impl Frame {
                     epf_local.get_rect_mut(full_r),
                     &mut br,
                     memory_tracker,
+                    max_channels,
                 )?;
                 used_hf_types.fetch_or(used, Ordering::Relaxed);
 
@@ -899,6 +906,7 @@ impl Frame {
         let modular = &lf_global_ref.modular_global;
         let stop: &dyn enough::Stop = &*decoder_state.stop;
         let memory_tracker_ref = &decoder_state.memory_tracker;
+        let max_channels = modular.max_channels();
         let has_lf_frame = header.has_lf_frame();
         let used_hf_types = AtomicU32::new(0);
 
@@ -960,6 +968,7 @@ impl Frame {
                                 tree,
                                 &mut br,
                                 memory_tracker_ref,
+                                max_channels,
                             )?;
 
                             let lf_sizes: [(usize, usize); 3] = if header.is444() {
@@ -1044,6 +1053,7 @@ impl Frame {
                             epf_local.get_rect_mut(full_r),
                             &mut br,
                             memory_tracker_ref,
+                            max_channels,
                         )?;
                         used_hf_types.fetch_or(used, Ordering::Relaxed);
 

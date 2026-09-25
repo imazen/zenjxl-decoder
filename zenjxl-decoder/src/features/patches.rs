@@ -3,6 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use crate::api::JxlCodestreamLevel;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use whereat::at;
@@ -373,6 +374,7 @@ impl PatchesDictionary {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[instrument(level = "debug", skip(br, memory_tracker), ret, err)]
     pub fn read(
         br: &mut BitReader,
@@ -381,6 +383,7 @@ impl PatchesDictionary {
         num_extra_channels: usize,
         reference_frames: &[Option<ReferenceFrame>],
         max_patches_limit: Option<usize>,
+        level: JxlCodestreamLevel,
         memory_tracker: &MemoryTracker,
     ) -> Result<PatchesDictionary> {
         let blendings_stride = num_extra_channels + 1;
@@ -417,6 +420,10 @@ impl PatchesDictionary {
                 max_ref_patches,
             )));
         }
+        // Summed area of every placement, bounded per conformance level.
+        // Upstream jxl-rs 9e7caa4.
+        let max_patch_area = level.patch_area_limit(num_pixels);
+        let mut total_patch_area = 0usize;
         let mut total_patches = 0;
         let mut next_size = 1;
         let mut positions: Vec<PatchPosition> = Vec::new();
@@ -501,6 +508,15 @@ impl PatchesDictionary {
                 )));
             }
             total_patches += id_count;
+            let patch_area = id_count.saturating_mul(ref_pos_xsize.saturating_mul(ref_pos_ysize));
+            total_patch_area = total_patch_area.saturating_add(patch_area);
+            if total_patch_area > max_patch_area {
+                return Err(at!(Error::LimitExceeded {
+                    resource: "patch area",
+                    actual: total_patch_area as u64,
+                    limit: max_patch_area as u64,
+                }));
+            }
 
             if total_patches > max_patches {
                 return Err(at!(Error::PatchesTooMany(
@@ -815,6 +831,7 @@ mod tests {
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                JxlCodestreamLevel::Level5,
                 &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
@@ -865,6 +882,7 @@ mod tests {
                 2,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                JxlCodestreamLevel::Level5,
                 &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
@@ -965,6 +983,7 @@ mod tests {
                 1,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                JxlCodestreamLevel::Level5,
                 &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
@@ -1027,6 +1046,7 @@ mod tests {
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                JxlCodestreamLevel::Level5,
                 &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {
@@ -1073,6 +1093,7 @@ mod tests {
                 0,
                 &[Some(ReferenceFrame::blank(1024, 1024, 1, true).unwrap())],
                 None,
+                JxlCodestreamLevel::Level5,
                 &MemoryTracker::default(),
             )?;
             let want_dict = PatchesDictionary {

@@ -156,6 +156,16 @@ pub struct DecoderState {
 }
 
 impl DecoderState {
+    /// Bounds on modular transforms: the channel count from the configured
+    /// conformance level, and the global palette size from `max_pixels`
+    /// (a palette larger than the pixel budget cannot be useful).
+    pub(crate) fn transform_limits(&self) -> crate::frame::modular::TransformLimits {
+        crate::frame::modular::TransformLimits {
+            max_channels: self.limits.max_codestream_level.max_modular_channels(),
+            max_palette_samples: self.limits.max_pixels.unwrap_or(usize::MAX),
+        }
+    }
+
     pub const MAX_STORED_FRAMES: usize = 4;
     /// Number of LF-frame slots (`lf_level` 1..=4).
     pub const NUM_LF_FRAMES: usize = 4;

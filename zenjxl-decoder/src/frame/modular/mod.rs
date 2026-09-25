@@ -44,6 +44,7 @@ use borrowed_buffers::with_buffers;
 pub use decode::ModularStreamId;
 use decode::decode_modular_subbitstream;
 pub use predict::Predictor;
+pub(crate) use transforms::apply::TransformLimits;
 use transforms::{TransformStepChunk, make_grids};
 pub use tree::Tree;
 
@@ -380,9 +381,16 @@ pub struct FullModularImage {
     parallel: bool,
     log_group_dim: usize,
     num_groups: (usize, usize),
+    /// Channel bound for group-local transforms (from the conformance level).
+    max_channels: usize,
 }
 
 impl FullModularImage {
+    /// Channel bound applied to group-local transforms.
+    pub(crate) fn max_channels(&self) -> usize {
+        self.max_channels
+    }
+
     pub fn can_do_partial_render(&self) -> bool {
         self.can_do_partial_render
     }
@@ -412,6 +420,7 @@ impl FullModularImage {
         global_tree: &Option<Tree>,
         br: &mut BitReader,
         memory_tracker: &MemoryTracker,
+        limits: transforms::apply::TransformLimits,
     ) -> Result<Self> {
         let mut channels = vec![];
         for c in 0..modular_color_channels {
@@ -465,6 +474,7 @@ impl FullModularImage {
                 parallel: false,
                 log_group_dim: frame_header.log_group_dim(),
                 num_groups: frame_header.size_groups(),
+                max_channels: limits.max_channels,
             });
         }
 
@@ -479,7 +489,7 @@ impl FullModularImage {
         });
 
         let (mut buffer_info, transform_steps) =
-            transforms::apply::meta_apply_transforms(&channels, &header)?;
+            transforms::apply::meta_apply_transforms(&channels, &header, limits)?;
 
         // Assign each (channel, group) pair present in the bitstream to the section in which it
         // will be decoded.
@@ -629,6 +639,7 @@ impl FullModularImage {
                 global_tree,
                 br,
                 memory_tracker,
+                limits.max_channels,
             )
         })?;
 
@@ -652,6 +663,7 @@ impl FullModularImage {
             parallel: false,
             log_group_dim: frame_header.log_group_dim(),
             num_groups: frame_header.size_groups(),
+            max_channels: limits.max_channels,
         })
     }
 
@@ -712,6 +724,7 @@ impl FullModularImage {
                     global_tree,
                     br,
                     memory_tracker,
+                    self.max_channels,
                 )
             },
         )?;
@@ -1115,6 +1128,7 @@ pub fn decode_vardct_lf(
     quant_lf: &mut Image<u8>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
+    max_channels: usize,
 ) -> Result<()> {
     let extra_precision = br.read(2)?;
     debug!(?extra_precision);
@@ -1141,6 +1155,7 @@ pub fn decode_vardct_lf(
         global_tree,
         br,
         memory_tracker,
+        max_channels,
     )?;
     let lf_rects = if frame_header.is444() {
         let [lf0, lf1, lf2] = lf_image;
@@ -1199,6 +1214,7 @@ pub fn decode_vardct_lf(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn decode_hf_metadata(
     group: usize,
     frame_header: &FrameHeader,
@@ -1207,6 +1223,7 @@ pub fn decode_hf_metadata(
     hf_meta: &mut HfMetadata,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
+    max_channels: usize,
 ) -> Result<()> {
     let r = frame_header.lf_group_rect(group);
     let cr = Rect {
@@ -1232,6 +1249,7 @@ pub fn decode_hf_metadata(
         epf_rect,
         br,
         memory_tracker,
+        max_channels,
     )?;
     hf_meta.used_hf_types |= used;
     Ok(())
@@ -1254,6 +1272,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
     mut epf_map_rect: ImageRectMut<'_, u8>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
+    max_channels: usize,
 ) -> Result<u32> {
     let stream_id = ModularStreamId::LFMeta(group).get_id(frame_header);
     debug!(?stream_id);
@@ -1275,6 +1294,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
         global_tree,
         br,
         memory_tracker,
+        max_channels,
     )?;
     let ytox_image = &buffers[0].data;
     let ytob_image = &buffers[1].data;

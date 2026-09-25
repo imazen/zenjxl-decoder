@@ -410,7 +410,8 @@ noted.
 | `895d743`, `0ed1c44` | `9726eb9` | overlapping VarDCT blocks rejected; Lehmer codes ≤ 2^30. No dedicated tests |
 | `75483fc`, `32d61f4` | `1b7f174` | x86 `as_i32` truncates like the other backends; AVX-512 table zero-extends. Tested on Zen 5 (all four x86 tiers) |
 | `cc4d214` | `5ea001c` | 64x128..256x256 IDCT rows on the heap |
-| `97e233d` | (this change) | `Error::UnexpectedCodestreamBoxEnd`, plus an explicit opt-in (`recover_partial_image` + `codestream_ended()`) that keeps the decoder so `flush_pixels` can recover a damaged file's partial image; upstream has no recovery path |
+| `7dad7ef`, `9e7caa4` (area limit), `accec18` | (level change) | Level 5 bounds by default through one field, `JxlDecoderLimits::max_codestream_level`, instead of upstream's three `force_level5_*` options; palette samples capped at `max_pixels` (upstream: `sample_limit`) |
+| `97e233d` | `22bca80` | `Error::UnexpectedCodestreamBoxEnd`, plus an explicit opt-in (`recover_partial_image` + `codestream_ended()`) that keeps the decoder so `flush_pixels` can recover a damaged file's partial image; upstream has no recovery path |
 
 **Already covered or not applicable**
 
@@ -426,9 +427,4 @@ noted.
 | `d7ecec1` | **not ported (by decision, 2026-09-25)**: upstream's panic does not occur here; per-frame format changes decode byte-identically (`pixel_format_can_change_between_frames`). The `Result` signature is listed under queued breaking changes |
 | `249e8c5` | **not ported, deliberately**: a speed change that keeps 16 of the 23 random noise mantissa bits, moving noise away from libjxl. No correctness fix in it |
 
-**Pending a decision (public API or default behaviour)**
-
-| upstream | what it needs |
-|---|---|
-| `7dad7ef`, `accec18`, `9e7caa4` (area limit) | Level 5 limits on by default for splines, patches and modular channel counts, with new `force_level5_*` options; also a palette sample limit. Would reject valid Level 10 files by default |
 
