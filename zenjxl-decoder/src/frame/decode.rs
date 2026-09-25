@@ -91,7 +91,9 @@ pub(super) fn upsample_lf_group(
         let lf_y0 = gy * lf_group_dim_y;
 
         let lf_width = lf_img.size().0.shrc(hs);
-        let lf_height = lf_img.size().1.shrc(hs);
+        // Vertical extent uses the vertical shift; `hs` here was wrong for
+        // 4:2:2 / 4:4:0 chroma.
+        let lf_height = lf_img.size().1.shrc(vs);
 
         let start_x = lf_x0.saturating_sub(2);
         let lf_x1 = (lf_x0 + lf_group_dim_x).min(lf_width);
@@ -112,14 +114,17 @@ pub(super) fn upsample_lf_group(
 
                 storage[save_start..save_end].copy_from_slice(&lf_img.row(iy)[start_x..end_x]);
 
+                // Mirror the border directly off the copied samples. The old
+                // `mirror(save_end, save_end)` form indexed from `save_start`,
+                // so when both edges sat in this group (`save_start == 2`) it
+                // read past the copied region.
                 if start_x == lf_x0 {
-                    storage[0] = storage[2 + mirror(-2, copy_width)];
-                    storage[1] = storage[2 + mirror(-1, copy_width)];
+                    storage[1] = storage[2];
+                    storage[0] = storage[if copy_width >= 2 { 3 } else { 2 }];
                 }
                 if end_x == lf_x1 {
-                    storage[save_end] = storage[save_start + mirror(save_end as isize, save_end)];
-                    storage[save_end + 1] =
-                        storage[save_start + mirror(save_end as isize + 1, save_end)];
+                    storage[save_end] = storage[save_end - 1];
+                    storage[save_end + 1] = storage[save_end.saturating_sub(2)];
                 }
             }
 

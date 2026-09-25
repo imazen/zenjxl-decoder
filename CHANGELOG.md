@@ -7,6 +7,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ## [Unreleased]
 
 ### Fixed
+- **Partial renders of LF-only groups could use wrong or stale samples.** `upsample_lf_group` (which fills groups whose HF data has not arrived) computed the LF height with the *horizontal* shift, wrong for 4:2:2 / 4:4:0 chroma, and when both edges of a row fell in the same LF group its right-edge padding indexed past the copied samples. Ported from upstream jxl-rs `760c9d6`; the dead `QuantEncoding::raw_from_qtable` goes with it. Upstream's follow-up `45abc97` remaps coordinates for its padded per-group LF layout and does not apply to this fork's packed layout.
 - **Modular channels with a large shift could get a wrong or wrapped group rectangle.** `ModularBufferInfo::get_grid_rect` computed `chan_size - bx` with plain subtraction, which wraps in release builds when a shifted channel is smaller than the grid position asked about, and channels whose LF/HF grid collapses to zero width or height were still assigned group data. Ported from upstream jxl-rs `21804e1`.
 
 ### Fixed
