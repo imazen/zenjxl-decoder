@@ -1,3 +1,8 @@
+// Copyright (c) the JPEG XL Project Authors. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // Actual thread migration is a native contract. wasm32-wasip1 does not
 // provide std::thread::spawn; the ordinary decoder tests cover that target.
 #![cfg(not(target_family = "wasm"))]
