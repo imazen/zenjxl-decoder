@@ -76,7 +76,7 @@ pub api::Error::FloatNaNOrInf
 pub api::Error::HFBlockOutOfBounds
 pub api::Error::HfQuantFactorTooSmall(f32)
 pub api::Error::ICCOutputNoCMS
-pub api::Error::IOError(core::io::error::Error)
+pub api::Error::IOError(std::io::error::Error)
 pub api::Error::IccEndOfStream
 pub api::Error::IccInvalidTagString(alloc::string::String)
 pub api::Error::IccInvalidWhitePoint(f32, f32, alloc::string::String)
@@ -628,10 +628,10 @@ pub const api::ImageDataType::DATA_TYPE_ID: api::DataTypeTag
 pub fn api::ImageDataType::from_f64(f64) -> Self
 pub fn api::ImageDataType::to_f64(self) -> f64
 pub trait api::JxlBitstreamInput
-pub fn api::JxlBitstreamInput::available_bytes(&mut self) -> core::result::Result<usize, core::io::error::Error>
-pub fn api::JxlBitstreamInput::read(&mut self, &mut [core::io::io_slice::IoSliceMut<'_>]) -> core::result::Result<usize, core::io::error::Error>
-pub fn api::JxlBitstreamInput::skip(&mut self, usize) -> core::result::Result<usize, core::io::error::Error>
-pub trait api::JxlCms
+pub fn api::JxlBitstreamInput::available_bytes(&mut self) -> core::result::Result<usize, std::io::error::Error>
+pub fn api::JxlBitstreamInput::read(&mut self, &mut [core::io::io_slice::IoSliceMut<'_>]) -> core::result::Result<usize, std::io::error::Error>
+pub fn api::JxlBitstreamInput::skip(&mut self, usize) -> core::result::Result<usize, std::io::error::Error>
+pub trait api::JxlCms: core::marker::Send
 pub fn api::JxlCms::initialize_transforms(&self, usize, usize, api::JxlColorProfile, api::JxlColorProfile, f32) -> api::Result<(usize, alloc::vec::Vec<alloc::boxed::Box<(dyn api::JxlCmsTransformer + core::marker::Send + core::marker::Sync)>>)>
 pub trait api::JxlCmsTransformer
 pub fn api::JxlCmsTransformer::do_transform(&mut self, &[f32], &mut [f32]) -> api::Result<()>
@@ -648,10 +648,9 @@ pub fn read_header_with(&[u8], api::JxlDecoderLimits) -> api::Result<api::JxlIma
 ## trait impls (54 types)
 
 &[u8]: api::JxlBitstreamInput
-alloc::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
 api::DataTypeTag: Clone, Copy, Debug, Eq, PartialEq
 api::Endianness: Clone, Copy, Debug, Eq, PartialEq
-api::Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<core::io::error::Error>, From<enough::reason::StopReason>
+api::Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<enough::reason::StopReason>, From<std::io::error::Error>
 api::ErrorClass: Clone, Copy, Debug, Eq, Hash, PartialEq
 api::ExtraChannel: Clone, Copy, Debug, Eq, PartialEq, num_traits::cast::FromPrimitive
 api::GainMapBundle: Clone, Debug, Eq, PartialEq
@@ -698,6 +697,7 @@ f64: api::ImageDataType
 i16: api::ImageDataType
 i32: api::ImageDataType
 i8: api::ImageDataType
+std::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
 u16: api::ImageDataType
 u32: api::ImageDataType
 u8: api::ImageDataType
@@ -710,8 +710,8 @@ api::Image<T>: !RefUnwindSafe !Unpin !UnwindSafe
 api::ImageRect<'a, T>: !RefUnwindSafe !Unpin !UnwindSafe
 api::ImageRectMut<'a, T>: !RefUnwindSafe !Unpin !UnwindSafe
 api::JxlDecoder<State>: !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
-api::JxlDecoderInner: !Freeze !RefUnwindSafe !Send !Sync !UnwindSafe
-api::JxlDecoderOptions: !RefUnwindSafe !Send !Sync !UnwindSafe
+api::JxlDecoderInner: !Freeze !RefUnwindSafe !Sync !UnwindSafe
+api::JxlDecoderOptions: !RefUnwindSafe !Sync !UnwindSafe
 api::JxlOutputBuffer<'a>: !UnwindSafe
 api::ProcessingResult<T, U>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
 api::RawImageRectMut<'a>: !UnwindSafe

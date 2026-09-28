@@ -6,6 +6,12 @@ All notable changes to `zenjxl-decoder` are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** `JxlCms` now requires `Send`, allowing incremental decoder states
+  to move between worker threads, including when a CMS provider is installed.
+  Custom providers with thread-local state must use a sendable representation.
+  No `Sync` bound is required.
+
 ### Added
 - A full crate README: quick start, the server-safety story (resource-limit
   presets + cooperative cancellation), all entry points, the feature matrix, and
