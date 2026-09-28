@@ -1412,7 +1412,11 @@ pub trait JxlCmsTransformer {
     fn do_transform_inplace(&mut self, inout: &mut [f32]) -> Result<()>;
 }
 
-pub trait JxlCms {
+/// Color-management provider owned by a decoder. Providers must be movable
+/// between threads so an incremental decoder can migrate between workers.
+/// Transform objects already require `Send + Sync`; the provider itself only
+/// requires `Send` and does not have to support concurrent calls.
+pub trait JxlCms: Send {
     /// Initializes `n` transforms (different transforms might be used in parallel) to
     /// convert from color space `input` to colorspace `output`, assuming an intensity of 1.0 for
     /// non-absolute luminance colorspaces of `intensity_target`.

@@ -88,3 +88,17 @@ deadline repair (`440cc002`) and 32-bit fixture serialization (`420d3885`).
 Remote `main` was verified at that commit after the run. The earlier preserved
 `940d2c51` work remains in its ancestry. CI's configured corpus policy remains
 in effect; a green job is not a claim that every external corpus was present.
+
+## Sendable incremental decoder state — 2026-09-28
+
+The zenjxl animation adapter needs to retain native decoder state between
+frames while satisfying zencodec's `Send` decoder contract. `JxlCms` lacked
+`Send`, making every decoder state non-Send even when no CMS was installed.
+The provider now requires `Send`; no unsafe implementation or `Sync` promise
+is added. This is a breaking bound for custom CMS implementations containing
+thread-local state. `sendable_state` moves image-info, frame-info, and decoded
+states between actual threads, with and without the built-in CMS feature.
+Its native 17×13, 10-bit linear RGB animation contains three presentations;
+all decoded samples are checked against the independent integer source formula.
+The fixture was produced by jxl-encoder's animation-contract regression and
+independently verified with libjxl v0.12.0 a7a9c78.

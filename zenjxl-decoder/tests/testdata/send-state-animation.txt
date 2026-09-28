@@ -1,0 +1,8 @@
+Native fixture: 17 x 13 RGB, 10-bit linear transfer, three visible frames.
+Produced by imazen/jxl-encoder animation_contract lossless precision test,
+fix/animation-request-contract branch based on 89efe733e2a598ae3ec10f92d4ef7089478ec357.
+Every sample is checked against the authored integer formula in sendable_state.rs.
+Independent decoder validation: libjxl v0.12.0, commit
+a7a9c787341cf703dede03c2009fa460cae5e5df; every sample within half a 10-bit code.
+The encoder PR records the final producer revision; this fixture does not use
+any decoder output as its expected pixel source.
