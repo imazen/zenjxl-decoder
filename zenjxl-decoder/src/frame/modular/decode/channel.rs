@@ -167,6 +167,15 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     Ok(())
 }
 
+#[inline(always)]
+fn clamped_gradient_i32(left: i32, top: i32, topleft: i32) -> i32 {
+    let min = left.min(top);
+    let max = left.max(top);
+    let grad = (left as i64 + top as i64 - topleft as i64) as i32;
+    let grad_clamp_max = if topleft < min { max } else { grad };
+    if topleft > max { min } else { grad_clamp_max }
+}
+
 #[inline(never)]
 fn decode_single_gradient(
     buffers: &mut [&mut ModularChannel],
@@ -176,13 +185,39 @@ fn decode_single_gradient(
     br: &mut BitReader,
     histograms: &Histograms,
 ) -> Result<()> {
-    use crate::frame::modular::predict::clamped_gradient;
-
     let size = buffers[chan].data.size();
     let ctx = tree.clustered_ctx;
     let sv = tree.single_value;
 
     const { assert!(IMAGE_OFFSET.1 == 2) };
+
+    if let Some(v) = sv {
+        for y in 0..size.1 {
+            let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
+            let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+            let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+
+            if y == 0 {
+                let mut last = 0i32;
+                for x in 0..size.0 {
+                    last = v.wrapping_add(last);
+                    row[x] = last;
+                }
+            } else {
+                let mut last = v.wrapping_add(row_top[0]);
+                row[0] = last;
+
+                for x in 1..size.0 {
+                    let top = row_top[x];
+                    let topleft = row_top[x - 1];
+                    let pred = clamped_gradient_i32(last, top, topleft);
+                    last = v.wrapping_add(pred);
+                    row[x] = last;
+                }
+            }
+        }
+        return Ok(());
+    }
 
     for y in 0..size.1 {
         let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
@@ -192,32 +227,20 @@ fn decode_single_gradient(
         if y == 0 {
             let mut last = 0i32;
             for x in 0..size.0 {
-                let dec = if let Some(v) = sv {
-                    v
-                } else {
-                    reader.read_signed_clustered_inline(histograms, br, ctx)
-                };
+                let dec = reader.read_signed_clustered_inline(histograms, br, ctx);
                 last = dec.wrapping_add(last);
                 row[x] = last;
             }
         } else {
-            let dec = if let Some(v) = sv {
-                v
-            } else {
-                reader.read_signed_clustered_inline(histograms, br, ctx)
-            };
+            let dec = reader.read_signed_clustered_inline(histograms, br, ctx);
             let mut last = dec.wrapping_add(row_top[0]);
             row[0] = last;
 
             for x in 1..size.0 {
                 let top = row_top[x];
                 let topleft = row_top[x - 1];
-                let pred = clamped_gradient(last as i64, top as i64, topleft as i64) as i32;
-                let dec = if let Some(v) = sv {
-                    v
-                } else {
-                    reader.read_signed_clustered_inline(histograms, br, ctx)
-                };
+                let pred = clamped_gradient_i32(last, top, topleft);
+                let dec = reader.read_signed_clustered_inline(histograms, br, ctx);
                 last = dec.wrapping_add(pred);
                 row[x] = last;
             }

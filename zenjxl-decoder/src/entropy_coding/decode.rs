@@ -142,11 +142,14 @@ impl Lz77State {
     }
 
     #[inline(always)]
-    fn pull_symbol(&mut self) -> Option<u32> {
+    fn pull_and_push_copy_symbol(&mut self) -> Option<u32> {
         if let Some(next_num_to_copy) = self.num_to_copy.checked_sub(1) {
-            let offset = (self.copy_pos & Self::WINDOW_MASK) as usize;
-            let sym = self.window[offset];
+            let offset_src = (self.copy_pos & Self::WINDOW_MASK) as usize;
+            let sym = self.window[offset_src];
             self.copy_pos += 1;
+            let offset_dst = (self.num_decoded & Self::WINDOW_MASK) as usize;
+            self.window[offset_dst] = sym;
+            self.num_decoded += 1;
             self.num_to_copy = next_num_to_copy;
             Some(sym)
         } else {
@@ -359,8 +362,7 @@ impl SymbolReader {
             }
 
             SymbolReaderState::Lz77(lz77_state) => {
-                if let Some(sym) = lz77_state.pull_symbol() {
-                    lz77_state.push_decoded_symbol(sym);
+                if let Some(sym) = lz77_state.pull_and_push_copy_symbol() {
                     return sym;
                 }
                 let token = match &histograms.codes {
@@ -406,9 +408,7 @@ impl SymbolReader {
                 );
                 lz77_state.apply_copy(distance_sym, num_to_copy);
 
-                let sym = lz77_state.pull_symbol().unwrap();
-                lz77_state.push_decoded_symbol(sym);
-                sym
+                lz77_state.pull_and_push_copy_symbol().unwrap()
             }
 
             SymbolReaderState::Rle(rle_state) => {
@@ -697,6 +697,16 @@ impl Histograms {
     /// Requires: all configs are 420 AND LZ77 is disabled
     pub fn can_use_config_420_fast_path(&self) -> bool {
         !self.lz77_params.enabled && self.uint_configs.iter().all(|cfg| cfg.is_config_420())
+    }
+
+    #[allow(dead_code)]
+    pub fn is_lz77_enabled(&self) -> bool {
+        self.lz77_params.enabled
+    }
+
+    #[allow(dead_code)]
+    pub fn is_huffman(&self) -> bool {
+        matches!(self.codes, Codes::Huffman(_))
     }
 }
 
