@@ -167,6 +167,66 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     Ok(())
 }
 
+#[inline(never)]
+fn decode_single_gradient(
+    buffers: &mut [&mut ModularChannel],
+    chan: usize,
+    tree: crate::frame::modular::decode::specialized_trees::SingleGradientOnly,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+    histograms: &Histograms,
+) -> Result<()> {
+    use crate::frame::modular::predict::clamped_gradient;
+
+    let size = buffers[chan].data.size();
+    let ctx = tree.clustered_ctx;
+    let sv = tree.single_value;
+
+    const { assert!(IMAGE_OFFSET.1 == 2) };
+
+    for y in 0..size.1 {
+        let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+
+        if y == 0 {
+            let mut last = 0i32;
+            for x in 0..size.0 {
+                let dec = if let Some(v) = sv {
+                    v
+                } else {
+                    reader.read_signed_clustered_inline(histograms, br, ctx)
+                };
+                last = dec.wrapping_add(last);
+                row[x] = last;
+            }
+        } else {
+            let dec = if let Some(v) = sv {
+                v
+            } else {
+                reader.read_signed_clustered_inline(histograms, br, ctx)
+            };
+            let mut last = dec.wrapping_add(row_top[0]);
+            row[0] = last;
+
+            for x in 1..size.0 {
+                let top = row_top[x];
+                let topleft = row_top[x - 1];
+                let pred = clamped_gradient(last as i64, top as i64, topleft as i64) as i32;
+                let dec = if let Some(v) = sv {
+                    v
+                } else {
+                    reader.read_signed_clustered_inline(histograms, br, ctx)
+                };
+                last = dec.wrapping_add(pred);
+                row[x] = last;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[instrument(level = "debug", skip(buffers, reader, tree))]
 pub(super) fn decode_modular_channel(
     buffers: &mut [&mut ModularChannel],
@@ -234,7 +294,7 @@ fn decode_modular_channel_inner(
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::SingleGradientOnly(t) => {
-            decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+            decode_single_gradient(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::General(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)

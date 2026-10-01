@@ -16,6 +16,7 @@ mod decoder;
 pub(crate) mod decoder;
 mod inner;
 mod input;
+pub mod incremental;
 #[cfg(feature = "cms")]
 mod moxcms_wrapper;
 mod options;
@@ -30,6 +31,7 @@ pub use convenience::{reconstruct_jpeg, reconstruct_jpeg_with};
 pub use data_types::*;
 pub use decoder::*;
 pub use enough::{Stop, StopReason, Unstoppable};
+pub use incremental::JxlIncrementalDecoder;
 pub use inner::*;
 pub use input::*;
 #[cfg(feature = "cms")]

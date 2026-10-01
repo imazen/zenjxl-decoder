@@ -13,7 +13,7 @@ use crate::entropy_coding::huffman::*;
 use crate::entropy_coding::hybrid_uint::*;
 use crate::error::{Error, Result};
 use crate::headers::encodings::*;
-use crate::util::NewWithCapacity;
+use crate::util::TryVecExt;
 use crate::util::tracing_wrappers::*;
 
 pub fn decode_varint16(br: &mut BitReader) -> Result<u16> {
@@ -137,19 +137,15 @@ impl Lz77State {
     #[inline(always)]
     fn push_decoded_symbol(&mut self, token: u32) {
         let offset = (self.num_decoded & Self::WINDOW_MASK) as usize;
-        if let Some(slot) = self.window.get_mut(offset) {
-            *slot = token;
-        } else {
-            debug_assert_eq!(self.window.len(), offset);
-            self.window.push(token);
-        }
+        self.window[offset] = token;
         self.num_decoded += 1;
     }
 
     #[inline(always)]
     fn pull_symbol(&mut self) -> Option<u32> {
         if let Some(next_num_to_copy) = self.num_to_copy.checked_sub(1) {
-            let sym = self.window[(self.copy_pos & Self::WINDOW_MASK) as usize];
+            let offset = (self.copy_pos & Self::WINDOW_MASK) as usize;
+            let sym = self.window[offset];
             self.copy_pos += 1;
             self.num_to_copy = next_num_to_copy;
             Some(sym)
@@ -282,7 +278,7 @@ impl SymbolReader {
                     min_symbol,
                     min_length,
                     dist_multiplier,
-                    window: Vec::new_with_capacity(1 << Lz77State::LOG_WINDOW_SIZE)
+                    window: Vec::try_from_elem(0u32, 1 << Lz77State::LOG_WINDOW_SIZE)
                         .map_err(|e| at!(Error::from(e)))?,
                     num_to_copy: 0,
                     copy_pos: 0,
@@ -509,16 +505,11 @@ impl SymbolReader {
                 let start = (lz77_state.num_decoded & Lz77State::WINDOW_MASK) as usize;
                 let end = ((lz77_state.num_decoded + N as u32) & Lz77State::WINDOW_MASK) as usize;
                 if start < end {
-                    let window_first = &lz77_state.window[start..];
-                    let actual_size = window_first.len().min(N);
-                    window[..actual_size].copy_from_slice(&window_first[..actual_size]);
+                    window.copy_from_slice(&lz77_state.window[start..end]);
                 } else {
-                    let window_first = &lz77_state.window[start..];
-                    let first_len = window_first
-                        .len()
-                        .min((1 << Lz77State::LOG_WINDOW_SIZE) - start);
-                    window[..first_len].copy_from_slice(&window_first[..first_len]);
-                    window[N - end..].copy_from_slice(&lz77_state.window[..end]);
+                    let first_len = (1 << Lz77State::LOG_WINDOW_SIZE) - start;
+                    window[..first_len].copy_from_slice(&lz77_state.window[start..]);
+                    window[first_len..].copy_from_slice(&lz77_state.window[..end]);
                 }
                 StateCheckpoint::Lz77 {
                     num_to_copy: lz77_state.num_to_copy,

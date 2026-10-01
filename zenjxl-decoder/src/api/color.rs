@@ -1412,7 +1412,7 @@ pub trait JxlCmsTransformer {
     fn do_transform_inplace(&mut self, inout: &mut [f32]) -> Result<()>;
 }
 
-pub trait JxlCms {
+pub trait JxlCms: Send + Sync {
     /// Initializes `n` transforms (different transforms might be used in parallel) to
     /// convert from color space `input` to colorspace `output`, assuming an intensity of 1.0 for
     /// non-absolute luminance colorspaces of `intensity_target`.

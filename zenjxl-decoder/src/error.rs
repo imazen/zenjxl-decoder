@@ -448,6 +448,46 @@ impl From<enough::StopReason> for Error {
 /// via `?` preserves the trace through `whereat`'s blanket `From<E> for At<E>`.
 pub type Result<T, E = At<Error>> = std::result::Result<T, E>;
 
+#[cfg(feature = "zencodec")]
+impl zencodec::CategorizedError for Error {
+    fn codec_name(&self) -> Option<&'static str> {
+        Some("jxl")
+    }
+
+    fn category(&self) -> zencodec::ErrorCategory {
+        match self.kind() {
+            ErrorClass::LimitExceeded => {
+                zencodec::ErrorCategory::Resource(zencodec::ResourceError::Limits(zencodec::LimitKind::Pixels))
+            }
+            ErrorClass::OutOfMemory => {
+                zencodec::ErrorCategory::Resource(zencodec::ResourceError::OutOfMemory)
+            }
+            ErrorClass::Cancelled => {
+                zencodec::ErrorCategory::Stopped(enough::StopReason::Cancelled)
+            }
+            ErrorClass::Io => {
+                zencodec::ErrorCategory::Io(zencodec::CodecIoKind::opaque())
+            }
+            ErrorClass::OutputConfiguration => {
+                zencodec::ErrorCategory::Request(zencodec::RequestError::Invalid(zencodec::InvalidKind::Buffer))
+            }
+            ErrorClass::Unsupported => {
+                zencodec::ErrorCategory::Request(zencodec::RequestError::Unsupported(zencodec::UnsupportedOperation::PixelFormat))
+            }
+            ErrorClass::Internal => {
+                zencodec::ErrorCategory::Internal(zencodec::InternalKind::Bug)
+            }
+            ErrorClass::InvalidBitstream => {
+                if matches!(self, Error::OutOfBounds(_)) {
+                    zencodec::ErrorCategory::Image(zencodec::ImageError::UnexpectedEof)
+                } else {
+                    zencodec::ErrorCategory::Image(zencodec::ImageError::Malformed)
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -376,8 +376,8 @@ impl ModularChannelDecoder for GradientLookupConfig420 {
 }
 
 pub struct SingleGradientOnly {
-    clustered_ctx: usize,
-    single_value: Option<i32>,
+    pub(crate) clustered_ctx: usize,
+    pub(crate) single_value: Option<i32>,
 }
 
 impl ModularChannelDecoder for SingleGradientOnly {
