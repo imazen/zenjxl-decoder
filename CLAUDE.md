@@ -89,29 +89,36 @@ Remote `main` was verified at that commit after the run. The earlier preserved
 `940d2c51` work remains in its ancestry. CI's configured corpus policy remains
 in effect; a green job is not a claim that every external corpus was present.
 
-## Fast-decode lossless exploration — 2026-10-01
+## Fast-decode lossless exploration — 2026-10-01/02
 
-[MEASURED] M4 Pro, 4 CLIC 2025 photos (~2.8 MP each), CLI `--speedtest`
-u8 `--no-cms`; a smoke comparison, not zenbench. Files come from jxl-encoder
-`examples/fast_decode_lossless.rs` (`6e7bb020`): effort 4, tree learning,
-LZ77, palette and patches off, so every channel prunes to one MA leaf.
+[MEASURED] M4 Pro, 4 CLIC 2025 photos (~2.8 MP, 48 groups each), CLI
+`--speedtest` u8 `--no-cms`; a smoke comparison, not zenbench. Files come
+from jxl-encoder `LosslessConfig::with_fast_decode()` (`02850e60`), which
+makes every channel one Gradient MA leaf with prefix codes and no LZ77.
 
 - Entropy decoding, not prediction, bounds single-thread lossless decode.
-  `main` reaches 68 MP/s on prefix-coded single-gradient files and 62 MP/s
-  on ANS; a zero predictor is no faster.
-- `explore/fused-prefix-lut` (`0441e81b`): a per-cluster 12-bit table
-  fuses the prefix code, hybrid-uint extra bits and signed unpack (99.4%
-  hit rate). It yields 131.9 MP/s at 1 thread (~396 MB/s RGB8), 429 at 4,
-  and 777 at 12, against 68/238/485 on `main`. The gain depends on the
-  register-resident `FastBits` cursor. With `&mut BitReader` in the hot
-  loop, the cursor is stored and reloaded per sample, and the same table
-  gives only +10%.
+  `main` reaches 68 MP/s on these files and 62 MP/s with ANS.
+- `explore/fused-prefix-lut` (draft PR #61) has three steps:
+  - `0441e81b`: a fused 12-bit table (prefix code, extra bits and signed
+    unpack in one load) reaches 132 MP/s. It needs the register-resident
+    `FastBits` cursor; with `&mut BitReader` in the hot loop the cursor is
+    stored and reloaded per sample, and the table gives only +10%.
+  - `31ad13d6`: two residuals per lookup reach 169 MP/s.
+  - `e4d32db2`: two groups decoded interleaved reach 201.5 MP/s at 1 thread
+    (~605 MB/s RGB8); 4 threads give 581 and 12 give 935, against 237 and
+    480 on `main`. Interleaving gained nothing until the two sides were
+    passed by value: behind `&mut`, both cursors spilled to memory.
+- Table window on M4: 11 bits 164, 12 bits ~170, 13 bits 172, 14 bits
+  161 MP/s. x86 (smaller L1D) is not measured.
 - `explore/two-pass-top` (`92b9b69b`) and `explore/fused-two-pass-top`
   (`af2dfd2d`) are negative results. Two-pass gradient is slower (68 to
-  52 MP/s), because it removes the overlap with entropy decoding. Fused
-  Top reaches 126 MP/s, below fused gradient, with ~15% larger files.
-- Prefix codes cost ~3% size against ANS (10.01 vs 9.73 MB for the four
-  images; PNG 12.08 MB).
+  52 MP/s), and fused Top (126 MP/s) is slower than fused gradient, with
+  ~15% larger files.
+- Conformance: preset files decode exactly in libjxl v0.12, jxl-rs 0.7.4
+  and jxl-oxide 0.12.6 (gray/alpha/8/16-bit, efforts 1-9). See jxl-encoder
+  `just fast-decode-check` and `just fast-decode-conformance`.
+- Prefix codes cost ~3-5% size against ANS for the same settings; the
+  preset is ~17% smaller than PNG on the CLIC photos.
 - `sansio` (`5fc1a3e`, origin) holds unreviewed prior-session work: a new
   public `JxlIncrementalDecoder` and default zencodec/zenpixels deps. It
   is not on `main`.
