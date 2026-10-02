@@ -184,5 +184,6 @@ pub(crate) trait RenderPipeline: Sized {
     }
 
     /// Upper bound on the inputs held for `take_recycled_inputs`.
+    #[cfg(feature = "threads")]
     fn set_recycled_inputs_capacity(&mut self, _capacity: usize) {}
 }
