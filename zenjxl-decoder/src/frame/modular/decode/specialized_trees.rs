@@ -380,6 +380,12 @@ pub struct SingleGradientOnly {
     pub(super) single_value: Option<i32>,
 }
 
+/// One `North` (Top) leaf with multiplier 1 and offset 0 after pruning.
+pub struct SingleTopOnly {
+    pub(super) clustered_ctx: usize,
+    pub(super) single_value: Option<i32>,
+}
+
 impl ModularChannelDecoder for SingleGradientOnly {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = false;
@@ -463,6 +469,7 @@ pub enum TreeSpecialCase {
     WpOnlyConfig420(WpOnlyLookupConfig420),
     GradientLookupConfig420(GradientLookupConfig420),
     SingleGradientOnly(SingleGradientOnly),
+    SingleTopOnly(SingleTopOnly),
     General(GeneralTree<false>),
     General420(GeneralTree<true>),
 }
@@ -583,6 +590,21 @@ pub fn specialize_tree(
     ] = &*pruned_tree
     {
         return Ok(TreeSpecialCase::SingleGradientOnly(SingleGradientOnly {
+            clustered_ctx: *id as usize,
+            single_value: single_symbol.map(unpack_signed),
+        }));
+    }
+
+    if let [
+        TreeNode::Leaf {
+            predictor: Predictor::North,
+            multiplier: 1,
+            offset: 0,
+            id,
+        },
+    ] = &*pruned_tree
+    {
+        return Ok(TreeSpecialCase::SingleTopOnly(SingleTopOnly {
             clustered_ctx: *id as usize,
             single_value: single_symbol.map(unpack_signed),
         }));

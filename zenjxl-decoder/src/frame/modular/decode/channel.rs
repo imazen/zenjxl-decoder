@@ -249,6 +249,81 @@ fn decode_single_gradient_fused(
     Ok(())
 }
 
+/// Single-`Top`-leaf channel: each row's residuals are read first (through
+/// the fused prefix lookup when available), then reconstructed with a
+/// vectorisable `row_top + res` pass. Edge rules follow
+/// `PredictionData::get_rows`: on row 0 `top` is `left` (0 at x = 0).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn decode_single_top_two_pass(
+    buffers: &mut [&mut ModularChannel],
+    chan: usize,
+    ctx: usize,
+    single_value: Option<i32>,
+    lut: Option<&FusedPrefixLut>,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+    histograms: &Histograms,
+) -> Result<()> {
+    #[cold]
+    #[inline(never)]
+    fn read_slow(
+        reader: &mut SymbolReader,
+        br: &mut BitReader,
+        histograms: &Histograms,
+        ctx: usize,
+    ) -> i32 {
+        reader.read_signed_clustered_inline(histograms, br, ctx)
+    }
+
+    let size = buffers[chan].data.size();
+    let mut res: Vec<i32> = Vec::new();
+    res.try_reserve_exact(size.0)
+        .map_err(|e| at!(crate::error::Error::from(e)))?;
+    res.resize(size.0, single_value.unwrap_or(0));
+
+    const { assert!(IMAGE_OFFSET.1 == 2) };
+
+    for y in 0..size.1 {
+        if single_value.is_none() {
+            if let Some(lut) = lut {
+                let mut fb = br.take_fast();
+                for r in res.iter_mut() {
+                    *r = match lut.read_signed_fast(&mut fb) {
+                        Some(v) => v,
+                        None => {
+                            br.put_fast(fb);
+                            let v = read_slow(reader, br, histograms, ctx);
+                            fb = br.take_fast();
+                            v
+                        }
+                    };
+                }
+                br.put_fast(fb);
+            } else {
+                for r in res.iter_mut() {
+                    *r = reader.read_signed_clustered_inline(histograms, br, ctx);
+                }
+            }
+        }
+        let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        if y == 0 {
+            let mut last = 0i32;
+            for (o, &r) in row.iter_mut().zip(res.iter()) {
+                last = r.wrapping_add(last);
+                *o = last;
+            }
+        } else {
+            for ((o, &r), &t) in row.iter_mut().zip(res.iter()).zip(row_top.iter()) {
+                *o = r.wrapping_add(t);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[instrument(level = "debug", skip(buffers, reader, tree))]
 pub(super) fn decode_modular_channel(
     buffers: &mut [&mut ModularChannel],
@@ -332,6 +407,23 @@ fn decode_modular_channel_inner(
                 );
             }
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+        }
+        TreeSpecialCase::SingleTopOnly(t) => {
+            let lut = if reader.is_plain() {
+                tree.histograms.fused_prefix_lut(t.clustered_ctx)
+            } else {
+                None
+            };
+            decode_single_top_two_pass(
+                buffers,
+                chan,
+                t.clustered_ctx,
+                t.single_value,
+                lut,
+                reader,
+                br,
+                &tree.histograms,
+            )
         }
         TreeSpecialCase::General(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
