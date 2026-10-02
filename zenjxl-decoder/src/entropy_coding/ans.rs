@@ -23,7 +23,6 @@ struct AnsHistogram {
     // computed as (state & 0xfff) >> log_bucket_size is always < buckets.len()
     buckets: Vec<Bucket>,
     log_bucket_size: usize,
-    bucket_mask: u32,
     // For optimizing fast-lossless case.
     single_symbol: Option<u32>,
 }
@@ -279,7 +278,6 @@ impl AnsHistogram {
         // 4 <= log_bucket_size <= 7
         let log_bucket_size = LOG_SUM_PROBS.checked_sub(log_alpha_size).unwrap();
         let bucket_size = 1u16 << log_bucket_size;
-        let bucket_mask = bucket_size as u32 - 1;
 
         let mut dist = vec![0u16; table_size];
         let alphabet_size = if br.read(1)? != 0 {
@@ -318,7 +316,6 @@ impl AnsHistogram {
         Ok(Self {
             buckets,
             log_bucket_size,
-            bucket_mask,
             single_symbol,
         })
     }
@@ -362,62 +359,6 @@ impl AnsHistogram {
 }
 
 impl AnsHistogram {
-    #[inline(always)]
-    pub fn read(&self, br: &mut BitReader, state: &mut u32) -> u32 {
-        let idx = *state & 0xfff;
-        let i = (idx >> self.log_bucket_size) as usize;
-        let pos = idx & self.bucket_mask;
-
-        let bucket = self.buckets[i];
-        let alias_symbol = bucket.alias_symbol as u32;
-        let alias_cutoff = bucket.alias_cutoff as u32;
-        let dist = bucket.dist as u32;
-
-        let map_to_alias = (pos >= alias_cutoff) as u32;
-        let offset = (bucket.alias_offset as u32) * map_to_alias;
-        let dist_xor = (bucket.alias_dist_xor as u32) * map_to_alias;
-
-        let dist = dist ^ dist_xor;
-        let symbol = (alias_symbol * map_to_alias) | (i as u32 * (1 - map_to_alias));
-        let offset = offset + pos;
-
-        let next_state = (*state >> LOG_SUM_PROBS) * dist + offset;
-        let select_appended = (next_state < (1 << 16)) as u32;
-        let appended_state = (next_state << 16) | (br.peek(16) as u32);
-        *state = (appended_state * select_appended) | (next_state * (1 - select_appended));
-        br.consume_optimistic((16 * select_appended) as usize);
-        symbol
-    }
-
-    /// [`Self::read`] on a register-resident cursor; requires at least 16
-    /// buffered bits (`FastBits::ensure(16)`).
-    #[inline(always)]
-    pub fn read_fast(&self, fb: &mut FastBits<'_>, state: &mut u32) -> u32 {
-        let idx = *state & 0xfff;
-        let i = (idx >> self.log_bucket_size) as usize;
-        let pos = idx & self.bucket_mask;
-
-        let bucket = self.buckets[i];
-        let alias_symbol = bucket.alias_symbol as u32;
-        let alias_cutoff = bucket.alias_cutoff as u32;
-        let dist = bucket.dist as u32;
-
-        let map_to_alias = (pos >= alias_cutoff) as u32;
-        let offset = (bucket.alias_offset as u32) * map_to_alias;
-        let dist_xor = (bucket.alias_dist_xor as u32) * map_to_alias;
-
-        let dist = dist ^ dist_xor;
-        let symbol = (alias_symbol * map_to_alias) | (i as u32 * (1 - map_to_alias));
-        let offset = offset + pos;
-
-        let next_state = (*state >> LOG_SUM_PROBS) * dist + offset;
-        let select_appended = (next_state < (1 << 16)) as u32;
-        let appended_state = (next_state << 16) | (fb.peek_buffered(16) as u32);
-        *state = (appended_state * select_appended) | (next_state * (1 - select_appended));
-        fb.consume_buffered((16 * select_appended) as usize);
-        symbol
-    }
-
     // For optimizing fast-lossless case.
     #[inline]
     pub fn single_symbol(&self) -> Option<u32> {
@@ -428,20 +369,87 @@ impl AnsHistogram {
 #[derive(Debug)]
 pub struct AnsCodes {
     histograms: Vec<AnsHistogram>,
+    /// Every histogram's buckets in one array, histogram `c` at
+    /// `c << log_alpha_size`, so a read does not first load the histogram's
+    /// own bucket pointer (one dependent load less per symbol). All
+    /// histograms of a set share `log_alpha_size` and so the bucket count.
+    flat: Vec<Bucket>,
+    log_alpha_size: usize,
+    log_bucket_size: usize,
+    bucket_mask: u32,
 }
 
 impl AnsCodes {
-    /// `AnsHistogram::read_fast` for histogram `ctx`.
+    /// One ANS step for histogram `ctx`: the bucket for `state`, then the
+    /// same arithmetic as `AnsHistogram::read`. `peek16` is the next 16 bits;
+    /// returns the symbol and how many of them were consumed (0 or 16).
+    #[inline(always)]
+    fn step(&self, state: &mut u32, ctx: usize, peek16: u32) -> (u32, usize) {
+        let idx = *state & 0xfff;
+        let i = idx >> self.log_bucket_size;
+        let pos = idx & self.bucket_mask;
+
+        let bucket = self.flat[(ctx << self.log_alpha_size) | i as usize];
+        let alias_symbol = bucket.alias_symbol as u32;
+        let alias_cutoff = bucket.alias_cutoff as u32;
+        let dist = bucket.dist as u32;
+
+        let map_to_alias = (pos >= alias_cutoff) as u32;
+        let offset = (bucket.alias_offset as u32) * map_to_alias;
+        let dist_xor = (bucket.alias_dist_xor as u32) * map_to_alias;
+
+        let dist = dist ^ dist_xor;
+        let symbol = (alias_symbol * map_to_alias) | (i * (1 - map_to_alias));
+        let offset = offset + pos;
+
+        let next_state = (*state >> LOG_SUM_PROBS) * dist + offset;
+        let select_appended = (next_state < (1 << 16)) as u32;
+        let appended_state = (next_state << 16) | peek16;
+        *state = (appended_state * select_appended) | (next_state * (1 - select_appended));
+        (symbol, (16 * select_appended) as usize)
+    }
+
+    /// Reads one symbol of histogram `ctx` (`AnsHistogram::read`).
+    #[inline(always)]
+    pub(super) fn read(&self, br: &mut BitReader, state: &mut u32, ctx: usize) -> u32 {
+        let (symbol, consumed) = self.step(state, ctx, br.peek(16) as u32);
+        br.consume_optimistic(consumed);
+        symbol
+    }
+
+    /// [`Self::read`] on a register-resident cursor; requires at least 16
+    /// buffered bits (`FastBits::ensure(16)`).
     #[inline(always)]
     pub(super) fn read_fast(&self, fb: &mut FastBits<'_>, state: &mut u32, ctx: usize) -> u32 {
-        self.histograms[ctx].read_fast(fb, state)
+        let (symbol, consumed) = self.step(state, ctx, fb.peek_buffered(16) as u32);
+        fb.consume_buffered(consumed);
+        symbol
     }
 
     pub fn decode(num: usize, log_alpha_size: usize, br: &mut BitReader) -> Result<AnsCodes> {
-        let histograms = (0..num)
+        let histograms: Vec<AnsHistogram> = (0..num)
             .map(|_| AnsHistogram::decode(br, log_alpha_size))
             .collect::<Result<_>>()?;
-        Ok(Self { histograms })
+        let log_bucket_size = LOG_SUM_PROBS
+            .checked_sub(log_alpha_size)
+            .ok_or(at!(Error::InvalidAnsHistogram))?;
+        let mut flat = Vec::new();
+        flat.try_reserve_exact(num << log_alpha_size)
+            .map_err(|e| at!(Error::from(e)))?;
+        for h in &histograms {
+            // AnsHistogram invariant: 2^(LOG_SUM_PROBS - log_bucket_size) buckets.
+            if h.buckets.len() != 1 << log_alpha_size || h.log_bucket_size != log_bucket_size {
+                return Err(at!(Error::InvalidAnsHistogram));
+            }
+            flat.extend_from_slice(&h.buckets);
+        }
+        Ok(Self {
+            histograms,
+            flat,
+            log_alpha_size,
+            log_bucket_size,
+            bucket_mask: (1u32 << log_bucket_size) - 1,
+        })
     }
 
     pub fn single_symbol(&self, ctx: usize) -> Option<u32> {
@@ -467,8 +475,7 @@ impl AnsReader {
 
     #[inline(always)]
     pub fn read(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
-        let histogram = &codes.histograms[ctx];
-        histogram.read(br, &mut self.0)
+        codes.read(br, &mut self.0, ctx)
     }
 
     pub(super) fn state(&self) -> u32 {
