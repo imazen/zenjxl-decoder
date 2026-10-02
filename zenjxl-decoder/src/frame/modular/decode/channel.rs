@@ -195,10 +195,12 @@ fn decode_modular_channel_inner(
     crate::profile!(modular_decode);
     debug!("reading channel");
     let size = buffers[chan].data.size();
-    if size.0 <= IMAGE_PADDING.0
-        || size.1 <= IMAGE_PADDING.1
-        || size.0 * size.1 <= SMALL_CHANNEL_THRESHOLD
-    {
+    // Short channels are fine for the specialised paths, which read rows
+    // above y = 0 only through the padding (and `get_rows` handles y < 2);
+    // VarDCT's AC-metadata channel is two rows of one sample per block, so
+    // routing every channel with height <= 2 here sent 20-60K samples per
+    // frame through the property-computing generic loop.
+    if size.0 <= IMAGE_PADDING.0 || size.0 * size.1 <= SMALL_CHANNEL_THRESHOLD {
         return decode_modular_channel_small(buffers, chan, stream_id, header, tree, reader, br);
     }
 
@@ -206,7 +208,7 @@ fn decode_modular_channel_inner(
     assert!(buffers[chan].data.padding().0 >= IMAGE_PADDING.0);
     assert_eq!(buffers[chan].data.offset(), IMAGE_OFFSET);
 
-    // We now know the channel has size at least IMAGE_PADDING.
+    // We now know the channel is wider than IMAGE_PADDING.0 and not tiny.
 
     let special_tree = specialize_tree(tree, chan, stream_id, size.0, header)?;
     match special_tree {
