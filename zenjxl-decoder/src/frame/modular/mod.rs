@@ -956,6 +956,41 @@ impl FullModularImage {
     // will have None as an image. Otherwise, the image will always be `Some(..)`.
     // It is *required* to do a dry run before doing an actual run after any event that might have
     // readied some buffers.
+    /// Runs the transform steps of one layer. Steps of a layer write disjoint
+    /// outputs; when their inputs are disjoint too, none can take (consume)
+    /// a buffer another one reads, so they run on the rayon pool. Otherwise,
+    /// or without `parallel`, they run in order.
+    fn run_layer(&self, frame_header: &FrameHeader, runs: &[(usize, bool)]) -> Result<()> {
+        #[cfg(feature = "threads")]
+        if self.parallel && runs.len() > 1 {
+            let mut seen = BTreeSet::new();
+            let disjoint = runs
+                .iter()
+                .flat_map(|(t, _)| self.transform_steps[*t].deps.iter())
+                .all(|dep| seen.insert(*dep));
+            if disjoint {
+                use rayon::prelude::*;
+                return runs.par_iter().try_for_each(|(t, is_final)| {
+                    self.transform_steps[*t].do_run(
+                        frame_header,
+                        &self.buffer_info,
+                        *is_final,
+                        self.parallel,
+                    )
+                });
+            }
+        }
+        for (t, is_final) in runs {
+            self.transform_steps[*t].do_run(
+                frame_header,
+                &self.buffer_info,
+                *is_final,
+                self.parallel,
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn process_output(
         &mut self,
         frame_header: &FrameHeader,
@@ -1009,6 +1044,9 @@ impl FullModularImage {
         let mut new_dirty_transforms = vec![];
         while let Some((_, transforms)) = to_process_by_layer.pop_first() {
             trace!("{transforms:?}");
+            // Steps of one layer run after the layer's bookkeeping, in
+            // parallel when allowed (see `run_layer`).
+            let mut layer_runs: Vec<(usize, bool)> = vec![];
             for (t, is_strong) in transforms {
                 let tfm = &self.transform_steps[t];
                 trace!("{:?}", tfm);
@@ -1041,7 +1079,7 @@ impl FullModularImage {
                 let previous_output_status = previous_output_status.unwrap();
 
                 if !dry_run {
-                    tfm.do_run(frame_header, &self.buffer_info, is_final, self.parallel)?;
+                    layer_runs.push((t, is_final));
                 }
 
                 // If this was the first _or_ the last render, trigger a re-render across weak edges
@@ -1061,6 +1099,8 @@ impl FullModularImage {
                     }
                 }
             }
+
+            self.run_layer(frame_header, &layer_runs)?;
 
             for (t, is_strong_dep) in new_dirty_transforms.drain(..) {
                 let layer = self.transform_steps[t].layer;
