@@ -203,10 +203,14 @@ fn decode_single_gradient_fused(
 
     let size = buffers[chan].data.size();
     let mut fb = br.take_fast();
-    macro_rules! read {
+    // One residual: fused lookup, else the regular reader.
+    macro_rules! read_one {
         () => {
-            match lut.read_signed_fast(&mut fb) {
-                Some(v) => v,
+            match lut.peek(&mut fb) {
+                Some(e) => {
+                    fb.consume_buffered(e.len1());
+                    e.first()
+                }
                 None => {
                     br.put_fast(fb);
                     let v = read_slow(reader, br, histograms, ctx);
@@ -219,30 +223,59 @@ fn decode_single_gradient_fused(
 
     const { assert!(IMAGE_OFFSET.1 == 2) };
 
+    let n = size.0;
     for y in 0..size.1 {
         let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
-        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
-        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + n];
+        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + n];
         if y == 0 {
             let mut last = 0i32;
             for o in row.iter_mut() {
-                last = read!().wrapping_add(last);
+                last = read_one!().wrapping_add(last);
                 *o = last;
             }
             continue;
         }
-        let mut last = read!().wrapping_add(row_top[0]);
+        let mut last = read_one!().wrapping_add(row_top[0]);
         row[0] = last;
-        for x in 1..size.0 {
-            let top = row_top[x];
-            let topleft = row_top[x - 1];
-            let min = last.min(top);
-            let max = last.max(top);
-            let grad = last.wrapping_add(top).wrapping_sub(topleft);
-            let grad_clamp_max = if topleft < min { max } else { grad };
-            let pred = if topleft > max { min } else { grad_clamp_max };
-            last = read!().wrapping_add(pred);
-            row[x] = last;
+        // Gradient step for column `x` (>= 1) from residual `r`.
+        macro_rules! step {
+            ($x:expr, $r:expr) => {{
+                let x = $x;
+                let top = row_top[x];
+                let topleft = row_top[x - 1];
+                let min = last.min(top);
+                let max = last.max(top);
+                let grad = last.wrapping_add(top).wrapping_sub(topleft);
+                let grad_clamp_max = if topleft < min { max } else { grad };
+                let pred = if topleft > max { min } else { grad_clamp_max };
+                last = ($r).wrapping_add(pred);
+                row[x] = last;
+            }};
+        }
+        let mut x = 1;
+        while x < n {
+            match lut.peek(&mut fb) {
+                // Two residuals per lookup when both fit and the row has room.
+                Some(e) if e.has_two() && x + 1 < n => {
+                    fb.consume_buffered(e.total_len());
+                    step!(x, e.first());
+                    step!(x + 1, e.second());
+                    x += 2;
+                }
+                Some(e) => {
+                    fb.consume_buffered(e.len1());
+                    step!(x, e.first());
+                    x += 1;
+                }
+                None => {
+                    br.put_fast(fb);
+                    let v = read_slow(reader, br, histograms, ctx);
+                    fb = br.take_fast();
+                    step!(x, v);
+                    x += 1;
+                }
+            }
         }
     }
     br.put_fast(fb);
