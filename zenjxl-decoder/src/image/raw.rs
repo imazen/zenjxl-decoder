@@ -171,6 +171,31 @@ impl OwnedRawImage {
         self.padding
     }
 
+    /// True if this image has exactly the geometry that
+    /// [`Self::new_zeroed_with_padding`] produces for these arguments, and is
+    /// not charged to a memory tracker, so it can stand in for that
+    /// allocation after [`Self::zero_fill`].
+    pub fn has_zeroed_padding_geometry(
+        &self,
+        byte_size: (usize, usize),
+        offset: (usize, usize),
+        mut padding: (usize, usize),
+    ) -> bool {
+        if !(padding.0 + byte_size.0).is_multiple_of(CACHE_LINE_BYTE_SIZE) {
+            padding.0 += CACHE_LINE_BYTE_SIZE - (padding.0 + byte_size.0) % CACHE_LINE_BYTE_SIZE;
+        }
+        self.tracker.is_none()
+            && self.offset == offset
+            && self.padding == padding
+            && self.data.byte_size() == (byte_size.0 + padding.0, byte_size.1 + padding.1)
+    }
+
+    /// Zeroes every accessible byte, including padding, matching a fresh
+    /// [`Self::new_zeroed_with_padding`] allocation.
+    pub fn zero_fill(&mut self) {
+        self.data.data_slice_mut().fill(0);
+    }
+
     /// Output buffers below this size are not pre-faulted: spreading a few
     /// hundred page faults over the thread pool costs more in wake-ups than
     /// it saves (measured -38 % on a 0.26 MP decode at 16 threads, and a net

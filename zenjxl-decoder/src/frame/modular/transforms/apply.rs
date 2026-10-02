@@ -683,6 +683,7 @@ pub fn meta_apply_transforms(
             grid_kind: ModularGridKind::None,
             grid_shape: (0, 0),
             buffer_grid: vec![],
+            pool: None,
         });
     }
 
@@ -695,6 +696,7 @@ pub fn meta_apply_transforms(
             grid_kind: ModularGridKind::None,
             grid_shape: (0, 0),
             buffer_grid: vec![],
+            pool: None,
         });
         buffer_info.len() - 1
     };

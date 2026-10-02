@@ -88,6 +88,22 @@ impl<T: ImageDataType> Image<T> {
         Ok(Self::from_raw(img))
     }
 
+    /// True if `raw` can be reused, after zeroing, as the image
+    /// [`Self::new_with_padding`] would allocate for these arguments.
+    pub fn fits_padded(
+        raw: &OwnedRawImage,
+        size: (usize, usize),
+        offset: (usize, usize),
+        padding: (usize, usize),
+    ) -> bool {
+        let s = T::DATA_TYPE_ID.size();
+        raw.has_zeroed_padding_geometry(
+            (size.0 * s, size.1),
+            (offset.0 * s, offset.1),
+            (padding.0 * s, padding.1),
+        )
+    }
+
     #[instrument(ret, err)]
     pub fn new(size: (usize, usize)) -> Result<Image<T>> {
         Self::new_with_padding(size, (0, 0), (0, 0))

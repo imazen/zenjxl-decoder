@@ -109,7 +109,22 @@ makes every channel one Gradient MA leaf with prefix codes and no LZ77.
     480 on `main`. Interleaving gained nothing until the two sides were
     passed by value: behind `&mut`, both cursors spilled to memory.
 - Table window on M4: 11 bits 164, 12 bits ~170, 13 bits 172, 14 bits
-  161 MP/s. x86 (smaller L1D) is not measured.
+  161 MP/s.
+- [MEASURED] Ryzen 9 7900X (Zen 4), Linux, same files, 1 thread:
+  `main` 60, fused table 89, two-symbol 97, interleaved 96 MP/s
+  (~288 MB/s RGB8). 4 threads: 252 to ~417; 12 threads: 383 to ~517.
+  11-bit and 12-bit windows tie there. Interleaving gives nothing on
+  Zen 4. Zen 5 is not measured.
+- [MEASURED] On that Linux box only ~52% of the 1-thread run is decoder
+  code: ~37% is kernel page faults and ~10% libc memset/memmove. The
+  cause is per-group modular channel buffers. `with_buffers` allocates
+  and zero-fills 144 buffers of ~248 KiB per decode (35.8 MB for a
+  2.8 MP RGB image) through `alloc_zeroed_fallible`
+  (try_reserve + resize, an explicit memset over fresh pages). The
+  render pipeline recycles rendered group buffers into its scratch pool,
+  but the modular reader never takes from it. Reusing those buffers
+  across groups is the next lever for Linux throughput on every modular
+  decode, not only this fast path.
 - `explore/two-pass-top` (`92b9b69b`) and `explore/fused-two-pass-top`
   (`af2dfd2d`) are negative results. Two-pass gradient is slower (68 to
   52 MP/s), and fused Top (126 MP/s) is slower than fused gradient, with

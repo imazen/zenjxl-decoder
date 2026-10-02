@@ -9,7 +9,7 @@ use std::any::Any;
 use crate::{
     api::JxlOutputBuffer,
     error::Result,
-    image::{Image, ImageDataType},
+    image::{Image, ImageDataType, OwnedRawImage},
     render::buffer_splitter::BufferSplitter,
 };
 
@@ -176,4 +176,13 @@ pub(crate) trait RenderPipeline: Sized {
 
     /// Restores normal state after the final re-render.
     fn finish_final_rerender(&mut self);
+
+    /// Group input buffers the pipeline has finished with and does not keep
+    /// for itself (modular frames), for reuse by the modular decoder.
+    fn take_recycled_inputs(&mut self) -> Vec<OwnedRawImage> {
+        Vec::new()
+    }
+
+    /// Upper bound on the inputs held for `take_recycled_inputs`.
+    fn set_recycled_inputs_capacity(&mut self, _capacity: usize) {}
 }

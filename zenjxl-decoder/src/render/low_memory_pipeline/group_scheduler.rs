@@ -385,6 +385,11 @@ impl LowMemoryRenderPipeline {
             && let Some(limit) = self.shared.group_scratch_buffers_limit
             && self.scratch_channel_buffers[channel * 3].len() >= limit
         {
+            // Not kept here; offered back to the modular decoder instead
+            // (bounded, see `take_recycled_inputs`).
+            if self.recycled_inputs.len() < self.recycled_inputs_capacity {
+                self.recycled_inputs.push(image);
+            }
             return;
         }
         self.scratch_channel_buffers[channel * 3 + kind].push(image)

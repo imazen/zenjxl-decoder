@@ -279,7 +279,20 @@ impl Frame {
         // inside decode_groups_parallel: mark_group_to_be_read sets buffer
         // statuses to FINAL_RENDER, which would break per-group dependency
         // checks if done for all groups up-front.
-        if !use_parallel {
+        // Sequential modular frames without border-dependent stages or noise
+        // pass each chunk of groups to the pipeline right after decoding it
+        // (STEP 3) instead of all groups at STEP 4. Rendered group buffers
+        // then return to the modular recycle pool, so a frame allocates a
+        // chunk's worth of group buffers rather than one per group (upstream
+        // #812). Rendering order changes, not output: without border stages
+        // a group renders identically whenever its channels are complete.
+        let eager_modular = !use_parallel
+            && !do_flush
+            && !self.was_flushed_once
+            && self.header.encoding == Encoding::Modular
+            && !self.header.has_noise()
+            && !pipeline!(self, p, p.needs_border_rendering());
+        if !use_parallel && !eager_modular {
             let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
             for (group, passes) in groups.iter() {
                 for (pass, _) in passes.iter() {
@@ -312,6 +325,109 @@ impl Frame {
                 if self.incomplete_groups > 0 {
                     self.was_flushed_once = true;
                 }
+            }
+        } else if eager_modular {
+            const EAGER_CHUNK: usize = 2;
+            let mut groups = groups.into_iter().peekable();
+            while groups.peek().is_some() {
+                let mut chunk: Vec<_> = groups.by_ref().take(EAGER_CHUNK).collect();
+                // STEP 2's modular marking, for this chunk only.
+                {
+                    let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
+                    for (group, passes) in chunk.iter() {
+                        for (pass, _) in passes.iter() {
+                            modular_global.mark_group_to_be_read(2 + *pass, *group);
+                        }
+                    }
+                    let mut pass_to_pipeline = |_, group, _, _| {
+                        self.groups_to_flush.insert(group);
+                        pipeline!(self, p, p.mark_group_to_rerender(group));
+                        Ok(())
+                    };
+                    modular_global.process_output(&self.header, true, &mut pass_to_pipeline)?;
+                }
+                // Two groups carrying the same single pass are read together
+                // (interleaved bitstreams), as in the non-eager loop below.
+                let pair_pass = match &chunk[..] {
+                    [(ga, pa), (gb, pb)] if ga != gb => match (&pa[..], &pb[..]) {
+                        ([(a, _)], [(b, _)]) if a == b => Some(*a),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                self.decoder_state.check_cancelled()?;
+                if let (Some(pass), [(group_a, passes_a), (group_b, passes_b)]) =
+                    (pair_pass, &mut chunk[..])
+                {
+                    let rendered_a = self.decode_hf_group_inner(
+                        *group_a,
+                        passes_a,
+                        &mut buffer_splitter,
+                        do_flush,
+                        false,
+                    )?;
+                    let rendered_b = self.decode_hf_group_inner(
+                        *group_b,
+                        passes_b,
+                        &mut buffer_splitter,
+                        do_flush,
+                        false,
+                    )?;
+                    let lf_global = self.lf_global.as_ref().unwrap();
+                    lf_global.modular_global.read_stream_pair(
+                        pass,
+                        *group_a,
+                        &mut passes_a[0].1,
+                        *group_b,
+                        &mut passes_b[0].1,
+                        &self.header,
+                        &lf_global.tree,
+                        &self.decoder_state.memory_tracker,
+                    )?;
+                    for (g, rendered) in [(*group_a, rendered_a), (*group_b, rendered_b)] {
+                        if rendered {
+                            self.changed_since_last_flush
+                                .insert((g, RenderUnit::VarDCT));
+                        }
+                    }
+                } else {
+                    for (group, passes) in chunk.iter_mut() {
+                        // Check for cancellation between groups
+                        self.decoder_state.check_cancelled()?;
+                        if self.decode_hf_group(*group, passes, &mut buffer_splitter, do_flush)? {
+                            self.changed_since_last_flush
+                                .insert((*group, RenderUnit::VarDCT));
+                        }
+                    }
+                }
+                // STEP 4's output pass, for what this chunk made ready.
+                {
+                    let modular_global = &mut self.lf_global.as_mut().unwrap().modular_global;
+                    let mut pass_to_pipeline =
+                        |chan, group, complete, image: Option<Image<i32>>| {
+                            self.changed_since_last_flush
+                                .insert((group, RenderUnit::Modular(chan)));
+                            pipeline!(
+                                self,
+                                p,
+                                p.set_buffer_for_group(
+                                    chan,
+                                    group,
+                                    complete,
+                                    image.unwrap(),
+                                    &mut buffer_splitter
+                                )?
+                            );
+                            Ok(())
+                        };
+                    modular_global.process_output(&self.header, false, &mut pass_to_pipeline)?;
+                }
+                let recycled = pipeline!(self, p, p.take_recycled_inputs());
+                self.lf_global
+                    .as_ref()
+                    .unwrap()
+                    .modular_global
+                    .recycle_buffers(recycled);
             }
         } else {
             // Modular groups that carry the same single pass are read two
@@ -697,11 +813,31 @@ impl Frame {
         // barrier cycle. Each barrier costs ~1ms+ from thread synchronization,
         // so we avoid batching unless group count is very high (8K+ images).
         // At 4T/384 groups, 6 batches caused 40% overhead vs unbatched.
-        let decode_batch_size = if num_needs_pixels > num_threads * 256 {
+        // Large modular frames without noise or border-dependent stages are
+        // decoded in batches of eight groups per thread, so that the group
+        // buffers rendered in one batch return through the recycle pool and
+        // are reused by the next, bounding the frame's group buffers by the
+        // batch instead of the image (upstream #812). Batches cost ~2.5% of
+        // frame time on a 48-group frame at 4 threads (M4 Pro, load
+        // imbalance at the batch boundary), so smaller frames stay unbatched.
+        let recycle_modular = !is_vardct
+            && !self.header.has_noise()
+            && !lmp_ref!().needs_border_rendering()
+            && num_groups > num_threads * 16;
+        let decode_batch_size = if recycle_modular {
+            (num_threads * 8).max(1)
+        } else if num_needs_pixels > num_threads * 256 {
             num_threads * 64
         } else {
             num_groups // fully unbatched
         };
+        if recycle_modular {
+            // Room for every channel buffer of one batch.
+            let capacity = decode_batch_size * 8;
+            lmp_mut!().set_recycled_inputs_capacity(capacity);
+            let lf_global = self.lf_global.as_ref().unwrap();
+            lf_global.modular_global.set_recycle_capacity(capacity);
+        }
         let is_batched = decode_batch_size < num_groups;
 
         // VarDCT scratch buffer pool — persists across all batches.
@@ -1450,6 +1586,14 @@ impl Frame {
             for &(group, chan) in &modular_channels_output {
                 self.changed_since_last_flush
                     .insert((group, RenderUnit::Modular(chan)));
+            }
+            if recycle_modular {
+                let recycled = lmp_mut!().take_recycled_inputs();
+                self.lf_global
+                    .as_ref()
+                    .unwrap()
+                    .modular_global
+                    .recycle_buffers(recycled);
             }
             phase3c_dur += phase3c_start.elapsed();
         } // end batch loop
