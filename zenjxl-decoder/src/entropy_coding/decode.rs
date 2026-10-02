@@ -6,7 +6,7 @@
 use jxl_macros::UnconditionalCoder;
 use whereat::at;
 
-use crate::bit_reader::BitReader;
+use crate::bit_reader::{BitReader, FastBits};
 use crate::entropy_coding::ans::*;
 use crate::entropy_coding::context_map::*;
 use crate::entropy_coding::huffman::*;
@@ -301,7 +301,46 @@ impl SymbolReader {
     }
 }
 
+/// Register-resident entropy state for hot loops over streams without
+/// LZ77: the bit cursor, the ANS state and the extra-bits error accumulator,
+/// held as plain values so the compiler can keep them in registers instead
+/// of loading and storing the `SymbolReader`/`BitReader` fields per symbol.
+/// Obtain with [`SymbolReader::plain_cursor`], read with
+/// [`Histograms::read_unsigned_plain`], and return with
+/// [`SymbolReader::finish_plain_cursor`] before any other use of the reader.
+pub struct PlainCursor<'a> {
+    fb: FastBits<'a>,
+    ans: u32,
+    nbits_acc: u32,
+}
+
 impl SymbolReader {
+    /// A [`PlainCursor`] for this reader, or `None` with LZ77/RLE state.
+    #[inline(always)]
+    pub fn plain_cursor<'a>(&self, br: &BitReader<'a>) -> Option<PlainCursor<'a>> {
+        self.is_plain().then(|| PlainCursor {
+            fb: br.take_fast(),
+            ans: self.ans_reader.state(),
+            nbits_acc: 0,
+        })
+    }
+
+    /// Writes a [`PlainCursor`]'s state back to this reader and `br`.
+    #[inline(always)]
+    pub fn finish_plain_cursor<'a>(&mut self, cursor: PlainCursor<'a>, br: &mut BitReader<'a>) {
+        br.put_fast(cursor.fb);
+        self.ans_reader.set_state(cursor.ans);
+        self.errors.nbits_acc |= cursor.nbits_acc;
+    }
+}
+
+impl SymbolReader {
+    /// True when no LZ77/RLE state exists, so a symbol can be read straight
+    /// from the code (e.g. through a [`PlainCursor`]).
+    pub fn is_plain(&self) -> bool {
+        matches!(self.state, SymbolReaderState::None)
+    }
+
     #[inline(always)]
     pub fn read_unsigned_inline(
         &mut self,
@@ -677,6 +716,27 @@ impl Histograms {
     #[inline(always)]
     fn uint_config(&self, cluster: usize) -> &HybridUint {
         &self.uint_configs[cluster]
+    }
+
+    /// Reads one unsigned symbol of `cluster` through a [`PlainCursor`]
+    /// with the same result as `SymbolReader::read_unsigned_clustered_inline`
+    /// on a reader without LZ77. `None`, with nothing consumed, near the end
+    /// of the data; the caller then uses the regular reader.
+    #[inline(always)]
+    pub fn read_unsigned_plain(&self, cursor: &mut PlainCursor<'_>, cluster: usize) -> Option<u32> {
+        // A prefix code (<= 15 bits) or an ANS refill (16 bits) plus up to 31
+        // hybrid-uint extra bits.
+        if !cursor.fb.ensure(47) {
+            return None;
+        }
+        let token = match &self.codes {
+            Codes::Huffman(hc) => hc.read_fast(&mut cursor.fb, cluster),
+            Codes::Ans(ans) => ans.read_fast(&mut cursor.fb, &mut cursor.ans, cluster),
+        };
+        Some(
+            self.uint_config(cluster)
+                .read_fast(token, &mut cursor.fb, &mut cursor.nbits_acc),
+        )
     }
 
     #[allow(dead_code)] // Used in debug!() tracing calls

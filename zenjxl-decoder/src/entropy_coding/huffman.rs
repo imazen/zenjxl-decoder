@@ -6,7 +6,7 @@
 use std::fmt::Debug;
 use whereat::at;
 
-use crate::bit_reader::BitReader;
+use crate::bit_reader::{BitReader, FastBits};
 use crate::entropy_coding::decode::*;
 use crate::error::{Error, Result};
 use crate::util::{CeilLog2, NewWithCapacity, tracing_wrappers::*};
@@ -449,6 +449,22 @@ impl Table {
         Ok(Table { entries })
     }
 
+    /// [`Self::read`] on a register-resident cursor; requires at least
+    /// `HUFFMAN_MAX_BITS` buffered bits.
+    #[inline(always)]
+    pub fn read_fast(&self, fb: &mut FastBits<'_>) -> u32 {
+        let mut pos = fb.peek_buffered(TABLE_BITS) as usize;
+        let mut n_bits = self.entries[pos].bits as usize;
+        if n_bits > TABLE_BITS {
+            fb.consume_buffered(TABLE_BITS);
+            n_bits -= TABLE_BITS;
+            pos += self.entries[pos].value as usize;
+            pos += fb.peek_buffered(n_bits) as usize;
+        }
+        fb.consume_buffered(self.entries[pos].bits as usize);
+        self.entries[pos].value as u32
+    }
+
     #[inline(always)]
     pub fn read(&self, br: &mut BitReader) -> u32 {
         let mut pos = br.peek(TABLE_BITS) as usize;
@@ -532,6 +548,12 @@ impl HuffmanCodes {
     pub fn read(&self, br: &mut BitReader, ctx: usize) -> u32 {
         let table = &self.tables[ctx];
         table.read(br)
+    }
+
+    /// See `Table::read_fast`.
+    #[inline(always)]
+    pub fn read_fast(&self, fb: &mut FastBits<'_>, ctx: usize) -> u32 {
+        self.tables[ctx].read_fast(fb)
     }
 
     pub fn single_symbol(&self, ctx: usize) -> Option<u32> {

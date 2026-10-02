@@ -33,7 +33,82 @@ impl Debug for BitReader<'_> {
 
 pub const MAX_BITS_PER_CALL: usize = 56;
 
+/// Register-resident copy of a `BitReader`'s cursor for hot loops.
+///
+/// Holding the cursor in a plain `Copy` value whose address never escapes
+/// lets the compiler keep it in registers; methods on `&mut BitReader` that
+/// may call the out-of-line `refill_slow` force it to memory on every read.
+/// Take it with `BitReader::take_fast`, return it with `put_fast` before any
+/// other use of the reader.
+#[derive(Clone, Copy)]
+pub struct FastBits<'a> {
+    data: &'a [u8],
+    bit_buf: u64,
+    bits_in_buf: usize,
+}
+
+impl FastBits<'_> {
+    /// Ensures at least `num` (<= 56) buffered bits using only the 8-byte
+    /// refill. Returns false near the end of the data, where the caller must
+    /// fall back to `BitReader`.
+    #[inline(always)]
+    pub fn ensure(&mut self, num: usize) -> bool {
+        debug_assert!(num <= MAX_BITS_PER_CALL);
+        if self.bits_in_buf >= num {
+            return true;
+        }
+        if self.data.len() < 8 {
+            return false;
+        }
+        let bits = LittleEndian::read_u64(self.data);
+        self.bit_buf |= bits << self.bits_in_buf;
+        let read_bytes = (63 - self.bits_in_buf) >> 3;
+        self.bits_in_buf |= 56;
+        self.data = &self.data[read_bytes..];
+        true
+    }
+
+    /// Low `num` buffered bits; requires a successful `ensure(num)`.
+    #[inline(always)]
+    pub fn peek_buffered(&self, num: usize) -> u64 {
+        self.bit_buf & ((1u64 << num) - 1)
+    }
+
+    /// Consumes `num` buffered bits; requires `num <= ` the ensured count.
+    #[inline(always)]
+    pub fn consume_buffered(&mut self, num: usize) {
+        debug_assert!(num <= self.bits_in_buf);
+        self.bit_buf >>= num;
+        self.bits_in_buf -= num;
+    }
+}
+
 impl<'a> BitReader<'a> {
+    /// See [`FastBits`].
+    #[inline(always)]
+    pub fn take_fast(&self) -> FastBits<'a> {
+        FastBits {
+            data: self.data,
+            bit_buf: self.bit_buf,
+            bits_in_buf: self.bits_in_buf,
+        }
+    }
+
+    /// See [`FastBits`].
+    #[inline(always)]
+    pub fn put_fast(&mut self, fast: FastBits<'a>) {
+        // A refill moves exactly as many bits from `data` into the buffer as
+        // it takes, so the bits consumed through `fast` are the bytes it took
+        // from `data` minus the growth of the buffer. Deriving the count here
+        // keeps a running counter out of every `consume_buffered`.
+        let taken = (self.data.len() - fast.data.len()) * 8;
+        let consumed = (taken + self.bits_in_buf) - fast.bits_in_buf;
+        self.total_bits_read = self.total_bits_read.wrapping_add(consumed);
+        self.data = fast.data;
+        self.bit_buf = fast.bit_buf;
+        self.bits_in_buf = fast.bits_in_buf;
+    }
+
     /// Constructs a BitReader for a given range of data.
     pub fn new(data: &[u8]) -> BitReader<'_> {
         BitReader {
@@ -297,6 +372,43 @@ impl<'a> BitReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads through `FastBits` (with refills) must leave the reader in the
+    /// same state, including `total_bits_read`, as the same reads through
+    /// `BitReader`, and return the same bits.
+    #[test]
+    fn fast_bits_matches_bit_reader() {
+        let data: Vec<u8> = (0..200u32)
+            .map(|i| (i.wrapping_mul(0x9d) ^ 0x3c) as u8)
+            .collect();
+        let lens: Vec<usize> = (0..400usize).map(|i| (i * 7 + 3) % 25).collect();
+        let mut slow = BitReader::new(&data);
+        let mut fast_reader = BitReader::new(&data);
+        let mut fast = fast_reader.take_fast();
+        for (i, &n) in lens.iter().enumerate() {
+            if !fast.ensure(n) {
+                // Near the end: hand back to the regular reader, as callers do.
+                fast_reader.put_fast(fast);
+                assert_eq!(fast_reader.read(n).ok(), slow.read(n).ok(), "read {i}");
+                fast = fast_reader.take_fast();
+                continue;
+            }
+            let got = fast.peek_buffered(n);
+            fast.consume_buffered(n);
+            assert_eq!(Some(got), slow.read(n).ok(), "read {i}");
+            if i % 37 == 0 {
+                fast_reader.put_fast(fast);
+                assert_eq!(
+                    fast_reader.total_bits_read(),
+                    slow.total_bits_read(),
+                    "read {i}"
+                );
+                fast = fast_reader.take_fast();
+            }
+        }
+        fast_reader.put_fast(fast);
+        assert_eq!(fast_reader.total_bits_read(), slow.total_bits_read());
+    }
 
     #[test]
     fn test_peek_out_of_range_does_not_panic() {

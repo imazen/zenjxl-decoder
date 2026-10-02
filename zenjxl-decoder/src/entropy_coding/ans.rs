@@ -5,7 +5,7 @@
 //
 // Originally written for jxl-oxide.
 
-use crate::bit_reader::BitReader;
+use crate::bit_reader::{BitReader, FastBits};
 use crate::error::{Error, Result};
 use whereat::at;
 
@@ -389,6 +389,35 @@ impl AnsHistogram {
         symbol
     }
 
+    /// [`Self::read`] on a register-resident cursor; requires at least 16
+    /// buffered bits (`FastBits::ensure(16)`).
+    #[inline(always)]
+    pub fn read_fast(&self, fb: &mut FastBits<'_>, state: &mut u32) -> u32 {
+        let idx = *state & 0xfff;
+        let i = (idx >> self.log_bucket_size) as usize;
+        let pos = idx & self.bucket_mask;
+
+        let bucket = self.buckets[i];
+        let alias_symbol = bucket.alias_symbol as u32;
+        let alias_cutoff = bucket.alias_cutoff as u32;
+        let dist = bucket.dist as u32;
+
+        let map_to_alias = (pos >= alias_cutoff) as u32;
+        let offset = (bucket.alias_offset as u32) * map_to_alias;
+        let dist_xor = (bucket.alias_dist_xor as u32) * map_to_alias;
+
+        let dist = dist ^ dist_xor;
+        let symbol = (alias_symbol * map_to_alias) | (i as u32 * (1 - map_to_alias));
+        let offset = offset + pos;
+
+        let next_state = (*state >> LOG_SUM_PROBS) * dist + offset;
+        let select_appended = (next_state < (1 << 16)) as u32;
+        let appended_state = (next_state << 16) | (fb.peek_buffered(16) as u32);
+        *state = (appended_state * select_appended) | (next_state * (1 - select_appended));
+        fb.consume_buffered((16 * select_appended) as usize);
+        symbol
+    }
+
     // For optimizing fast-lossless case.
     #[inline]
     pub fn single_symbol(&self) -> Option<u32> {
@@ -402,6 +431,12 @@ pub struct AnsCodes {
 }
 
 impl AnsCodes {
+    /// `AnsHistogram::read_fast` for histogram `ctx`.
+    #[inline(always)]
+    pub(super) fn read_fast(&self, fb: &mut FastBits<'_>, state: &mut u32, ctx: usize) -> u32 {
+        self.histograms[ctx].read_fast(fb, state)
+    }
+
     pub fn decode(num: usize, log_alpha_size: usize, br: &mut BitReader) -> Result<AnsCodes> {
         let histograms = (0..num)
             .map(|_| AnsHistogram::decode(br, log_alpha_size))
@@ -434,6 +469,14 @@ impl AnsReader {
     pub fn read(&mut self, codes: &AnsCodes, br: &mut BitReader, ctx: usize) -> u32 {
         let histogram = &codes.histograms[ctx];
         histogram.read(br, &mut self.0)
+    }
+
+    pub(super) fn state(&self) -> u32 {
+        self.0
+    }
+
+    pub(super) fn set_state(&mut self, state: u32) {
+        self.0 = state;
     }
 
     pub fn check_final_state(self) -> Result<()> {

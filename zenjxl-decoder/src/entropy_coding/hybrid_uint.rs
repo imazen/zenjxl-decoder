@@ -3,7 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::bit_reader::BitReader;
+use crate::bit_reader::{BitReader, FastBits};
 use crate::error::Error;
 
 use crate::util::CeilLog2;
@@ -88,6 +88,34 @@ impl HybridUint {
         let hi = (symbol & 3) | 4;
 
         (hi << nbits) | bits
+    }
+
+    /// [`Self::read`] on a register-resident cursor; requires at least 31
+    /// buffered bits.
+    #[inline(always)]
+    pub fn read_fast(&self, symbol: u32, fb: &mut FastBits<'_>, nbits_acc: &mut u32) -> u32 {
+        if symbol < self.split_token {
+            return symbol;
+        }
+        if self.msb_in_token == 0 && self.lsb_in_token == 0 {
+            let nbits_raw = self.split_exponent + symbol - self.split_token;
+            *nbits_acc |= nbits_raw;
+            let nbits = nbits_raw & 31;
+            let bits = fb.peek_buffered(nbits as usize) as u32;
+            fb.consume_buffered(nbits as usize);
+            return (1 << nbits) | bits;
+        }
+        let bits_in_token = self.lsb_in_token + self.msb_in_token;
+        let nbits_raw =
+            self.split_exponent - bits_in_token + ((symbol - self.split_token) >> bits_in_token);
+        *nbits_acc |= nbits_raw;
+        let nbits = nbits_raw & 31;
+        let low = symbol & ((1 << self.lsb_in_token) - 1);
+        let symbol_nolow = symbol >> self.lsb_in_token;
+        let bits = fb.peek_buffered(nbits as usize) as u32;
+        fb.consume_buffered(nbits as usize);
+        let hi = (symbol_nolow & ((1 << self.msb_in_token) - 1)) | (1 << self.msb_in_token);
+        (((hi << nbits) | bits) << self.lsb_in_token) | low
     }
 
     /// Reads a hybrid uint value from the bitstream.

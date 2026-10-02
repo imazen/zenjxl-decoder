@@ -5,6 +5,7 @@
 
 // The simd_function! macro generates dispatch wrappers that inherit all params.
 
+use crate::entropy_coding::decode::unpack_signed;
 use num_traits::Float;
 use whereat::at;
 
@@ -662,9 +663,32 @@ pub fn decode_vardct_group(
                     let nonzero_context = block_context_map
                         .nonzero_context(predicted_nzeros, block_context)
                         + context_offset;
-                    let mut nonzeros =
-                        reader.read_unsigned_inline(&pass_info.histograms, br, nonzero_context)
-                            as usize;
+                    // Entropy state in registers for the block (no LZ77); the
+                    // regular reader near the end of the data.
+                    let histograms = &pass_info.histograms;
+                    let mut cursor = reader.plain_cursor(br);
+                    macro_rules! read_unsigned {
+                        ($ctx:expr) => {{
+                            let ctx = $ctx;
+                            let fast = match cursor.as_mut() {
+                                Some(c) => histograms
+                                    .read_unsigned_plain(c, histograms.map_context_to_cluster(ctx)),
+                                None => None,
+                            };
+                            match fast {
+                                Some(v) => v,
+                                None => {
+                                    if let Some(c) = cursor.take() {
+                                        reader.finish_plain_cursor(c, br);
+                                    }
+                                    let v = reader.read_unsigned_inline(histograms, br, ctx);
+                                    cursor = reader.plain_cursor(br);
+                                    v
+                                }
+                            }
+                        }};
+                    }
+                    let mut nonzeros = read_unsigned!(nonzero_context) as usize;
                     trace!(
                         "block ({},{},{c}) predicted_nzeros: {predicted_nzeros} \
                        nzero_ctx: {nonzero_context} (offset: {context_offset}) \
@@ -691,12 +715,14 @@ pub fn decode_vardct_group(
                         }
                         let ctx =
                             histo_offset + zero_density_context(nonzeros, k, log_num_blocks, prev);
-                        let coeff =
-                            reader.read_signed_inline(&pass_info.histograms, br, ctx) << *shift;
+                        let coeff = unpack_signed(read_unsigned!(ctx)) << *shift;
                         prev = if coeff != 0 { 1 } else { 0 };
                         nonzeros -= prev;
                         let coeff_index = permutation[k] as usize;
                         current_coeffs[coeff_index] += coeff;
+                    }
+                    if let Some(c) = cursor.take() {
+                        reader.finish_plain_cursor(c, br);
                     }
                     if nonzeros != 0 {
                         return Err(at!(Error::EndOfBlockResidualNonZeros(nonzeros)));
