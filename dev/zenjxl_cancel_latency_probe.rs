@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // How fast does zenjxl-decoder's in-library cooperative cancellation actually stop
 // a decode, compared to the upstream "chunk the input" workaround?
 use std::sync::Arc;

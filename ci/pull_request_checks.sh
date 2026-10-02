@@ -20,8 +20,10 @@ test_copyright() {
   for f in $(git ls-files .. | grep -E ${TEXT_FILES}); do
     if [[ "${f#third_party/}" == "$f" ]]; then
       # $f is not in third_party/
+      # Upstream jxl-rs files carry the JPEG XL Project Authors notice;
+      # files written for this fork carry Imazen LLC's.
       if ! head -n 10 "$f" |
-        grep -F 'Copyright (c) the JPEG XL Project Authors.' >/dev/null; then
+        grep -E 'Copyright \(c\) (the JPEG XL Project Authors|Imazen LLC)\.' >/dev/null; then
         echo "$f: Missing Copyright blob near the top of the file." >&2
         ret=1
       fi
