@@ -195,6 +195,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
         std::mem::take(&mut self.recycled_inputs)
     }
 
+    #[cfg(feature = "threads")]
     fn set_recycled_inputs_capacity(&mut self, capacity: usize) {
         self.recycled_inputs_capacity = capacity;
     }
