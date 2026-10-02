@@ -164,3 +164,32 @@ rounds; 11.2 MP numbers from `/usr/bin/time -v`.
 - Content of recycled buffers is always fully overwritten by decode
   (poisoning them did not change output), but the zero-fill is kept so a
   reused buffer is byte-identical to a fresh one, padding included.
+
+## Fast lossy (VarDCT) decoding — 2026-10-02
+
+[MEASURED] 4 CLIC 2025 photos (~2.8 MP), CLI `--speedtest`, MP/s.
+
+- Fastest lossy encoding to decode: VarDCT with libjxl `--faster_decoding=4`
+  (EPF and gaborish off, no 32x32+, simple block contexts, fixed gradient
+  DC tree), about 10% larger than e7 at the same distance. Modular lossy
+  (`-m 1`) is the slowest (~25 MP/s on M4). Dithering is not a cost: u16
+  output (undithered) is no faster than u8.
+- Decoder changes `082c50ed`, `c3d92091`, `24809159`, `04612ee4`.
+  Ryzen 7900X, cjxl d1 fd4: 1 thread 122 -> 134, 12 threads 416 -> 485;
+  cjxl d1 e7: 76 -> 80, 286 -> 304. M4 Pro fd4: ~101 -> ~108 / ~430 -> ~470.
+  Upstream jxl-rs `5122960` on M4: within 1-2% single-threaded, slower at
+  12 threads on JPEG transcodes and jxl-encoder files.
+- Tried without gain (reverted): a register-cursor rewrite of the
+  gradient-lookup DC loop, and hoisting the ANS/prefix match out of the AC
+  loop (<1%).
+- Serial floor: an image up to 2048x2048 has one LF group, decoded on one
+  thread before any HF group (bitstream order: DC stream, then HF
+  metadata). On M4 that is ~1.2 ms DC + ~1.3 ms HF metadata for 2.8 MP,
+  about 9-10 ns per sample along a value -> context -> ANS chain; at 12
+  threads it is ~40% of the frame. HF groups cannot start earlier because
+  the HF metadata follows all of the DC data in the same section.
+- jxl-encoder `--faster-decoding` (`32caff3d`) now follows libjxl v0.12
+  (EPF by tier, kGradientFixedDC DC tree, no 64x32 from tier 2); its tier-4
+  files decode within 1% of cjxl's. libjxl's tier-1 simple block context map
+  and 6-histogram AC cap are not mirrored there and measured as not needed
+  for decode speed.
