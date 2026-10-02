@@ -1343,6 +1343,19 @@ impl Frame {
         buffer_splitter: &mut BufferSplitter,
         force_render: bool,
     ) -> Result<bool> {
+        self.decode_hf_group_inner(group, passes, buffer_splitter, force_render, true)
+    }
+
+    /// `decode_hf_group`; with `read_modular == false` the caller reads the
+    /// group's modular streams itself (see `ModularState::read_stream_pair`).
+    pub(crate) fn decode_hf_group_inner(
+        &mut self,
+        group: usize,
+        passes: &mut [(usize, BitReader)],
+        buffer_splitter: &mut BufferSplitter,
+        force_render: bool,
+        read_modular: bool,
+    ) -> Result<bool> {
         if passes.is_empty() {
             assert!(force_render);
         }
@@ -1446,7 +1459,7 @@ impl Frame {
             }
         }
 
-        {
+        if read_modular {
             let lf_global = self.lf_global.as_ref().unwrap();
             for (pass, br) in passes.iter_mut() {
                 lf_global.modular_global.read_stream(

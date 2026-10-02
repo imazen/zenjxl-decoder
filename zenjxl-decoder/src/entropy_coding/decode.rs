@@ -9,6 +9,7 @@ use whereat::at;
 use crate::bit_reader::{BitReader, FastBits};
 use crate::entropy_coding::ans::*;
 use crate::entropy_coding::context_map::*;
+use crate::entropy_coding::fused_prefix::FusedPrefixLut;
 use crate::entropy_coding::huffman::*;
 use crate::entropy_coding::hybrid_uint::*;
 use crate::error::{Error, Result};
@@ -79,6 +80,9 @@ pub struct Histograms {
     log_alpha_size: usize,
     uint_configs: Vec<HybridUint>,
     codes: Codes,
+    /// Lazily built per-cluster fused lookups; empty unless the codes are
+    /// prefix codes and LZ77 is off.
+    fused: Vec<std::sync::OnceLock<Option<FusedPrefixLut>>>,
 }
 
 #[derive(Debug)]
@@ -697,6 +701,17 @@ impl Histograms {
             Codes::Ans(AnsCodes::decode(num_histograms, log_alpha_size, br)?)
         };
 
+        let fused = if use_prefix_code && !lz77_params.enabled {
+            let mut fused = Vec::new();
+            fused
+                .try_reserve_exact(num_histograms)
+                .map_err(|e| at!(Error::from(e)))?;
+            fused.resize_with(num_histograms, std::sync::OnceLock::new);
+            fused
+        } else {
+            Vec::new()
+        };
+
         Ok(Histograms {
             lz77_params,
             lz77_length_uint,
@@ -705,6 +720,7 @@ impl Histograms {
             log_alpha_size,
             uint_configs,
             codes,
+            fused,
         })
     }
 
@@ -737,6 +753,19 @@ impl Histograms {
             self.uint_config(cluster)
                 .read_fast(token, &mut cursor.fb, &mut cursor.nbits_acc),
         )
+    }
+
+    /// Fused prefix lookup for `cluster`, built on first use. `None` for ANS
+    /// codes, with LZ77, or if the table could not be allocated. Reads through
+    /// it are only valid while the `SymbolReader` has no LZ77/RLE state.
+    pub fn fused_prefix_lut(&self, cluster: usize) -> Option<&FusedPrefixLut> {
+        let Codes::Huffman(hc) = &self.codes else {
+            return None;
+        };
+        self.fused
+            .get(cluster)?
+            .get_or_init(|| FusedPrefixLut::build(hc, cluster, self.uint_config(cluster)))
+            .as_ref()
     }
 
     #[allow(dead_code)] // Used in debug!() tracing calls
@@ -788,6 +817,7 @@ impl Histograms {
             context_map: vec![0u8; num_contexts],
             lz_dist_cluster: 0,
             codes,
+            fused: vec![std::sync::OnceLock::new()],
         }
     }
 
@@ -810,6 +840,7 @@ impl Histograms {
             context_map,
             lz_dist_cluster,
             codes,
+            fused: Vec::new(),
         }
     }
 }

@@ -12,6 +12,7 @@ use crate::{
         IMAGE_OFFSET, IMAGE_PADDING, ModularChannel, Tree,
         decode::{
             common::make_pixel,
+            fused_gradient::{self, FusedSide},
             specialized_trees::{TreeSpecialCase, specialize_tree},
         },
         predict::{PredictionData, WeightedPredictorState},
@@ -167,6 +168,36 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     Ok(())
 }
 
+/// If channel `chan` is decoded by the fused single-gradient path, returns
+/// its clustered context: large enough for the specialised paths, one
+/// Gradient leaf without a constant value, prefix codes, and no LZ77 state.
+pub(super) fn fused_gradient_ctx(
+    buffers: &[&mut ModularChannel],
+    chan: usize,
+    stream_id: usize,
+    header: &GroupHeader,
+    tree: &Tree,
+    reader: &SymbolReader,
+) -> Result<Option<usize>> {
+    let size = buffers[chan].data.size();
+    if size.0 <= IMAGE_PADDING.0
+        || size.1 <= IMAGE_PADDING.1
+        || size.0 * size.1 <= SMALL_CHANNEL_THRESHOLD
+        || !reader.is_plain()
+    {
+        return Ok(None);
+    }
+    let TreeSpecialCase::SingleGradientOnly(t) =
+        specialize_tree(tree, chan, stream_id, size.0, header)?
+    else {
+        return Ok(None);
+    };
+    if t.single_value.is_some() || tree.histograms.fused_prefix_lut(t.clustered_ctx).is_none() {
+        return Ok(None);
+    }
+    Ok(Some(t.clustered_ctx))
+}
+
 #[instrument(level = "debug", skip(buffers, reader, tree))]
 pub(super) fn decode_modular_channel(
     buffers: &mut [&mut ModularChannel],
@@ -239,6 +270,14 @@ fn decode_modular_channel_inner(
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::SingleGradientOnly(t) => {
+            if t.single_value.is_none()
+                && reader.is_plain()
+                && let Some(lut) = tree.histograms.fused_prefix_lut(t.clustered_ctx)
+            {
+                let side = FusedSide::new(lut, reader, br, &tree.histograms, t.clustered_ctx);
+                fused_gradient::decode_one(buffers[chan], side);
+                return Ok(());
+            }
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::General(t) => {
