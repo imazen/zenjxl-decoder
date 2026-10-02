@@ -167,6 +167,60 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     Ok(())
 }
 
+/// Two-pass decoder for a channel whose pruned tree is one `Top` leaf
+/// (multiplier 1, offset 0). With one context the entropy stream does not
+/// depend on pixel values, so each row's residuals are read into `res` first
+/// and reconstruction is a separate, vectorisable `row_top + res` pass.
+///
+/// Edge rules follow `PredictionData::get_rows`: on row 0, `top` is `left`
+/// (0 at x = 0); at x = 0 on later rows it is `row_top[0]`.
+///
+/// Measured 2026-10-01 (M4 Pro, 4 CLIC photos, 1 thread): the same two-pass
+/// form *slows* single-gradient decode (67.8 -> 51.8 MP/s, prefix codes),
+/// because splitting the passes removes the overlap between the serial
+/// gradient chain and entropy decoding. Gradient stays on the fused loop.
+#[inline(never)]
+fn decode_single_top_two_pass(
+    buffers: &mut [&mut ModularChannel],
+    chan: usize,
+    ctx: usize,
+    single_value: Option<i32>,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+    histograms: &Histograms,
+) -> Result<()> {
+    let size = buffers[chan].data.size();
+    let mut res: Vec<i32> = Vec::new();
+    res.try_reserve_exact(size.0)
+        .map_err(|e| at!(crate::error::Error::from(e)))?;
+    res.resize(size.0, single_value.unwrap_or(0));
+
+    const { assert!(IMAGE_OFFSET.1 == 2) };
+
+    for y in 0..size.1 {
+        if single_value.is_none() {
+            for r in res.iter_mut() {
+                *r = reader.read_signed_clustered_inline(histograms, br, ctx);
+            }
+        }
+        let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        if y == 0 {
+            let mut last = 0i32;
+            for (o, &r) in row.iter_mut().zip(res.iter()) {
+                last = r.wrapping_add(last);
+                *o = last;
+            }
+        } else {
+            for ((o, &r), &t) in row.iter_mut().zip(res.iter()).zip(row_top.iter()) {
+                *o = r.wrapping_add(t);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[instrument(level = "debug", skip(buffers, reader, tree))]
 pub(super) fn decode_modular_channel(
     buffers: &mut [&mut ModularChannel],
@@ -236,6 +290,15 @@ fn decode_modular_channel_inner(
         TreeSpecialCase::SingleGradientOnly(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
+        TreeSpecialCase::SingleTopOnly(t) => decode_single_top_two_pass(
+            buffers,
+            chan,
+            t.clustered_ctx,
+            t.single_value,
+            reader,
+            br,
+            &tree.histograms,
+        ),
         TreeSpecialCase::General(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
