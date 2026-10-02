@@ -139,3 +139,28 @@ makes every channel one Gradient MA leaf with prefix codes and no LZ77.
   is not on `main`.
 
 Benchmark files and logs are under `~/tmp/fastll/`.
+
+## Modular buffer recycling and parallel transforms — 2026-10-02
+
+[MEASURED] Ryzen 9 7900X, Linux, CLI `--speedtest` u8, 3 interleaved
+rounds; 11.2 MP numbers from `/usr/bin/time -v`.
+
+- `97f08d29`: modular group buffers come from a `RecyclePool` (zero-filled,
+  exact geometry) fed by the render pipeline's `take_recycled_inputs`.
+  Sequential modular frames without noise or border stages output each
+  two-group chunk right after decoding (`eager_modular` in
+  `frame/render.rs`); parallel frames with > 16 groups per thread use
+  batches of 8 groups per thread. 1 thread on 48-group frames: 60 to
+  83 MP/s; sys time 0.27 to 0.04 s; 11.2 MP peak RSS 228 to 94 MiB
+  (1 thread), 230 to 128 MiB (4 threads). Multi-thread speed is
+  unchanged: glibc's per-thread arenas already kept those pages mapped.
+- `e23e8697`: a transform layer's `do_run` calls run on rayon when their
+  inputs are disjoint (`FullModularImage::run_layer`). The parallel
+  path's Phase 3a-store was 1.8 of 5.5 ms per 48-group frame at 12 threads.
+- Combined with `explore/fused-prefix-lut` (fast-decode files): 1 thread
+  166.5, 4 threads 448.5, 12 threads 738.3 MP/s (main before both:
+  60.1 / 245.0 / 376.8). 12-thread scaling is still ~4.4x the 1-thread rate;
+  the remaining serial work is per-frame setup and Phase 3a output passing.
+- Content of recycled buffers is always fully overwritten by decode
+  (poisoning them did not change output), but the zero-fill is kept so a
+  reused buffer is byte-identical to a fresh one, padding included.
