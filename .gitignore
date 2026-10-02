@@ -13,6 +13,7 @@ jxl/resources/test/portrait_4k_q90.jxl
 
 # Rust build artifacts
 target/
+target-cmd/
 
 # Public-API snapshot runner (workspace-excluded package; lockfile committed)
 apidoc/target/
