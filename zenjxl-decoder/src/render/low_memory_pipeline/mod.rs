@@ -177,6 +177,10 @@ pub struct LowMemoryRenderPipeline {
     // could be reused to store group data for that channel.
     // Indexed by [3*channel] = center, [3*channel+1] = topbottom, [3*channel+2] = leftright.
     scratch_channel_buffers: Vec<Vec<OwnedRawImage>>,
+    /// Group inputs released past `group_scratch_buffers_limit`, drained by
+    /// `take_recycled_inputs`; at most `recycled_inputs_capacity` are kept.
+    recycled_inputs: Vec<OwnedRawImage>,
+    recycled_inputs_capacity: usize,
     // When true, render_with_new_group skips border recycling (only recycles center data).
     // Used during the final re-render pass to keep all groups' is_ready=true so that
     // sequential processing produces the same readiness masks as the parallel path.
@@ -187,6 +191,14 @@ pub struct LowMemoryRenderPipeline {
 }
 
 impl RenderPipeline for LowMemoryRenderPipeline {
+    fn take_recycled_inputs(&mut self) -> Vec<OwnedRawImage> {
+        std::mem::take(&mut self.recycled_inputs)
+    }
+
+    fn set_recycled_inputs_capacity(&mut self, capacity: usize) {
+        self.recycled_inputs_capacity = capacity;
+    }
+
     type Buffer = RowBuffer;
 
     fn new_from_shared(shared: RenderPipelineShared<Self::Buffer>) -> Result<Self> {
@@ -420,6 +432,9 @@ impl RenderPipeline for LowMemoryRenderPipeline {
             opaque_alpha_buffers,
             sorted_buffer_indices,
             scratch_channel_buffers: (0..nc * 3).map(|_| vec![]).collect(),
+            recycled_inputs: vec![],
+            // A few groups' channels; raised for parallel batches.
+            recycled_inputs_capacity: 16,
             skip_border_recycling: false,
             store_only: false,
         })

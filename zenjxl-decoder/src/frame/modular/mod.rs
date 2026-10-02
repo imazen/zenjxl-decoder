@@ -9,7 +9,7 @@ use std::{
     fmt::Debug,
     ops::Range,
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -30,7 +30,7 @@ use crate::{
         frame_header::FrameHeader,
         modular::{GroupHeader, TransformId},
     },
-    image::{Image, ImageRectMut, Rect},
+    image::{Image, ImageRectMut, OwnedRawImage, Rect},
     util::{AtomicRefCell, CeilLog2, MemoryTracker, SmallVec, tracing_wrappers::*},
 };
 
@@ -278,6 +278,50 @@ impl ModularBuffer {
     }
 }
 
+/// Group buffers handed back by the render pipeline, reused by
+/// `with_buffers` instead of allocating (upstream #812). Bounded so that it
+/// never holds more than the groups in flight.
+pub(crate) struct RecyclePool {
+    images: Mutex<Vec<OwnedRawImage>>,
+    capacity: AtomicUsize,
+}
+
+impl Default for RecyclePool {
+    fn default() -> Self {
+        Self {
+            images: Mutex::new(Vec::new()),
+            // The channels of one sequential chunk (two groups) plus
+            // transform outputs; raised for parallel batches.
+            capacity: AtomicUsize::new(16),
+        }
+    }
+}
+
+impl RecyclePool {
+    pub(crate) fn take(&self, fits: impl Fn(&OwnedRawImage) -> bool) -> Option<OwnedRawImage> {
+        let mut images = self.images.lock().unwrap();
+        let i = images.iter().position(fits)?;
+        Some(images.swap_remove(i))
+    }
+
+    pub(crate) fn give(&self, recycled: Vec<OwnedRawImage>) {
+        let capacity = self.capacity.load(Ordering::Relaxed);
+        let mut images = self.images.lock().unwrap();
+        for image in recycled {
+            if images.len() >= capacity {
+                break;
+            }
+            images.push(image);
+        }
+    }
+}
+
+impl std::fmt::Debug for RecyclePool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RecyclePool({})", self.images.lock().unwrap().len())
+    }
+}
+
 #[derive(Debug)]
 struct ModularBufferInfo {
     info: ChannelInfo,
@@ -288,6 +332,8 @@ struct ModularBufferInfo {
     grid_kind: ModularGridKind,
     grid_shape: (usize, usize),
     buffer_grid: Vec<ModularBuffer>,
+    /// Shared recycle pool of the owning `FullModularImage`.
+    pool: Option<Arc<RecyclePool>>,
 }
 
 impl ModularBufferInfo {
@@ -389,6 +435,8 @@ pub struct FullModularImage {
     num_groups: (usize, usize),
     /// Channel bound for group-local transforms (from the conformance level).
     max_channels: usize,
+    /// Pool shared by every entry of `buffer_info`; see [`RecyclePool`].
+    recycle_pool: Option<Arc<RecyclePool>>,
 }
 
 impl FullModularImage {
@@ -481,6 +529,7 @@ impl FullModularImage {
                 log_group_dim: frame_header.log_group_dim(),
                 num_groups: frame_header.size_groups(),
                 max_channels: limits.max_channels,
+                recycle_pool: None,
             });
         }
 
@@ -655,6 +704,11 @@ impl FullModularImage {
             ready_buffers.insert((*b, 0));
         }
 
+        let recycle_pool = Arc::new(RecyclePool::default());
+        for info in buffer_info.iter_mut() {
+            info.pool = Some(recycle_pool.clone());
+        }
+
         Ok(FullModularImage {
             buffer_info,
             transform_steps,
@@ -670,7 +724,24 @@ impl FullModularImage {
             log_group_dim: frame_header.log_group_dim(),
             num_groups: frame_header.size_groups(),
             max_channels: limits.max_channels,
+            recycle_pool: Some(recycle_pool),
         })
+    }
+
+    /// Upper bound on buffers held by the recycle pool.
+    #[cfg(feature = "threads")]
+    pub fn set_recycle_capacity(&self, capacity: usize) {
+        if let Some(pool) = &self.recycle_pool {
+            pool.capacity.store(capacity, Ordering::Relaxed);
+        }
+    }
+
+    /// Hands group buffers released by the render pipeline to the recycle
+    /// pool, for reuse by later groups of this frame.
+    pub fn recycle_buffers(&self, recycled: Vec<OwnedRawImage>) {
+        if let Some(pool) = &self.recycle_pool {
+            pool.give(recycled);
+        }
     }
 
     pub fn mark_group_to_be_read(&self, section_id: usize, group: usize) {
