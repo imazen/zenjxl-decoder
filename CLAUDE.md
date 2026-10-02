@@ -88,3 +88,32 @@ deadline repair (`440cc002`) and 32-bit fixture serialization (`420d3885`).
 Remote `main` was verified at that commit after the run. The earlier preserved
 `940d2c51` work remains in its ancestry. CI's configured corpus policy remains
 in effect; a green job is not a claim that every external corpus was present.
+
+## Fast-decode lossless exploration — 2026-10-01
+
+[MEASURED] M4 Pro, 4 CLIC 2025 photos (~2.8 MP each), CLI `--speedtest`
+u8 `--no-cms`; a smoke comparison, not zenbench. Files come from jxl-encoder
+`examples/fast_decode_lossless.rs` (`6e7bb020`): effort 4, tree learning,
+LZ77, palette and patches off, so every channel prunes to one MA leaf.
+
+- Entropy decoding, not prediction, bounds single-thread lossless decode.
+  `main` reaches 68 MP/s on prefix-coded single-gradient files and 62 MP/s
+  on ANS; a zero predictor is no faster.
+- `explore/fused-prefix-lut` (`0441e81b`): a per-cluster 12-bit table
+  fuses the prefix code, hybrid-uint extra bits and signed unpack (99.4%
+  hit rate). It yields 131.9 MP/s at 1 thread (~396 MB/s RGB8), 429 at 4,
+  and 777 at 12, against 68/238/485 on `main`. The gain depends on the
+  register-resident `FastBits` cursor. With `&mut BitReader` in the hot
+  loop, the cursor is stored and reloaded per sample, and the same table
+  gives only +10%.
+- `explore/two-pass-top` (`92b9b69b`) and `explore/fused-two-pass-top`
+  (`af2dfd2d`) are negative results. Two-pass gradient is slower (68 to
+  52 MP/s), because it removes the overlap with entropy decoding. Fused
+  Top reaches 126 MP/s, below fused gradient, with ~15% larger files.
+- Prefix codes cost ~3% size against ANS (10.01 vs 9.73 MB for the four
+  images; PNG 12.08 MB).
+- `sansio` (`5fc1a3e`, origin) holds unreviewed prior-session work: a new
+  public `JxlIncrementalDecoder` and default zencodec/zenpixels deps. It
+  is not on `main`.
+
+Benchmark files and logs are under `~/tmp/fastll/`.
