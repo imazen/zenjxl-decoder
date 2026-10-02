@@ -6,15 +6,13 @@
 use super::common::precompute_references;
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::{
-        decode::{Histograms, SymbolReader},
-        fused_prefix::FusedPrefixLut,
-    },
+    entropy_coding::decode::{Histograms, SymbolReader},
     error::Result,
     frame::modular::{
         IMAGE_OFFSET, IMAGE_PADDING, ModularChannel, Tree,
         decode::{
             common::make_pixel,
+            fused_gradient::{self, FusedSide},
             specialized_trees::{TreeSpecialCase, specialize_tree},
         },
         predict::{PredictionData, WeightedPredictorState},
@@ -170,116 +168,34 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     Ok(())
 }
 
-/// Single-gradient-leaf channel read through the cluster's fused prefix
-/// lookup (`FusedPrefixLut`): one peek, load and consume per residual in the
-/// common case, the regular reader otherwise. Same reconstruction as
-/// `SingleGradientOnly::decode_one`; edge rules follow
-/// `PredictionData::get_rows` (row 0 predicts `left`, x = 0 predicts
-/// `row_top[0]`).
-#[inline(never)]
-fn decode_single_gradient_fused(
-    buffers: &mut [&mut ModularChannel],
+/// If channel `chan` is decoded by the fused single-gradient path, returns
+/// its clustered context: large enough for the specialised paths, one
+/// Gradient leaf without a constant value, prefix codes, and no LZ77 state.
+pub(super) fn fused_gradient_ctx(
+    buffers: &[&mut ModularChannel],
     chan: usize,
-    ctx: usize,
-    lut: &FusedPrefixLut,
-    reader: &mut SymbolReader,
-    br: &mut BitReader,
-    histograms: &Histograms,
-) -> Result<()> {
-    // The cursor lives in a `FastBits` copy whose address never escapes, so
-    // it stays in registers; it is synced to `br` only around the cold
-    // fallback. Passing `&mut BitReader` through the hot path instead forced a
-    // store and reload of the cursor on every sample (measured 2026-10-01).
-    #[cold]
-    #[inline(never)]
-    fn read_slow(
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
-        histograms: &Histograms,
-        ctx: usize,
-    ) -> i32 {
-        reader.read_signed_clustered_inline(histograms, br, ctx)
-    }
-
+    stream_id: usize,
+    header: &GroupHeader,
+    tree: &Tree,
+    reader: &SymbolReader,
+) -> Result<Option<usize>> {
     let size = buffers[chan].data.size();
-    let mut fb = br.take_fast();
-    // One residual: fused lookup, else the regular reader.
-    macro_rules! read_one {
-        () => {
-            match lut.peek(&mut fb) {
-                Some(e) => {
-                    fb.consume_buffered(e.len1());
-                    e.first()
-                }
-                None => {
-                    br.put_fast(fb);
-                    let v = read_slow(reader, br, histograms, ctx);
-                    fb = br.take_fast();
-                    v
-                }
-            }
-        };
+    if size.0 <= IMAGE_PADDING.0
+        || size.1 <= IMAGE_PADDING.1
+        || size.0 * size.1 <= SMALL_CHANNEL_THRESHOLD
+        || !reader.is_plain()
+    {
+        return Ok(None);
     }
-
-    const { assert!(IMAGE_OFFSET.1 == 2) };
-
-    let n = size.0;
-    for y in 0..size.1 {
-        let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
-        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + n];
-        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + n];
-        if y == 0 {
-            let mut last = 0i32;
-            for o in row.iter_mut() {
-                last = read_one!().wrapping_add(last);
-                *o = last;
-            }
-            continue;
-        }
-        let mut last = read_one!().wrapping_add(row_top[0]);
-        row[0] = last;
-        // Gradient step for column `x` (>= 1) from residual `r`.
-        macro_rules! step {
-            ($x:expr, $r:expr) => {{
-                let x = $x;
-                let top = row_top[x];
-                let topleft = row_top[x - 1];
-                let min = last.min(top);
-                let max = last.max(top);
-                let grad = last.wrapping_add(top).wrapping_sub(topleft);
-                let grad_clamp_max = if topleft < min { max } else { grad };
-                let pred = if topleft > max { min } else { grad_clamp_max };
-                last = ($r).wrapping_add(pred);
-                row[x] = last;
-            }};
-        }
-        let mut x = 1;
-        while x < n {
-            match lut.peek(&mut fb) {
-                // Two residuals per lookup when both fit and the row has room.
-                Some(e) if e.has_two() && x + 1 < n => {
-                    fb.consume_buffered(e.total_len());
-                    step!(x, e.first());
-                    step!(x + 1, e.second());
-                    x += 2;
-                }
-                Some(e) => {
-                    fb.consume_buffered(e.len1());
-                    step!(x, e.first());
-                    x += 1;
-                }
-                None => {
-                    br.put_fast(fb);
-                    let v = read_slow(reader, br, histograms, ctx);
-                    fb = br.take_fast();
-                    step!(x, v);
-                    x += 1;
-                }
-            }
-        }
+    let TreeSpecialCase::SingleGradientOnly(t) =
+        specialize_tree(tree, chan, stream_id, size.0, header)?
+    else {
+        return Ok(None);
+    };
+    if t.single_value.is_some() || tree.histograms.fused_prefix_lut(t.clustered_ctx).is_none() {
+        return Ok(None);
     }
-    br.put_fast(fb);
-    Ok(())
+    Ok(Some(t.clustered_ctx))
 }
 
 #[instrument(level = "debug", skip(buffers, reader, tree))]
@@ -353,16 +269,9 @@ fn decode_modular_channel_inner(
                 && reader.is_plain()
                 && let Some(lut) = tree.histograms.fused_prefix_lut(t.clustered_ctx)
             {
-                let ctx = t.clustered_ctx;
-                return decode_single_gradient_fused(
-                    buffers,
-                    chan,
-                    ctx,
-                    lut,
-                    reader,
-                    br,
-                    &tree.histograms,
-                );
+                let side = FusedSide::new(lut, reader, br, &tree.histograms, t.clustered_ctx);
+                fused_gradient::decode_one(buffers[chan], side);
+                return Ok(());
             }
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }

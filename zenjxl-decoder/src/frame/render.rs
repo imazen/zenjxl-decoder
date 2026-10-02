@@ -314,9 +314,58 @@ impl Frame {
                 }
             }
         } else {
-            for (group, mut passes) in groups {
+            // Modular groups that carry the same single pass are read two
+            // at a time, so that channels on the fused single-gradient path
+            // decode both bitstreams interleaved (one thread, two
+            // independent dependency chains). The result is the same as
+            // reading them one after the other.
+            let pairable = self.header.encoding == Encoding::Modular && !self.header.has_noise();
+            let mut groups = groups.into_iter().peekable();
+            while let Some((group, mut passes)) = groups.next() {
                 // Check for cancellation between groups
                 self.decoder_state.check_cancelled()?;
+                let pair_pass = match (&passes[..], groups.peek()) {
+                    ([(pa, _)], Some((gb, pb))) if pairable && *gb != group => match &pb[..] {
+                        [(p, _)] if p == pa => Some(*pa),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(pass) = pair_pass {
+                    let (group_b, mut passes_b) = groups.next().unwrap();
+                    let rendered_a = self.decode_hf_group_inner(
+                        group,
+                        &mut passes,
+                        &mut buffer_splitter,
+                        do_flush,
+                        false,
+                    )?;
+                    let rendered_b = self.decode_hf_group_inner(
+                        group_b,
+                        &mut passes_b,
+                        &mut buffer_splitter,
+                        do_flush,
+                        false,
+                    )?;
+                    let lf_global = self.lf_global.as_ref().unwrap();
+                    lf_global.modular_global.read_stream_pair(
+                        pass,
+                        group,
+                        &mut passes[0].1,
+                        group_b,
+                        &mut passes_b[0].1,
+                        &self.header,
+                        &lf_global.tree,
+                        &self.decoder_state.memory_tracker,
+                    )?;
+                    for (g, rendered) in [(group, rendered_a), (group_b, rendered_b)] {
+                        if rendered {
+                            self.changed_since_last_flush
+                                .insert((g, RenderUnit::VarDCT));
+                        }
+                    }
+                    continue;
+                }
                 if self.decode_hf_group(group, &mut passes, &mut buffer_splitter, do_flush)? {
                     self.changed_since_last_flush
                         .insert((group, RenderUnit::VarDCT));
@@ -715,78 +764,121 @@ impl Frame {
                     .quant_biases;
                 let tracker = &self.decoder_state.memory_tracker;
 
-                work[batch_start..batch_end]
-                    .par_iter_mut()
-                    .try_for_each(|gw| -> Result<()> {
-                        stop.check().map_err(Error::from)?;
-                        // Allocate pixel buffers on-demand from the shared pool.
-                        // This runs in PARALLEL instead of the old sequential Phase 1
-                        // allocation, distributing page fault cost across threads.
-                        if is_vardct && gw.do_render {
-                            // Pop under the lock, allocate outside it: a `match`
-                            // on `pool.lock().pop()` would keep the guard alive
-                            // for the whole match, serialising the (large,
-                            // page-faulting) allocations of every thread.
-                            let pooled = pixel_pool.lock().unwrap().pop();
-                            gw.pixels = Some(match pooled {
-                                Some(bufs) => bufs,
-                                None => [
-                                    Image::<f32>::new_uninit(pixel_sizes[0])?,
-                                    Image::<f32>::new_uninit(pixel_sizes[1])?,
-                                    Image::<f32>::new_uninit(pixel_sizes[2])?,
-                                ],
-                            });
-                        }
-                        if is_vardct && !gw.passes.is_empty() {
-                            let hf_global = hf_global.unwrap();
-                            let hf_meta = hf_meta.unwrap();
-                            let pooled = buffer_pool.lock().unwrap().pop();
-                            let mut buffers = match pooled {
-                                Some(b) => b,
-                                None => VarDctBuffers::new()?,
-                            };
-
-                            if !(gw.pixels.is_none() && gw.do_render) {
-                                // Each parallel task uses a distinct gw.group —
-                                // each group owns its own Vec<i32>, no shared state.
-                                let hf_coeffs = gw.hf_coeffs.as_mut().map(|[a, b, c]| {
-                                    [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()]
-                                });
-                                decode_vardct_group(
-                                    gw.group,
-                                    &mut gw.passes,
+                // Modular-only frames: read two groups per task, as the
+                // sequential path does, when there are still at least two
+                // such tasks per thread. Same result as one task per group.
+                let batch_len = batch_end - batch_start;
+                if !is_vardct && !header.has_noise() && batch_len >= 4 * num_threads {
+                    work[batch_start..batch_end]
+                        .par_chunks_mut(2)
+                        .try_for_each(|chunk| -> Result<()> {
+                            stop.check().map_err(Error::from)?;
+                            if let [a, b] = chunk
+                                && let ([(pa, br_a)], [(pb, br_b)]) =
+                                    (&mut a.passes[..], &mut b.passes[..])
+                                && pa == pb
+                            {
+                                return lf_global.modular_global.read_stream_pair(
+                                    *pa,
+                                    a.group,
+                                    br_a,
+                                    b.group,
+                                    br_b,
                                     header,
-                                    lf_global,
-                                    hf_global,
-                                    hf_meta,
-                                    lf_image,
-                                    quant_lf,
-                                    quant_biases,
-                                    hf_coeffs,
-                                    &mut gw.pixels,
-                                    &mut buffers,
+                                    &lf_global.tree,
                                     tracker,
-                                    #[cfg(feature = "jpeg")]
-                                    None,
+                                );
+                            }
+                            for gw in chunk.iter_mut() {
+                                for (pass, br) in gw.passes.iter_mut() {
+                                    lf_global.modular_global.read_stream(
+                                        ModularStreamId::ModularHF {
+                                            group: gw.group,
+                                            pass: *pass,
+                                        },
+                                        header,
+                                        &lf_global.tree,
+                                        br,
+                                        tracker,
+                                    )?;
+                                }
+                            }
+                            Ok(())
+                        })?;
+                } else {
+                    work[batch_start..batch_end].par_iter_mut().try_for_each(
+                        |gw| -> Result<()> {
+                            stop.check().map_err(Error::from)?;
+                            // Allocate pixel buffers on-demand from the shared pool.
+                            // This runs in PARALLEL instead of the old sequential Phase 1
+                            // allocation, distributing page fault cost across threads.
+                            if is_vardct && gw.do_render {
+                                // Pop under the lock, allocate outside it: a `match`
+                                // on `pool.lock().pop()` would keep the guard alive
+                                // for the whole match, serialising the (large,
+                                // page-faulting) allocations of every thread.
+                                let pooled = pixel_pool.lock().unwrap().pop();
+                                gw.pixels = Some(match pooled {
+                                    Some(bufs) => bufs,
+                                    None => [
+                                        Image::<f32>::new_uninit(pixel_sizes[0])?,
+                                        Image::<f32>::new_uninit(pixel_sizes[1])?,
+                                        Image::<f32>::new_uninit(pixel_sizes[2])?,
+                                    ],
+                                });
+                            }
+                            if is_vardct && !gw.passes.is_empty() {
+                                let hf_global = hf_global.unwrap();
+                                let hf_meta = hf_meta.unwrap();
+                                let pooled = buffer_pool.lock().unwrap().pop();
+                                let mut buffers = match pooled {
+                                    Some(b) => b,
+                                    None => VarDctBuffers::new()?,
+                                };
+
+                                if !(gw.pixels.is_none() && gw.do_render) {
+                                    // Each parallel task uses a distinct gw.group —
+                                    // each group owns its own Vec<i32>, no shared state.
+                                    let hf_coeffs = gw.hf_coeffs.as_mut().map(|[a, b, c]| {
+                                        [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()]
+                                    });
+                                    decode_vardct_group(
+                                        gw.group,
+                                        &mut gw.passes,
+                                        header,
+                                        lf_global,
+                                        hf_global,
+                                        hf_meta,
+                                        lf_image,
+                                        quant_lf,
+                                        quant_biases,
+                                        hf_coeffs,
+                                        &mut gw.pixels,
+                                        &mut buffers,
+                                        tracker,
+                                        #[cfg(feature = "jpeg")]
+                                        None,
+                                    )?;
+                                }
+                                buffer_pool.lock().unwrap().push(buffers);
+                            }
+
+                            for (pass, br) in gw.passes.iter_mut() {
+                                lf_global.modular_global.read_stream(
+                                    ModularStreamId::ModularHF {
+                                        group: gw.group,
+                                        pass: *pass,
+                                    },
+                                    header,
+                                    &lf_global.tree,
+                                    br,
+                                    tracker,
                                 )?;
                             }
-                            buffer_pool.lock().unwrap().push(buffers);
-                        }
-
-                        for (pass, br) in gw.passes.iter_mut() {
-                            lf_global.modular_global.read_stream(
-                                ModularStreamId::ModularHF {
-                                    group: gw.group,
-                                    pass: *pass,
-                                },
-                                header,
-                                &lf_global.tree,
-                                br,
-                                tracker,
-                            )?;
-                        }
-                        Ok(())
-                    })?;
+                            Ok(())
+                        },
+                    )?;
+                }
             }
             phase2_dur += phase2_start.elapsed();
 

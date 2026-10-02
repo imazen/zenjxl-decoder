@@ -737,6 +737,54 @@ impl FullModularImage {
         Ok(())
     }
 
+    /// Reads the same pass of two HF groups with the same result as two
+    /// `read_stream` calls; see `decode_modular_subbitstream_pair`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn read_stream_pair(
+        &self,
+        pass: usize,
+        group_a: usize,
+        br_a: &mut BitReader,
+        group_b: usize,
+        br_b: &mut BitReader,
+        frame_header: &FrameHeader,
+        global_tree: &Option<Tree>,
+        memory_tracker: &MemoryTracker,
+    ) -> Result<()> {
+        if self.buffer_info.is_empty() {
+            info!("No modular channels to decode");
+            return Ok(());
+        }
+        debug_assert_ne!(group_a, group_b);
+        let section_id = 2 + pass;
+        let indices = &self.section_buffer_indices[section_id];
+        let id_a = ModularStreamId::ModularHF {
+            pass,
+            group: group_a,
+        }
+        .get_id(frame_header);
+        let id_b = ModularStreamId::ModularHF {
+            pass,
+            group: group_b,
+        }
+        .get_id(frame_header);
+        with_buffers(&self.buffer_info, indices, group_a, |bufs_a| {
+            with_buffers(&self.buffer_info, indices, group_b, |bufs_b| {
+                decode::decode_modular_subbitstream_pair(
+                    bufs_a,
+                    id_a,
+                    br_a,
+                    bufs_b,
+                    id_b,
+                    br_b,
+                    global_tree,
+                    memory_tracker,
+                    self.max_channels,
+                )
+            })
+        })
+    }
+
     fn maybe_output(
         &self,
         buf: usize,

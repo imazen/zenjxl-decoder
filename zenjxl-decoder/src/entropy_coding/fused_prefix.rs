@@ -21,7 +21,7 @@ use crate::entropy_coding::huffman::HuffmanCodes;
 use crate::entropy_coding::hybrid_uint::HybridUint;
 
 pub const FUSED_BITS: usize = 12;
-const FUSED_SIZE: usize = 1 << FUSED_BITS;
+pub const FUSED_SIZE: usize = 1 << FUSED_BITS;
 
 /// One table entry, packed into a `u64`:
 ///
@@ -129,16 +129,22 @@ impl FusedPrefixLut {
         })
     }
 
-    /// Entry for the next window, or `None` (nothing consumed) when the
-    /// regular reader must be used: the code does not fit, or the data is
-    /// too close to its end for the 8-byte refill.
-    #[inline(always)]
-    pub fn peek(&self, fb: &mut FastBits<'_>) -> Option<FusedEntry> {
-        if !fb.ensure(FUSED_BITS) {
-            return None;
-        }
-        let window = fb.peek_buffered(FUSED_BITS) as usize;
-        let entry = self.entries[window & (FUSED_SIZE - 1)];
-        (entry.total_len() != 0).then_some(entry)
+    /// The table itself, for hot loops that keep the reference in a
+    /// register rather than reloading it through `self` on every lookup.
+    pub fn table(&self) -> &[FusedEntry; FUSED_SIZE] {
+        &self.entries
     }
+}
+
+/// Entry for the next window of a table from [`FusedPrefixLut::table`], or
+/// `None` (nothing consumed) when the regular reader must be used: the code
+/// does not fit, or the data is too close to its end for the 8-byte refill.
+#[inline(always)]
+pub fn peek_table(table: &[FusedEntry; FUSED_SIZE], fb: &mut FastBits<'_>) -> Option<FusedEntry> {
+    if !fb.ensure(FUSED_BITS) {
+        return None;
+    }
+    let window = fb.peek_buffered(FUSED_BITS) as usize;
+    let entry = table[window & (FUSED_SIZE - 1)];
+    (entry.total_len() != 0).then_some(entry)
 }
