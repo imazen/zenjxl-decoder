@@ -6,7 +6,10 @@
 use super::common::precompute_references;
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, SymbolReader},
+    entropy_coding::{
+        decode::{Histograms, SymbolReader},
+        fused_prefix::FusedPrefixLut,
+    },
     error::Result,
     frame::modular::{
         IMAGE_OFFSET, IMAGE_PADDING, ModularChannel, Tree,
@@ -167,6 +170,85 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     Ok(())
 }
 
+/// Single-gradient-leaf channel read through the cluster's fused prefix
+/// lookup (`FusedPrefixLut`): one peek, load and consume per residual in the
+/// common case, the regular reader otherwise. Same reconstruction as
+/// `SingleGradientOnly::decode_one`; edge rules follow
+/// `PredictionData::get_rows` (row 0 predicts `left`, x = 0 predicts
+/// `row_top[0]`).
+#[inline(never)]
+fn decode_single_gradient_fused(
+    buffers: &mut [&mut ModularChannel],
+    chan: usize,
+    ctx: usize,
+    lut: &FusedPrefixLut,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+    histograms: &Histograms,
+) -> Result<()> {
+    // The cursor lives in a `FastBits` copy whose address never escapes, so
+    // it stays in registers; it is synced to `br` only around the cold
+    // fallback. Passing `&mut BitReader` through the hot path instead forced a
+    // store and reload of the cursor on every sample (measured 2026-10-01).
+    #[cold]
+    #[inline(never)]
+    fn read_slow(
+        reader: &mut SymbolReader,
+        br: &mut BitReader,
+        histograms: &Histograms,
+        ctx: usize,
+    ) -> i32 {
+        reader.read_signed_clustered_inline(histograms, br, ctx)
+    }
+
+    let size = buffers[chan].data.size();
+    let mut fb = br.take_fast();
+    macro_rules! read {
+        () => {
+            match lut.read_signed_fast(&mut fb) {
+                Some(v) => v,
+                None => {
+                    br.put_fast(fb);
+                    let v = read_slow(reader, br, histograms, ctx);
+                    fb = br.take_fast();
+                    v
+                }
+            }
+        };
+    }
+
+    const { assert!(IMAGE_OFFSET.1 == 2) };
+
+    for y in 0..size.1 {
+        let [row, row_top] = buffers[chan].data.distinct_full_rows_mut([y + 2, y + 1]);
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        let row_top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + size.0];
+        if y == 0 {
+            let mut last = 0i32;
+            for o in row.iter_mut() {
+                last = read!().wrapping_add(last);
+                *o = last;
+            }
+            continue;
+        }
+        let mut last = read!().wrapping_add(row_top[0]);
+        row[0] = last;
+        for x in 1..size.0 {
+            let top = row_top[x];
+            let topleft = row_top[x - 1];
+            let min = last.min(top);
+            let max = last.max(top);
+            let grad = last.wrapping_add(top).wrapping_sub(topleft);
+            let grad_clamp_max = if topleft < min { max } else { grad };
+            let pred = if topleft > max { min } else { grad_clamp_max };
+            last = read!().wrapping_add(pred);
+            row[x] = last;
+        }
+    }
+    br.put_fast(fb);
+    Ok(())
+}
+
 #[instrument(level = "debug", skip(buffers, reader, tree))]
 pub(super) fn decode_modular_channel(
     buffers: &mut [&mut ModularChannel],
@@ -234,6 +316,21 @@ fn decode_modular_channel_inner(
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::SingleGradientOnly(t) => {
+            if t.single_value.is_none()
+                && reader.is_plain()
+                && let Some(lut) = tree.histograms.fused_prefix_lut(t.clustered_ctx)
+            {
+                let ctx = t.clustered_ctx;
+                return decode_single_gradient_fused(
+                    buffers,
+                    chan,
+                    ctx,
+                    lut,
+                    reader,
+                    br,
+                    &tree.histograms,
+                );
+            }
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::General(t) => {

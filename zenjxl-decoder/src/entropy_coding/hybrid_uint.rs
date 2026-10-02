@@ -122,6 +122,30 @@ impl HybridUint {
     }
 }
 
+impl HybridUint {
+    /// Number of extra bits `read` consumes after `symbol` (unmasked, so an
+    /// invalid config can report >= 32).
+    pub fn extra_bits(&self, symbol: u32) -> u32 {
+        if symbol < self.split_token {
+            return 0;
+        }
+        let bits_in_token = self.lsb_in_token + self.msb_in_token;
+        self.split_exponent - bits_in_token + ((symbol - self.split_token) >> bits_in_token)
+    }
+
+    /// The value `read` returns for `symbol` followed by the `nbits` extra
+    /// bits `bits`, where `nbits == self.extra_bits(symbol) < 32`.
+    pub fn assemble(&self, symbol: u32, nbits: u32, bits: u32) -> u32 {
+        if symbol < self.split_token {
+            return symbol;
+        }
+        let low = symbol & ((1 << self.lsb_in_token) - 1);
+        let symbol_nolow = symbol >> self.lsb_in_token;
+        let hi = (symbol_nolow & ((1 << self.msb_in_token) - 1)) | (1 << self.msb_in_token);
+        (((hi << nbits) | bits) << self.lsb_in_token) | low
+    }
+}
+
 #[cfg(test)]
 impl HybridUint {
     pub fn new(split_exponent: u32, msb_in_token: u32, lsb_in_token: u32) -> Self {
@@ -136,6 +160,35 @@ impl HybridUint {
 
 #[cfg(test)]
 mod test {
+    /// `extra_bits` + `assemble` (used to build the fused prefix lookup)
+    /// must reproduce `read` for every valid config and token.
+    #[test]
+    fn extra_bits_and_assemble_match_read() {
+        use super::*;
+        let data: Vec<u8> = (0..64u32)
+            .map(|i| (i.wrapping_mul(0x9e) ^ 0x5a) as u8)
+            .collect();
+        for split_exponent in 0..=8u32 {
+            for msb in 0..=split_exponent {
+                for lsb in 0..=(split_exponent - msb) {
+                    let cfg = HybridUint::new(split_exponent, msb, lsb);
+                    for symbol in 0..256u32 {
+                        let nbits = cfg.extra_bits(symbol);
+                        if nbits > 24 {
+                            continue;
+                        }
+                        let mut br = BitReader::new(&data);
+                        let bits = br.peek(nbits as usize) as u32;
+                        let mut acc = 0;
+                        let expected = cfg.read(symbol, &mut br, &mut acc);
+                        assert_eq!(br.total_bits_read(), nbits as usize);
+                        assert_eq!(cfg.assemble(symbol, nbits, bits), expected);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_hybrid_uint_decode_invalid() {
         use super::*;

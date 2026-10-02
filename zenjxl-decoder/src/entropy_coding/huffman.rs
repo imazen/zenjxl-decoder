@@ -449,6 +449,23 @@ impl Table {
         Ok(Table { entries })
     }
 
+    /// `(code_length, symbol)` for the code at the start of `window`, using
+    /// the same two-level walk as `read`. A length above `TABLE_BITS` may
+    /// need more bits than `window` provides; callers must reject it.
+    fn lookup_window(&self, window: u32) -> (u32, u32) {
+        let mut pos = (window as usize) & (TABLE_SIZE - 1);
+        let first = self.entries[pos].bits as usize;
+        if first > TABLE_BITS {
+            let n_bits = first - TABLE_BITS;
+            pos += self.entries[pos].value as usize;
+            pos += ((window as usize) >> TABLE_BITS) & ((1 << n_bits) - 1);
+            let entry = self.entries[pos];
+            return (TABLE_BITS as u32 + entry.bits as u32, entry.value as u32);
+        }
+        let entry = self.entries[pos];
+        (entry.bits as u32, entry.value as u32)
+    }
+
     #[inline(always)]
     pub fn read(&self, br: &mut BitReader) -> u32 {
         let mut pos = br.peek(TABLE_BITS) as usize;
@@ -532,6 +549,11 @@ impl HuffmanCodes {
     pub fn read(&self, br: &mut BitReader, ctx: usize) -> u32 {
         let table = &self.tables[ctx];
         table.read(br)
+    }
+
+    /// See `Table::lookup_window`.
+    pub fn lookup_window(&self, ctx: usize, window: u32) -> (u32, u32) {
+        self.tables[ctx].lookup_window(window)
     }
 
     pub fn single_symbol(&self, ctx: usize) -> Option<u32> {

@@ -33,7 +33,79 @@ impl Debug for BitReader<'_> {
 
 pub const MAX_BITS_PER_CALL: usize = 56;
 
+/// Register-resident copy of a `BitReader`'s cursor for hot loops.
+///
+/// Holding the cursor in a plain `Copy` value whose address never escapes
+/// lets the compiler keep it in registers; methods on `&mut BitReader` that
+/// may call the out-of-line `refill_slow` force it to memory on every read.
+/// Take it with `BitReader::take_fast`, return it with `put_fast` before any
+/// other use of the reader.
+#[derive(Clone, Copy)]
+pub struct FastBits<'a> {
+    data: &'a [u8],
+    bit_buf: u64,
+    bits_in_buf: usize,
+    total_bits_read: usize,
+}
+
+impl FastBits<'_> {
+    /// Ensures at least `num` (<= 56) buffered bits using only the 8-byte
+    /// refill. Returns false near the end of the data, where the caller must
+    /// fall back to `BitReader`.
+    #[inline(always)]
+    pub fn ensure(&mut self, num: usize) -> bool {
+        debug_assert!(num <= MAX_BITS_PER_CALL);
+        if self.bits_in_buf >= num {
+            return true;
+        }
+        if self.data.len() < 8 {
+            return false;
+        }
+        let bits = LittleEndian::read_u64(self.data);
+        self.bit_buf |= bits << self.bits_in_buf;
+        let read_bytes = (63 - self.bits_in_buf) >> 3;
+        self.bits_in_buf |= 56;
+        self.data = &self.data[read_bytes..];
+        true
+    }
+
+    /// Low `num` buffered bits; requires a successful `ensure(num)`.
+    #[inline(always)]
+    pub fn peek_buffered(&self, num: usize) -> u64 {
+        self.bit_buf & ((1u64 << num) - 1)
+    }
+
+    /// Consumes `num` buffered bits; requires `num <= ` the ensured count.
+    #[inline(always)]
+    pub fn consume_buffered(&mut self, num: usize) {
+        debug_assert!(num <= self.bits_in_buf);
+        self.bit_buf >>= num;
+        self.bits_in_buf -= num;
+        self.total_bits_read = self.total_bits_read.wrapping_add(num);
+    }
+}
+
 impl<'a> BitReader<'a> {
+    /// See [`FastBits`].
+    #[inline(always)]
+    pub fn take_fast(&self) -> FastBits<'a> {
+        FastBits {
+            data: self.data,
+            bit_buf: self.bit_buf,
+            bits_in_buf: self.bits_in_buf,
+            total_bits_read: self.total_bits_read,
+        }
+    }
+
+    /// See [`FastBits`].
+    #[inline(always)]
+    pub fn put_fast(&mut self, fast: FastBits<'a>) {
+        self.data = fast.data;
+        self.bit_buf = fast.bit_buf;
+        self.bits_in_buf = fast.bits_in_buf;
+        self.total_bits_read = fast.total_bits_read;
+    }
+
     /// Constructs a BitReader for a given range of data.
     pub fn new(data: &[u8]) -> BitReader<'_> {
         BitReader {
