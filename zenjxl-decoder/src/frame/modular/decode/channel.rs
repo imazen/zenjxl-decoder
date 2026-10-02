@@ -235,6 +235,9 @@ fn decode_modular_channel_inner(
         TreeSpecialCase::GradientLookupConfig420(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
+        TreeSpecialCase::GradientLookup(t) => {
+            decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+        }
         TreeSpecialCase::SingleGradientOnly(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }

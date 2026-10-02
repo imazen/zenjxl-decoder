@@ -305,17 +305,23 @@ impl ModularChannelDecoder for WpOnlyLookupConfig420 {
 /// Property 9 is the "gradient property": left + top - topleft
 const GRADIENT_PROPERTY: u8 = 9;
 
-/// Config 420 specialized version of gradient lookup for trees that split only on property 9.
-/// This uses the specialized entropy decoder for config 420 + no LZ77.
-pub struct GradientLookupConfig420 {
+/// Gradient lookup for trees that split only on property 9 (the gradient
+/// property) with Gradient leaves: libjxl's `kGradientFixedDC` DC tree and
+/// lossless effort 2. With `C420`, every hybrid-uint config is 4/2/0 and
+/// there is no LZ77, so the specialized config-420 reader is used; otherwise
+/// the regular clustered reader (any uint configs, LZ77 allowed).
+pub struct GradientLookup<const C420: bool> {
     lut: [u8; LUT_TABLE_SIZE],
 }
 
-fn make_gradient_lut_config_420(
+/// See [`GradientLookup`].
+pub type GradientLookupConfig420 = GradientLookup<true>;
+
+fn make_gradient_lut<const C420: bool>(
     tree: &[TreeNode],
     histograms: &Histograms,
-) -> Option<GradientLookupConfig420> {
-    if !histograms.can_use_config_420_fast_path() {
+) -> Option<GradientLookup<C420>> {
+    if C420 && !histograms.can_use_config_420_fast_path() {
         return None;
     }
     // Verify all splits are on property 9 and all leaves have Gradient predictor
@@ -335,10 +341,10 @@ fn make_gradient_lut_config_420(
     }
 
     let lut = make_lut(tree)?;
-    Some(GradientLookupConfig420 { lut })
+    Some(GradientLookup { lut })
 }
 
-impl ModularChannelDecoder for GradientLookupConfig420 {
+impl<const C420: bool> ModularChannelDecoder for GradientLookup<C420> {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = false;
 
@@ -369,8 +375,11 @@ impl ModularChannelDecoder for GradientLookupConfig420 {
             prediction_data.topleft as i64,
         );
 
-        // Use the specialized config 420 fast path
-        let dec = reader.read_signed_clustered_config_420(histograms, br, cluster as usize);
+        let dec = if C420 {
+            reader.read_signed_clustered_config_420(histograms, br, cluster as usize)
+        } else {
+            reader.read_signed_clustered_inline(histograms, br, cluster as usize)
+        };
         dec.wrapping_add(pred as i32)
     }
 }
@@ -462,6 +471,7 @@ pub enum TreeSpecialCase {
     NoWp420(NoWpTree<true>),
     WpOnlyConfig420(WpOnlyLookupConfig420),
     GradientLookupConfig420(GradientLookupConfig420),
+    GradientLookup(GradientLookup<false>),
     SingleGradientOnly(SingleGradientOnly),
     General(GeneralTree<false>),
     General420(GeneralTree<true>),
@@ -599,8 +609,19 @@ pub fn specialize_tree(
     // Non-WP trees (includes effort 2 encoding and some groups in effort > 3)
     if !uses_wp {
         // Try config 420 specialized gradient LUT version (fast path for effort 2 encoded images)
-        if let Some(gl) = make_gradient_lut_config_420(&pruned_tree, &tree.histograms) {
+        if let Some(gl) = make_gradient_lut::<true>(&pruned_tree, &tree.histograms) {
             return Ok(TreeSpecialCase::GradientLookupConfig420(gl));
+        }
+        // Same tree shape with other uint configs (e.g. per-cluster
+        // optimised configs from jxl-encoder `--faster-decoding`).
+        #[cfg(test)]
+        let enabled = !tests::DISABLE_GRADIENT_LOOKUP.load(std::sync::atomic::Ordering::Relaxed);
+        #[cfg(not(test))]
+        let enabled = true;
+        if enabled && let Some(gl) = make_gradient_lut::<false>(&pruned_tree, &tree.histograms) {
+            #[cfg(test)]
+            tests::GRADIENT_LOOKUP_USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Ok(TreeSpecialCase::GradientLookup(gl));
         }
         return Ok(if config_420 {
             TreeSpecialCase::NoWp420(NoWpTree::new(
@@ -644,4 +665,41 @@ pub fn specialize_tree(
             single_symbol,
         )?)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// Test-only switch that sends gradient-only trees with non-4/2/0 uint
+    /// configs through the generic tree path instead of `GradientLookup`.
+    pub(super) static DISABLE_GRADIENT_LOOKUP: AtomicBool = AtomicBool::new(false);
+    /// Channels decoded through `GradientLookup<false>`.
+    pub(super) static GRADIENT_LOOKUP_USES: AtomicUsize = AtomicUsize::new(0);
+
+    /// jxl-encoder `--faster-decoding 4` VarDCT (320x256 CLIC crop) codes
+    /// its DC with libjxl's fixed gradient tree and per-cluster uint
+    /// configs. `GradientLookup<false>` must decode it exactly as the generic
+    /// tree path does.
+    #[test]
+    fn gradient_lookup_matches_generic_tree_path() {
+        let data =
+            include_bytes!("../../../../tests/testdata/lossy-fast/gradient_fixed_dc_fd4.jxl");
+        let options = || crate::api::JxlDecoderOptions {
+            parallel: false,
+            ..Default::default()
+        };
+        let before = GRADIENT_LOOKUP_USES.load(Ordering::Relaxed);
+        let fast = crate::api::decode_with(data, options()).expect("decode");
+        assert!(
+            GRADIENT_LOOKUP_USES.load(Ordering::Relaxed) > before,
+            "fixture did not take GradientLookup<false>"
+        );
+        DISABLE_GRADIENT_LOOKUP.store(true, Ordering::Relaxed);
+        let generic = crate::api::decode_with(data, options());
+        DISABLE_GRADIENT_LOOKUP.store(false, Ordering::Relaxed);
+        let generic = generic.expect("decode");
+        assert_eq!((fast.width, fast.height), (320, 256));
+        assert!(fast.data == generic.data, "GradientLookup output differs");
+    }
 }
