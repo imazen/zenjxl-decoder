@@ -234,6 +234,9 @@ impl ModularBuffer {
             return ModularChannel::try_clone(self.data.borrow().as_ref().unwrap());
         }
         let mut ret = None;
+        // `fetch_update` is deprecated in Rust 1.99 in favour of `try_update`,
+        // which is newer than this crate's MSRV (1.89).
+        #[allow(deprecated)]
         let _ = self.remaining_uses.fetch_update(
             Ordering::Release,
             Ordering::Acquire,
@@ -258,6 +261,9 @@ impl ModularBuffer {
         if !can_consume {
             return;
         }
+        // `fetch_update` is deprecated in Rust 1.99 in favour of `try_update`,
+        // which is newer than this crate's MSRV (1.89).
+        #[allow(deprecated)]
         let _ = self.remaining_uses.fetch_update(
             Ordering::Release,
             Ordering::Acquire,
