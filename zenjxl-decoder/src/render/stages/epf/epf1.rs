@@ -8,7 +8,7 @@ use crate::{
     features::epf::SigmaSource,
     render::{
         Channels, ChannelsMut, RenderPipelineInOutStage,
-        stages::epf::common::{get_sigma, prepare_sad_mul_storage},
+        stages::epf::common::{get_sigma, prepare_sad_mul_storage, uniform_sigma},
     },
 };
 
@@ -106,11 +106,23 @@ fn epf1_process_row_chunk(
     let scale_vec: [D::F32Vec; 3] = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
 
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
-        let sigma = get_sigma(d, x + xpos, row_sigma);
+        // Scalar skip test when the vector lies in one block, as in libjxl.
+        let uniform = uniform_sigma::<D>(x + xpos, row_sigma);
+        if uniform.is_some_and(|s| s < MIN_SIGMA) {
+            for c in 0..3 {
+                D::F32Vec::load_from(d, channels[c][2], 2 + x)
+                    .store_at(out_rows[c * out_rpc], x);
+            }
+            continue;
+        }
+        let sigma = match uniform {
+            Some(s) => D::F32Vec::splat(d, s),
+            None => get_sigma(d, x + xpos, row_sigma),
+        };
         let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
-        if sigma_mask.all() {
+        if uniform.is_none() && sigma_mask.all() {
             for c in 0..3 {
                 D::F32Vec::load_from(d, channels[c][2], 2 + x)
                     .store_at(out_rows[c * out_rpc], x);

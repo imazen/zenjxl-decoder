@@ -40,6 +40,20 @@ pub(super) fn prepare_sad_mul_storage(x: usize, y: usize, sm: f32, bsm: f32) -> 
     sad_mul_storage
 }
 
+/// The sigma of the vector at `x` when all its lanes lie in one block
+/// (always for 4-lane vectors at aligned `x`), so the skip test can be a
+/// scalar compare as in libjxl.
+#[inline(always)]
+pub(super) fn uniform_sigma<D: SimdDescriptor>(x: usize, row_sigma: SigmaRow<'_>) -> Option<f32> {
+    match row_sigma {
+        SigmaRow::Constant(sigma) => Some(sigma),
+        SigmaRow::Variable(row) => {
+            let lanes = D::F32Vec::LEN;
+            (lanes <= BLOCK_DIM && x % BLOCK_DIM + lanes <= BLOCK_DIM).then(|| row[x / BLOCK_DIM])
+        }
+    }
+}
+
 #[inline(always)]
 pub(super) fn get_sigma<D: SimdDescriptor>(d: D, x: usize, row_sigma: SigmaRow<'_>) -> D::F32Vec {
     match row_sigma {
