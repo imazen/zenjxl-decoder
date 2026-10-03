@@ -23,6 +23,7 @@ use crate::{
     },
     headers::modular::GroupHeader,
     image::Image,
+    util::IsolatedBuf,
 };
 
 /// `C420`: every cluster uses hybrid-uint config 420 and LZ77 is off, so the
@@ -31,7 +32,7 @@ use crate::{
 pub struct NoWpTree<const C420: bool> {
     flat_nodes: Vec<FlatTreeNode>,
     references: Image<i32>,
-    property_buffer: Vec<i32>,
+    property_buffer: IsolatedBuf<i32>,
     used_mask: u32,
     /// The decoded residual every leaf of this tree produces, when every
     /// reachable cluster is a single-symbol distribution (see
@@ -53,7 +54,7 @@ impl<const C420: bool> NoWpTree<C420> {
             .next_multiple_of(PROPERTIES_PER_PREVCHAN);
         let references = Image::<i32>::new((num_ref_props, xsize))?;
         let num_properties = NUM_NONREF_PROPERTIES + num_ref_props;
-        let mut property_buffer: Vec<i32> = vec![0; num_properties];
+        let mut property_buffer = IsolatedBuf::<i32>::new(num_properties);
 
         property_buffer[0] = channel as i32;
         property_buffer[1] = stream as i32;

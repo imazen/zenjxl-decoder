@@ -19,7 +19,7 @@ use crate::{
     },
     headers::modular::GroupHeader,
     image::Image,
-    util::tracing_wrappers::*,
+    util::{IsolatedBuf, tracing_wrappers::*},
 };
 use whereat::at;
 
@@ -48,7 +48,7 @@ fn decode_modular_channel_small(
 
     const { assert!(IMAGE_OFFSET.1 == 2) };
 
-    let mut property_buffer: Vec<i32> = vec![0; num_properties];
+    let mut property_buffer = IsolatedBuf::<i32>::new(num_properties);
     property_buffer[0] = chan as i32;
     property_buffer[1] = stream_id as i32;
 
