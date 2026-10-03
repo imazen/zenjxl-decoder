@@ -1378,6 +1378,8 @@ impl Frame {
             self.render_noise_for_group(group, complete, buffer_splitter)?;
         }
 
+        #[cfg(feature = "jpeg")]
+        let jpeg_stride_blocks = self.header.size_blocks().0;
         let lf_global = self.lf_global.as_ref().unwrap();
         if self.header.encoding == Encoding::VarDCT {
             info!("Decoding VarDCT group {group}");
@@ -1432,7 +1434,13 @@ impl Frame {
                     buffers,
                     &self.decoder_state.memory_tracker,
                     #[cfg(feature = "jpeg")]
-                    self.jpeg_coeffs.as_mut(),
+                    self.jpeg_coeffs
+                        .as_mut()
+                        .map(|[a, b, c]| super::group::JpegCoeffSink {
+                            coeffs: [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()],
+                            stride_blocks: jpeg_stride_blocks,
+                            origin_blocks: (0, 0),
+                        }),
                 )?;
             }
             if let Some(pixels) = pixels {

@@ -457,6 +457,31 @@ impl<'a, 'b, 'c> PassInfo<'a, 'b, 'c> {
     }
 }
 
+/// Where `decode_vardct_group` stores the quantized coefficients of DCT8
+/// blocks for JPEG reconstruction: per channel, 64 values (JPEG natural
+/// order, DC left at 0) per block, block `(bx, by)` (absolute, in blocks)
+/// at `((by - origin_blocks.1) * stride_blocks + bx - origin_blocks.0) * 64`.
+/// The sequential path passes the frame-wide arrays (origin 0, stride the
+/// padded frame width in blocks); the parallel path a per-group buffer.
+#[cfg(feature = "jpeg")]
+pub(crate) struct JpegCoeffSink<'a> {
+    pub coeffs: [&'a mut [i16]; 3],
+    pub stride_blocks: usize,
+    pub origin_blocks: (usize, usize),
+}
+
+#[cfg(feature = "jpeg")]
+impl JpegCoeffSink<'_> {
+    fn block_offset(&self, bx: usize, by: usize) -> Option<usize> {
+        let x = bx.checked_sub(self.origin_blocks.0)?;
+        let y = by.checked_sub(self.origin_blocks.1)?;
+        if x >= self.stride_blocks {
+            return None;
+        }
+        Some((y * self.stride_blocks + x) * BLOCK_SIZE)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn decode_vardct_group(
     group: usize,
@@ -472,7 +497,7 @@ pub fn decode_vardct_group(
     pixels: &mut Option<[Image<f32>; 3]>,
     buffers: &mut VarDctBuffers,
     tracker: &MemoryTracker,
-    #[cfg(feature = "jpeg")] mut jpeg_coeffs: Option<&mut [Vec<i16>; 3]>,
+    #[cfg(feature = "jpeg")] mut jpeg_coeffs: Option<JpegCoeffSink<'_>>,
 ) -> Result<()> {
     crate::profile!(entropy_decode);
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
@@ -733,17 +758,18 @@ pub fn decode_vardct_group(
             }
             // Capture quantized AC coefficients for JPEG reconstruction
             #[cfg(feature = "jpeg")]
-            if let Some(ref mut jpeg_coeffs) = jpeg_coeffs {
+            if let Some(ref mut sink) = jpeg_coeffs {
                 // Only DCT8 (8x8) blocks for JPEG
                 if cx == 1 && cy == 1 {
                     let abs_bx = block_group_rect.origin.0 + bx;
                     let abs_by = block_group_rect.origin.1 + by;
-                    // Use padded block dimensions (accounts for chroma subsampling)
-                    let (xsize_blocks, _) = frame_header.size_blocks();
+                    let dst_offset = sink.block_offset(abs_bx, abs_by);
+                    let jpeg_coeffs = &mut sink.coeffs;
                     for c in 0..3 {
                         let src = &coeffs[c][coeffs_offset..coeffs_offset + BLOCK_SIZE];
-                        let dst_offset = (abs_by * xsize_blocks + abs_bx) * BLOCK_SIZE;
-                        if dst_offset + BLOCK_SIZE <= jpeg_coeffs[c].len() {
+                        if let Some(dst_offset) = dst_offset
+                            && dst_offset + BLOCK_SIZE <= jpeg_coeffs[c].len()
+                        {
                             // Transpose: JPEG natural[y*8+x] = JXL[x*8+y]
                             for y in 0..BLOCK_DIM {
                                 for x in 0..BLOCK_DIM {

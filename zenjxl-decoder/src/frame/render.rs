@@ -554,6 +554,8 @@ impl Frame {
         buffer_splitter: &mut BufferSplitter,
         do_flush: bool,
     ) -> Result<bool> {
+        #[cfg(feature = "jpeg")]
+        use super::group::JpegCoeffSink;
         use super::group::{VarDctBuffers, decode_vardct_group};
         use super::modular::ModularStreamId;
         use crate::image::{Image, OwnedRawImage};
@@ -622,6 +624,10 @@ impl Frame {
             pixels: Option<[Image<f32>; 3]>,
             /// Owned per-group HF coefficient buffers (multi-pass only).
             hf_coeffs: Option<[Vec<i32>; 3]>,
+            /// This group's JPEG-reconstruction coefficients, copied into
+            /// the frame's arrays after the parallel phase.
+            #[cfg(feature = "jpeg")]
+            jpeg_coeffs: Option<[Vec<i16>; 3]>,
         }
 
         struct GroupRenderInfo {
@@ -638,6 +644,8 @@ impl Frame {
         // Pixel buffers are allocated on-demand in Phase 2 (parallel) to avoid
         // the sequential allocation bottleneck that caused the 0.59x regression.
         let phase1_start = crate::util::clock::Instant::now();
+        #[cfg(feature = "jpeg")]
+        let jpeg_enabled = self.jpeg_coeffs.is_some();
         let mut work: Vec<GroupWork> = Vec::with_capacity(groups.len());
         let mut num_needs_pixels = 0usize;
         for (group, passes) in groups {
@@ -679,6 +687,8 @@ impl Frame {
                 do_render,
                 pixels: None, // Deferred to Phase 2
                 hf_coeffs,
+                #[cfg(feature = "jpeg")]
+                jpeg_coeffs: None,
             });
         }
 
@@ -827,6 +837,12 @@ impl Frame {
                                 ],
                             });
                         }
+                        #[cfg(feature = "jpeg")]
+                        if jpeg_enabled && is_vardct && !gw.passes.is_empty() {
+                            let r = header.block_group_rect(gw.group);
+                            let n = r.size.0 * r.size.1 * crate::BLOCK_SIZE;
+                            gw.jpeg_coeffs = Some([vec![0; n], vec![0; n], vec![0; n]]);
+                        }
                         if is_vardct && !gw.passes.is_empty() {
                             let hf_global = hf_global.unwrap();
                             let hf_meta = hf_meta.unwrap();
@@ -857,7 +873,18 @@ impl Frame {
                                     &mut buffers,
                                     tracker,
                                     #[cfg(feature = "jpeg")]
-                                    None,
+                                    gw.jpeg_coeffs.as_mut().map(|[a, b, c]| {
+                                        let rect = header.block_group_rect(gw.group);
+                                        JpegCoeffSink {
+                                            coeffs: [
+                                                a.as_mut_slice(),
+                                                b.as_mut_slice(),
+                                                c.as_mut_slice(),
+                                            ],
+                                            stride_blocks: rect.size.0,
+                                            origin_blocks: rect.origin,
+                                        }
+                                    }),
                                 )?;
                             }
                             buffer_pool.lock().unwrap().push(buffers);
@@ -879,6 +906,29 @@ impl Frame {
                     })?;
             }
             phase2_dur += phase2_start.elapsed();
+
+            // Copy each group's JPEG coefficients into the frame's arrays.
+            #[cfg(feature = "jpeg")]
+            if let Some(frame_coeffs) = self.jpeg_coeffs.as_mut() {
+                let stride = self.header.size_blocks().0;
+                for gw in &mut work[batch_start..batch_end] {
+                    let Some(local) = gw.jpeg_coeffs.take() else {
+                        continue;
+                    };
+                    let rect = self.header.block_group_rect(gw.group);
+                    let row_len = rect.size.0 * crate::BLOCK_SIZE;
+                    for (dst_c, src_c) in frame_coeffs.iter_mut().zip(&local) {
+                        for (r, src) in src_c.chunks_exact(row_len).enumerate() {
+                            let dst =
+                                ((rect.origin.1 + r) * stride + rect.origin.0) * crate::BLOCK_SIZE;
+                            let n = row_len.min(dst_c.len().saturating_sub(dst));
+                            if n > 0 {
+                                dst_c[dst..dst + n].copy_from_slice(&src[..n]);
+                            }
+                        }
+                    }
+                }
+            }
 
             // Collect VarDCT pixels for parallel storage.
             let collect_start = crate::util::clock::Instant::now();

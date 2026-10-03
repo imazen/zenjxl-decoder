@@ -246,3 +246,30 @@ fn test_no_jpeg_reconstruction_for_non_jpeg_jxl() {
         "Non-JPEG JXL should not produce JPEG reconstruction"
     );
 }
+
+/// Multi-group transcode (520x264 4:2:0 photo crop, libjxl v0.12 `cjxl`,
+/// 3x2 groups) through the public `reconstruct_jpeg` with default options,
+/// which decode HF groups in parallel when the `threads` feature is on.
+/// The parallel group path did not capture AC coefficients, so the
+/// reconstruction lost them (2,837 of 10,753 bytes).
+#[test]
+fn test_jpeg_reconstruction_multigroup_default_options() {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/jpeg-multigroup");
+    let jxl_data = std::fs::read(dir.join("crop_520x264_420.jxl")).unwrap();
+    let reference = std::fs::read(dir.join("crop_520x264_420.jpg")).unwrap();
+    let reconstructed = crate::api::reconstruct_jpeg(&jxl_data)
+        .unwrap()
+        .expect("JPEG reconstruction data");
+    assert_jpeg_match(
+        &reconstructed,
+        &reference,
+        "520x264 multi-group (default options)",
+    );
+    let reconstructed = decode_jpeg_reconstruction(&jxl_data).expect("JPEG reconstruction data");
+    assert_jpeg_match(
+        &reconstructed,
+        &reference,
+        "520x264 multi-group (decoder API)",
+    );
+}
