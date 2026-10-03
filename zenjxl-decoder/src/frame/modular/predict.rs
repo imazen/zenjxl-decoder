@@ -417,6 +417,15 @@ pub struct WeightedPredictorState {
     pred_errors_buffer: Vec<[u32; NUM_PREDICTORS]>,
     error: Vec<i32>,
     wp_header: WeightedHeader,
+    /// Position `(x + 1, y)` after `update_errors(.., (x, y), ..)`: the
+    /// next `predict_and_property` at that position takes the values below
+    /// from here instead of reloading them right after they were stored.
+    carry_pos: (usize, usize),
+    /// `error` of the previous sample (`te_w`).
+    carry_te_w: i32,
+    /// `pred_errors_buffer` at the next sample's N and NW positions.
+    carry_n: [u32; NUM_PREDICTORS],
+    carry_nw: [u32; NUM_PREDICTORS],
 }
 
 impl WeightedPredictorState {
@@ -432,6 +441,10 @@ impl WeightedPredictorState {
                 .map_err(|e| at!(Error::from(e)))?,
             error: Vec::try_from_elem(0i32, num_errors).map_err(|e| at!(Error::from(e)))?,
             wp_header: wp_header.clone(),
+            carry_pos: (usize::MAX, usize::MAX),
+            carry_te_w: 0,
+            carry_n: [0; NUM_PREDICTORS],
+            carry_nw: [0; NUM_PREDICTORS],
         })
     }
 
@@ -474,6 +487,7 @@ impl WeightedPredictorState {
     }
 
     pub fn restore_state(&mut self, wp_image: &Image<i32>, xsize: usize) {
+        self.carry_pos = (usize::MAX, usize::MAX);
         let row_stride = xsize + 2;
         assert_eq!(wp_image.size(), (row_stride, 1 + NUM_PREDICTORS));
         self.error[0..row_stride].copy_from_slice(wp_image.row(0));
@@ -505,10 +519,15 @@ impl WeightedPredictorState {
         *self.get_errors_at_pos_mut(cur_row + pos.0) = errs;
 
         // Update previous row position (contiguous access)
+        let carry_nw = *self.get_errors_at_pos(prev_row + pos.0);
         let prev_errors = self.get_errors_at_pos_mut(prev_row + pos.0 + 1);
         for i in 0..NUM_PREDICTORS {
             prev_errors[i] = prev_errors[i].wrapping_add(errs[i]);
         }
+        self.carry_n = *prev_errors;
+        self.carry_nw = carry_nw;
+        self.carry_te_w = self.error[cur_row + pos.0];
+        self.carry_pos = (pos.0 + 1, pos.1);
     }
 
     /// Decodes row `y` of a channel whose tree is the weighted predictor
@@ -548,13 +567,21 @@ impl WeightedPredictorState {
             self.wp_header.w3,
         ];
         let h = &self.wp_header;
+        // The previous sample's error and the N/NW error sums it just
+        // updated are carried in registers: reloading them right after
+        // the store put a store-to-load forward on the per-sample chain.
+        let mut te_w: i64 = 0;
+        let mut carry_n = prev_pe[0];
+        let mut carry_nw = prev_pe[0];
         for x in 0..xsize {
             let data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
             let pos_ne = if x + 1 < xsize { x + 1 } else { x };
             let pos_nw = if x > 0 { x - 1 } else { x };
-            let errors_n = prev_pe[x];
+            // At x = 0 both are prev_pe[0]; afterwards prev_pe[x] and
+            // prev_pe[x - 1] as updated by the two previous samples.
+            let errors_n = carry_n;
+            let errors_nw = carry_nw;
             let errors_ne = prev_pe[pos_ne];
-            let errors_nw = prev_pe[pos_nw];
             let mut weights = [0u32; NUM_PREDICTORS];
             for i in 0..NUM_PREDICTORS {
                 weights[i] = error_weight(
@@ -570,7 +597,6 @@ impl WeightedPredictorState {
             let nw = add_bits(data.topleft);
             let nn = add_bits(data.toptop);
 
-            let te_w = if x == 0 { 0 } else { cur_e[x - 1] as i64 };
             let te_n = prev_e[x] as i64;
             let te_nw = prev_e[pos_nw] as i64;
             let sum_wn = te_n + te_w;
@@ -609,17 +635,29 @@ impl WeightedPredictorState {
             row[x] = val;
 
             let v = add_bits(val);
-            cur_e[x] = (pred - v) as i32;
+            let e = (pred - v) as i32;
+            cur_e[x] = e;
+            te_w = e as i64;
             let mut errs = [0u32; NUM_PREDICTORS];
             for (err, &pr) in errs.iter_mut().zip(prediction.iter()) {
                 *err = (((pr - v).abs() + PREDICTION_ROUND) >> PRED_EXTRA_BITS) as u32;
             }
             cur_pe[x] = errs;
-            let prev_errors = &mut prev_pe[x + 1];
+            // prev_pe[x + 1] is errors_ne unless x is the last sample.
+            let base = if x + 1 < xsize {
+                errors_ne
+            } else {
+                prev_pe[x + 1]
+            };
+            let mut updated = [0u32; NUM_PREDICTORS];
             for i in 0..NUM_PREDICTORS {
-                prev_errors[i] = prev_errors[i].wrapping_add(errs[i]);
+                updated[i] = base[i].wrapping_add(errs[i]);
             }
+            prev_pe[x + 1] = updated;
+            carry_nw = errors_n;
+            carry_n = updated;
         }
+        self.carry_pos = (usize::MAX, usize::MAX);
     }
 
     #[inline(always)]
@@ -638,9 +676,18 @@ impl WeightedPredictorState {
         let pos_ne = if pos.0 < xsize - 1 { pos_n + 1 } else { pos_n };
         let pos_nw = if pos.0 > 0 { pos_n - 1 } else { pos_n };
         // Get errors at the 3 neighboring positions (contiguous access per position)
-        let errors_n = self.get_errors_at_pos(pos_n);
-        let errors_ne = self.get_errors_at_pos(pos_ne);
-        let errors_nw = self.get_errors_at_pos(pos_nw);
+        let carried = self.carry_pos == pos;
+        let errors_n = if carried {
+            self.carry_n
+        } else {
+            *self.get_errors_at_pos(pos_n)
+        };
+        let errors_ne = *self.get_errors_at_pos(pos_ne);
+        let errors_nw = if carried {
+            self.carry_nw
+        } else {
+            *self.get_errors_at_pos(pos_nw)
+        };
 
         let mut weights = [0u32; NUM_PREDICTORS];
         for i in 0..NUM_PREDICTORS {
@@ -659,6 +706,8 @@ impl WeightedPredictorState {
 
         let te_w = if pos.0 == 0 {
             0
+        } else if carried {
+            self.carry_te_w as i64
         } else {
             self.error[cur_row + pos.0 - 1] as i64
         };

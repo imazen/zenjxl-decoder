@@ -276,6 +276,9 @@ impl WpOnlyLookupConfig420 {
         let off = crate::frame::modular::IMAGE_OFFSET.0;
         let (w, h) = channel.data.size();
         let lut = &self.lut;
+        // Entropy state in registers (`PlainCursor`); near the end of the
+        // data one symbol at a time goes through the regular reader.
+        let mut cursor = reader.plain_cursor(br);
         for y in 0..h {
             let [row, row_top, row_toptop] = channel.data.distinct_full_rows_mut([y + 2, y + 1, y]);
             self.wp_state.decode_row(
@@ -286,12 +289,40 @@ impl WpOnlyLookupConfig420 {
                 |property| {
                     let ctx = lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
                         .clamp(0, LUT_TABLE_SIZE as i64 - 1)
-                        as usize];
-                    reader.read_signed_clustered_config_420(histograms, br, ctx as usize)
+                        as usize] as usize;
+                    if let Some(c) = cursor.as_mut()
+                        && let Some(v) = histograms.read_unsigned_plain_420(c, ctx)
+                    {
+                        return unpack_signed(v);
+                    }
+                    let (v, c) = read_420_slow(cursor.take(), reader, br, histograms, ctx);
+                    cursor = c;
+                    v
                 },
             );
         }
+        if let Some(c) = cursor {
+            reader.finish_plain_cursor(c, br);
+        }
     }
+}
+
+/// One config-4/2/0 read through the regular reader, handing a
+/// [`PlainCursor`] back and forth by value.
+#[cold]
+#[inline(never)]
+fn read_420_slow<'a>(
+    cursor: Option<crate::entropy_coding::decode::PlainCursor<'a>>,
+    reader: &mut SymbolReader,
+    br: &mut BitReader<'a>,
+    histograms: &Histograms,
+    ctx: usize,
+) -> (i32, Option<crate::entropy_coding::decode::PlainCursor<'a>>) {
+    if let Some(c) = cursor {
+        reader.finish_plain_cursor(c, br);
+    }
+    let v = reader.read_signed_clustered_config_420(histograms, br, ctx);
+    (v, reader.plain_cursor(br))
 }
 
 impl ModularChannelDecoder for WpOnlyLookupConfig420 {
