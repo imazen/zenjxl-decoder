@@ -160,8 +160,11 @@ impl CodestreamParser {
                 // When VarDCT parallel and HF global section is ready, overlap LF group
                 // decode with HF global parsing. decode_hf_global only depends on lf_global
                 // (the LF Global section), not on LF group data — so both can run concurrently.
+                // Also with a single LF group (images up to 2048x2048), where
+                // the LF group is otherwise decoded alone on one thread.
                 #[cfg(feature = "threads")]
-                let use_overlap = use_parallel_lf
+                let use_overlap = frame.decoder_state.parallel
+                    && !self.lf_sections.is_empty()
                     && frame.header().encoding != crate::headers::frame_header::Encoding::Modular
                     && self.hf_global_section.is_some();
 
