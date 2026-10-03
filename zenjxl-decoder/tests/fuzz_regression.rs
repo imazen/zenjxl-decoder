@@ -25,7 +25,7 @@ use zenutils_fuzz::RegressionSuite;
 /// constant counts only what actually gets replayed.
 ///
 /// Raise this when seeds are added; only lower it when deleting seeds on purpose.
-const MIN_SEEDS: usize = 21;
+const MIN_SEEDS: usize = 22;
 
 /// Count the files `RegressionSuite::run` will actually replay, using its own
 /// filters: recurse into subdirectories, skip dotfiles, `*.md` and `*.txt`.

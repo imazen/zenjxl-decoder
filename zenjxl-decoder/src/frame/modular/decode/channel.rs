@@ -250,7 +250,9 @@ fn channel_loop<D: ModularChannelDecoder, S: SymbolSource>(
     let mut src = src;
     let size = buffers[chan].data.size();
     debug_assert!(size.0 >= 4);
-    debug_assert!(size.1 >= 2);
+    // Wide one-row channels come here too (`082c50ed`): rows above y = 0
+    // are read only through the padding rows, and `get_rows` handles y < 2.
+    debug_assert!(size.1 >= 1);
 
     const { assert!(IMAGE_OFFSET.1 == 2) };
 
