@@ -160,7 +160,46 @@ Investigating and fixing pixel parity issues between jxl-rs and libjxl (djxl ref
 
 ## Remaining Issues (1 failure)
 
-### 1. CMYK Color Space (max_error=60)
+### 1. CMYK to RGB (max_error=4) — status 2026-10-03
+
+Measured with references from djxl v0.12 (Homebrew, lcms2 2.18) for all 184
+corpus files: 183 pass. The earlier "noise/spline" failure is fixed (see 9.);
+the two `test_debug_*` tests that walk frame headers by hand pass with the
+corpus present.
+
+`cmyk_layers` was two separate problems:
+
+- **Raw CMYK decode was wrong** (fixed, `39a1a09b`). CMYK output requests
+  still folded K into C/M/Y. Against libjxl's raw output (`djxl ... out.npy
+  --norender_spotcolors`, the form the conformance suite compares) the decode
+  now matches within 6e-8 on every channel. This was hiding under the
+  "different CMS" explanation below: in RGB the folded pixels sit under
+  near-full black ink, so they barely showed.
+- **CMYK to sRGB differs by CMS** (narrowed, `505e701c`). The conversion is
+  not part of conformance; it depends on the CMS. libjxl's lcms2 path uses
+  relative colorimetric with black-point compensation (reproduced in Python
+  with lcms2: max diff 1 vs djxl). skcms builds give a different image
+  (paper white 252/255/254). Against lcms2: max error 22 on 712 values, now
+  4 on 508, after working around two moxcms 0.9.1 sRGB-encoding faults and
+  adding lcms2-style BPC in the wrapper.
+
+**Remaining gap**: moxcms's 4-D CLUT interpolation differs from lcms2's in
+near-white tints (one light tint: linear R 0.904 vs 0.876; paper white, pure
+K and 50% CMYK agree within 1e-4). moxcms's `interpolation_method` does not
+change 4-input tables. Closing it means evaluating the profile's A2B table
+with lcms2's scheme (linear on the first input, tetrahedral on the other
+three) instead of through moxcms.
+
+Reproduce: `generate_references.sh /opt/homebrew/bin/djxl` into a scratch
+copy of the corpus (`~/tmp/jxl-corpus-mirror/jxl`, inputs symlinked), then
+`CODEC_CORPUS_PATH=<mirror> cargo test --release --features cms --lib
+test_all_codec_corpus_parity -- --ignored`.
+
+The section below is the 2025-12 investigation, kept for history; its
+"inherent CMS difference, max 60" conclusion was measured against skcms and
+missed the raw-decode bug.
+
+### (2025-12) CMYK Color Space (max_error=60)
 
 | File | Error |
 |------|-------|
