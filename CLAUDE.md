@@ -193,3 +193,31 @@ rounds; 11.2 MP numbers from `/usr/bin/time -v`.
   files decode within 1% of cjxl's. libjxl's tier-1 simple block context map
   and 6-histogram AC cap are not mirrored there and measured as not needed
   for decode speed.
+
+## Lossy gap to djxl, profiled — 2026-10-02
+
+[MEASURED] M4 Pro, 4 photos (2.8-3.1 MP), `--data-type f32` (djxl
+`--disable_output` decodes to float, so u8 runs overstate the gap by the
+u8 conversion), MP/s, ours / djxl v0.12:
+
+- d1 e7: 1T 65.6 / 72.7, 12T 284 / 349. JPEG q90 transcode: 1T 124 / 136,
+  12T 509 / 668. d1 fd4: 1T 110 / 105, 12T 459 / 521.
+- Fixed: EPF stage 1 checked bounds on all 54 loads per vector and
+  reloaded row pointers after each store (`e1463a0c`): d1 e7 1T 62.2 -> 65.9.
+  Per-decode `sample` counts put EPF1 at ~1.6x djxl's before, ~1.5x after
+  (sampling estimate).
+- 12T is the larger gap. On the JPEG transcode at 12T the main thread spends
+  ~35% of wall time in the serial LF group (DC through the weighted
+  predictor, `WpOnlyLookupConfig420`, then HF metadata) and workers are idle
+  ~57% of the time; the rest of the idle time is the gap between the decode
+  and render parallel phases. Single-threaded sample fractions put our WP
+  DC decode at roughly 1.2x djxl's time (sampling estimate, not measured
+  per function).
+- Register cursor (`PlainCursor`) for modular channels helps single-leaf
+  trees only: fast-decode preset 66 -> 89 MP/s 1T, 487 -> 603 12T. On
+  learned trees and libjxl's gradient DC tree it was neutral 1T and 3-10%
+  slower at 12T in back-to-back runs, so it is off there
+  (`ModularChannelDecoder::USE_CURSOR`).
+- 12T numbers on this Mac move 5-10% with background load (Spotlight,
+  mediaanalysisd, rust-analyzer); compare A-B-A, not A-B.
+

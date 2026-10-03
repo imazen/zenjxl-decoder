@@ -308,6 +308,7 @@ impl SymbolReader {
 /// Obtain with [`SymbolReader::plain_cursor`], read with
 /// [`Histograms::read_unsigned_plain`], and return with
 /// [`SymbolReader::finish_plain_cursor`] before any other use of the reader.
+#[derive(Clone, Copy)]
 pub struct PlainCursor<'a> {
     fb: FastBits<'a>,
     ans: u32,
@@ -841,6 +842,28 @@ impl Histograms {
             self.uint_config(cluster)
                 .read_fast(token, &mut cursor.fb, &mut cursor.nbits_acc),
         )
+    }
+
+    /// [`Self::read_unsigned_plain`] for streams whose hybrid-uint configs
+    /// are all 4/2/0 ([`Self::can_use_config_420_fast_path`]).
+    #[inline(always)]
+    pub fn read_unsigned_plain_420(
+        &self,
+        cursor: &mut PlainCursor<'_>,
+        cluster: usize,
+    ) -> Option<u32> {
+        if !cursor.fb.ensure(47) {
+            return None;
+        }
+        let token = match &self.codes {
+            Codes::Huffman(hc) => hc.read_fast(&mut cursor.fb, cluster),
+            Codes::Ans(ans) => ans.read_fast(&mut cursor.fb, &mut cursor.ans, cluster),
+        };
+        Some(HybridUint::read_config_420_fast(
+            token,
+            &mut cursor.fb,
+            &mut cursor.nbits_acc,
+        ))
     }
 
     /// The codes `cluster` reads with through an [`RleCursor`]; `None`

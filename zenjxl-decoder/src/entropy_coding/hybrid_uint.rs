@@ -90,6 +90,22 @@ impl HybridUint {
         (hi << nbits) | bits
     }
 
+    /// [`Self::read_config_420`] on a register-resident cursor; requires at
+    /// least 31 buffered bits.
+    #[inline(always)]
+    pub fn read_config_420_fast(symbol: u32, fb: &mut FastBits<'_>, nbits_acc: &mut u32) -> u32 {
+        if symbol < 16 {
+            return symbol;
+        }
+        let nbits_raw = (symbol >> 2) - 2;
+        *nbits_acc |= nbits_raw;
+        let nbits = nbits_raw & 31;
+        let bits = fb.peek_buffered(nbits as usize) as u32;
+        fb.consume_buffered(nbits as usize);
+        let hi = (symbol & 3) | 4;
+        (hi << nbits) | bits
+    }
+
     /// [`Self::read`] on a register-resident cursor; requires at least 31
     /// buffered bits.
     #[inline(always)]

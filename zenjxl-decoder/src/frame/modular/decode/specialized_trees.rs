@@ -7,13 +7,12 @@ use std::{collections::VecDeque, ops::Range};
 use whereat::at;
 
 use crate::{
-    bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, SymbolReader, unpack_signed},
+    entropy_coding::decode::{Histograms, unpack_signed},
     error::Result,
     frame::modular::{
         ModularChannel, Predictor, Tree,
         decode::{
-            channel::ModularChannelDecoder,
+            channel::{ModularChannelDecoder, SymbolSource},
             common::{make_pixel, precompute_references},
         },
         predict::{PredictionData, WeightedPredictorState, clamped_gradient},
@@ -83,13 +82,12 @@ impl<const C420: bool> ModularChannelDecoder for NoWpTree<C420> {
     }
 
     #[inline(always)]
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         prediction_data: PredictionData,
         pos: (usize, usize),
         xsize: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
         let prediction_result = predict_flat(
@@ -106,13 +104,9 @@ impl<const C420: bool> ModularChannelDecoder for NoWpTree<C420> {
         let dec = if let Some(sv) = self.single_value {
             sv
         } else if C420 {
-            reader.read_signed_clustered_config_420(
-                histograms,
-                br,
-                prediction_result.context as usize,
-            )
+            src.read_signed_420(histograms, prediction_result.context as usize)
         } else {
-            reader.read_signed_clustered_inline(histograms, br, prediction_result.context as usize)
+            src.read_signed(histograms, prediction_result.context as usize)
         };
         make_pixel(dec, prediction_result.multiplier, prediction_result.guess)
     }
@@ -157,13 +151,12 @@ impl<const C420: bool> ModularChannelDecoder for GeneralTree<C420> {
     }
 
     #[inline(always)]
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         prediction_data: PredictionData,
         pos: (usize, usize),
         xsize: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
         let prediction_result = predict_flat(
@@ -180,13 +173,9 @@ impl<const C420: bool> ModularChannelDecoder for GeneralTree<C420> {
         let dec = if let Some(sv) = self.no_wp_tree.single_value {
             sv
         } else if C420 {
-            reader.read_signed_clustered_config_420(
-                histograms,
-                br,
-                prediction_result.context as usize,
-            )
+            src.read_signed_420(histograms, prediction_result.context as usize)
         } else {
-            reader.read_signed_clustered_inline(histograms, br, prediction_result.context as usize)
+            src.read_signed(histograms, prediction_result.context as usize)
         };
         let val = make_pixel(dec, prediction_result.multiplier, prediction_result.guess);
         self.wp_state.update_errors(val, pos, xsize);
@@ -280,13 +269,12 @@ impl ModularChannelDecoder for WpOnlyLookupConfig420 {
     }
 
     #[inline(always)]
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         prediction_data: PredictionData,
         pos: (usize, usize),
         xsize: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
         let (wp_pred, property) = self
@@ -295,7 +283,7 @@ impl ModularChannelDecoder for WpOnlyLookupConfig420 {
         let ctx = self.lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
             .clamp(0, LUT_TABLE_SIZE as i64 - 1) as usize];
         // Use the specialized 420 fast path
-        let dec = reader.read_signed_clustered_config_420(histograms, br, ctx as usize);
+        let dec = src.read_signed_420(histograms, ctx as usize);
         let val = dec.wrapping_add(wp_pred as i32);
         self.wp_state.update_errors(val, pos, xsize);
         val
@@ -351,13 +339,12 @@ impl<const C420: bool> ModularChannelDecoder for GradientLookup<C420> {
     fn init_row(&mut self, _: &mut [&mut ModularChannel], _: usize, _: usize) {}
 
     #[inline(always)]
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         prediction_data: PredictionData,
         _: (usize, usize),
         _: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
         let prop9 = prediction_data
@@ -376,9 +363,9 @@ impl<const C420: bool> ModularChannelDecoder for GradientLookup<C420> {
         );
 
         let dec = if C420 {
-            reader.read_signed_clustered_config_420(histograms, br, cluster as usize)
+            src.read_signed_420(histograms, cluster as usize)
         } else {
-            reader.read_signed_clustered_inline(histograms, br, cluster as usize)
+            src.read_signed(histograms, cluster as usize)
         };
         dec.wrapping_add(pred as i32)
     }
@@ -398,17 +385,17 @@ impl SingleGradientOnly {
 impl ModularChannelDecoder for SingleGradientOnly {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = false;
+    const USE_CURSOR: bool = true;
 
     fn init_row(&mut self, _: &mut [&mut ModularChannel], _: usize, _: usize) {}
 
     #[inline(always)]
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         prediction_data: PredictionData,
         _: (usize, usize),
         _: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
         // Direct gradient path: Predictor::Gradient.predict_one reduces to
@@ -424,7 +411,7 @@ impl ModularChannelDecoder for SingleGradientOnly {
         let dec = if let Some(sv) = self.single_value {
             sv
         } else {
-            reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx)
+            src.read_signed(histograms, self.clustered_ctx)
         };
         dec.wrapping_add(pred as i32)
     }
@@ -449,23 +436,23 @@ impl NoTree {
 impl ModularChannelDecoder for NoTree {
     const NEEDS_TOP: bool = false;
     const NEEDS_TOPTOP: bool = false;
+    const USE_CURSOR: bool = true;
 
     fn init_row(&mut self, _: &mut [&mut ModularChannel], _: usize, _: usize) {}
 
     #[inline(always)]
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         _: PredictionData,
         _: (usize, usize),
         _: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
         let dec = if let Some(sv) = self.single_value {
             sv
         } else {
-            reader.read_signed_clustered_inline(histograms, br, self.clustered_ctx)
+            src.read_signed(histograms, self.clustered_ctx)
         };
         make_pixel(dec, 1, 0)
     }

@@ -6,7 +6,7 @@
 use super::common::precompute_references;
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, SymbolReader},
+    entropy_coding::decode::{Histograms, PlainCursor, SymbolReader, unpack_signed},
     error::Result,
     frame::modular::{
         IMAGE_OFFSET, IMAGE_PADDING, ModularChannel, Tree,
@@ -84,31 +84,170 @@ fn decode_modular_channel_small(
     Ok(())
 }
 
+/// Where a channel decoder's symbols come from: the regular reader, or a
+/// register-resident [`PlainCursor`] for streams without LZ77.
+pub(super) trait SymbolSource {
+    /// `SymbolReader::read_signed_clustered_inline`.
+    fn read_signed(&mut self, histograms: &Histograms, cluster: usize) -> i32;
+    /// `SymbolReader::read_signed_clustered_config_420`; requires
+    /// `histograms.can_use_config_420_fast_path()`.
+    fn read_signed_420(&mut self, histograms: &Histograms, cluster: usize) -> i32;
+}
+
+struct ReaderSource<'r, 'b, 'a> {
+    reader: &'r mut SymbolReader,
+    br: &'b mut BitReader<'a>,
+}
+
+impl SymbolSource for ReaderSource<'_, '_, '_> {
+    #[inline(always)]
+    fn read_signed(&mut self, histograms: &Histograms, cluster: usize) -> i32 {
+        self.reader
+            .read_signed_clustered_inline(histograms, self.br, cluster)
+    }
+
+    #[inline(always)]
+    fn read_signed_420(&mut self, histograms: &Histograms, cluster: usize) -> i32 {
+        self.reader
+            .read_signed_clustered_config_420(histograms, self.br, cluster)
+    }
+}
+
+/// Reads through a [`PlainCursor`]; near the end of the data, one symbol at
+/// a time goes through the regular reader.
+struct CursorSource<'r, 'b, 'a> {
+    cursor: PlainCursor<'a>,
+    reader: &'r mut SymbolReader,
+    br: &'b mut BitReader<'a>,
+}
+
+/// The cursor goes in and out by value: a `&mut` to it would keep it in
+/// memory for the whole channel loop.
+#[cold]
+#[inline(never)]
+fn read_signed_slow<'a>(
+    cursor: PlainCursor<'a>,
+    reader: &mut SymbolReader,
+    br: &mut BitReader<'a>,
+    histograms: &Histograms,
+    cluster: usize,
+    config_420: bool,
+) -> (i32, PlainCursor<'a>) {
+    reader.finish_plain_cursor(cursor, br);
+    let v = if config_420 {
+        reader.read_signed_clustered_config_420(histograms, br, cluster)
+    } else {
+        reader.read_signed_clustered_inline(histograms, br, cluster)
+    };
+    (v, reader.plain_cursor(br).unwrap())
+}
+
+impl CursorSource<'_, '_, '_> {
+    #[inline(always)]
+    fn slow(&mut self, histograms: &Histograms, cluster: usize, config_420: bool) -> i32 {
+        let (v, cursor) = read_signed_slow(
+            self.cursor,
+            self.reader,
+            self.br,
+            histograms,
+            cluster,
+            config_420,
+        );
+        self.cursor = cursor;
+        v
+    }
+}
+
+impl SymbolSource for CursorSource<'_, '_, '_> {
+    #[inline(always)]
+    fn read_signed(&mut self, histograms: &Histograms, cluster: usize) -> i32 {
+        match histograms.read_unsigned_plain(&mut self.cursor, cluster) {
+            Some(v) => unpack_signed(v),
+            None => self.slow(histograms, cluster, false),
+        }
+    }
+
+    #[inline(always)]
+    fn read_signed_420(&mut self, histograms: &Histograms, cluster: usize) -> i32 {
+        match histograms.read_unsigned_plain_420(&mut self.cursor, cluster) {
+            Some(v) => unpack_signed(v),
+            None => self.slow(histograms, cluster, true),
+        }
+    }
+}
+
 pub(super) trait ModularChannelDecoder {
     const NEEDS_TOP: bool;
     const NEEDS_TOPTOP: bool;
+    /// Whether to read through a [`PlainCursor`] when the stream allows it.
+    /// On only for single-leaf trees: measured 2026-10-02 (M4 Pro), it made
+    /// the fast-decode preset 34% faster single-threaded, but learned-tree
+    /// lossless e7 and libjxl's gradient DC tree 10% and 3% slower on 12
+    /// threads, with no single-threaded change.
+    const USE_CURSOR: bool = false;
     fn init_row(&mut self, buffers: &mut [&mut ModularChannel], chan: usize, y: usize);
-    fn decode_one(
+    fn decode_one<S: SymbolSource>(
         &mut self,
         prediction_data: PredictionData,
         pos: (usize, usize),
         xsize: usize,
-        reader: &mut SymbolReader,
-        br: &mut BitReader,
+        src: &mut S,
         histograms: &Histograms,
     ) -> i32;
 }
 
 #[inline(never)]
-#[allow(clippy::needless_range_loop)] // Iterator chain (.enumerate().skip().take()) measured 1% overhead
 fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     buffers: &mut [&mut ModularChannel],
     chan: usize,
-    mut decoder: D,
+    decoder: D,
     reader: &mut SymbolReader,
     br: &mut BitReader,
     histograms: &Histograms,
 ) -> Result<()> {
+    #[cfg(test)]
+    let use_cursor =
+        D::USE_CURSOR && !tests::DISABLE_CURSOR.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(test))]
+    let use_cursor = D::USE_CURSOR;
+    match reader.plain_cursor(br).filter(|_| use_cursor) {
+        Some(cursor) => {
+            #[cfg(test)]
+            tests::CURSOR_USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let src = channel_loop(
+                buffers,
+                chan,
+                decoder,
+                CursorSource { cursor, reader, br },
+                histograms,
+            );
+            src.reader.finish_plain_cursor(src.cursor, src.br);
+        }
+        None => {
+            channel_loop(
+                buffers,
+                chan,
+                decoder,
+                ReaderSource { reader, br },
+                histograms,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Takes and returns the symbol source by value so a cursor in it can live
+/// in registers.
+#[inline(always)]
+#[allow(clippy::needless_range_loop)] // Iterator chain (.enumerate().skip().take()) measured 1% overhead
+fn channel_loop<D: ModularChannelDecoder, S: SymbolSource>(
+    buffers: &mut [&mut ModularChannel],
+    chan: usize,
+    mut decoder: D,
+    src: S,
+    histograms: &Histograms,
+) -> S {
+    let mut src = src;
     let size = buffers[chan].data.size();
     debug_assert!(size.0 >= 4);
     debug_assert!(size.1 >= 2);
@@ -116,10 +255,9 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
     const { assert!(IMAGE_OFFSET.1 == 2) };
 
     // Let the compiler decide whether inlining in the borders is worth it.
-    let do_decode_cold =
-        |decoder: &mut D, prediction_data, pos, reader: &mut SymbolReader, br: &mut BitReader| {
-            decoder.decode_one(prediction_data, pos, size.0, reader, br, histograms)
-        };
+    let do_decode_cold = |decoder: &mut D, prediction_data, pos, src: &mut S| {
+        decoder.decode_one(prediction_data, pos, size.0, src, histograms)
+    };
 
     for y in 0..size.1 {
         decoder.init_row(buffers, chan, y);
@@ -132,14 +270,14 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
         let mut prediction_data = PredictionData::default();
         for x in 0..2 {
             prediction_data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
-            let val = do_decode_cold(&mut decoder, prediction_data, (x, y), reader, br);
+            let val = do_decode_cold(&mut decoder, prediction_data, (x, y), &mut src);
             row[x] = val;
             last = val;
         }
         if y < 2 {
             for x in 2..size.0 - 2 {
                 let prediction_data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
-                let val = do_decode_cold(&mut decoder, prediction_data, (x, y), reader, br);
+                let val = do_decode_cold(&mut decoder, prediction_data, (x, y), &mut src);
                 row[x] = val;
             }
         } else {
@@ -152,19 +290,18 @@ fn decode_modular_channel_impl<D: ModularChannelDecoder>(
                     D::NEEDS_TOP,
                     D::NEEDS_TOPTOP,
                 );
-                let val =
-                    decoder.decode_one(prediction_data, (x, y), size.0, reader, br, histograms);
+                let val = decoder.decode_one(prediction_data, (x, y), size.0, &mut src, histograms);
                 row[x] = val;
                 last = val;
             }
         }
         for x in size.0 - 2..size.0 {
             prediction_data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
-            let val = do_decode_cold(&mut decoder, prediction_data, (x, y), reader, br);
+            let val = do_decode_cold(&mut decoder, prediction_data, (x, y), &mut src);
             row[x] = val;
         }
     }
-    Ok(())
+    src
 }
 
 #[instrument(level = "debug", skip(buffers, reader, tree))]
@@ -255,6 +392,48 @@ fn decode_modular_channel_inner(
         }
         TreeSpecialCase::General420(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// Test-only switch that sends every channel through the regular reader.
+    pub(super) static DISABLE_CURSOR: AtomicBool = AtomicBool::new(false);
+    /// Channels decoded through a `CursorSource`.
+    pub(super) static CURSOR_USES: AtomicUsize = AtomicUsize::new(0);
+
+    /// jxl-encoder single-leaf lossless files (prefix codes, no LZ77):
+    /// Gradient leaves (`--fast-decode`, 200x96 RGB8 and 272x96 16-bit
+    /// gray, two groups across) and a Zero leaf (`-P 0`, 104x36). Each section's
+    /// last samples go through the regular reader. Output must match the
+    /// regular reader's exactly.
+    #[test]
+    fn plain_cursor_matches_reader_path() {
+        use crate::api::decoder::tests::decode;
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/plain-cursor");
+        for name in ["gradient_rgb8.jxl", "gradient_gray16.jxl", "zero_rgb8.jxl"] {
+            let data = std::fs::read(dir.join(name)).unwrap();
+            let before = CURSOR_USES.load(Ordering::Relaxed);
+            let (_, fast) = decode(&data, usize::MAX, false, false, None).unwrap();
+            assert!(
+                CURSOR_USES.load(Ordering::Relaxed) > before,
+                "{name}: cursor not used"
+            );
+            DISABLE_CURSOR.store(true, Ordering::Relaxed);
+            let generic = decode(&data, usize::MAX, false, false, None);
+            DISABLE_CURSOR.store(false, Ordering::Relaxed);
+            let (_, generic) = generic.unwrap();
+            assert_eq!(fast.len(), generic.len());
+            for (f, g) in fast[0].iter().zip(&generic[0]) {
+                assert_eq!(f.size(), g.size());
+                for y in 0..f.size().1 {
+                    assert!(f.row(y) == g.row(y), "{name}: row {y} differs");
+                }
+            }
         }
     }
 }
