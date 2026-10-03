@@ -89,13 +89,20 @@ fn epf1_process_row_chunk(
     let channels: [[&[f32]; 5]; 3] =
         core::array::from_fn(|c| core::array::from_fn(|r| &rows[c * rpc + r][..common_len]));
 
-    let out_rows = &mut output_rows.row_data;
     let out_rpc = output_rows.rows_per_channel;
     assert!(out_rpc >= 1);
-    assert!(out_rows.len() >= 3 * out_rpc);
-    for c in 0..3 {
-        assert!(out_rows[c * out_rpc].len() >= min_out_len);
-    }
+    // The three output rows as locals trimmed to one length: read through
+    // the row table, their pointers and lengths were reloaded and each
+    // store checked separately.
+    let (out_x, rest) = output_rows.row_data.split_at_mut(out_rpc);
+    let (out_y, out_b) = rest.split_at_mut(out_rpc);
+    let out_len = out_x[0].len().min(out_y[0].len()).min(out_b[0].len());
+    assert!(out_len >= min_out_len);
+    let out_rows: [&mut [f32]; 3] = [
+        &mut out_x[0][..out_len],
+        &mut out_y[0][..out_len],
+        &mut out_b[0][..out_len],
+    ];
 
     let row_sigma = stage.sigma.row(ypos / BLOCK_DIM);
 
@@ -105,12 +112,13 @@ fn epf1_process_row_chunk(
 
     let scale_vec: [D::F32Vec; 3] = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
 
-    // The last start position of a `window`: checked once per vector below,
-    // it covers the bounds checks of all 15 rows' windows, which all have
-    // length `common_len`.
+    // The last start position of a `window` and of an output vector: checked
+    // once per vector below, it covers the bounds checks of all 15 input
+    // rows' windows and the 3 output rows, each set of one length.
     let last_window = common_len
         .checked_sub(D::F32Vec::LEN + 4)
-        .expect("rows shorter than one window");
+        .expect("rows shorter than one window")
+        .min(out_len.checked_sub(D::F32Vec::LEN).expect("output shorter than one vector"));
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
         assert!(x <= last_window);
         // Scalar skip test when the vector lies in one block, as in libjxl.
@@ -118,7 +126,7 @@ fn epf1_process_row_chunk(
         if uniform.is_some_and(|s| s < MIN_SIGMA) {
             for c in 0..3 {
                 D::F32Vec::load_from(d, channels[c][2], 2 + x)
-                    .store_at(out_rows[c * out_rpc], x);
+                    .store_at(out_rows[c], x);
             }
             continue;
         }
@@ -132,7 +140,7 @@ fn epf1_process_row_chunk(
         if uniform.is_none() && sigma_mask.all() {
             for c in 0..3 {
                 D::F32Vec::load_from(d, channels[c][2], 2 + x)
-                    .store_at(out_rows[c * out_rpc], x);
+                    .store_at(out_rows[c], x);
             }
             continue;
         }
@@ -156,7 +164,7 @@ fn epf1_process_row_chunk(
         let inv_w = D::F32Vec::splat(d, 1.0) / w;
         for c in 0..3 {
             let out = channel_out(d, &channels[c], x, &sads, inv_w, sigma_mask);
-            out.store_at(out_rows[c * out_rpc], x);
+            out.store_at(out_rows[c], x);
         }
     }
 });

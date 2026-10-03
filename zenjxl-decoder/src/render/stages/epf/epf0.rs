@@ -8,7 +8,7 @@ use crate::{
     features::epf::SigmaSource,
     render::{
         Channels, ChannelsMut, RenderPipelineInOutStage,
-        stages::epf::common::{get_sigma, prepare_sad_mul_storage},
+        stages::epf::common::{get_sigma, prepare_sad_mul_storage, uniform_sigma},
     },
 };
 
@@ -85,13 +85,18 @@ simd_function!(
     let channels: [[&[f32]; 7]; 3] =
         core::array::from_fn(|c| core::array::from_fn(|r| &rows[c * rpc + r][..common_len]));
 
-    let out_rows = &mut output_rows.row_data;
     let out_rpc = output_rows.rows_per_channel;
     assert!(out_rpc >= 1);
-    assert!(out_rows.len() >= 3 * out_rpc);
-    for c in 0..3 {
-        assert!(out_rows[c * out_rpc].len() >= min_out_len);
-    }
+    // The three output rows as locals trimmed to one length (see EPF1).
+    let (out_x, rest) = output_rows.row_data.split_at_mut(out_rpc);
+    let (out_y, out_b) = rest.split_at_mut(out_rpc);
+    let out_len = out_x[0].len().min(out_y[0].len()).min(out_b[0].len());
+    assert!(out_len >= min_out_len);
+    let out_rows: [&mut [f32]; 3] = [
+        &mut out_x[0][..out_len],
+        &mut out_y[0][..out_len],
+        &mut out_b[0][..out_len],
+    ];
 
     let row_sigma = stage.sigma.row(ypos / BLOCK_DIM);
 
@@ -103,15 +108,33 @@ simd_function!(
 
     let scale_vec: [D::F32Vec; 3] = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
 
+    // The last start position of a `window` and of an output vector: checked
+    // once per vector below, it covers the bounds checks of all 21 input
+    // rows' windows and the 3 output rows, each set of one length.
+    let last_window = common_len
+        .checked_sub(D::F32Vec::LEN + 6)
+        .expect("rows shorter than one window")
+        .min(out_len.checked_sub(D::F32Vec::LEN).expect("output shorter than one vector"));
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
-        let sigma = get_sigma(d, x + xpos, row_sigma);
+        assert!(x <= last_window);
+        // Scalar skip test when the vector lies in one block, as in libjxl.
+        let uniform = uniform_sigma::<D>(x + xpos, row_sigma);
+        if uniform.is_some_and(|s| s < MIN_SIGMA) {
+            for c in 0..3 {
+                D::F32Vec::load_from(d, channels[c][3], 3 + x).store_at(out_rows[c], x);
+            }
+            continue;
+        }
+        let sigma = match uniform {
+            Some(s) => D::F32Vec::splat(d, s),
+            None => get_sigma(d, x + xpos, row_sigma),
+        };
         let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
-        if sigma_mask.all() {
+        if uniform.is_none() && sigma_mask.all() {
             for c in 0..3 {
-                D::F32Vec::load_from(d, channels[c][3], 3 + x)
-                    .store_at(out_rows[c * out_rpc], x);
+                D::F32Vec::load_from(d, channels[c][3], 3 + x).store_at(out_rows[c], x);
             }
             continue;
         }
@@ -131,7 +154,7 @@ simd_function!(
         }
         let inv_w = D::F32Vec::splat(d, 1.0) / w;
         for c in 0..3 {
-            channel_out(d, &channels[c], x, &sads, inv_w, sigma_mask).store_at(out_rows[c * out_rpc], x);
+            channel_out(d, &channels[c], x, &sads, inv_w, sigma_mask).store_at(out_rows[c], x);
         }
     }
 });

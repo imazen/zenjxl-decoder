@@ -78,9 +78,13 @@ fn epf2_process_row_chunk(
     let common_len = rows.iter().flatten().map(|r| r.len()).min().unwrap();
     assert!(common_len >= min_in_len);
     let rows = rows.map(|ch| ch.map(|r| &r[..common_len]));
-    assert!(output_x[0].len() >= min_out_len);
-    assert!(output_y[0].len() >= min_out_len);
-    assert!(output_b[0].len() >= min_out_len);
+    // Output rows as locals trimmed to one length, so the per-vector bound
+    // below covers their stores.
+    let out_len = output_x[0].len().min(output_y[0].len()).min(output_b[0].len());
+    assert!(out_len >= min_out_len);
+    let output_x = &mut output_x[0][..out_len];
+    let output_y = &mut output_y[0][..out_len];
+    let output_b = &mut output_b[0][..out_len];
 
     let row_sigma = stage.sigma.row(ypos / BLOCK_DIM);
 
@@ -92,12 +96,13 @@ fn epf2_process_row_chunk(
     let scale = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
     let len = D::F32Vec::LEN;
 
-    // The last start position of a window: checked once per vector, it
-    // covers the bounds checks of all 9 rows' windows, which all have
-    // length `common_len`.
+    // The last start position of a window and of an output vector: checked
+    // once per vector, it covers the bounds checks of all 9 input rows'
+    // windows and the 3 output rows, each set of one length.
     let last_window = common_len
         .checked_sub(len + 2)
-        .expect("rows shorter than one window");
+        .expect("rows shorter than one window")
+        .min(out_len.checked_sub(len).expect("output shorter than one vector"));
     for x in (0..xsize).step_by(len) {
         assert!(x <= last_window);
         let [wx, wy, wb] = rows.map(|ch| ch.map(|r| &r[x..x + len + 2]));
@@ -109,9 +114,9 @@ fn epf2_process_row_chunk(
         // Scalar skip test when the vector lies in one block, as in libjxl.
         let uniform = uniform_sigma::<D>(x + xpos, row_sigma);
         if uniform.is_some_and(|s| s < MIN_SIGMA) {
-            x_cc.store_at(output_x[0], x);
-            y_cc.store_at(output_y[0], x);
-            b_cc.store_at(output_b[0], x);
+            x_cc.store_at(output_x, x);
+            y_cc.store_at(output_y, x);
+            b_cc.store_at(output_b, x);
             continue;
         }
         let sigma = match uniform {
@@ -122,9 +127,9 @@ fn epf2_process_row_chunk(
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if uniform.is_none() && sigma_mask.all() {
-            x_cc.store_at(output_x[0], x);
-            y_cc.store_at(output_y[0], x);
-            b_cc.store_at(output_b[0], x);
+            x_cc.store_at(output_x, x);
+            y_cc.store_at(output_y, x);
+            b_cc.store_at(output_b, x);
             continue;
         }
 
@@ -162,9 +167,9 @@ fn epf2_process_row_chunk(
         x_acc = sigma_mask.if_then_else_f32(x_cc, x_acc);
         y_acc = sigma_mask.if_then_else_f32(y_cc, y_acc);
         b_acc = sigma_mask.if_then_else_f32(b_cc, b_acc);
-        x_acc.store_at(output_x[0], x);
-        y_acc.store_at(output_y[0], x);
-        b_acc.store_at(output_b[0], x);
+        x_acc.store_at(output_x, x);
+        y_acc.store_at(output_y, x);
+        b_acc.store_at(output_b, x);
     }
 });
 
