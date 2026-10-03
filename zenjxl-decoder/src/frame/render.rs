@@ -815,94 +815,123 @@ impl Frame {
                     .quant_biases;
                 let tracker = &self.decoder_state.memory_tracker;
 
-                work[batch_start..batch_end]
-                    .par_iter_mut()
-                    .try_for_each(|gw| -> Result<()> {
-                        stop.check().map_err(Error::from)?;
-                        // Allocate pixel buffers on-demand from the shared pool.
-                        // This runs in PARALLEL instead of the old sequential Phase 1
-                        // allocation, distributing page fault cost across threads.
-                        if is_vardct && gw.do_render {
-                            // Pop under the lock, allocate outside it: a `match`
-                            // on `pool.lock().pop()` would keep the guard alive
-                            // for the whole match, serialising the (large,
-                            // page-faulting) allocations of every thread.
-                            let pooled = pixel_pool.lock().unwrap().pop();
-                            gw.pixels = Some(match pooled {
-                                Some(bufs) => bufs,
-                                None => [
-                                    Image::<f32>::new_uninit(pixel_sizes[0])?,
-                                    Image::<f32>::new_uninit(pixel_sizes[1])?,
-                                    Image::<f32>::new_uninit(pixel_sizes[2])?,
-                                ],
+                let decode_group = |gw: &mut GroupWork| -> Result<()> {
+                    stop.check().map_err(Error::from)?;
+                    // Allocate pixel buffers on-demand from the shared pool.
+                    // This runs in PARALLEL instead of the old sequential Phase 1
+                    // allocation, distributing page fault cost across threads.
+                    if is_vardct && gw.do_render {
+                        // Pop under the lock, allocate outside it: a `match`
+                        // on `pool.lock().pop()` would keep the guard alive
+                        // for the whole match, serialising the (large,
+                        // page-faulting) allocations of every thread.
+                        let pooled = pixel_pool.lock().unwrap().pop();
+                        gw.pixels = Some(match pooled {
+                            Some(bufs) => bufs,
+                            None => [
+                                Image::<f32>::new_uninit(pixel_sizes[0])?,
+                                Image::<f32>::new_uninit(pixel_sizes[1])?,
+                                Image::<f32>::new_uninit(pixel_sizes[2])?,
+                            ],
+                        });
+                    }
+                    #[cfg(feature = "jpeg")]
+                    if jpeg_enabled && is_vardct && !gw.passes.is_empty() {
+                        let r = header.block_group_rect(gw.group);
+                        let n = r.size.0 * r.size.1 * crate::BLOCK_SIZE;
+                        gw.jpeg_coeffs = Some([vec![0; n], vec![0; n], vec![0; n]]);
+                    }
+                    if is_vardct && !gw.passes.is_empty() {
+                        let hf_global = hf_global.unwrap();
+                        let hf_meta = hf_meta.unwrap();
+                        let pooled = buffer_pool.lock().unwrap().pop();
+                        let mut buffers = match pooled {
+                            Some(b) => b,
+                            None => VarDctBuffers::new()?,
+                        };
+
+                        if !(gw.pixels.is_none() && gw.do_render) {
+                            // Each parallel task uses a distinct gw.group —
+                            // each group owns its own Vec<i32>, no shared state.
+                            let hf_coeffs = gw.hf_coeffs.as_mut().map(|[a, b, c]| {
+                                [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()]
                             });
-                        }
-                        #[cfg(feature = "jpeg")]
-                        if jpeg_enabled && is_vardct && !gw.passes.is_empty() {
-                            let r = header.block_group_rect(gw.group);
-                            let n = r.size.0 * r.size.1 * crate::BLOCK_SIZE;
-                            gw.jpeg_coeffs = Some([vec![0; n], vec![0; n], vec![0; n]]);
-                        }
-                        if is_vardct && !gw.passes.is_empty() {
-                            let hf_global = hf_global.unwrap();
-                            let hf_meta = hf_meta.unwrap();
-                            let pooled = buffer_pool.lock().unwrap().pop();
-                            let mut buffers = match pooled {
-                                Some(b) => b,
-                                None => VarDctBuffers::new()?,
-                            };
-
-                            if !(gw.pixels.is_none() && gw.do_render) {
-                                // Each parallel task uses a distinct gw.group —
-                                // each group owns its own Vec<i32>, no shared state.
-                                let hf_coeffs = gw.hf_coeffs.as_mut().map(|[a, b, c]| {
-                                    [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()]
-                                });
-                                decode_vardct_group(
-                                    gw.group,
-                                    &mut gw.passes,
-                                    header,
-                                    lf_global,
-                                    hf_global,
-                                    hf_meta,
-                                    lf_image,
-                                    quant_lf,
-                                    quant_biases,
-                                    hf_coeffs,
-                                    &mut gw.pixels,
-                                    &mut buffers,
-                                    tracker,
-                                    #[cfg(feature = "jpeg")]
-                                    gw.jpeg_coeffs.as_mut().map(|[a, b, c]| {
-                                        let rect = header.block_group_rect(gw.group);
-                                        JpegCoeffSink {
-                                            coeffs: [
-                                                a.as_mut_slice(),
-                                                b.as_mut_slice(),
-                                                c.as_mut_slice(),
-                                            ],
-                                            stride_blocks: rect.size.0,
-                                            origin_blocks: rect.origin,
-                                        }
-                                    }),
-                                )?;
-                            }
-                            buffer_pool.lock().unwrap().push(buffers);
-                        }
-
-                        for (pass, br) in gw.passes.iter_mut() {
-                            lf_global.modular_global.read_stream(
-                                ModularStreamId::ModularHF {
-                                    group: gw.group,
-                                    pass: *pass,
-                                },
+                            decode_vardct_group(
+                                gw.group,
+                                &mut gw.passes,
                                 header,
-                                &lf_global.tree,
-                                br,
+                                lf_global,
+                                hf_global,
+                                hf_meta,
+                                lf_image,
+                                quant_lf,
+                                quant_biases,
+                                hf_coeffs,
+                                &mut gw.pixels,
+                                &mut buffers,
                                 tracker,
+                                #[cfg(feature = "jpeg")]
+                                gw.jpeg_coeffs.as_mut().map(|[a, b, c]| {
+                                    let rect = header.block_group_rect(gw.group);
+                                    JpegCoeffSink {
+                                        coeffs: [
+                                            a.as_mut_slice(),
+                                            b.as_mut_slice(),
+                                            c.as_mut_slice(),
+                                        ],
+                                        stride_blocks: rect.size.0,
+                                        origin_blocks: rect.origin,
+                                    }
+                                }),
                             )?;
                         }
-                        Ok(())
+                        buffer_pool.lock().unwrap().push(buffers);
+                    }
+
+                    for (pass, br) in gw.passes.iter_mut() {
+                        lf_global.modular_global.read_stream(
+                            ModularStreamId::ModularHF {
+                                group: gw.group,
+                                pass: *pass,
+                            },
+                            header,
+                            &lf_global.tree,
+                            br,
+                            tracker,
+                        )?;
+                    }
+                    Ok(())
+                };
+                // Largest sections first, from a shared queue: a group's
+                // decode time follows its section size, and taking the
+                // largest remaining one keeps a big group from starting last
+                // while the other threads idle. Rayon's split of a slice into
+                // ranges would hand the largest groups to one thread.
+                let mut order: Vec<&mut GroupWork> =
+                    work[batch_start..batch_end].iter_mut().collect();
+                order.sort_by_cached_key(|gw| {
+                    std::cmp::Reverse(
+                        gw.passes
+                            .iter()
+                            .map(|(_, br)| br.total_bits_available())
+                            .sum::<usize>(),
+                    )
+                });
+                let workers = num_threads.min(order.len());
+                let queue = std::sync::Mutex::new(order.into_iter());
+                (0..workers)
+                    .into_par_iter()
+                    .try_for_each(|_| -> Result<()> {
+                        loop {
+                            let Some(gw) = queue.lock().unwrap().next() else {
+                                return Ok(());
+                            };
+                            if let Err(e) = decode_group(gw) {
+                                // Leave nothing for the other workers.
+                                queue.lock().unwrap().by_ref().for_each(drop);
+                                return Err(e);
+                            }
+                        }
                     })?;
             }
             phase2_dur += phase2_start.elapsed();
