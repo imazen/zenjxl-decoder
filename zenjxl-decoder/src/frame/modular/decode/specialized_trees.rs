@@ -389,6 +389,12 @@ pub struct SingleGradientOnly {
     single_value: Option<i32>,
 }
 
+impl SingleGradientOnly {
+    pub(super) fn clustered_ctx(&self) -> usize {
+        self.clustered_ctx
+    }
+}
+
 impl ModularChannelDecoder for SingleGradientOnly {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = false;

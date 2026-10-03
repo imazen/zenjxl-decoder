@@ -334,6 +334,110 @@ impl SymbolReader {
     }
 }
 
+/// Register-resident entropy state for hot loops over prefix-coded streams
+/// whose LZ77 only repeats the previous symbol (the RLE shape libjxl's
+/// effort-1 lossless encoder writes). Same use as [`PlainCursor`]: obtain
+/// with [`SymbolReader::rle_cursor`], read with [`RleCode::read`], and
+/// return with [`SymbolReader::finish_rle_cursor`].
+#[derive(Clone, Copy)]
+pub struct RleCursor<'a> {
+    fb: FastBits<'a>,
+    nbits_acc: u32,
+    min_symbol: u32,
+    min_length: u32,
+    last_sym: Option<u32>,
+    repeat_count: u32,
+    lz77_repeat: bool,
+}
+
+impl SymbolReader {
+    /// An [`RleCursor`] for this reader, or `None` unless it is in RLE state
+    /// with prefix codes.
+    #[inline(always)]
+    pub fn rle_cursor<'a>(
+        &self,
+        histograms: &Histograms,
+        br: &BitReader<'a>,
+    ) -> Option<RleCursor<'a>> {
+        let SymbolReaderState::Rle(rle) = &self.state else {
+            return None;
+        };
+        if !matches!(histograms.codes, Codes::Huffman(_)) {
+            return None;
+        }
+        Some(RleCursor {
+            fb: br.take_fast(),
+            nbits_acc: 0,
+            min_symbol: rle.min_symbol,
+            min_length: rle.min_length,
+            last_sym: rle.last_sym,
+            repeat_count: rle.repeat_count,
+            lz77_repeat: false,
+        })
+    }
+
+    /// Writes an [`RleCursor`]'s state back to this reader and `br`.
+    #[inline(always)]
+    pub fn finish_rle_cursor<'a>(&mut self, cursor: RleCursor<'a>, br: &mut BitReader<'a>) {
+        br.put_fast(cursor.fb);
+        let SymbolReaderState::Rle(rle) = &mut self.state else {
+            unreachable!("RleCursor taken from a reader in RLE state");
+        };
+        rle.last_sym = cursor.last_sym;
+        rle.repeat_count = cursor.repeat_count;
+        self.errors.nbits_acc |= cursor.nbits_acc;
+        self.errors.lz77_repeat |= cursor.lz77_repeat;
+    }
+}
+
+/// The prefix code and hybrid-uint configs of one cluster of an RLE stream,
+/// resolved once per channel ([`Histograms::rle_code`]).
+pub struct RleCode<'h> {
+    table: &'h Table,
+    uint: &'h HybridUint,
+    len_uint: &'h HybridUint,
+}
+
+impl RleCode<'_> {
+    /// Reads one unsigned symbol through an [`RleCursor`], with the same
+    /// result and error state as the reader's RLE path
+    /// (`RleState::pull_symbol` / `push_token`). `None`, with nothing
+    /// changed, when a token must be read near the end of the data; the
+    /// caller then uses the regular reader.
+    #[inline(always)]
+    pub fn read(&self, c: &mut RleCursor<'_>) -> Option<u32> {
+        if c.repeat_count > 0
+            && let Some(sym) = c.last_sym
+        {
+            c.repeat_count -= 1;
+            return Some(sym);
+        }
+        // A prefix code (<= 15 bits) plus up to 31 hybrid-uint extra bits.
+        if !c.fb.ensure(47) {
+            return None;
+        }
+        // `pull_symbol` consumes one repeat even without a symbol to repeat.
+        c.repeat_count = c.repeat_count.saturating_sub(1);
+        let token = self.table.read_fast(&mut c.fb);
+        if let Some(token) = token.checked_sub(c.min_symbol) {
+            let count = self.len_uint.read_fast(token, &mut c.fb, &mut c.nbits_acc);
+            // Overflow is invalid but unreported, as on the reader's path.
+            c.repeat_count = count.wrapping_add(c.min_length);
+        } else {
+            c.last_sym = Some(self.uint.read_fast(token, &mut c.fb, &mut c.nbits_acc));
+            c.repeat_count = 1;
+        }
+        if c.repeat_count > 0 {
+            c.repeat_count -= 1;
+            if let Some(sym) = c.last_sym {
+                return Some(sym);
+            }
+        }
+        c.lz77_repeat = true;
+        Some(0)
+    }
+}
+
 impl SymbolReader {
     /// True when no LZ77/RLE state exists, so a symbol can be read straight
     /// from the code (e.g. through a [`PlainCursor`]).
@@ -737,6 +841,19 @@ impl Histograms {
             self.uint_config(cluster)
                 .read_fast(token, &mut cursor.fb, &mut cursor.nbits_acc),
         )
+    }
+
+    /// The codes `cluster` reads with through an [`RleCursor`]; `None`
+    /// unless the stream uses prefix codes and LZ77.
+    pub fn rle_code(&self, cluster: usize) -> Option<RleCode<'_>> {
+        let Codes::Huffman(hc) = &self.codes else {
+            return None;
+        };
+        Some(RleCode {
+            table: hc.table(cluster),
+            uint: self.uint_config(cluster),
+            len_uint: self.lz77_length_uint.as_ref()?,
+        })
     }
 
     #[allow(dead_code)] // Used in debug!() tracing calls

@@ -6,6 +6,7 @@
 mod bitstream;
 mod channel;
 mod common;
+mod rle_gradient;
 mod specialized_trees;
 
 pub use bitstream::decode_modular_subbitstream;

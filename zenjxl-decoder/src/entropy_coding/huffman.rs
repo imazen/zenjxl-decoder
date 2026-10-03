@@ -31,7 +31,7 @@ impl Debug for TableEntry {
 }
 
 #[derive(Debug)]
-struct Table {
+pub(super) struct Table {
     entries: Vec<TableEntry>,
 }
 
@@ -554,6 +554,10 @@ impl HuffmanCodes {
     #[inline(always)]
     pub fn read_fast(&self, fb: &mut FastBits<'_>, ctx: usize) -> u32 {
         self.tables[ctx].read_fast(fb)
+    }
+
+    pub(super) fn table(&self, ctx: usize) -> &Table {
+        &self.tables[ctx]
     }
 
     pub fn single_symbol(&self, ctx: usize) -> Option<u32> {

@@ -235,7 +235,7 @@ batch):
 | 654a985 #787 + 8e8769b #817 | single-symbol fast path (must ship together) | **PORTED** (`cddf926`, batch 4) — sunset_logo 1T now 1.07× behind, 12T at parity |
 | ad5ead5 #716 | enum flat tree + `Box<[i32;256]>` property buffer | **N/A (measured)** — ported and measured slower on aarch64 (2026-08-22), reverted; re-measure on x86 before retrying |
 | 4fcfb24 #793 | weighted predictor layout/unrolling | **N/A (measured)** — the fork's WP paths already measure faster than upstream's (2026-08-23), and the upstream version relies on `get_unchecked` |
-| afd41c9 #797 | reader-generic flat trees, fast-lossless path | **LATER** (medium–large); `Tree::num_properties` piece is trivial |
+| afd41c9 #797 | reader-generic flat trees, fast-lossless path | **fast-lossless path PORTED (2026-10-02)** as `frame/modular/decode/rle_gradient.rs`: single Gradient leaves in prefix-coded RLE streams (libjxl e1), read through a register-resident `RleCursor`/`RleCode` instead of upstream's per-stream loop; libjxl e1 photos 49.2 -> 74.8 MP/s 1T (upstream 60, djxl 57). Reader-generic flat trees still **LATER**; `Tree::num_properties` piece is trivial |
 | 7f8ee4f #812 (scratch cap only) | `group_scratch_buffers_limit = Some(0)` for modular frames | **PORTED** (`15f332f`) — 300 cached tiles / 78 MB dropped on a 2333x2333 lossless decode, speed unchanged |
 | 7f8ee4f #812 (rest), 2d0b720, c066ee2, 07cb870, abf9c4f, 4495876, f76be0c | depth-first transform engine, border buffers, eager dealloc, parallel modular transforms | **LATER** as one project; this is where upstream's 2× MT modular win comes from |
 | 088ec7f #888 | remove internal image padding | **LATER, behind #797** — the fork's specialised tree decoders use the padded rows for branch-free `row_top[x + 2]` loads; port only together with the #797 loop restructure |
@@ -425,6 +425,7 @@ noted.
 | `a5ac008` | the dither table is a `const` here |
 | `45abc97` | coordinate remap for upstream's padded LF layout |
 | `d7ecec1` | **not ported (by decision, 2026-09-25)**: upstream's panic does not occur here; per-frame format changes decode byte-identically (`pixel_format_can_change_between_frames`). The `Result` signature is listed under queued breaking changes |
+| `b76fd14` #940 | **not ported, deliberately (2026-10-02)**: replaces the blue-noise u8 dither table with a different pattern. This fork keeps libjxl's table. Measured against djxl v0.12 u8 output on two cjxl d1 e7 photos (2048x1358, 1365x2048), ImageMagick `compare -metric AE` gives 1.8 and 1.1 here versus 3,518 and 3,595 for upstream `jxl_cli` at `5122960`; 16-bit output is not dithered. Revisit if libjxl adopts the new table |
 | `249e8c5` | **not ported, deliberately**: a speed change that keeps 16 of the 23 random noise mantissa bits, moving noise away from libjxl. No correctness fix in it |
 
 
