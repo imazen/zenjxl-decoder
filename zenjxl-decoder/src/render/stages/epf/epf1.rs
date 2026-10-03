@@ -105,7 +105,14 @@ fn epf1_process_row_chunk(
 
     let scale_vec: [D::F32Vec; 3] = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
 
+    // The last start position of a `window`: checked once per vector below,
+    // it covers the bounds checks of all 15 rows' windows, which all have
+    // length `common_len`.
+    let last_window = common_len
+        .checked_sub(D::F32Vec::LEN + 4)
+        .expect("rows shorter than one window");
     for x in (0..xsize).step_by(D::F32Vec::LEN) {
+        assert!(x <= last_window);
         // Scalar skip test when the vector lies in one block, as in libjxl.
         let uniform = uniform_sigma::<D>(x + xpos, row_sigma);
         if uniform.is_some_and(|s| s < MIN_SIGMA) {

@@ -92,7 +92,14 @@ fn epf2_process_row_chunk(
     let scale = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
     let len = D::F32Vec::LEN;
 
+    // The last start position of a window: checked once per vector, it
+    // covers the bounds checks of all 9 rows' windows, which all have
+    // length `common_len`.
+    let last_window = common_len
+        .checked_sub(len + 2)
+        .expect("rows shorter than one window");
     for x in (0..xsize).step_by(len) {
+        assert!(x <= last_window);
         let [wx, wy, wb] = rows.map(|ch| ch.map(|r| &r[x..x + len + 2]));
 
         let x_cc = D::F32Vec::load_from(d, wx[1], 1);
