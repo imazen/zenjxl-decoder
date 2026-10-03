@@ -256,11 +256,21 @@ was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
   instructions).
 - Rejected: packing cluster + hybrid-uint config into one per-context
   table for the AC loop (0.3% fewer instructions, 1.5-3% more cycles).
-- Parity at `a820cac9`, interleaved, zen/djxl (4 CLIC photos per set):
-  1 thread d1e7 1.01, fd4 1.20, JPEG 4:2:0 1.10, 4:4:4 1.08, d3 0.95,
-  e7 lossless 0.97, e3 1.18, e1 1.27; 12 threads d1e7 1.01, fd4 1.03,
-  JPEG 4:2:0 1.03, 4:4:4 1.05, d3 0.97, e7 1.32, e3 1.33, e1 1.61. Upstream
-  jxl-rs is behind djxl on every set except e7/e1 at 12 threads.
+- Parity at `63370cd7`, interleaved, zen/djxl (4 CLIC photos per set):
+  1 thread d1e7 1.05, fd4 1.19, JPEG 4:2:0 1.10, 4:4:4 1.08, d3 1.02,
+  e7 lossless 0.97, e3 1.19, e1 1.28; 12 threads d1e7 1.02, fd4 1.03,
+  JPEG 4:2:0 1.03, 4:4:4 1.05, d3 1.01, e7 1.30, e3 1.36, e1 1.61. Ahead of
+  upstream jxl-rs on every set at both thread counts.
+- EPF gains came from codegen, not algorithm: per-vector bounds checks on
+  15-21 row windows and output rows read through the row table every vector
+  (`85d33a94`, `5592d393`), and SmallVec pushes building each stage call's
+  row lists (`63370cd7`).
+- e7 lossless 1T (0.97): per decode djxl 889M cycles / 3.02G instructions,
+  zen 947M / 3.63G. Not instruction-bound: removing the tree walk's property
+  bounds checks (fixed 256-entry buffer, -3% instructions), caching the WP
+  weights (-1.2%) and a 2x unrolled walk (-2.4%) each left cycles equal or
+  higher. The time is in the data-dependent tree branches and the leaf
+  predictor switch, as in libjxl.
 - d3 1T: per decode djxl 146M cycles / 710M instructions, zen 152M / 900M.
   Our EPF1 and EPF2 kernels take ~2x djxl's share each; the sRGB transfer
   (`linear_to_srgb_simd`, 9% here) is the same algorithm as libjxl's.
