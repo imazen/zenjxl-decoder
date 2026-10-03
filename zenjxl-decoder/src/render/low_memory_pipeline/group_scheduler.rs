@@ -267,7 +267,7 @@ pub(super) fn compute_work_items(
     Ok(items)
 }
 
-pub(super) struct InputBuffer {
+pub(crate) struct InputBuffer {
     // One buffer per channel.
     pub(super) data: Vec<Option<OwnedRawImage>>,
     // Storage for left/right borders. Includes corners.
@@ -281,6 +281,12 @@ pub(super) struct InputBuffer {
 }
 
 impl InputBuffer {
+    /// The colour channel buffers, taken out.
+    #[cfg(feature = "threads")]
+    pub(crate) fn take_colour_data(&mut self) -> [Option<OwnedRawImage>; 3] {
+        std::array::from_fn(|c| self.data[c].take())
+    }
+
     pub(super) fn has_buffer(&self, chan: usize) -> bool {
         self.data[chan].is_some()
     }
@@ -697,6 +703,7 @@ impl LowMemoryRenderPipeline {
                 border_size: self.border_size,
                 opaque_alpha_buffers: &self.opaque_alpha_buffers,
                 sorted_buffer_indices: &self.sorted_buffer_indices,
+                own_group: None,
             };
             let ctx = &mut self.render_ctx;
             let save_buffer_info = &self.save_buffer_info;

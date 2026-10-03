@@ -144,6 +144,50 @@ pub(crate) struct PipelineReadView<'a> {
     pub(super) border_size: (usize, usize),
     pub(super) opaque_alpha_buffers: &'a [Option<RowBuffer>],
     pub(super) sorted_buffer_indices: &'a [Vec<(usize, usize, usize)>],
+    /// A group whose input is read from here instead of `input_buffers`
+    /// (see [`LowMemoryRenderPipeline::render_group_with_data`]).
+    pub(super) own_group: Option<(usize, &'a InputBuffer)>,
+}
+
+impl<'a> PipelineReadView<'a> {
+    /// The input buffers of group `g`.
+    #[inline]
+    pub(super) fn input_buffer(&self, g: usize) -> &'a InputBuffer {
+        match self.own_group {
+            Some((own, buf)) if own == g => buf,
+            _ => &self.input_buffers[g],
+        }
+    }
+
+    /// An input buffer holding `data` as the colour channels.
+    #[cfg(feature = "threads")]
+    pub(crate) fn input_buffer_with_data(&self, data: [OwnedRawImage; 3]) -> InputBuffer {
+        let mut buf = InputBuffer::new(self.shared.num_channels());
+        for (c, img) in data.into_iter().enumerate() {
+            buf.data[c] = Some(img);
+        }
+        buf
+    }
+
+    /// Renders `item` of group `g` from `data` (its colour channels), which
+    /// is not stored in the pipeline. Requires
+    /// [`LowMemoryRenderPipeline::self_contained_work_items`].
+    #[cfg(feature = "threads")]
+    pub(crate) fn render_group_with_data(
+        &self,
+        ctx: &mut GroupRenderContext,
+        g: usize,
+        data: &InputBuffer,
+        item: &group_scheduler::RenderWorkItem,
+        buffers: &mut [Option<JxlOutputBuffer>],
+    ) -> Result<()> {
+        debug_assert_eq!(self.border_size, (0, 0));
+        let view = PipelineReadView {
+            own_group: Some((g, data)),
+            ..*self
+        };
+        render_group::render(ctx, &view, (item.gx, item.gy), item.image_area, buffers)
+    }
 }
 
 pub struct LowMemoryRenderPipeline {
@@ -586,6 +630,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                 border_size: self.border_size,
                 opaque_alpha_buffers: &self.opaque_alpha_buffers,
                 sorted_buffer_indices: &self.sorted_buffer_indices,
+                own_group: None,
             };
             render_group::render_outside(
                 &mut self.render_ctx,
@@ -697,6 +742,7 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                     border_size: self.border_size,
                     opaque_alpha_buffers: &self.opaque_alpha_buffers,
                     sorted_buffer_indices: &self.sorted_buffer_indices,
+                    own_group: None,
                 };
                 let ctx = &mut self.render_ctx;
                 let save_buffer_info = &self.save_buffer_info;
@@ -771,7 +817,48 @@ impl LowMemoryRenderPipeline {
             border_size: self.border_size,
             opaque_alpha_buffers: &self.opaque_alpha_buffers,
             sorted_buffer_indices: &self.sorted_buffer_indices,
+            own_group: None,
         }
+    }
+
+    /// The work items of every group of a one-shot decode, if the frame can
+    /// render each group from that group's own pixels alone: no stage reads
+    /// neighbouring pixels, only the three colour channels are used, and no
+    /// padding around the frame is rendered. The groups are then rendered by
+    /// [`PipelineReadView::render_group_with_data`] right after decoding.
+    #[cfg(feature = "threads")]
+    pub(crate) fn self_contained_work_items(
+        &self,
+    ) -> Result<Option<Vec<group_scheduler::RenderWorkItem>>> {
+        if self.border_size != (0, 0)
+            || self.shared.num_used_channels() != 3
+            || (0..3).any(|c| !self.shared.channel_is_used[c])
+            || self.shared.extend_stage_index.is_some()
+        {
+            return Ok(None);
+        }
+        let mut items = Vec::with_capacity(self.input_buffers.len());
+        for g in 0..self.input_buffers.len() {
+            items.extend(group_scheduler::compute_work_items(
+                g,
+                &[],
+                &self.shared,
+                self.border_size,
+                FullReadiness::Some(true),
+            )?);
+        }
+        Ok(Some(items))
+    }
+
+    /// Records group `g` as rendered by
+    /// [`PipelineReadView::render_group_with_data`]:
+    /// the state its stores and rendering would have left.
+    #[cfg(feature = "threads")]
+    pub(crate) fn mark_rendered_with_data(&mut self, g: usize, complete: bool) {
+        for c in self.shared.group_chan_complete[g].iter_mut() {
+            *c = complete;
+        }
+        self.input_buffers[g].is_ready = true;
     }
 
     /// Returns the frame origin and full image size from the extend stage,

@@ -601,6 +601,13 @@ impl Frame {
         }
 
         let phase_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
+        if std::env::var_os("JXL_BORDER").is_some() {
+            eprintln!(
+                "BORDER needs={} noise={}",
+                lmp_ref!().needs_border_rendering(),
+                self.header.has_noise()
+            );
+        }
 
         // The parallel path writes to output through `get_full_buffers`, which
         // bypasses the BufferSplitter's changed-region tracking; report writes
@@ -628,6 +635,9 @@ impl Frame {
             /// the frame's arrays after the parallel phase.
             #[cfg(feature = "jpeg")]
             jpeg_coeffs: Option<[Vec<i16>; 3]>,
+            /// Rendered to the output by its decode task (see
+            /// `self_contained_work_items`); nothing to store or render after.
+            rendered: bool,
         }
 
         struct GroupRenderInfo {
@@ -689,6 +699,7 @@ impl Frame {
                 hf_coeffs,
                 #[cfg(feature = "jpeg")]
                 jpeg_coeffs: None,
+                rendered: false,
             });
         }
 
@@ -815,6 +826,52 @@ impl Frame {
                     .quant_biases;
                 let tracker = &self.decoder_state.memory_tracker;
 
+                // Frames whose groups render from their own pixels alone are
+                // rendered by each group's decode task, while the pixels are
+                // still in cache, into that group's disjoint output fragment:
+                // no store, border extraction or separate render pass, and
+                // the pixel buffers go straight back to the pool.
+                let lmp = lmp_ref!();
+                let inline_items = if is_vardct
+                    && !is_batched
+                    && num_groups == self.header.num_groups()
+                    && !self.was_flushed_once
+                    && has_output
+                    && !self.header.has_noise()
+                    && self.header.passes.num_passes == 1
+                    && work
+                        .iter()
+                        .all(|gw| gw.do_render && gw.complete && !gw.passes.is_empty())
+                    && !inline_render_disabled()
+                {
+                    lmp.self_contained_work_items()?
+                } else {
+                    None
+                };
+                let inline = match inline_items {
+                    Some(items) => {
+                        let (layouts, fragments) =
+                            split_output_for_items(lmp, buffer_splitter.get_full_buffers(), &items);
+                        fragments.map(|(fragments, col_offsets)| {
+                            let mut group_items = vec![Vec::new(); lmp.num_groups()];
+                            for (i, item) in items.iter().enumerate() {
+                                group_items[item.gy * self.header.size_groups().0 + item.gx]
+                                    .push(i);
+                            }
+                            let fragments: Vec<std::sync::Mutex<_>> = fragments
+                                .into_iter()
+                                .map(|f| std::sync::Mutex::new(Some(f)))
+                                .collect();
+                            (items, layouts, fragments, col_offsets, group_items)
+                        })
+                    }
+                    None => None,
+                };
+                let inline_ctx_pool = inline.as_ref().map(|_| {
+                    crate::render::low_memory_pipeline::ContextPool::new(lmp.context_factory())
+                });
+                let view = lmp.read_view();
+
                 let decode_group = |gw: &mut GroupWork| -> Result<()> {
                     stop.check().map_err(Error::from)?;
                     // Allocate pixel buffers on-demand from the shared pool.
@@ -900,6 +957,52 @@ impl Frame {
                             tracker,
                         )?;
                     }
+                    if let (Some((items, layouts, fragments, col_offsets, group_items)), Some(pool)) =
+                        (inline.as_ref(), inline_ctx_pool.as_ref())
+                        && let Some(pixels) = gw.pixels.take()
+                    {
+                        let mut input = view.input_buffer_with_data(pixels.map(|p| p.into_raw()));
+                        let mut ctx = pool.take()?;
+                        for &i in &group_items[gw.group] {
+                            let Some(mut slot_bufs) = fragments[i].lock().unwrap().take() else {
+                                continue;
+                            };
+                            let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> = slot_bufs
+                                .iter_mut()
+                                .enumerate()
+                                .map(|(slot_idx, frag_opt)| {
+                                    let frag = frag_opt.as_mut()?;
+                                    let cr = layouts[i]
+                                        .iter()
+                                        .find(|&&(s, _, _, _)| s == slot_idx)
+                                        .map(|&(_, _, _, cr)| cr)?;
+                                    let col_offset = col_offsets[i][slot_idx];
+                                    Some(frag.rect(Rect {
+                                        origin: (cr.origin.0 - col_offset, cr.origin.1),
+                                        size: cr.size,
+                                    }))
+                                })
+                                .collect();
+                            view.render_group_with_data(
+                                ctx.get_mut(),
+                                gw.group,
+                                &input,
+                                &items[i],
+                                &mut local_bufs,
+                            )?;
+                        }
+                        if let [Some(a), Some(b), Some(c)] = input.take_colour_data() {
+                            pixel_pool.lock().unwrap().push([
+                                Image::from_raw(a),
+                                Image::from_raw(b),
+                                Image::from_raw(c),
+                            ]);
+                        }
+                        gw.rendered = true;
+                        #[cfg(test)]
+                        inline_render_tests::USES
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
                     Ok(())
                 };
                 // Largest sections first, from a shared queue: a group's
@@ -935,6 +1038,12 @@ impl Frame {
                     })?;
             }
             phase2_dur += phase2_start.elapsed();
+            for gw in &work[batch_start..batch_end] {
+                if gw.rendered {
+                    lmp_mut!().mark_rendered_with_data(gw.group, gw.complete);
+                    any_rendered |= has_output;
+                }
+            }
 
             // Copy each group's JPEG coefficients into the frame's arrays.
             #[cfg(feature = "jpeg")]
@@ -1191,210 +1300,13 @@ impl Frame {
                 any_rendered |= has_output;
                 let p = lmp_ref!();
                 let view = p.read_view();
-                let (frame_origin, full_image_size) = p.extend_origin_size();
-                let sbi = p.save_buffer_info();
-                let input_size = p.input_size();
                 let ctx_pool =
                     crate::render::low_memory_pipeline::ContextPool::new(p.context_factory());
                 let num_buffer_slots = buffer_splitter.get_full_buffers().len();
 
-                // Pre-compute channel_rects for all items.
-                let all_layouts: Vec<Vec<(usize, usize, usize, Rect)>> = all_items
-                    .iter()
-                    .map(|item| {
-                        buffer_splitter::compute_local_buffer_layouts(
-                            sbi,
-                            num_buffer_slots,
-                            item.image_area,
-                            input_size,
-                            full_image_size,
-                            frame_origin,
-                        )
-                    })
-                    .collect();
-
-                // Group items by gy (sorted ascending).
-                let mut gy_map: std::collections::BTreeMap<usize, Vec<usize>> =
-                    std::collections::BTreeMap::new();
-                for (i, item) in all_items.iter().enumerate() {
-                    gy_map.entry(item.gy).or_default().push(i);
-                }
-                let gy_items: Vec<Vec<usize>> = gy_map.into_values().collect();
-                let num_bands = gy_items.len();
-
-                // Sort items within each band by gx for consistent column ordering.
-                let gy_items: Vec<Vec<usize>> = gy_items
-                    .into_iter()
-                    .map(|mut indices| {
-                        indices.sort_by_key(|&idx| all_items[idx].gx);
-                        indices
-                    })
-                    .collect();
-
-                // Compute per-slot, per-band row ranges from channel_rects.
-                let mut slot_band_ranges: Vec<Vec<(usize, usize)>> =
-                    vec![vec![(usize::MAX, 0); num_bands]; num_buffer_slots];
-                for (band_idx, item_indices) in gy_items.iter().enumerate() {
-                    for &item_idx in item_indices {
-                        for &(slot, _, _, channel_rect) in &all_layouts[item_idx] {
-                            let start_row = channel_rect.origin.1;
-                            let end_row = start_row + channel_rect.size.1;
-                            let range = &mut slot_band_ranges[slot][band_idx];
-                            range.0 = range.0.min(start_row);
-                            range.1 = range.1.max(end_row);
-                        }
-                    }
-                }
-
-                // Verify non-overlapping bands for each active slot.
-                let bands_disjoint = slot_band_ranges.iter().all(|ranges| {
-                    ranges.windows(2).all(|w| {
-                        let (_, end_a) = w[0];
-                        let (start_b, _) = w[1];
-                        // Empty bands (usize::MAX, 0) never overlap.
-                        end_a == 0 || start_b == usize::MAX || end_a <= start_b
-                    })
-                });
-                // ... and non-overlapping columns within each band: the tile
-                // grid below cuts every band at the column starts of its
-                // items, so an item must end before the next one starts or
-                // its fragment is too narrow for its rectangle. Readiness-mask
-                // rectangles of an incremental batch can overlap in x
-                // (neighbouring groups that both became all-ready render the
-                // strip between them) while their bands do not overlap in y,
-                // which used to trip the `rect()` bounds assert in the
-                // fragment path; such batches take the copy-back fallback.
-                let columns_disjoint = gy_items.iter().all(|item_indices| {
-                    (0..num_buffer_slots).all(|slot| {
-                        let mut prev_end = 0usize;
-                        item_indices.iter().all(|&item_idx| {
-                            match all_layouts[item_idx]
-                                .iter()
-                                .find(|&&(s, _, _, _)| s == slot)
-                            {
-                                Some(&(_, _, _, cr)) => {
-                                    let ok = cr.origin.0 >= prev_end;
-                                    prev_end = cr.origin.0 + cr.size.0;
-                                    ok
-                                }
-                                None => true,
-                            }
-                        })
-                    })
-                });
-                let can_band_split = num_bands > 1 && bands_disjoint && columns_disjoint;
-
-                // Fragment path: split each slot's buffer into a tile grid,
-                // then process all tiles in parallel with direct writes.
-                if can_band_split {
-                    // Compute per-slot row split points.
-                    let slot_split_rows: Vec<Vec<usize>> = (0..num_buffer_slots)
-                        .map(|slot| {
-                            let ranges = &slot_band_ranges[slot];
-                            (0..num_bands - 1)
-                                .map(|band_idx| {
-                                    let end_row = ranges[band_idx].1;
-                                    if end_row == 0 { 0 } else { end_row }
-                                })
-                                .collect()
-                        })
-                        .collect();
-
-                    // Compute per-slot, per-band column split points.
-                    // Within each band, items are sorted by gx. For each slot,
-                    // use the column start of each item (except the first) as
-                    // the split point.
-                    let slot_split_cols_per_band: Vec<Vec<Vec<usize>>> = (0..num_buffer_slots)
-                        .map(|slot| {
-                            gy_items
-                                .iter()
-                                .map(|item_indices| {
-                                    // Collect column starts for items in this band+slot.
-                                    let col_starts: Vec<usize> = item_indices
-                                        .iter()
-                                        .filter_map(|&item_idx| {
-                                            all_layouts[item_idx]
-                                                .iter()
-                                                .find(|&&(s, _, _, _)| s == slot)
-                                                .map(|&(_, _, _, cr)| cr.origin.0)
-                                        })
-                                        .collect();
-                                    // Split points = starts of 2nd, 3rd, ... items.
-                                    col_starts.into_iter().skip(1).collect()
-                                })
-                                .collect()
-                        })
-                        .collect();
-
-                    // Split each slot's buffer into a tile grid.
-                    let output = buffer_splitter.get_full_buffers();
-                    let mut slot_grids: Vec<Option<Vec<Vec<Option<JxlOutputBuffer<'_>>>>>> = output
-                        .iter_mut()
-                        .enumerate()
-                        .map(|(slot_idx, buf_opt)| {
-                            buf_opt.as_mut().map(|buf| {
-                                let split_cols_refs: Vec<&[usize]> = slot_split_cols_per_band
-                                    [slot_idx]
-                                    .iter()
-                                    .map(|v| v.as_slice())
-                                    .collect();
-                                buf.split_into_tile_grid(
-                                    &slot_split_rows[slot_idx],
-                                    &split_cols_refs,
-                                )
-                                .into_iter()
-                                .map(|band| band.into_iter().map(Some).collect())
-                                .collect()
-                            })
-                        })
-                        .collect();
-
-                    // Build per-item fragment sets by taking from the grid.
-                    // Each item gets one fragment per slot, plus the fragment's
-                    // absolute column offset so rect() can adjust correctly.
-                    let mut item_fragments: Vec<Vec<Option<JxlOutputBuffer<'_>>>> = (0..all_items
-                        .len())
-                        .map(|_| (0..num_buffer_slots).map(|_| None).collect())
-                        .collect();
-                    let mut item_col_offsets: Vec<Vec<usize>> =
-                        vec![vec![0; num_buffer_slots]; all_items.len()];
-
-                    for (band_idx, item_indices) in gy_items.iter().enumerate() {
-                        // Track fragment index per slot (items without a rect for
-                        // a given slot don't consume a fragment in that slot).
-                        let mut slot_frag_idx: Vec<usize> = vec![0; num_buffer_slots];
-                        for &item_idx in item_indices {
-                            for slot_idx in 0..num_buffer_slots {
-                                let has_rect = all_layouts[item_idx]
-                                    .iter()
-                                    .any(|&(s, _, _, _)| s == slot_idx);
-                                if !has_rect {
-                                    continue;
-                                }
-                                let frag_idx = slot_frag_idx[slot_idx];
-                                slot_frag_idx[slot_idx] += 1;
-                                if let Some(grid) = slot_grids[slot_idx].as_mut()
-                                    && let Some(frag) =
-                                        grid[band_idx].get_mut(frag_idx).and_then(|o| o.take())
-                                {
-                                    item_fragments[item_idx][slot_idx] = Some(frag);
-                                    // Fragment col offset: 0 for first fragment,
-                                    // split_cols[frag_idx-1] for subsequent ones.
-                                    let col_offset = if frag_idx == 0 {
-                                        0
-                                    } else {
-                                        slot_split_cols_per_band[slot_idx][band_idx]
-                                            .get(frag_idx - 1)
-                                            .copied()
-                                            .unwrap_or(0)
-                                    };
-                                    item_col_offsets[item_idx][slot_idx] = col_offset;
-                                }
-                            }
-                        }
-                    }
-                    drop(slot_grids);
-
+                let (all_layouts, fragments) =
+                    split_output_for_items(p, buffer_splitter.get_full_buffers(), &all_items);
+                if let Some((mut item_fragments, item_col_offsets)) = fragments {
                     // Process all tiles in parallel with direct fragment writes.
                     item_fragments
                         .par_iter_mut()
@@ -2513,5 +2425,267 @@ impl Frame {
     ) -> Result<()> {
         self.prepare_render_pipeline(pixel_format, cms, input_profile, output_profile)?;
         self.finalize_lf()
+    }
+}
+
+/// Per-item output layouts and, when the items' output rectangles are
+/// disjoint, one output fragment per item and buffer slot (with the
+/// fragment's column offset), so items can be rendered in parallel straight
+/// into the output.
+#[cfg(feature = "threads")]
+#[allow(clippy::type_complexity)]
+fn split_output_for_items<'o>(
+    p: &crate::render::LowMemoryRenderPipeline,
+    output: &'o mut [Option<JxlOutputBuffer<'_>>],
+    all_items: &[crate::render::low_memory_pipeline::group_scheduler::RenderWorkItem],
+) -> (
+    Vec<Vec<(usize, usize, usize, Rect)>>,
+    Option<(Vec<Vec<Option<JxlOutputBuffer<'o>>>>, Vec<Vec<usize>>)>,
+) {
+    use crate::render::buffer_splitter;
+    let (frame_origin, full_image_size) = p.extend_origin_size();
+    let sbi = p.save_buffer_info();
+    let input_size = p.input_size();
+    let num_buffer_slots = output.len();
+    // Pre-compute channel_rects for all items.
+    let all_layouts: Vec<Vec<(usize, usize, usize, Rect)>> = all_items
+        .iter()
+        .map(|item| {
+            buffer_splitter::compute_local_buffer_layouts(
+                sbi,
+                num_buffer_slots,
+                item.image_area,
+                input_size,
+                full_image_size,
+                frame_origin,
+            )
+        })
+        .collect();
+
+    // Group items by gy (sorted ascending).
+    let mut gy_map: std::collections::BTreeMap<usize, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, item) in all_items.iter().enumerate() {
+        gy_map.entry(item.gy).or_default().push(i);
+    }
+    let gy_items: Vec<Vec<usize>> = gy_map.into_values().collect();
+    let num_bands = gy_items.len();
+
+    // Sort items within each band by gx for consistent column ordering.
+    let gy_items: Vec<Vec<usize>> = gy_items
+        .into_iter()
+        .map(|mut indices| {
+            indices.sort_by_key(|&idx| all_items[idx].gx);
+            indices
+        })
+        .collect();
+
+    // Compute per-slot, per-band row ranges from channel_rects.
+    let mut slot_band_ranges: Vec<Vec<(usize, usize)>> =
+        vec![vec![(usize::MAX, 0); num_bands]; num_buffer_slots];
+    for (band_idx, item_indices) in gy_items.iter().enumerate() {
+        for &item_idx in item_indices {
+            for &(slot, _, _, channel_rect) in &all_layouts[item_idx] {
+                let start_row = channel_rect.origin.1;
+                let end_row = start_row + channel_rect.size.1;
+                let range = &mut slot_band_ranges[slot][band_idx];
+                range.0 = range.0.min(start_row);
+                range.1 = range.1.max(end_row);
+            }
+        }
+    }
+
+    // Verify non-overlapping bands for each active slot.
+    let bands_disjoint = slot_band_ranges.iter().all(|ranges| {
+        ranges.windows(2).all(|w| {
+            let (_, end_a) = w[0];
+            let (start_b, _) = w[1];
+            // Empty bands (usize::MAX, 0) never overlap.
+            end_a == 0 || start_b == usize::MAX || end_a <= start_b
+        })
+    });
+    // ... and non-overlapping columns within each band: the tile
+    // grid below cuts every band at the column starts of its
+    // items, so an item must end before the next one starts or
+    // its fragment is too narrow for its rectangle. Readiness-mask
+    // rectangles of an incremental batch can overlap in x
+    // (neighbouring groups that both became all-ready render the
+    // strip between them) while their bands do not overlap in y,
+    // which used to trip the `rect()` bounds assert in the
+    // fragment path; such batches take the copy-back fallback.
+    let columns_disjoint = gy_items.iter().all(|item_indices| {
+        (0..num_buffer_slots).all(|slot| {
+            let mut prev_end = 0usize;
+            item_indices.iter().all(|&item_idx| {
+                match all_layouts[item_idx]
+                    .iter()
+                    .find(|&&(s, _, _, _)| s == slot)
+                {
+                    Some(&(_, _, _, cr)) => {
+                        let ok = cr.origin.0 >= prev_end;
+                        prev_end = cr.origin.0 + cr.size.0;
+                        ok
+                    }
+                    None => true,
+                }
+            })
+        })
+    });
+    let can_band_split = num_bands > 1 && bands_disjoint && columns_disjoint;
+
+    // Fragment path: split each slot's buffer into a tile grid,
+    // then process all tiles in parallel with direct writes.
+    if !can_band_split {
+        return (all_layouts, None);
+    }
+    // Compute per-slot row split points.
+    let slot_split_rows: Vec<Vec<usize>> = (0..num_buffer_slots)
+        .map(|slot| {
+            let ranges = &slot_band_ranges[slot];
+            (0..num_bands - 1)
+                .map(|band_idx| {
+                    let end_row = ranges[band_idx].1;
+                    if end_row == 0 { 0 } else { end_row }
+                })
+                .collect()
+        })
+        .collect();
+
+    // Compute per-slot, per-band column split points.
+    // Within each band, items are sorted by gx. For each slot,
+    // use the column start of each item (except the first) as
+    // the split point.
+    let slot_split_cols_per_band: Vec<Vec<Vec<usize>>> = (0..num_buffer_slots)
+        .map(|slot| {
+            gy_items
+                .iter()
+                .map(|item_indices| {
+                    // Collect column starts for items in this band+slot.
+                    let col_starts: Vec<usize> = item_indices
+                        .iter()
+                        .filter_map(|&item_idx| {
+                            all_layouts[item_idx]
+                                .iter()
+                                .find(|&&(s, _, _, _)| s == slot)
+                                .map(|&(_, _, _, cr)| cr.origin.0)
+                        })
+                        .collect();
+                    // Split points = starts of 2nd, 3rd, ... items.
+                    col_starts.into_iter().skip(1).collect()
+                })
+                .collect()
+        })
+        .collect();
+
+    // Split each slot's buffer into a tile grid.
+    let mut slot_grids: Vec<Option<Vec<Vec<Option<JxlOutputBuffer<'_>>>>>> = output
+        .iter_mut()
+        .enumerate()
+        .map(|(slot_idx, buf_opt)| {
+            buf_opt.as_mut().map(|buf| {
+                let split_cols_refs: Vec<&[usize]> = slot_split_cols_per_band[slot_idx]
+                    .iter()
+                    .map(|v| v.as_slice())
+                    .collect();
+                buf.split_into_tile_grid(&slot_split_rows[slot_idx], &split_cols_refs)
+                    .into_iter()
+                    .map(|band| band.into_iter().map(Some).collect())
+                    .collect()
+            })
+        })
+        .collect();
+
+    // Build per-item fragment sets by taking from the grid.
+    // Each item gets one fragment per slot, plus the fragment's
+    // absolute column offset so rect() can adjust correctly.
+    let mut item_fragments: Vec<Vec<Option<JxlOutputBuffer<'_>>>> = (0..all_items.len())
+        .map(|_| (0..num_buffer_slots).map(|_| None).collect())
+        .collect();
+    let mut item_col_offsets: Vec<Vec<usize>> = vec![vec![0; num_buffer_slots]; all_items.len()];
+
+    for (band_idx, item_indices) in gy_items.iter().enumerate() {
+        // Track fragment index per slot (items without a rect for
+        // a given slot don't consume a fragment in that slot).
+        let mut slot_frag_idx: Vec<usize> = vec![0; num_buffer_slots];
+        for &item_idx in item_indices {
+            for slot_idx in 0..num_buffer_slots {
+                let has_rect = all_layouts[item_idx]
+                    .iter()
+                    .any(|&(s, _, _, _)| s == slot_idx);
+                if !has_rect {
+                    continue;
+                }
+                let frag_idx = slot_frag_idx[slot_idx];
+                slot_frag_idx[slot_idx] += 1;
+                if let Some(grid) = slot_grids[slot_idx].as_mut()
+                    && let Some(frag) = grid[band_idx].get_mut(frag_idx).and_then(|o| o.take())
+                {
+                    item_fragments[item_idx][slot_idx] = Some(frag);
+                    // Fragment col offset: 0 for first fragment,
+                    // split_cols[frag_idx-1] for subsequent ones.
+                    let col_offset = if frag_idx == 0 {
+                        0
+                    } else {
+                        slot_split_cols_per_band[slot_idx][band_idx]
+                            .get(frag_idx - 1)
+                            .copied()
+                            .unwrap_or(0)
+                    };
+                    item_col_offsets[item_idx][slot_idx] = col_offset;
+                }
+            }
+        }
+    }
+    drop(slot_grids);
+    (all_layouts, Some((item_fragments, item_col_offsets)))
+}
+
+/// Test switch for the in-task render of `decode_groups_parallel`.
+#[cfg(feature = "threads")]
+fn inline_render_disabled() -> bool {
+    #[cfg(test)]
+    return inline_render_tests::DISABLE.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(test))]
+    false
+}
+
+#[cfg(all(test, feature = "threads"))]
+mod inline_render_tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// Sends the groups through the separate store-and-render pass instead.
+    pub(super) static DISABLE: AtomicBool = AtomicBool::new(false);
+    /// Groups rendered by their decode task.
+    pub(super) static USES: AtomicUsize = AtomicUsize::new(0);
+
+    /// libjxl v0.12 files of 272x264 (2x2 groups) whose render pipeline reads
+    /// no neighbouring pixels: a q75 4:4:4 JPEG transcode and a d1
+    /// `--faster_decoding=4` file. Each group is rendered by its decode task,
+    /// and the output must match the separate render pass exactly.
+    #[test]
+    fn self_contained_groups_render_in_decode_task() {
+        use crate::api::decoder::tests::decode;
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/inline-render");
+        for name in ["crop_272x264_444.jxl", "crop_272x264_fd4.jxl"] {
+            let data = std::fs::read(dir.join(name)).unwrap();
+            let before = USES.load(Ordering::Relaxed);
+            let (_, inline) = decode(&data, usize::MAX, false, false, None).unwrap();
+            assert!(
+                USES.load(Ordering::Relaxed) > before,
+                "{name}: groups not rendered by their decode task"
+            );
+            DISABLE.store(true, Ordering::Relaxed);
+            let separate = decode(&data, usize::MAX, false, false, None);
+            DISABLE.store(false, Ordering::Relaxed);
+            let (_, separate) = separate.unwrap();
+            assert_eq!(inline.len(), separate.len());
+            for (a, b) in inline[0].iter().zip(&separate[0]) {
+                assert_eq!(a.size(), b.size());
+                for y in 0..a.size().1 {
+                    assert!(a.row(y) == b.row(y), "{name}: row {y} differs");
+                }
+            }
+        }
     }
 }

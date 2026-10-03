@@ -143,7 +143,7 @@ impl<'a> BufferFiller<'a> {
         // data stays alive), neighbour rows are read from the neighbours'
         // centre buffers; otherwise from the borders extracted into their
         // `topbottom` / `leftright` buffers.
-        let direct_borders = view.input_buffers[gid].topbottom[c].is_none();
+        let direct_borders = view.input_buffer(gid).topbottom[c].is_none();
         let top_y_offset = if direct_borders {
             group_ysize
         } else {
@@ -185,7 +185,7 @@ impl<'a> BufferFiller<'a> {
             // Buffer of group `g` holding this row kind, and its width in
             // pixels (only needed for the left neighbour's offset).
             let buffer = |g: usize| -> (&'a OwnedRawImage, usize) {
-                let b = &view.input_buffers[g];
+                let b = view.input_buffer(g);
                 if direct_borders {
                     let buf = b.data[c].as_ref().unwrap();
                     (buf, buf.byte_size().0 / ty.size())
@@ -201,9 +201,9 @@ impl<'a> BufferFiller<'a> {
                 src_byte_offset_left[kind] = xs * ty.size() - to_copy_left;
             }
             images[kind * 3 + 1] = Some(if is_topbottom && !direct_borders {
-                view.input_buffers[base_gid].topbottom[c].as_ref().unwrap()
+                view.input_buffer(base_gid).topbottom[c].as_ref().unwrap()
             } else {
-                view.input_buffers[base_gid].data[c].as_ref().unwrap()
+                view.input_buffer(base_gid).data[c].as_ref().unwrap()
             });
             if has_right {
                 images[kind * 3 + 2] = Some(buffer(base_gid + 1).0);
