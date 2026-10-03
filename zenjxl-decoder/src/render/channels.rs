@@ -13,10 +13,18 @@ use crate::util::SmallVec;
 /// This eliminates nested Vec collections while maintaining the same indexing syntax.
 pub struct Channels<'a, T> {
     // The number of input rows should be maximized by the EPF0 stage, which has 21.
-    pub(crate) row_data: SmallVec<[&'a [T]; 32]>,
+    // A plain array and a length: a `SmallVec` checked its capacity and
+    // inline/heap state on every push, several times per row per stage.
+    buf: [&'a [T]; MAX_INPUT_ROWS],
+    num_rows: usize,
     num_channels: usize,
     pub(crate) rows_per_channel: usize,
 }
+
+/// Rows a [`Channels`] holds at most.
+const MAX_INPUT_ROWS: usize = 32;
+/// Rows a [`ChannelsMut`] holds at most.
+const MAX_OUTPUT_ROWS: usize = 8;
 
 impl<'a, T> Channels<'a, T> {
     /// Create a new Channels accessor.
@@ -35,20 +43,19 @@ impl<'a, T> Channels<'a, T> {
             num_channels * rows_per_channel,
             "row_data length must equal num_channels * rows_per_channel"
         );
-        Self {
-            row_data,
-            num_channels,
-            rows_per_channel,
+        let mut this = Self::empty(num_channels, rows_per_channel);
+        for row in row_data {
+            this.push(row);
         }
+        this
     }
 
-    /// An accessor with no rows yet, to [`Self::push`] into. Unlike
-    /// [`Self::new`], this does not move a filled `SmallVec` (512 bytes of
-    /// inline storage) into place, which cost a `memcpy` per row per stage.
+    /// An accessor with no rows yet, to [`Self::push`] into.
     #[inline(always)]
     pub fn empty(num_channels: usize, rows_per_channel: usize) -> Self {
         Self {
-            row_data: SmallVec::new(),
+            buf: [&[]; MAX_INPUT_ROWS],
+            num_rows: 0,
             num_channels,
             rows_per_channel,
         }
@@ -57,7 +64,14 @@ impl<'a, T> Channels<'a, T> {
     /// Appends a row; rows are channel-major.
     #[inline(always)]
     pub fn push(&mut self, row: &'a [T]) {
-        self.row_data.push(row);
+        self.buf[self.num_rows] = row;
+        self.num_rows += 1;
+    }
+
+    /// All rows, channel-major.
+    #[inline(always)]
+    pub fn rows(&self) -> &[&'a [T]] {
+        &self.buf[..self.num_rows]
     }
 
     /// Returns the number of channels.
@@ -84,7 +98,7 @@ impl<'a, T> std::ops::Index<usize> for Channels<'a, T> {
 
     fn index(&self, ch: usize) -> &[&'a [T]] {
         let start = ch * self.rows_per_channel;
-        &self.row_data[start..start + self.rows_per_channel]
+        &self.rows()[start..start + self.rows_per_channel]
     }
 }
 
@@ -94,7 +108,8 @@ impl<'a, T> std::ops::Index<usize> for Channels<'a, T> {
 /// and `channels[ch][row]` returns `&mut [T]` (pixels for a specific row).
 pub struct ChannelsMut<'a, T> {
     // The number of output rows should be maximized by the Upsample8 stage, which has 8.
-    pub(crate) row_data: SmallVec<[&'a mut [T]; 8]>,
+    buf: [&'a mut [T]; MAX_OUTPUT_ROWS],
+    num_rows: usize,
     num_channels: usize,
     pub(crate) rows_per_channel: usize,
 }
@@ -116,18 +131,19 @@ impl<'a, T> ChannelsMut<'a, T> {
             num_channels * rows_per_channel,
             "row_data length must equal num_channels * rows_per_channel"
         );
-        Self {
-            row_data,
-            num_channels,
-            rows_per_channel,
+        let mut this = Self::empty(num_channels, rows_per_channel);
+        for row in row_data {
+            this.push(row);
         }
+        this
     }
 
     /// See [`Channels::empty`].
     #[inline(always)]
     pub fn empty(num_channels: usize, rows_per_channel: usize) -> Self {
         Self {
-            row_data: SmallVec::new(),
+            buf: std::array::from_fn(|_| Default::default()),
+            num_rows: 0,
             num_channels,
             rows_per_channel,
         }
@@ -136,7 +152,14 @@ impl<'a, T> ChannelsMut<'a, T> {
     /// Appends a row; rows are channel-major.
     #[inline(always)]
     pub fn push(&mut self, row: &'a mut [T]) {
-        self.row_data.push(row);
+        self.buf[self.num_rows] = row;
+        self.num_rows += 1;
+    }
+
+    /// All rows, channel-major.
+    #[inline(always)]
+    pub fn rows_mut(&mut self) -> &mut [&'a mut [T]] {
+        &mut self.buf[..self.num_rows]
     }
 
     /// Returns the number of channels.
@@ -162,7 +185,7 @@ impl<'a, T> ChannelsMut<'a, T> {
             self.num_channels
         );
         let rpc = self.rows_per_channel;
-        let (first, rest) = self.row_data.split_at_mut(rpc);
+        let (first, rest) = self.rows_mut().split_at_mut(rpc);
         let (second, rest) = rest.split_at_mut(rpc);
         let (third, _) = rest.split_at_mut(rpc);
         (first, second, third)
@@ -173,7 +196,7 @@ impl<'a, T> ChannelsMut<'a, T> {
     #[allow(dead_code)] // Part of ChannelsMut accessor API
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [&'a mut [T]]> {
         let rpc = self.rows_per_channel;
-        self.row_data.chunks_mut(rpc)
+        self.rows_mut().chunks_mut(rpc)
     }
 }
 
@@ -183,7 +206,7 @@ impl<'a, T> std::ops::Index<usize> for ChannelsMut<'a, T> {
 
     fn index(&self, ch: usize) -> &[&'a mut [T]] {
         let start = ch * self.rows_per_channel;
-        &self.row_data[start..start + self.rows_per_channel]
+        &self.buf[..self.num_rows][start..start + self.rows_per_channel]
     }
 }
 
@@ -191,6 +214,7 @@ impl<'a, T> std::ops::Index<usize> for ChannelsMut<'a, T> {
 impl<'a, T> std::ops::IndexMut<usize> for ChannelsMut<'a, T> {
     fn index_mut(&mut self, ch: usize) -> &mut [&'a mut [T]] {
         let start = ch * self.rows_per_channel;
-        &mut self.row_data[start..start + self.rows_per_channel]
+        let end = start + self.rows_per_channel;
+        &mut self.rows_mut()[start..end]
     }
 }

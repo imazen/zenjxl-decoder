@@ -72,7 +72,7 @@ fn epf1_process_row_chunk(
     let min_in_len = 4 + xsize;
     let min_out_len = xsize;
 
-    let rows = &input_rows.row_data;
+    let rows = input_rows.rows();
     let rpc = input_rows.rows_per_channel;
     assert!(rpc >= 5);
     assert!(rows.len() >= 3 * rpc);
@@ -94,7 +94,7 @@ fn epf1_process_row_chunk(
     // The three output rows as locals trimmed to one length: read through
     // the row table, their pointers and lengths were reloaded and each
     // store checked separately.
-    let (out_x, rest) = output_rows.row_data.split_at_mut(out_rpc);
+    let (out_x, rest) = output_rows.rows_mut().split_at_mut(out_rpc);
     let (out_y, out_b) = rest.split_at_mut(out_rpc);
     let out_len = out_x[0].len().min(out_y[0].len()).min(out_b[0].len());
     assert!(out_len >= min_out_len);

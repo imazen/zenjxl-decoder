@@ -72,7 +72,7 @@ simd_function!(
     let min_in_len = 6 + xsize;
     let min_out_len = xsize;
 
-    let rows = &input_rows.row_data;
+    let rows = input_rows.rows();
     let rpc = input_rows.rows_per_channel;
     assert!(rpc >= 7);
     assert!(rows.len() >= 3 * rpc);
@@ -88,7 +88,7 @@ simd_function!(
     let out_rpc = output_rows.rows_per_channel;
     assert!(out_rpc >= 1);
     // The three output rows as locals trimmed to one length (see EPF1).
-    let (out_x, rest) = output_rows.row_data.split_at_mut(out_rpc);
+    let (out_x, rest) = output_rows.rows_mut().split_at_mut(out_rpc);
     let (out_y, out_b) = rest.split_at_mut(out_rpc);
     let out_len = out_x[0].len().min(out_y[0].len()).min(out_b[0].len());
     assert!(out_len >= min_out_len);
