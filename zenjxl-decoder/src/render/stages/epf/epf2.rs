@@ -65,18 +65,19 @@ fn epf2_process_row_chunk(
     let (input_x, input_y, input_b) = (&input_rows[0], &input_rows[1], &input_rows[2]);
     let (output_x, output_y, output_b) = output_rows.split_first_3_mut();
 
-    // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
-    // EPF2 has BORDER=1, so 3 input rows per channel (indices 0-2).
-    // Max column access: row[2 + x] where x goes up to xsize - VEC_LEN,
-    // and load reads VEC_LEN elements. So min row len = 2 + xsize.
+    // EPF2 has BORDER=1: 3 input rows per channel, read at columns
+    // x..x + LEN + 2. All 9 rows are trimmed to one common length so that a
+    // single bounds check per vector covers them, and each vector reads
+    // through `LEN + 2`-sample windows at constant offsets.
     let min_in_len = 2 + xsize;
     let min_out_len = xsize;
     for ch in [input_x, input_y, input_b] {
         assert!(ch.len() >= 3);
-        for row in ch.iter().take(3) {
-            assert!(row.len() >= min_in_len);
-        }
     }
+    let rows: [[&[f32]; 3]; 3] = [input_x, input_y, input_b].map(|ch| [ch[0], ch[1], ch[2]]);
+    let common_len = rows.iter().flatten().map(|r| r.len()).min().unwrap();
+    assert!(common_len >= min_in_len);
+    let rows = rows.map(|ch| ch.map(|r| &r[..common_len]));
     assert!(output_x[0].len() >= min_out_len);
     assert!(output_y[0].len() >= min_out_len);
     assert!(output_b[0].len() >= min_out_len);
@@ -88,24 +89,27 @@ fn epf2_process_row_chunk(
     let sm = stage.sigma_scale * 1.65;
     let bsm = sm * stage.border_sad_mul;
     let sad_mul_storage = prepare_sad_mul_storage(xpos, ypos, sm, bsm);
+    let scale = stage.channel_scale.map(|s| D::F32Vec::splat(d, s));
+    let len = D::F32Vec::LEN;
 
-    for x in (0..xsize).step_by(D::F32Vec::LEN) {
+    for x in (0..xsize).step_by(len) {
         let sigma = get_sigma(d, x + xpos, row_sigma);
         let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
+        let [wx, wy, wb] = rows.map(|ch| ch.map(|r| &r[x..x + len + 2]));
+
+        let x_cc = D::F32Vec::load_from(d, wx[1], 1);
+        let y_cc = D::F32Vec::load_from(d, wy[1], 1);
+        let b_cc = D::F32Vec::load_from(d, wb[1], 1);
 
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
         if sigma_mask.all() {
-            D::F32Vec::load_from(d, input_x[1], 1 + x).store_at(output_x[0], x);
-            D::F32Vec::load_from(d, input_y[1], 1 + x).store_at(output_y[0], x);
-            D::F32Vec::load_from(d, input_b[1], 1 + x).store_at(output_b[0], x);
+            x_cc.store_at(output_x[0], x);
+            y_cc.store_at(output_y[0], x);
+            b_cc.store_at(output_b[0], x);
             continue;
         }
 
         let inv_sigma = sigma * sad_mul;
-
-        let x_cc = D::F32Vec::load_from(d, input_x[1], 1 + x);
-        let y_cc = D::F32Vec::load_from(d, input_y[1], 1 + x);
-        let b_cc = D::F32Vec::load_from(d, input_b[1], 1 + x);
 
         let mut w_acc = D::F32Vec::splat(d, 1.0);
         let mut x_acc = x_cc;
@@ -114,16 +118,13 @@ fn epf2_process_row_chunk(
 
         for (y_off, x_off) in [(0, 1), (1, 0), (1, 2), (2, 1)] {
             let (cx, cy, cb) = (
-                D::F32Vec::load_from(d, input_x[y_off as usize], x_off + x),
-                D::F32Vec::load_from(d, input_y[y_off as usize], x_off + x),
-                D::F32Vec::load_from(d, input_b[y_off as usize], x_off + x),
+                D::F32Vec::load_from(d, wx[y_off], x_off),
+                D::F32Vec::load_from(d, wy[y_off], x_off),
+                D::F32Vec::load_from(d, wb[y_off], x_off),
             );
             let sad = (cx - x_cc).abs().mul_add(
-                D::F32Vec::splat(d, stage.channel_scale[0]),
-                (cy - y_cc).abs().mul_add(
-                    D::F32Vec::splat(d, stage.channel_scale[1]),
-                    (cb - b_cc).abs() * D::F32Vec::splat(d, stage.channel_scale[2]),
-                ),
+                scale[0],
+                (cy - y_cc).abs().mul_add(scale[1], (cb - b_cc).abs() * scale[2]),
             );
             let weight = sad
                 .mul_add(inv_sigma, D::F32Vec::splat(d, 1.0))
@@ -139,9 +140,9 @@ fn epf2_process_row_chunk(
         x_acc *= inv_w;
         y_acc *= inv_w;
         b_acc *= inv_w;
-        x_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_x[1], 1 + x), x_acc);
-        y_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_y[1], 1 + x), y_acc);
-        b_acc = sigma_mask.if_then_else_f32(D::F32Vec::load_from(d, input_b[1], 1 + x), b_acc);
+        x_acc = sigma_mask.if_then_else_f32(x_cc, x_acc);
+        y_acc = sigma_mask.if_then_else_f32(y_cc, y_acc);
+        b_acc = sigma_mask.if_then_else_f32(b_cc, b_acc);
         x_acc.store_at(output_x[0], x);
         y_acc.store_at(output_y[0], x);
         b_acc.store_at(output_b[0], x);
