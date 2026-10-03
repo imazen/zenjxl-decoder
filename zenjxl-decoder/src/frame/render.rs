@@ -2071,6 +2071,18 @@ impl Frame {
             && (frame_header.needs_blending()
                 || (frame_header.can_be_referenced && !frame_header.save_before_ct));
 
+        // A caller asking for interleaved CMYK, or for the Black channel itself,
+        // wants the image's native ink values — what libjxl returns when no colour
+        // conversion is requested. Folding K into C/M/Y here would hand back
+        // C·K, M·K, Y·K instead of C, M, Y.
+        let raw_cmyk_requested = pixel_format.color_type == JxlColorType::Cmyk
+            || black_channel.is_some_and(|k| {
+                pixel_format
+                    .extra_channel_format
+                    .get(k - 3)
+                    .is_some_and(|f| f.is_some())
+            });
+
         // If CMS was used, the full XYB+TF+u8 fusion is not possible — fall back.
         // We deferred XybStage earlier, so we need to add it now plus the separate TF stage.
         if fuse_xyb_u8.is_some() && cms_used {
@@ -2105,7 +2117,7 @@ impl Frame {
         }
 
         // For CMYK images that don't need deferred CMS, apply Black channel conversion here
-        if has_black_channel && !cmyk_needs_deferred_cms {
+        if has_black_channel && !cmyk_needs_deferred_cms && !raw_cmyk_requested {
             for (i, info) in decoder_state
                 .file_header
                 .image_metadata
@@ -2174,7 +2186,7 @@ impl Frame {
                 .iter()
                 .enumerate()
             {
-                if info.ec_type == ExtraChannel::Black {
+                if info.ec_type == ExtraChannel::Black && !raw_cmyk_requested {
                     #[cfg(feature = "cms")]
                     if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
                     {

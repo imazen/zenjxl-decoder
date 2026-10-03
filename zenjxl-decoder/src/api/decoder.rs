@@ -2260,6 +2260,61 @@ pub(crate) mod tests {
         }
     }
 
+    /// Raw CMYK output carries the native ink values, matching libjxl.
+    ///
+    /// Expected values are libjxl v0.12 `djxl cmyk_layers.jxl out.npy
+    /// --norender_spotcolors` (C, M, Y, K, alpha). Before the fix the decoder
+    /// folded K into C/M/Y even when asked for CMYK, returning C·K, M·K, Y·K:
+    /// 0.0 instead of 1.0 at (135, 14), and wrong on 12,424 pixels in all.
+    #[test]
+    fn test_cmyk_raw_output_matches_libjxl() {
+        let file = crate::util::test::fixture_bytes("conformance_test_images/cmyk_layers.jxl");
+        let expected: [((usize, usize), [f32; 4]); 4] = [
+            ((135, 14), [1.0, 1.0, 1.0, 0.0]),
+            ((98, 311), [0.816_932, 0.681_107, 0.498_039, 0.850_396]),
+            ((138, 311), [0.862_699, 0.760_830, 0.623_529, 0.887_797]),
+            ((230, 311), [0.740_761, 0.681_107, 0.470_696, 0.850_396]),
+        ];
+        let f32_le = JxlDataFormat::F32 {
+            endianness: crate::api::Endianness::LittleEndian,
+        };
+        // Interleaved CMYK, and color plus the Black extra channel.
+        let interleaved = JxlPixelFormat {
+            color_type: JxlColorType::Cmyk,
+            color_data_format: Some(f32_le),
+            extra_channel_format: vec![None, None],
+        };
+        let separate = JxlPixelFormat {
+            color_type: JxlColorType::Rgb,
+            color_data_format: Some(f32_le),
+            extra_channel_format: vec![Some(f32_le), None],
+        };
+        for use_simple in [true, false] {
+            let (cmyk, _, _) =
+                decode_with_format::<f32>(&file, &interleaved, use_simple, false).unwrap();
+            let (split, _, _) =
+                decode_with_format::<f32>(&file, &separate, use_simple, false).unwrap();
+            for ((x, y), want) in expected {
+                let row = cmyk[0].row(y);
+                let color = split[0].row(y);
+                let black = split[1].row(y);
+                let got_interleaved = [row[x * 4], row[x * 4 + 1], row[x * 4 + 2], row[x * 4 + 3]];
+                let got_separate = [color[x * 3], color[x * 3 + 1], color[x * 3 + 2], black[x]];
+                for (got, layout) in [(got_interleaved, "interleaved"), (got_separate, "separate")]
+                {
+                    for c in 0..4 {
+                        assert!(
+                            (got[c] - want[c]).abs() < 1e-5,
+                            "({x},{y}) {layout} channel {c}: got {}, libjxl {} (use_simple={use_simple})",
+                            got[c],
+                            want[c]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Requesting CMYK output for a non-CMYK image fails. (upstream jxl-rs #891)
     #[test]
     fn test_cmyk_pixel_format_requires_cmyk_image() {
