@@ -221,3 +221,34 @@ u8 conversion), MP/s, ours / djxl v0.12:
 - 12T numbers on this Mac move 5-10% with background load (Spotlight,
   mediaanalysisd, rust-analyzer); compare A-B-A, not A-B.
 
+
+## Multi-threaded parity work — 2026-10-03
+
+[MEASURED] M4 Pro (8 P + 4 E cores), f32, interleaved runs; the machine
+was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
+
+- False sharing (`e404d64b`): two 4-thread processes decoded e7 lossless at
+  a combined ~60 MP/s while one 8-thread process reached 50. The cause was
+  the per-channel MA-tree property buffer (a small `Vec<i32>` written every
+  sample) sharing a cache line with another thread's data. `IsolatedBuf`
+  (`util/isolated.rs`) pads it by 128 bytes per side. The two-process vs
+  one-process comparison is the quick test for this class of problem.
+- Per-group timing (`JXL_GDBG`-style instrumentation, not committed) shows
+  E-core threads run groups 2-3.7x slower and macOS starts some threads on
+  E-cores; P-core groups also slow ~1.3x at 12 threads (all-core clocks).
+  From 8 to 12 threads we gained nothing on fd4 while djxl gained 9%.
+- Serial LF group (one LF group up to 2048x2048): d1e7 DC 1.87 ms + HF
+  metadata 0.85 ms; JPEG q90 DC 1.03 + 0.2; fd4 DC 1.13 + 0.85. DC per
+  sample matches our e7 lossless speed, itself at djxl parity. Reading
+  `GradientLookup` (fd4 DC) through the register cursor was slower (LF
+  2.02 -> 2.30 ms); keep `USE_CURSOR` off there.
+- The batched VarDCT path is expensive: forcing 2 batches of 24 groups
+  raised P3b from 2.81 to 5.12 ms (d1e7) and 0.95 to 3.03 ms (JPEG), so
+  overlapping render with the next batch's decode is not worth it on top of it.
+- In-task render (`8c4e8175`) covers only pipelines with `border_size == 0`
+  (fd4, JPEG 4:4:4). JPEG 4:2:0, d1e7 and d3 still use P2 -> P3b.
+- Rejected: packing cluster + hybrid-uint config into one per-context
+  table for the AC loop (0.3% fewer instructions, 1.5-3% more cycles).
+- Parity after these changes, 12 threads, zen/djxl: d1e7 0.94, fd4 ~0.99,
+  JPEG 4:2:0 0.91, JPEG 4:4:4 ~0.93-1.0, d3 0.89. 1 thread: ahead or tied
+  everywhere except d3 (78 vs 81) and e7 lossless (10.7 vs 11.2).
