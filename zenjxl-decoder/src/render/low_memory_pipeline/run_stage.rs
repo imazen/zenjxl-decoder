@@ -11,7 +11,7 @@ use crate::{
         internal::{PipelineBuffer, RunInOutStage},
         low_memory_pipeline::render_group::ChannelVec,
     },
-    util::{ShiftRightCeil, SmallVec, mirror, tracing_wrappers::*},
+    util::{ShiftRightCeil, mirror, tracing_wrappers::*},
 };
 
 use super::{
@@ -106,21 +106,20 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
         // Build flat input rows: all rows for all channels in one Vec
         let input_rows_per_channel = (2 * Self::BORDER.1 + 1) as usize;
         let num_channels = input_buffers.len();
-        let mut input_row_data = SmallVec::new();
+        let mut input_rows = Channels::empty(num_channels, input_rows_per_channel);
         for x in input_buffers.iter() {
             for iy in -ibordery..=ibordery {
-                input_row_data.push(
+                input_rows.push(
                     &x.get_row::<T::InputT>(mirror(current_row as isize + iy, image_height))
                         [xstart - Self::BORDER.0 as usize..],
                 );
             }
         }
-        let input_rows = Channels::new(input_row_data, num_channels, input_rows_per_channel);
 
         // Build flat output rows: all rows for all channels in one Vec
         let output_rows_per_channel = 1 << T::SHIFT.1;
         let num_output_channels = output_buffers.len();
-        let mut output_row_data = SmallVec::new();
+        let mut output_rows = ChannelsMut::empty(num_output_channels, output_rows_per_channel);
         // optimize for the common case of a single output row per channel.
         if output_rows_per_channel == 1 {
             // Use OutputT's x0_offset, not InputT's - they differ for type conversions (e.g., f32→u8).
@@ -128,7 +127,7 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
             let output_xstart = RowBuffer::x0_offset::<T::OutputT>() - (xpre << T::SHIFT.0);
             for x in output_buffers.iter_mut() {
                 let row = x.get_row_mut::<T::OutputT>(current_row);
-                output_row_data.push(&mut row[output_xstart..]);
+                output_rows.push(&mut row[output_xstart..]);
             }
         } else {
             for x in output_buffers.iter_mut() {
@@ -136,14 +135,11 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
                     (current_row << T::SHIFT.1)..((current_row + 1) << T::SHIFT.1),
                     RowBuffer::x0_offset::<T::OutputT>() - (xpre << T::SHIFT.0),
                 );
-                output_row_data.extend(rows);
+                for row in rows {
+                    output_rows.push(row);
+                }
             }
         }
-        let mut output_rows = ChannelsMut::new(
-            output_row_data,
-            num_output_channels,
-            output_rows_per_channel,
-        );
 
         self.process_row_chunk(
             (group_x0 - xpre, current_row),

@@ -42,6 +42,24 @@ impl<'a, T> Channels<'a, T> {
         }
     }
 
+    /// An accessor with no rows yet, to [`Self::push`] into. Unlike
+    /// [`Self::new`], this does not move a filled `SmallVec` (512 bytes of
+    /// inline storage) into place, which cost a `memcpy` per row per stage.
+    #[inline(always)]
+    pub fn empty(num_channels: usize, rows_per_channel: usize) -> Self {
+        Self {
+            row_data: SmallVec::new(),
+            num_channels,
+            rows_per_channel,
+        }
+    }
+
+    /// Appends a row; rows are channel-major.
+    #[inline(always)]
+    pub fn push(&mut self, row: &'a [T]) {
+        self.row_data.push(row);
+    }
+
     /// Returns the number of channels.
     pub fn len(&self) -> usize {
         self.num_channels
@@ -103,6 +121,22 @@ impl<'a, T> ChannelsMut<'a, T> {
             num_channels,
             rows_per_channel,
         }
+    }
+
+    /// See [`Channels::empty`].
+    #[inline(always)]
+    pub fn empty(num_channels: usize, rows_per_channel: usize) -> Self {
+        Self {
+            row_data: SmallVec::new(),
+            num_channels,
+            rows_per_channel,
+        }
+    }
+
+    /// Appends a row; rows are channel-major.
+    #[inline(always)]
+    pub fn push(&mut self, row: &'a mut [T]) {
+        self.row_data.push(row);
     }
 
     /// Returns the number of channels.
