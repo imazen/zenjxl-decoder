@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
+use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask, simd_function};
 
 /// 3x3 plus-shaped kernel with 5 SADs per pixel (3x3 plus-shaped). So this makes this filter a 5x5 filter.
 pub struct Epf1Stage {
@@ -80,15 +80,14 @@ fn epf1_process_row_chunk(
     // Extract channel row slices (5 rows each) with length assertions.
     // Indexing with constants after the assertion lets LLVM eliminate
     // bounds checks on row selection in the hot loop.
-    let ch0 = &rows[..rpc];
-    let ch1 = &rows[rpc..2 * rpc];
-    let ch2 = &rows[2 * rpc..3 * rpc];
-    let channels: [&[&[f32]]; 3] = [ch0, ch1, ch2];
-    for ch in &channels {
-        for r in 0..5 {
-            assert!(ch[r].len() >= min_in_len);
-        }
-    }
+    // The 15 input rows and 3 output rows as locals: read through the row
+    // tables, LLVM reloaded every row pointer after each output store.
+    // Trimmed to one common length, so a single bounds check per vector
+    // covers all 15 rows.
+    let common_len = (0..15).map(|i| rows[i / 5 * rpc + i % 5].len()).min().unwrap();
+    assert!(common_len >= min_in_len);
+    let channels: [[&[f32]; 5]; 3] =
+        core::array::from_fn(|c| core::array::from_fn(|r| &rows[c * rpc + r][..common_len]));
 
     let out_rows = &mut output_rows.row_data;
     let out_rpc = output_rows.rows_per_channel;
@@ -119,45 +118,12 @@ fn epf1_process_row_chunk(
             continue;
         }
 
-        // Compute SADs across all 3 channels
+        // Channels are passed by constant index so each helper sees its
+        // five rows as values, not through a table it would reload.
         let mut sads = [D::F32Vec::splat(d, 0.0); 4];
-        for c in 0..3 {
-            let ch = channels[c];
-            let scale = scale_vec[c];
-            let p20 = D::F32Vec::load_from(d, ch[0], 2 + x);
-            let p11 = D::F32Vec::load_from(d, ch[1], 1 + x);
-            let p21 = D::F32Vec::load_from(d, ch[1], 2 + x);
-            let p31 = D::F32Vec::load_from(d, ch[1], 3 + x);
-            let p02 = D::F32Vec::load_from(d, ch[2], x);
-            let p12 = D::F32Vec::load_from(d, ch[2], 1 + x);
-            let p22 = D::F32Vec::load_from(d, ch[2], 2 + x);
-            let p32 = D::F32Vec::load_from(d, ch[2], 3 + x);
-            let p42 = D::F32Vec::load_from(d, ch[2], 4 + x);
-            let p13 = D::F32Vec::load_from(d, ch[3], 1 + x);
-            let p23 = D::F32Vec::load_from(d, ch[3], 2 + x);
-            let p33 = D::F32Vec::load_from(d, ch[3], 3 + x);
-            let p24 = D::F32Vec::load_from(d, ch[4], 2 + x);
-            let d20_21 = (p20 - p21).abs();
-            let d11_21 = (p11 - p21).abs();
-            let d22_21 = (p22 - p21).abs();
-            let d31_21 = (p31 - p21).abs();
-            let d02_12 = (p02 - p12).abs();
-            let d11_12 = (p11 - p12).abs();
-            let d12_22 = (p22 - p12).abs();
-            let d31_32 = (p31 - p32).abs();
-            let d22_32 = (p22 - p32).abs();
-            let d42_32 = (p42 - p32).abs();
-            let d13_12 = (p13 - p12).abs();
-            let d22_23 = (p22 - p23).abs();
-            let d13_23 = (p13 - p23).abs();
-            let d33_23 = (p33 - p23).abs();
-            let d33_32 = (p33 - p32).abs();
-            let d24_23 = (p24 - p23).abs();
-            sads[0] = (d20_21 + d11_12 + d22_21 + d31_32 + d22_23).mul_add(scale, sads[0]);
-            sads[1] = (d11_21 + d02_12 + d12_22 + d22_32 + d13_23).mul_add(scale, sads[1]);
-            sads[2] = (d31_21 + d12_22 + d22_32 + d42_32 + d33_23).mul_add(scale, sads[2]);
-            sads[3] = (d22_21 + d13_12 + d22_23 + d33_32 + d24_23).mul_add(scale, sads[3]);
-        }
+        channel_sads(d, &channels[0], x, scale_vec[0], &mut sads);
+        channel_sads(d, &channels[1], x, scale_vec[1], &mut sads);
+        channel_sads(d, &channels[2], x, scale_vec[2], &mut sads);
 
         // Compute output based on SADs
         let inv_sigma = sigma * sad_mul;
@@ -170,19 +136,86 @@ fn epf1_process_row_chunk(
         }
         let inv_w = D::F32Vec::splat(d, 1.0) / w;
         for c in 0..3 {
-            let ch = channels[c];
-            let mut out = D::F32Vec::load_from(d, ch[2], 2 + x);
-            out = D::F32Vec::load_from(d, ch[3], 2 + x).mul_add(sads[3], out);
-            out = D::F32Vec::load_from(d, ch[2], 3 + x).mul_add(sads[2], out);
-            out = D::F32Vec::load_from(d, ch[2], 1 + x).mul_add(sads[1], out);
-            out = D::F32Vec::load_from(d, ch[1], 2 + x).mul_add(sads[0], out);
-            out *= inv_w;
-            let p22 = D::F32Vec::load_from(d, ch[2], 2 + x);
-            let out = sigma_mask.if_then_else_f32(p22, out);
+            let out = channel_out(d, &channels[c], x, &sads, inv_w, sigma_mask);
             out.store_at(out_rows[c * out_rpc], x);
         }
     }
 });
+
+/// The `LEN + 4` samples of `row` that one vector of output at `x` reads.
+/// One bounds check here; loads at constant offsets into it need none.
+#[inline(always)]
+fn window<D: SimdDescriptor>(row: &[f32], x: usize) -> &[f32] {
+    &row[x..x + D::F32Vec::LEN + 4]
+}
+
+/// Adds one channel's contribution to the four plus-shaped SADs.
+#[inline(always)]
+fn channel_sads<D: SimdDescriptor>(
+    d: D,
+    rows: &[&[f32]; 5],
+    x: usize,
+    scale: D::F32Vec,
+    sads: &mut [D::F32Vec; 4],
+) {
+    let ch = rows.map(|r| window::<D>(r, x));
+    let p20 = D::F32Vec::load_from(d, ch[0], 2);
+    let p11 = D::F32Vec::load_from(d, ch[1], 1);
+    let p21 = D::F32Vec::load_from(d, ch[1], 2);
+    let p31 = D::F32Vec::load_from(d, ch[1], 3);
+    let p02 = D::F32Vec::load_from(d, ch[2], 0);
+    let p12 = D::F32Vec::load_from(d, ch[2], 1);
+    let p22 = D::F32Vec::load_from(d, ch[2], 2);
+    let p32 = D::F32Vec::load_from(d, ch[2], 3);
+    let p42 = D::F32Vec::load_from(d, ch[2], 4);
+    let p13 = D::F32Vec::load_from(d, ch[3], 1);
+    let p23 = D::F32Vec::load_from(d, ch[3], 2);
+    let p33 = D::F32Vec::load_from(d, ch[3], 3);
+    let p24 = D::F32Vec::load_from(d, ch[4], 2);
+    let d20_21 = (p20 - p21).abs();
+    let d11_21 = (p11 - p21).abs();
+    let d22_21 = (p22 - p21).abs();
+    let d31_21 = (p31 - p21).abs();
+    let d02_12 = (p02 - p12).abs();
+    let d11_12 = (p11 - p12).abs();
+    let d12_22 = (p22 - p12).abs();
+    let d31_32 = (p31 - p32).abs();
+    let d22_32 = (p22 - p32).abs();
+    let d42_32 = (p42 - p32).abs();
+    let d13_12 = (p13 - p12).abs();
+    let d22_23 = (p22 - p23).abs();
+    let d13_23 = (p13 - p23).abs();
+    let d33_23 = (p33 - p23).abs();
+    let d33_32 = (p33 - p32).abs();
+    let d24_23 = (p24 - p23).abs();
+    sads[0] = (d20_21 + d11_12 + d22_21 + d31_32 + d22_23).mul_add(scale, sads[0]);
+    sads[1] = (d11_21 + d02_12 + d12_22 + d22_32 + d13_23).mul_add(scale, sads[1]);
+    sads[2] = (d31_21 + d12_22 + d22_32 + d42_32 + d33_23).mul_add(scale, sads[2]);
+    sads[3] = (d22_21 + d13_12 + d22_23 + d33_32 + d24_23).mul_add(scale, sads[3]);
+}
+
+/// One channel's filtered output vector at `x`.
+#[inline(always)]
+fn channel_out<D: SimdDescriptor>(
+    d: D,
+    rows: &[&[f32]; 5],
+    x: usize,
+    sads: &[D::F32Vec; 4],
+    inv_w: D::F32Vec,
+    sigma_mask: D::Mask,
+) -> D::F32Vec {
+    let r1 = window::<D>(rows[1], x);
+    let r2 = window::<D>(rows[2], x);
+    let r3 = window::<D>(rows[3], x);
+    let p22 = D::F32Vec::load_from(d, r2, 2);
+    let mut out = p22;
+    out = D::F32Vec::load_from(d, r3, 2).mul_add(sads[3], out);
+    out = D::F32Vec::load_from(d, r2, 3).mul_add(sads[2], out);
+    out = D::F32Vec::load_from(d, r2, 1).mul_add(sads[1], out);
+    out = D::F32Vec::load_from(d, r1, 2).mul_add(sads[0], out);
+    out *= inv_w;
+    sigma_mask.if_then_else_f32(p22, out)
+}
 
 impl RenderPipelineInOutStage for Epf1Stage {
     type InputT = f32;
