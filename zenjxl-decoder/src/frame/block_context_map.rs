@@ -14,9 +14,9 @@ use whereat::at;
 
 pub const NON_ZERO_BUCKETS: usize = 37;
 
-// Supremum of zero_density_context(x, y) + 1, when x + y <= 64.
+// Supremum of the zero-density context of (x, y) + 1, when x + y <= 64.
 pub const ZERO_DENSITY_CONTEXT_COUNT: usize = 458;
-// Supremum of zero_density_context(x, y) + 1.
+// Supremum of the zero-density context of (x, y) + 1.
 pub const ZERO_DENSITY_CONTEXT_LIMIT: usize = 474;
 
 pub const COEFF_FREQ_CONTEXT: [usize; 64] = [
@@ -32,19 +32,23 @@ pub const COEFF_NUM_NONZERO_CONTEXT: [usize; 64] = [
     206, 206, 206, 206, 206, 206,
 ];
 
+// A coefficient's zero-density context is
+// `zero_density_nonzeros_part + zero_density_freq_part + prev`, with `prev`
+// whether the previous coefficient was nonzero.
+
+/// The part of a zero-density context that depends on `nonzeros_left`.
 #[inline(always)]
-pub fn zero_density_context(
-    nonzeros_left: usize,
-    k: usize,
-    log_num_blocks: usize,
-    prev: usize,
-) -> usize {
+pub fn zero_density_nonzeros_part(nonzeros_left: usize, log_num_blocks: usize) -> usize {
     let nonzeros_left_norm = nonzeros_left.shrc(log_num_blocks);
+    COEFF_NUM_NONZERO_CONTEXT[nonzeros_left_norm & 63] * 2
+}
+
+/// The part of a zero-density context that depends on `k`.
+#[inline(always)]
+pub fn zero_density_freq_part(k: usize, log_num_blocks: usize) -> usize {
     let k_norm = k >> log_num_blocks;
     debug_assert!((1..64).contains(&k_norm));
-    debug_assert!((1..64).contains(&nonzeros_left_norm));
-    (COEFF_NUM_NONZERO_CONTEXT[nonzeros_left_norm & 63] + COEFF_FREQ_CONTEXT[k_norm & 63]) * 2
-        + prev
+    COEFF_FREQ_CONTEXT[k_norm & 63] * 2
 }
 
 #[derive(Debug)]

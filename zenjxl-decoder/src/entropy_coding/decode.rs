@@ -844,6 +844,29 @@ impl Histograms {
         )
     }
 
+    /// [`Self::read_unsigned_plain`], also returning whether the value is
+    /// nonzero. That is known from the token alone (a hybrid uint is 0 only
+    /// for token 0), so a caller whose next context depends on it does not
+    /// wait for the extra bits.
+    #[inline(always)]
+    pub fn read_unsigned_plain_nz(
+        &self,
+        cursor: &mut PlainCursor<'_>,
+        cluster: usize,
+    ) -> Option<(u32, bool)> {
+        if !cursor.fb.ensure(47) {
+            return None;
+        }
+        let token = match &self.codes {
+            Codes::Huffman(hc) => hc.read_fast(&mut cursor.fb, cluster),
+            Codes::Ans(ans) => ans.read_fast(&mut cursor.fb, &mut cursor.ans, cluster),
+        };
+        let value =
+            self.uint_config(cluster)
+                .read_fast(token, &mut cursor.fb, &mut cursor.nbits_acc);
+        Some((value, token != 0))
+    }
+
     /// [`Self::read_unsigned_plain`] for streams whose hybrid-uint configs
     /// are all 4/2/0 ([`Self::can_use_config_420_fast_path`]).
     #[inline(always)]

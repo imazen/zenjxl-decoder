@@ -715,6 +715,31 @@ pub fn decode_vardct_group(
                             }
                         }};
                     }
+                    // Like `read_unsigned!`, also returning whether the
+                    // value is nonzero, from the token where possible.
+                    macro_rules! read_unsigned_nz {
+                        ($ctx:expr) => {{
+                            let ctx = $ctx;
+                            let fast = match cursor.as_mut() {
+                                Some(c) => histograms.read_unsigned_plain_nz(
+                                    c,
+                                    histograms.map_context_to_cluster(ctx),
+                                ),
+                                None => None,
+                            };
+                            match fast {
+                                Some(v) => v,
+                                None => {
+                                    if let Some(c) = cursor.take() {
+                                        reader.finish_plain_cursor(c, br);
+                                    }
+                                    let v = reader.read_unsigned_inline(histograms, br, ctx);
+                                    cursor = reader.plain_cursor(br);
+                                    (v, v != 0)
+                                }
+                            }
+                        }};
+                    }
                     let mut nonzeros = read_unsigned!(nonzero_context) as usize;
                     trace!(
                         "block ({},{},{c}) predicted_nzeros: {predicted_nzeros} \
@@ -736,15 +761,31 @@ pub fn decode_vardct_group(
                     let mut prev = if nonzeros > num_coeffs / 16 { 0 } else { 1 };
                     let permutation = &pass_info.coeff_orders[shape_id * 3 + c];
                     let current_coeffs = &mut coeffs[c][coeffs_offset..coeffs_offset + num_coeffs];
+                    // The context's `nonzeros` part for the current count and
+                    // for one less are both looked up before the symbol is
+                    // read; the symbol then only selects one, keeping the
+                    // table load off the symbol-to-symbol dependency chain.
+                    let mut nonzeros_part = zero_density_nonzeros_part(nonzeros, log_num_blocks);
                     for k in num_blocks..num_coeffs {
                         if nonzeros == 0 {
                             break;
                         }
-                        let ctx =
-                            histo_offset + zero_density_context(nonzeros, k, log_num_blocks, prev);
-                        let coeff = unpack_signed(read_unsigned!(ctx)) << *shift;
-                        prev = if coeff != 0 { 1 } else { 0 };
+                        debug_assert!((1..64).contains(&nonzeros.shrc(log_num_blocks)));
+                        let ctx = histo_offset
+                            + nonzeros_part
+                            + zero_density_freq_part(k, log_num_blocks)
+                            + prev;
+                        let part_if_nonzero =
+                            zero_density_nonzeros_part(nonzeros - 1, log_num_blocks);
+                        // `prev` is whether the unshifted value is nonzero, as
+                        // in libjxl's `DecodeACVarBlock`.
+                        let (u_coeff, nonzero) = read_unsigned_nz!(ctx);
+                        let coeff = unpack_signed(u_coeff) << *shift;
+                        prev = nonzero as usize;
                         nonzeros -= prev;
+                        if nonzero {
+                            nonzeros_part = part_if_nonzero;
+                        }
                         let coeff_index = permutation[k] as usize;
                         current_coeffs[coeff_index] += coeff;
                     }
