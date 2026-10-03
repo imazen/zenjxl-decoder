@@ -7,7 +7,8 @@ use std::{collections::VecDeque, ops::Range};
 use whereat::at;
 
 use crate::{
-    entropy_coding::decode::{Histograms, unpack_signed},
+    bit_reader::BitReader,
+    entropy_coding::decode::{Histograms, SymbolReader, unpack_signed},
     error::Result,
     frame::modular::{
         ModularChannel, Predictor, Tree,
@@ -257,6 +258,39 @@ impl WpOnlyLookupConfig420 {
         let wp_state = WeightedPredictorState::new(&header.wp_header, xsize).ok()?;
         let lut = make_lut(tree)?;
         Some(Self { lut, wp_state })
+    }
+}
+
+impl WpOnlyLookupConfig420 {
+    /// Decodes the whole channel row by row through
+    /// [`WeightedPredictorState::decode_row`]; same output as the
+    /// per-sample `decode_one` path.
+    pub(super) fn decode_channel(
+        mut self,
+        channel: &mut ModularChannel,
+        reader: &mut SymbolReader,
+        br: &mut BitReader,
+        histograms: &Histograms,
+    ) {
+        const { assert!(crate::frame::modular::IMAGE_OFFSET.1 == 2) };
+        let off = crate::frame::modular::IMAGE_OFFSET.0;
+        let (w, h) = channel.data.size();
+        let lut = &self.lut;
+        for y in 0..h {
+            let [row, row_top, row_toptop] = channel.data.distinct_full_rows_mut([y + 2, y + 1, y]);
+            self.wp_state.decode_row(
+                y,
+                &mut row[off..off + w],
+                &row_top[off..off + w],
+                &row_toptop[off..off + w],
+                |property| {
+                    let ctx = lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
+                        .clamp(0, LUT_TABLE_SIZE as i64 - 1)
+                        as usize];
+                    reader.read_signed_clustered_config_420(histograms, br, ctx as usize)
+                },
+            );
+        }
     }
 }
 

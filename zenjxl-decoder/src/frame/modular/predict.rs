@@ -511,6 +511,117 @@ impl WeightedPredictorState {
         }
     }
 
+    /// Decodes row `y` of a channel whose tree is the weighted predictor
+    /// alone: for each sample, `read(property)` returns the decoded
+    /// residual for WP property `property`, which is added to the WP
+    /// prediction. Same arithmetic as [`Self::predict_and_property`] and
+    /// [`Self::update_errors`] per sample, but the two error rows are split
+    /// once per row, so indexing needs no row-parity select and no per-access
+    /// bounds checks beyond the slices' own.
+    #[inline(always)]
+    pub fn decode_row(
+        &mut self,
+        y: usize,
+        row: &mut [i32],
+        row_top: &[i32],
+        row_toptop: &[i32],
+        mut read: impl FnMut(i32) -> i32,
+    ) {
+        let xsize = row.len();
+        let stride = xsize + 2;
+        let (e0, e1) = self.error.split_at_mut(stride);
+        let (pe0, pe1) = self.pred_errors_buffer.split_at_mut(stride);
+        // Odd rows write slot 0 and read slot 1 (`update_errors`).
+        let (cur_e, prev_e, cur_pe, prev_pe) = if y & 1 != 0 {
+            (e0, e1, pe0, pe1)
+        } else {
+            (e1, e0, pe1, pe0)
+        };
+        let cur_e = &mut cur_e[..stride];
+        let prev_e = &prev_e[..stride];
+        let cur_pe = &mut cur_pe[..stride];
+        let prev_pe = &mut prev_pe[..stride];
+        let max_weight = [
+            self.wp_header.w0,
+            self.wp_header.w1,
+            self.wp_header.w2,
+            self.wp_header.w3,
+        ];
+        let h = &self.wp_header;
+        for x in 0..xsize {
+            let data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
+            let pos_ne = if x + 1 < xsize { x + 1 } else { x };
+            let pos_nw = if x > 0 { x - 1 } else { x };
+            let errors_n = prev_pe[x];
+            let errors_ne = prev_pe[pos_ne];
+            let errors_nw = prev_pe[pos_nw];
+            let mut weights = [0u32; NUM_PREDICTORS];
+            for i in 0..NUM_PREDICTORS {
+                weights[i] = error_weight(
+                    errors_n[i]
+                        .wrapping_add(errors_ne[i])
+                        .wrapping_add(errors_nw[i]),
+                    max_weight[i],
+                );
+            }
+            let n = add_bits(data.top);
+            let w = add_bits(data.left);
+            let ne = add_bits(data.topright);
+            let nw = add_bits(data.topleft);
+            let nn = add_bits(data.toptop);
+
+            let te_w = if x == 0 { 0 } else { cur_e[x - 1] as i64 };
+            let te_n = prev_e[x] as i64;
+            let te_nw = prev_e[pos_nw] as i64;
+            let sum_wn = te_n + te_w;
+            let te_ne = prev_e[pos_ne] as i64;
+
+            let mut p = te_w;
+            if te_n.abs() > p.abs() {
+                p = te_n;
+            }
+            if te_nw.abs() > p.abs() {
+                p = te_nw;
+            }
+            if te_ne.abs() > p.abs() {
+                p = te_ne;
+            }
+
+            let prediction = [
+                w + ne - n,
+                n - (((sum_wn + te_ne) * h.p1c as i64) >> 5),
+                w - (((sum_wn + te_nw) * h.p2c as i64) >> 5),
+                n - ((te_nw * (h.p3ca as i64)
+                    + (te_n * (h.p3cb as i64))
+                    + (te_ne * (h.p3cc as i64))
+                    + ((nn - n) * (h.p3cd as i64))
+                    + ((nw - w) * (h.p3ce as i64)))
+                    >> 5),
+            ];
+            let mut pred = weighted_average(&prediction, &mut weights);
+            if ((te_n ^ te_w) | (te_n ^ te_nw)) <= 0 {
+                let mx = w.max(ne.max(n));
+                let mn = w.min(ne.min(n));
+                pred = mn.max(mx.min(pred));
+            }
+            let wp_pred = (pred + PREDICTION_ROUND) >> PRED_EXTRA_BITS;
+            let val = read(p as i32).wrapping_add(wp_pred as i32);
+            row[x] = val;
+
+            let v = add_bits(val);
+            cur_e[x] = (pred - v) as i32;
+            let mut errs = [0u32; NUM_PREDICTORS];
+            for (err, &pr) in errs.iter_mut().zip(prediction.iter()) {
+                *err = (((pr - v).abs() + PREDICTION_ROUND) >> PRED_EXTRA_BITS) as u32;
+            }
+            cur_pe[x] = errs;
+            let prev_errors = &mut prev_pe[x + 1];
+            for i in 0..NUM_PREDICTORS {
+                prev_errors[i] = prev_errors[i].wrapping_add(errs[i]);
+            }
+        }
+    }
+
     #[inline(always)]
     pub fn predict_and_property(
         &mut self,

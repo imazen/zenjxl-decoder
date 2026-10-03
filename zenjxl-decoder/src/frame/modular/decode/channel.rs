@@ -369,7 +369,14 @@ fn decode_modular_channel_inner(
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::WpOnlyConfig420(t) => {
-            decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
+            #[cfg(test)]
+            if tests::DISABLE_WP_ROWS.load(std::sync::atomic::Ordering::Relaxed) {
+                return decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms);
+            }
+            #[cfg(test)]
+            tests::WP_ROWS_USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            t.decode_channel(buffers[chan], reader, br, &tree.histograms);
+            Ok(())
         }
         TreeSpecialCase::GradientLookupConfig420(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
@@ -406,6 +413,46 @@ mod tests {
     pub(super) static DISABLE_CURSOR: AtomicBool = AtomicBool::new(false);
     /// Channels decoded through a `CursorSource`.
     pub(super) static CURSOR_USES: AtomicUsize = AtomicUsize::new(0);
+    /// Test-only switch that sends weighted-predictor-only channels through
+    /// the per-sample `decode_one` path instead of `decode_row`.
+    pub(super) static DISABLE_WP_ROWS: AtomicBool = AtomicBool::new(false);
+    /// Channels decoded through `WpOnlyLookupConfig420::decode_channel`.
+    pub(super) static WP_ROWS_USES: AtomicUsize = AtomicUsize::new(0);
+
+    /// Decodes `data` with the switch off and on and compares the frames.
+    fn fast_matches_generic(name: &str, data: &[u8], switch: &AtomicBool, uses: &AtomicUsize) {
+        use crate::api::decoder::tests::decode;
+        let before = uses.load(Ordering::Relaxed);
+        let (_, fast) = decode(data, usize::MAX, false, false, None).unwrap();
+        assert!(
+            uses.load(Ordering::Relaxed) > before,
+            "{name}: fast path not used"
+        );
+        switch.store(true, Ordering::Relaxed);
+        let generic = decode(data, usize::MAX, false, false, None);
+        switch.store(false, Ordering::Relaxed);
+        let (_, generic) = generic.unwrap();
+        assert_eq!(fast.len(), generic.len());
+        for (f, g) in fast[0].iter().zip(&generic[0]) {
+            assert_eq!(f.size(), g.size());
+            for y in 0..f.size().1 {
+                assert!(f.row(y) == g.row(y), "{name}: row {y} differs");
+            }
+        }
+    }
+
+    /// libjxl v0.12 JPEG transcodes whose VarDCT DC uses the
+    /// weighted-predictor-only tree with 4/2/0 configs (photo crops, q40:
+    /// 768x512 4:2:0 and 512x384 4:4:4). `decode_row` must match the
+    /// per-sample path.
+    #[test]
+    fn wp_rows_match_per_sample_path() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/wp-rows");
+        for name in ["jpeg420.jxl", "jpeg444.jxl"] {
+            let data = std::fs::read(dir.join(name)).unwrap();
+            fast_matches_generic(name, &data, &DISABLE_WP_ROWS, &WP_ROWS_USES);
+        }
+    }
 
     /// jxl-encoder single-leaf lossless files (prefix codes, no LZ77):
     /// Gradient leaves (`--fast-decode`, 200x96 RGB8 and 272x96 16-bit
