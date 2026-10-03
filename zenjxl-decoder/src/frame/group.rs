@@ -616,8 +616,10 @@ pub fn decode_vardct_group(
                 }
             };
 
-            let transform_type = HfTransformType::from_usize(transform_id as usize)
-                .ok_or(Error::InvalidVarDCTTransform(transform_id as usize))?;
+            // Not `ok_or`: that builds (and drops) the error for every block.
+            let Some(transform_type) = HfTransformType::from_usize(transform_id as usize) else {
+                return Err(at!(Error::InvalidVarDCTTransform(transform_id as usize)));
+            };
             let cx = covered_blocks_x(transform_type) as usize;
             let cy = covered_blocks_y(transform_type) as usize;
             let shape_id = block_shape_id(transform_type) as usize;

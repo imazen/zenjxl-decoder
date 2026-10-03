@@ -1448,11 +1448,21 @@ pub(crate) fn decode_hf_metadata_into_rects(
             }
             let raw_transform = transform_image.row(0)[num];
             let raw_quant = 1 + transform_image.row(1)[num].clamp(0, 255);
-            let transform_type = HfTransformType::from_usize(raw_transform as usize)
-                .ok_or(Error::InvalidVarDCTTransform(raw_transform as usize))?;
+            // Not `ok_or`: that builds (and drops) the error for every block.
+            let Some(transform_type) = HfTransformType::from_usize(raw_transform as usize) else {
+                return Err(at!(Error::InvalidVarDCTTransform(raw_transform as usize)));
+            };
             used_hf_types |= 1 << raw_transform;
             let cx = covered_blocks_x(transform_type) as usize;
             let cy = covered_blocks_y(transform_type) as usize;
+            if cx == 1 && cy == 1 {
+                // A single block: in bounds, and its only cell was checked
+                // empty above, so the multi-block checks below always pass.
+                transform_map_rect.row(y)[x] = raw_transform as u8 + 128;
+                raw_quant_map_rect.row(y)[x] = raw_quant;
+                num += 1;
+                continue;
+            }
             if (cx > 1 || cy > 1) && !frame_header.is444() {
                 return Err(at!(Error::InvalidBlockSizeForChromaSubsampling));
             }
