@@ -704,6 +704,8 @@ impl LowMemoryRenderPipeline {
                 opaque_alpha_buffers: &self.opaque_alpha_buffers,
                 sorted_buffer_indices: &self.sorted_buffer_indices,
                 own_group: None,
+                #[cfg(feature = "threads")]
+                group_inputs: None,
             };
             let ctx = &mut self.render_ctx;
             let save_buffer_info = &self.save_buffer_info;

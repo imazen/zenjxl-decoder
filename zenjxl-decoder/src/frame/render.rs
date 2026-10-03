@@ -832,7 +832,7 @@ impl Frame {
                 // no store, border extraction or separate render pass, and
                 // the pixel buffers go straight back to the pool.
                 let lmp = lmp_ref!();
-                let inline_items = if is_vardct
+                let one_shot_items = if is_vardct
                     && !is_batched
                     && num_groups == self.header.num_groups()
                     && !self.was_flushed_once
@@ -844,32 +844,30 @@ impl Frame {
                         .all(|gw| gw.do_render && gw.complete && !gw.passes.is_empty())
                     && !inline_render_disabled()
                 {
-                    lmp.self_contained_work_items()?
+                    lmp.one_shot_work_items()?
                 } else {
                     None
                 };
-                let inline = match inline_items {
-                    Some(items) => {
+                let inline = match one_shot_items {
+                    Some((items, needs_neighbours)) => {
                         let (layouts, fragments) =
                             split_output_for_items(lmp, buffer_splitter.get_full_buffers(), &items);
                         fragments.map(|(fragments, col_offsets)| {
-                            let mut group_items = vec![Vec::new(); lmp.num_groups()];
-                            for (i, item) in items.iter().enumerate() {
-                                group_items[item.gy * self.header.size_groups().0 + item.gx]
-                                    .push(i);
-                            }
-                            let fragments: Vec<std::sync::Mutex<_>> = fragments
-                                .into_iter()
-                                .map(|f| std::sync::Mutex::new(Some(f)))
-                                .collect();
-                            (items, layouts, fragments, col_offsets, group_items)
+                            InlineRender::new(
+                                items,
+                                layouts,
+                                fragments,
+                                col_offsets,
+                                self.header.size_groups(),
+                                crate::render::low_memory_pipeline::ContextPool::new(
+                                    lmp.context_factory(),
+                                ),
+                                needs_neighbours,
+                            )
                         })
                     }
                     None => None,
                 };
-                let inline_ctx_pool = inline.as_ref().map(|_| {
-                    crate::render::low_memory_pipeline::ContextPool::new(lmp.context_factory())
-                });
                 let view = lmp.read_view();
 
                 let decode_group = |gw: &mut GroupWork| -> Result<()> {
@@ -957,46 +955,21 @@ impl Frame {
                             tracker,
                         )?;
                     }
-                    if let (Some((items, layouts, fragments, col_offsets, group_items)), Some(pool)) =
-                        (inline.as_ref(), inline_ctx_pool.as_ref())
+                    if let Some(inline) = inline.as_ref()
                         && let Some(pixels) = gw.pixels.take()
                     {
                         let mut input = view.input_buffer_with_data(pixels.map(|p| p.into_raw()));
-                        let mut ctx = pool.take()?;
-                        for &i in &group_items[gw.group] {
-                            let Some(mut slot_bufs) = fragments[i].lock().unwrap().take() else {
-                                continue;
-                            };
-                            let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> = slot_bufs
-                                .iter_mut()
-                                .enumerate()
-                                .map(|(slot_idx, frag_opt)| {
-                                    let frag = frag_opt.as_mut()?;
-                                    let cr = layouts[i]
-                                        .iter()
-                                        .find(|&&(s, _, _, _)| s == slot_idx)
-                                        .map(|&(_, _, _, cr)| cr)?;
-                                    let col_offset = col_offsets[i][slot_idx];
-                                    Some(frag.rect(Rect {
-                                        origin: (cr.origin.0 - col_offset, cr.origin.1),
-                                        size: cr.size,
-                                    }))
-                                })
-                                .collect();
-                            view.render_group_with_data(
-                                ctx.get_mut(),
-                                gw.group,
-                                &input,
-                                &items[i],
-                                &mut local_bufs,
-                            )?;
-                        }
-                        if let [Some(a), Some(b), Some(c)] = input.take_colour_data() {
-                            pixel_pool.lock().unwrap().push([
-                                Image::from_raw(a),
-                                Image::from_raw(b),
-                                Image::from_raw(c),
-                            ]);
+                        if inline.needs_neighbours {
+                            inline.publish(gw.group, input);
+                        } else {
+                            inline.render(&view, gw.group, &input)?;
+                            if let [Some(a), Some(b), Some(c)] = input.take_colour_data() {
+                                pixel_pool.lock().unwrap().push([
+                                    Image::from_raw(a),
+                                    Image::from_raw(b),
+                                    Image::from_raw(c),
+                                ]);
+                            }
                         }
                         gw.rendered = true;
                         #[cfg(test)]
@@ -1012,26 +985,62 @@ impl Frame {
                 // ranges would hand the largest groups to one thread.
                 let mut order: Vec<&mut GroupWork> =
                     work[batch_start..batch_end].iter_mut().collect();
-                order.sort_by_cached_key(|gw| {
-                    std::cmp::Reverse(
-                        gw.passes
-                            .iter()
-                            .map(|(_, br)| br.total_bits_available())
-                            .sum::<usize>(),
-                    )
-                });
+                // Groups that render once their neighbours are decoded go in
+                // raster order instead, so that renders become ready while
+                // their neighbourhood is still in cache rather than at the end.
+                if !inline.as_ref().is_some_and(|i| i.needs_neighbours) {
+                    order.sort_by_cached_key(|gw| {
+                        std::cmp::Reverse(
+                            gw.passes
+                                .iter()
+                                .map(|(_, br)| br.total_bits_available())
+                                .sum::<usize>(),
+                        )
+                    });
+                }
                 let workers = num_threads.min(order.len());
                 let queue = std::sync::Mutex::new(order.into_iter());
+                // Groups whose render reads their neighbours are rendered as
+                // soon as the neighbours are decoded, ahead of further decodes.
+                let deferred = inline.as_ref().filter(|i| i.needs_neighbours);
                 (0..workers)
                     .into_par_iter()
                     .try_for_each(|_| -> Result<()> {
+                        // A panicking worker must not leave the others waiting
+                        // for renders it would have unlocked.
+                        let _guard = deferred.map(|d| FailOnUnwind(&d.failed));
                         loop {
-                            let Some(gw) = queue.lock().unwrap().next() else {
-                                return Ok(());
+                            if let Some(d) = deferred {
+                                if d.failed.load(std::sync::atomic::Ordering::Relaxed) {
+                                    return Ok(());
+                                }
+                                if let Some(g) = d.pop_ready() {
+                                    if let Err(e) = d.render_decoded(&view, g) {
+                                        d.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        queue.lock().unwrap().by_ref().for_each(drop);
+                                        return Err(e);
+                                    }
+                                    continue;
+                                }
+                            }
+                            let next = queue.lock().unwrap().next();
+                            let Some(gw) = next else {
+                                match deferred {
+                                    // Renders still to be unlocked by groups other
+                                    // workers are decoding.
+                                    Some(d) if !d.all_rendered() => {
+                                        std::thread::yield_now();
+                                        continue;
+                                    }
+                                    _ => return Ok(()),
+                                }
                             };
                             if let Err(e) = decode_group(gw) {
                                 // Leave nothing for the other workers.
                                 queue.lock().unwrap().by_ref().for_each(drop);
+                                if let Some(d) = deferred {
+                                    d.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                                }
                                 return Err(e);
                             }
                         }
@@ -2658,16 +2667,22 @@ mod inline_render_tests {
     /// Groups rendered by their decode task.
     pub(super) static USES: AtomicUsize = AtomicUsize::new(0);
 
-    /// libjxl v0.12 files of 272x264 (2x2 groups) whose render pipeline reads
-    /// no neighbouring pixels: a q75 4:4:4 JPEG transcode and a d1
-    /// `--faster_decoding=4` file. Each group is rendered by its decode task,
-    /// and the output must match the separate render pass exactly.
+    /// libjxl v0.12 multi-group files, each rendered by the decode tasks;
+    /// the output must match the separate render pass exactly. 272x264 (2x2
+    /// groups): a q75 4:4:4 JPEG transcode and a d1 `--faster_decoding=4`
+    /// file, whose renders read no neighbouring pixels, and a d1 e7 file
+    /// (EPF and gaborish) whose renders do; 520x264 (3x2 groups): a q90
+    /// 4:2:0 JPEG transcode (chroma upsampling reads neighbours).
     #[test]
-    fn self_contained_groups_render_in_decode_task() {
+    fn groups_render_in_decode_tasks() {
         use crate::api::decoder::tests::decode;
-        let dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/inline-render");
-        for name in ["crop_272x264_444.jxl", "crop_272x264_fd4.jxl"] {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata");
+        for name in [
+            "inline-render/crop_272x264_444.jxl",
+            "inline-render/crop_272x264_fd4.jxl",
+            "inline-render/crop_272x264_d1e7.jxl",
+            "jpeg-multigroup/crop_520x264_420.jxl",
+        ] {
             let data = std::fs::read(dir.join(name)).unwrap();
             let before = USES.load(Ordering::Relaxed);
             let (_, inline) = decode(&data, usize::MAX, false, false, None).unwrap();
@@ -2687,5 +2702,175 @@ mod inline_render_tests {
                 }
             }
         }
+    }
+}
+
+/// Sets the flag if dropped while unwinding.
+#[cfg(feature = "threads")]
+struct FailOnUnwind<'a>(&'a std::sync::atomic::AtomicBool);
+
+#[cfg(feature = "threads")]
+impl Drop for FailOnUnwind<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+/// Renders the groups of a one-shot parallel VarDCT decode in the decode
+/// tasks (see `LowMemoryRenderPipeline::one_shot_work_items`), each into its
+/// own fragment of the output. Without `needs_neighbours` a group renders
+/// right after its decode; otherwise its decoded input is published, and it
+/// renders once every group of its 3x3 neighbourhood is decoded.
+#[cfg(feature = "threads")]
+struct InlineRender<'o, 'p> {
+    items: Vec<crate::render::low_memory_pipeline::group_scheduler::RenderWorkItem>,
+    layouts: Vec<Vec<(usize, usize, usize, Rect)>>,
+    fragments: Vec<std::sync::Mutex<Option<Vec<Option<JxlOutputBuffer<'o>>>>>>,
+    col_offsets: Vec<Vec<usize>>,
+    /// Item indices of each group.
+    group_items: Vec<Vec<usize>>,
+    ctx_pool: crate::render::low_memory_pipeline::ContextPool<'p>,
+    groups: (usize, usize),
+    needs_neighbours: bool,
+    /// Decoded inputs, published by `publish`.
+    inputs:
+        Vec<std::sync::OnceLock<crate::render::low_memory_pipeline::group_scheduler::InputBuffer>>,
+    /// Per group: groups of its 3x3 neighbourhood not yet decoded.
+    waiting: Vec<std::sync::atomic::AtomicUsize>,
+    /// Groups whose neighbourhood is decoded, not yet rendered.
+    ready: std::sync::Mutex<Vec<usize>>,
+    rendered: std::sync::atomic::AtomicUsize,
+    /// Set when a worker fails, so the others stop waiting.
+    failed: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(feature = "threads")]
+impl<'o, 'p> InlineRender<'o, 'p> {
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    fn new(
+        items: Vec<crate::render::low_memory_pipeline::group_scheduler::RenderWorkItem>,
+        layouts: Vec<Vec<(usize, usize, usize, Rect)>>,
+        fragments: Vec<Vec<Option<JxlOutputBuffer<'o>>>>,
+        col_offsets: Vec<Vec<usize>>,
+        groups: (usize, usize),
+        ctx_pool: crate::render::low_memory_pipeline::ContextPool<'p>,
+        needs_neighbours: bool,
+    ) -> Self {
+        let num_groups = groups.0 * groups.1;
+        let mut group_items = vec![Vec::new(); num_groups];
+        for (i, item) in items.iter().enumerate() {
+            group_items[item.gy * groups.0 + item.gx].push(i);
+        }
+        let mut this = Self {
+            items,
+            layouts,
+            fragments: fragments
+                .into_iter()
+                .map(|f| std::sync::Mutex::new(Some(f)))
+                .collect(),
+            col_offsets,
+            group_items,
+            ctx_pool,
+            groups,
+            needs_neighbours,
+            inputs: (0..num_groups)
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
+            waiting: Vec::new(),
+            ready: std::sync::Mutex::new(Vec::new()),
+            rendered: std::sync::atomic::AtomicUsize::new(0),
+            failed: std::sync::atomic::AtomicBool::new(false),
+        };
+        this.waiting = (0..num_groups)
+            .map(|g| std::sync::atomic::AtomicUsize::new(this.neighbourhood(g).count()))
+            .collect();
+        this
+    }
+
+    /// Group `g` and its (up to 8) neighbours.
+    fn neighbourhood(&self, g: usize) -> impl Iterator<Item = usize> + use<> {
+        let (xs, ys) = self.groups;
+        let (gx, gy) = (g % xs, g / xs);
+        let x0 = gx.saturating_sub(1);
+        let x1 = (gx + 1).min(xs - 1);
+        let y0 = gy.saturating_sub(1);
+        let y1 = (gy + 1).min(ys - 1);
+        (y0..=y1).flat_map(move |y| (x0..=x1).map(move |x| y * xs + x))
+    }
+
+    /// Renders every item of group `g` from `input`, its decoded colour
+    /// channels, reading neighbours through `view`.
+    fn render(
+        &self,
+        view: &crate::render::low_memory_pipeline::PipelineReadView<'_>,
+        g: usize,
+        input: &crate::render::low_memory_pipeline::group_scheduler::InputBuffer,
+    ) -> Result<()> {
+        let mut ctx = self.ctx_pool.take()?;
+        for &i in &self.group_items[g] {
+            let Some(mut slot_bufs) = self.fragments[i].lock().unwrap().take() else {
+                continue;
+            };
+            let mut local_bufs: Vec<Option<JxlOutputBuffer<'_>>> = slot_bufs
+                .iter_mut()
+                .enumerate()
+                .map(|(slot_idx, frag_opt)| {
+                    let frag = frag_opt.as_mut()?;
+                    let cr = self.layouts[i]
+                        .iter()
+                        .find(|&&(s, _, _, _)| s == slot_idx)
+                        .map(|&(_, _, _, cr)| cr)?;
+                    let col_offset = self.col_offsets[i][slot_idx];
+                    Some(frag.rect(Rect {
+                        origin: (cr.origin.0 - col_offset, cr.origin.1),
+                        size: cr.size,
+                    }))
+                })
+                .collect();
+            view.render_group_with_data(ctx.get_mut(), g, input, &self.items[i], &mut local_bufs)?;
+        }
+        Ok(())
+    }
+
+    /// Publishes the decoded input of group `g` and queues the groups whose
+    /// neighbourhood is now complete.
+    fn publish(
+        &self,
+        g: usize,
+        input: crate::render::low_memory_pipeline::group_scheduler::InputBuffer,
+    ) {
+        if self.inputs[g].set(input).is_err() {
+            unreachable!("group {g} decoded twice");
+        }
+        for n in self.neighbourhood(g) {
+            // AcqRel: the worker that takes `n` sees every input published
+            // before its count reached zero.
+            if self.waiting[n].fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+                self.ready.lock().unwrap().push(n);
+            }
+        }
+    }
+
+    fn pop_ready(&self) -> Option<usize> {
+        self.ready.lock().unwrap().pop()
+    }
+
+    /// Renders a group taken from `pop_ready`.
+    fn render_decoded(
+        &self,
+        view: &crate::render::low_memory_pipeline::PipelineReadView<'_>,
+        g: usize,
+    ) -> Result<()> {
+        let input = self.inputs[g].get().expect("queued groups are decoded");
+        self.render(&view.with_group_inputs(&self.inputs), g, input)?;
+        self.rendered
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn all_rendered(&self) -> bool {
+        self.rendered.load(std::sync::atomic::Ordering::Acquire) == self.inputs.len()
     }
 }

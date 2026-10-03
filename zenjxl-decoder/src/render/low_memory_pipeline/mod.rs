@@ -145,17 +145,41 @@ pub(crate) struct PipelineReadView<'a> {
     pub(super) opaque_alpha_buffers: &'a [Option<RowBuffer>],
     pub(super) sorted_buffer_indices: &'a [Vec<(usize, usize, usize)>],
     /// A group whose input is read from here instead of `input_buffers`
-    /// (see [`LowMemoryRenderPipeline::render_group_with_data`]).
+    /// (see [`Self::render_group_with_data`]).
     pub(super) own_group: Option<(usize, &'a InputBuffer)>,
+    /// Inputs of every group, read instead of `input_buffers` (see
+    /// [`Self::with_group_inputs`]).
+    #[cfg(feature = "threads")]
+    pub(super) group_inputs: Option<&'a [std::sync::OnceLock<InputBuffer>]>,
 }
 
 impl<'a> PipelineReadView<'a> {
     /// The input buffers of group `g`.
     #[inline]
     pub(super) fn input_buffer(&self, g: usize) -> &'a InputBuffer {
-        match self.own_group {
-            Some((own, buf)) if own == g => buf,
-            _ => &self.input_buffers[g],
+        if let Some((own, buf)) = self.own_group
+            && own == g
+        {
+            return buf;
+        }
+        #[cfg(feature = "threads")]
+        if let Some(inputs) = self.group_inputs {
+            return inputs[g]
+                .get()
+                .expect("a group is rendered only after its neighbours are decoded");
+        }
+        &self.input_buffers[g]
+    }
+
+    /// This view, reading each group's input from `inputs` (set once the
+    /// group is decoded) instead of the pipeline. With it,
+    /// [`Self::render_group_with_data`] renders a group whose neighbours'
+    /// entries are set.
+    #[cfg(feature = "threads")]
+    pub(crate) fn with_group_inputs(&self, inputs: &'a [std::sync::OnceLock<InputBuffer>]) -> Self {
+        Self {
+            group_inputs: Some(inputs),
+            ..*self
         }
     }
 
@@ -171,7 +195,8 @@ impl<'a> PipelineReadView<'a> {
 
     /// Renders `item` of group `g` from `data` (its colour channels), which
     /// is not stored in the pipeline. Requires
-    /// [`LowMemoryRenderPipeline::self_contained_work_items`].
+    /// [`LowMemoryRenderPipeline::one_shot_work_items`], and neighbours'
+    /// inputs through [`Self::with_group_inputs`] when the render reads them.
     #[cfg(feature = "threads")]
     pub(crate) fn render_group_with_data(
         &self,
@@ -181,7 +206,6 @@ impl<'a> PipelineReadView<'a> {
         item: &group_scheduler::RenderWorkItem,
         buffers: &mut [Option<JxlOutputBuffer>],
     ) -> Result<()> {
-        debug_assert_eq!(self.border_size, (0, 0));
         let view = PipelineReadView {
             own_group: Some((g, data)),
             ..*self
@@ -631,6 +655,8 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                 opaque_alpha_buffers: &self.opaque_alpha_buffers,
                 sorted_buffer_indices: &self.sorted_buffer_indices,
                 own_group: None,
+                #[cfg(feature = "threads")]
+                group_inputs: None,
             };
             render_group::render_outside(
                 &mut self.render_ctx,
@@ -743,6 +769,8 @@ impl RenderPipeline for LowMemoryRenderPipeline {
                     opaque_alpha_buffers: &self.opaque_alpha_buffers,
                     sorted_buffer_indices: &self.sorted_buffer_indices,
                     own_group: None,
+                    #[cfg(feature = "threads")]
+                    group_inputs: None,
                 };
                 let ctx = &mut self.render_ctx;
                 let save_buffer_info = &self.save_buffer_info;
@@ -818,20 +846,22 @@ impl LowMemoryRenderPipeline {
             opaque_alpha_buffers: &self.opaque_alpha_buffers,
             sorted_buffer_indices: &self.sorted_buffer_indices,
             own_group: None,
+            #[cfg(feature = "threads")]
+            group_inputs: None,
         }
     }
 
-    /// The work items of every group of a one-shot decode, if the frame can
-    /// render each group from that group's own pixels alone: no stage reads
-    /// neighbouring pixels, only the three colour channels are used, and no
-    /// padding around the frame is rendered. The groups are then rendered by
-    /// [`PipelineReadView::render_group_with_data`] right after decoding.
+    /// The work items of every group of a one-shot decode, for rendering
+    /// each group during the decode with
+    /// [`PipelineReadView::render_group_with_data`]: only the three colour
+    /// channels are used and no padding around the frame is rendered. The
+    /// flag says whether a group's render reads its neighbours' pixels.
     #[cfg(feature = "threads")]
-    pub(crate) fn self_contained_work_items(
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn one_shot_work_items(
         &self,
-    ) -> Result<Option<Vec<group_scheduler::RenderWorkItem>>> {
-        if self.border_size != (0, 0)
-            || self.shared.num_used_channels() != 3
+    ) -> Result<Option<(Vec<group_scheduler::RenderWorkItem>, bool)>> {
+        if self.shared.num_used_channels() != 3
             || (0..3).any(|c| !self.shared.channel_is_used[c])
             || self.shared.extend_stage_index.is_some()
         {
@@ -847,7 +877,7 @@ impl LowMemoryRenderPipeline {
                 FullReadiness::Some(true),
             )?);
         }
-        Ok(Some(items))
+        Ok(Some((items, self.border_size != (0, 0))))
     }
 
     /// Records group `g` as rendered by
