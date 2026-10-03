@@ -361,6 +361,10 @@ pub(crate) fn render(
         })
         .collect();
 
+    // Per stage: whether the x padding of its input rows has been applied
+    // in this call. After the first row only the newest input row needs it:
+    // the others were padded when they were newest and are not written again.
+    let mut x_padded: SmallVec<[bool; 16]> = view.shared.stages.iter().map(|_| false).collect();
     for vy in vy0..vy1 {
         let mut current_origin = (0, 0);
         let mut current_size = view.shared.input_size;
@@ -453,9 +457,15 @@ pub(crate) fn render(
                     // is narrower than the border (jxl-rs #845), and would be wrong
                     // under any scheduler that hands a group a rectangle it does
                     // not start (jxl-rs 43e2db6).
+                    let pad_rows = if x_padded[i] {
+                        bordery..=bordery
+                    } else {
+                        -bordery..=bordery
+                    };
+                    x_padded[i] = true;
                     if start_of_row && borderx != 0 {
                         for (si, ci) in view.stage_input_buffer_index[i].iter() {
-                            for iy in -bordery..=bordery {
+                            for iy in pad_rows.clone() {
                                 let y = mirror(y as isize + iy, shifted_ysize);
                                 apply_x_padding(
                                     s.input_type(),
@@ -470,7 +480,7 @@ pub(crate) fn render(
                     }
                     if end_of_row && borderx != 0 {
                         for (si, ci) in view.stage_input_buffer_index[i].iter() {
-                            for iy in -bordery..=bordery {
+                            for iy in pad_rows.clone() {
                                 let y = mirror(y as isize + iy, shifted_ysize);
                                 apply_x_padding(
                                     s.input_type(),
