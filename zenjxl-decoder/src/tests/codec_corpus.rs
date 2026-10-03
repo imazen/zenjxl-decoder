@@ -167,6 +167,19 @@ fn decode_jxl_to_pixels_with_options(
 }
 
 /// Run a single parity test case.
+/// Corpus files whose RGB reference depends on the colour management system
+/// that rendered it, with the largest 8-bit difference accepted.
+///
+/// `cmyk_layers` is CMYK: its decode is checked exactly in CMYK
+/// (`test_cmyk_raw_output_matches_libjxl`), but the RGB reference is djxl's
+/// CMYK->sRGB conversion, which libjxl does with lcms2 or skcms depending on
+/// the build. Against djxl v0.12 built with lcms2, the `cms` feature (moxcms)
+/// measures max 4 on 508 of 1,048,576 values (2026-10-03, `505e701c`): moxcms
+/// interpolates the profile's 4-D CLUT differently from lcms2 in near-white
+/// tints. skcms-built references differ further (paper white 252/255/254).
+/// The bound is the measured value, so any regression still fails.
+const CMS_DEPENDENT_RGB_BOUNDS: &[(&str, &str, u8)] = &[("conformance", "cmyk_layers", 4)];
+
 fn run_parity_test(test_case: &CodecCorpusTestCase) -> Result<(), String> {
     // Skip if no reference available
     let ref_path = test_case.reference_path.as_ref().ok_or_else(|| {
@@ -232,7 +245,10 @@ fn run_parity_test(test_case: &CodecCorpusTestCase) -> Result<(), String> {
         width,
         height,
         compare_channels,
-        CONFORMANCE_THRESHOLD_U8,
+        CMS_DEPENDENT_RGB_BOUNDS
+            .iter()
+            .find(|(category, name, _)| *category == test_case.category && *name == test_case.name)
+            .map_or(CONFORMANCE_THRESHOLD_U8, |&(_, _, bound)| bound),
     );
 
     if result.passed {
