@@ -245,10 +245,22 @@ was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
 - The batched VarDCT path is expensive: forcing 2 batches of 24 groups
   raised P3b from 2.81 to 5.12 ms (d1e7) and 0.95 to 3.03 ms (JPEG), so
   overlapping render with the next batch's decode is not worth it on top of it.
-- In-task render (`8c4e8175`) covers only pipelines with `border_size == 0`
-  (fd4, JPEG 4:4:4). JPEG 4:2:0, d1e7 and d3 still use P2 -> P3b.
+- In-task render: `8c4e8175` for `border_size == 0` pipelines (fd4, JPEG
+  4:4:4), `a820cac9` for the rest (a group renders when its 3x3
+  neighbourhood is decoded; inputs published through per-group
+  `OnceLock`s). Those frames decode in raster order: largest-first left the
+  renders to the end and lost 2.7% on JPEG 4:2:0 at 4 threads.
+- Tried without gain on d3 1T: a single-pass `get_distinct_indices` (the
+  profile's 2.6% there is mis-attributed inlined code; instruction count
+  unchanged) and a vector-index EPF1 loop with one up-front bound (+0.2%
+  instructions).
 - Rejected: packing cluster + hybrid-uint config into one per-context
   table for the AC loop (0.3% fewer instructions, 1.5-3% more cycles).
-- Parity after these changes, 12 threads, zen/djxl: d1e7 0.94, fd4 ~0.99,
-  JPEG 4:2:0 0.91, JPEG 4:4:4 ~0.93-1.0, d3 0.89. 1 thread: ahead or tied
-  everywhere except d3 (78 vs 81) and e7 lossless (10.7 vs 11.2).
+- Parity at `a820cac9`, interleaved, zen/djxl (4 CLIC photos per set):
+  1 thread d1e7 1.01, fd4 1.20, JPEG 4:2:0 1.10, 4:4:4 1.08, d3 0.95,
+  e7 lossless 0.97, e3 1.18, e1 1.27; 12 threads d1e7 1.01, fd4 1.03,
+  JPEG 4:2:0 1.03, 4:4:4 1.05, d3 0.97, e7 1.32, e3 1.33, e1 1.61. Upstream
+  jxl-rs is behind djxl on every set except e7/e1 at 12 threads.
+- d3 1T: per decode djxl 146M cycles / 710M instructions, zen 152M / 900M.
+  Our EPF1 and EPF2 kernels take ~2x djxl's share each; the sRGB transfer
+  (`linear_to_srgb_simd`, 9% here) is the same algorithm as libjxl's.
