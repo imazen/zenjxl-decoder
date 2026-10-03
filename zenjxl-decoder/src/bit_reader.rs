@@ -54,11 +54,12 @@ impl FastBits<'_> {
     #[inline(always)]
     pub fn ensure(&mut self, num: usize) -> bool {
         debug_assert!(num <= MAX_BITS_PER_CALL);
-        if self.bits_in_buf >= num {
-            return true;
-        }
+        // The refill is valid at any fill level, so it runs unconditionally
+        // while 8 bytes remain: testing `bits_in_buf >= num` first is a
+        // branch on how many bits the previous symbols took, which
+        // mispredicts in entropy-decode loops.
         if self.data.len() < 8 {
-            return false;
+            return self.bits_in_buf >= num;
         }
         let bits = LittleEndian::read_u64(self.data);
         self.bit_buf |= bits << self.bits_in_buf;
@@ -160,8 +161,12 @@ impl<'a> BitReader<'a> {
             return 0;
         }
         debug_assert!(num <= MAX_BITS_PER_CALL);
-        if self.bits_in_buf < num {
+        // As in `FastBits::ensure`: refill unconditionally while 8 bytes
+        // remain instead of branching on the buffered bit count.
+        if self.data.len() >= 8 {
             self.refill();
+        } else if self.bits_in_buf < num {
+            self.refill_slow();
         }
         // SAFETY-NOTE: `num <= 56` is enforced above, so the shift is well-defined.
         self.bit_buf & ((1u64 << num) - 1)
