@@ -8,7 +8,7 @@ use crate::{
     features::epf::SigmaSource,
     render::{
         Channels, ChannelsMut, RenderPipelineInOutStage,
-        stages::epf::common::{get_sigma, prepare_sad_mul_storage},
+        stages::epf::common::{get_sigma, prepare_sad_mul_storage, uniform_sigma},
     },
 };
 
@@ -93,16 +93,28 @@ fn epf2_process_row_chunk(
     let len = D::F32Vec::LEN;
 
     for x in (0..xsize).step_by(len) {
-        let sigma = get_sigma(d, x + xpos, row_sigma);
-        let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
         let [wx, wy, wb] = rows.map(|ch| ch.map(|r| &r[x..x + len + 2]));
 
         let x_cc = D::F32Vec::load_from(d, wx[1], 1);
         let y_cc = D::F32Vec::load_from(d, wy[1], 1);
         let b_cc = D::F32Vec::load_from(d, wb[1], 1);
 
+        // Scalar skip test when the vector lies in one block, as in libjxl.
+        let uniform = uniform_sigma::<D>(x + xpos, row_sigma);
+        if uniform.is_some_and(|s| s < MIN_SIGMA) {
+            x_cc.store_at(output_x[0], x);
+            y_cc.store_at(output_y[0], x);
+            b_cc.store_at(output_b[0], x);
+            continue;
+        }
+        let sigma = match uniform {
+            Some(s) => D::F32Vec::splat(d, s),
+            None => get_sigma(d, x + xpos, row_sigma),
+        };
+        let sad_mul = D::F32Vec::load_from(d, &sad_mul_storage, x % 8);
+
         let sigma_mask = D::F32Vec::splat(d, MIN_SIGMA).gt(sigma);
-        if sigma_mask.all() {
+        if uniform.is_none() && sigma_mask.all() {
             x_cc.store_at(output_x[0], x);
             y_cc.store_at(output_y[0], x);
             b_cc.store_at(output_b[0], x);
