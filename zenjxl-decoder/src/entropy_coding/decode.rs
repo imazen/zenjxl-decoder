@@ -904,6 +904,11 @@ impl Histograms {
     /// Returns true if the config 420 fast path can be safely used.
     /// Config 420: split_exponent=4, msb_in_token=2, lsb_in_token=0 (common pattern)
     /// Requires: all configs are 420 AND LZ77 is disabled
+    /// Whether the stream uses LZ77 (or RLE).
+    pub fn uses_lz77(&self) -> bool {
+        self.lz77_params.enabled
+    }
+
     pub fn can_use_config_420_fast_path(&self) -> bool {
         !self.lz77_params.enabled && self.uint_configs.iter().all(|cfg| cfg.is_config_420())
     }

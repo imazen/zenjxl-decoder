@@ -378,6 +378,16 @@ fn decode_modular_channel_inner(
             t.decode_channel(buffers[chan], reader, br, &tree.histograms);
             Ok(())
         }
+        TreeSpecialCase::WpOnly(t) => {
+            #[cfg(test)]
+            if tests::DISABLE_WP_ROWS.load(std::sync::atomic::Ordering::Relaxed) {
+                return decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms);
+            }
+            #[cfg(test)]
+            tests::WP_ROWS_USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            t.decode_channel(buffers[chan], reader, br, &tree.histograms);
+            Ok(())
+        }
         TreeSpecialCase::GradientLookupConfig420(t) => {
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
@@ -441,14 +451,14 @@ mod tests {
         }
     }
 
-    /// libjxl v0.12 JPEG transcodes whose VarDCT DC uses the
-    /// weighted-predictor-only tree with 4/2/0 configs (photo crops, q40:
-    /// 768x512 4:2:0 and 512x384 4:4:4). `decode_row` must match the
-    /// per-sample path.
+    /// libjxl v0.12 files whose VarDCT DC uses the weighted-predictor-only
+    /// tree: JPEG transcodes with 4/2/0 configs (photo crops, q40: 768x512
+    /// 4:2:0 and 512x384 4:4:4) and `cjxl -d 3 -e 7` with other configs
+    /// (512x384). `decode_row` must match the per-sample path.
     #[test]
     fn wp_rows_match_per_sample_path() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/wp-rows");
-        for name in ["jpeg420.jxl", "jpeg444.jxl"] {
+        for name in ["jpeg420.jxl", "jpeg444.jxl", "d3e7.jxl"] {
             let data = std::fs::read(dir.join(name)).unwrap();
             fast_matches_generic(name, &data, &DISABLE_WP_ROWS, &WP_ROWS_USES);
         }

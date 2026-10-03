@@ -238,30 +238,38 @@ fn make_lut(tree: &[TreeNode]) -> Option<[u8; LUT_TABLE_SIZE]> {
     Some(ans)
 }
 
-/// Specialized WpOnlyLookup for when all HybridUint configs are 420
-/// This allows using the fast-path entropy decoder
-pub struct WpOnlyLookupConfig420 {
+/// Trees whose every node uses the weighted predictor (WP property splits,
+/// Weighted leaves): a lookup table from the WP property to the cluster.
+/// With `C420` every hybrid-uint config is 4/2/0 and there is no LZ77, so
+/// the specialised config-420 reader is used; otherwise the regular one.
+pub struct WpOnlyLookup<const C420: bool> {
     lut: [u8; LUT_TABLE_SIZE],
     wp_state: WeightedPredictorState,
 }
 
-impl WpOnlyLookupConfig420 {
+/// See [`WpOnlyLookup`].
+pub type WpOnlyLookupConfig420 = WpOnlyLookup<true>;
+
+impl<const C420: bool> WpOnlyLookup<C420> {
     fn new(
         tree: &[TreeNode],
         histograms: &Histograms,
         header: &GroupHeader,
         xsize: usize,
     ) -> Option<Self> {
-        if !histograms.can_use_config_420_fast_path() {
+        if C420 && !histograms.can_use_config_420_fast_path() {
+            return None;
+        }
+        // The general variant reads through a `PlainCursor`, which LZ77
+        // streams cannot use; those keep the general tree path.
+        if !C420 && histograms.uses_lz77() {
             return None;
         }
         let wp_state = WeightedPredictorState::new(&header.wp_header, xsize).ok()?;
         let lut = make_lut(tree)?;
         Some(Self { lut, wp_state })
     }
-}
 
-impl WpOnlyLookupConfig420 {
     /// Decodes the whole channel row by row through
     /// [`WeightedPredictorState::decode_row`]; same output as the
     /// per-sample `decode_one` path.
@@ -276,8 +284,9 @@ impl WpOnlyLookupConfig420 {
         let off = crate::frame::modular::IMAGE_OFFSET.0;
         let (w, h) = channel.data.size();
         let lut = &self.lut;
-        // Entropy state in registers (`PlainCursor`); near the end of the
-        // data one symbol at a time goes through the regular reader.
+        // Entropy state in registers (`PlainCursor`, streams without LZ77);
+        // near the end of the data one symbol at a time goes through the
+        // regular reader.
         let mut cursor = reader.plain_cursor(br);
         for y in 0..h {
             let [row, row_top, row_toptop] = channel.data.distinct_full_rows_mut([y + 2, y + 1, y]);
@@ -290,12 +299,17 @@ impl WpOnlyLookupConfig420 {
                     let ctx = lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
                         .clamp(0, LUT_TABLE_SIZE as i64 - 1)
                         as usize] as usize;
-                    if let Some(c) = cursor.as_mut()
-                        && let Some(v) = histograms.read_unsigned_plain_420(c, ctx)
-                    {
-                        return unpack_signed(v);
+                    if let Some(c) = cursor.as_mut() {
+                        let fast = if C420 {
+                            histograms.read_unsigned_plain_420(c, ctx)
+                        } else {
+                            histograms.read_unsigned_plain(c, ctx)
+                        };
+                        if let Some(v) = fast {
+                            return unpack_signed(v);
+                        }
                     }
-                    let (v, c) = read_420_slow(cursor.take(), reader, br, histograms, ctx);
+                    let (v, c) = read_slow::<C420>(cursor.take(), reader, br, histograms, ctx);
                     cursor = c;
                     v
                 },
@@ -307,25 +321,29 @@ impl WpOnlyLookupConfig420 {
     }
 }
 
-/// One config-4/2/0 read through the regular reader, handing a
-/// [`PlainCursor`] back and forth by value.
+/// One read through the regular reader, handing a [`PlainCursor`] back and
+/// forth by value.
 #[cold]
 #[inline(never)]
-fn read_420_slow<'a>(
+fn read_slow<'a, const C420: bool>(
     cursor: Option<crate::entropy_coding::decode::PlainCursor<'a>>,
     reader: &mut SymbolReader,
     br: &mut BitReader<'a>,
     histograms: &Histograms,
-    ctx: usize,
+    cluster: usize,
 ) -> (i32, Option<crate::entropy_coding::decode::PlainCursor<'a>>) {
     if let Some(c) = cursor {
         reader.finish_plain_cursor(c, br);
     }
-    let v = reader.read_signed_clustered_config_420(histograms, br, ctx);
+    let v = if C420 {
+        reader.read_signed_clustered_config_420(histograms, br, cluster)
+    } else {
+        reader.read_signed_clustered_inline(histograms, br, cluster)
+    };
     (v, reader.plain_cursor(br))
 }
 
-impl ModularChannelDecoder for WpOnlyLookupConfig420 {
+impl<const C420: bool> ModularChannelDecoder for WpOnlyLookup<C420> {
     const NEEDS_TOP: bool = true;
     const NEEDS_TOPTOP: bool = true;
 
@@ -346,9 +364,12 @@ impl ModularChannelDecoder for WpOnlyLookupConfig420 {
             .wp_state
             .predict_and_property(pos, xsize, &prediction_data);
         let ctx = self.lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
-            .clamp(0, LUT_TABLE_SIZE as i64 - 1) as usize];
-        // Use the specialized 420 fast path
-        let dec = src.read_signed_420(histograms, ctx as usize);
+            .clamp(0, LUT_TABLE_SIZE as i64 - 1) as usize] as usize;
+        let dec = if C420 {
+            src.read_signed_420(histograms, ctx)
+        } else {
+            src.read_signed(histograms, ctx)
+        };
         let val = dec.wrapping_add(wp_pred as i32);
         self.wp_state.update_errors(val, pos, xsize);
         val
@@ -528,6 +549,7 @@ pub enum TreeSpecialCase {
     NoWp(NoWpTree<false>),
     NoWp420(NoWpTree<true>),
     WpOnlyConfig420(WpOnlyLookupConfig420),
+    WpOnly(WpOnlyLookup<false>),
     GradientLookupConfig420(GradientLookupConfig420),
     GradientLookup(GradientLookup<false>),
     SingleGradientOnly(SingleGradientOnly),
@@ -661,6 +683,10 @@ pub fn specialize_tree(
         if let Some(wp) = WpOnlyLookupConfig420::new(&pruned_tree, &tree.histograms, header, xsize)
         {
             return Ok(TreeSpecialCase::WpOnlyConfig420(wp));
+        }
+        if let Some(wp) = WpOnlyLookup::<false>::new(&pruned_tree, &tree.histograms, header, xsize)
+        {
+            return Ok(TreeSpecialCase::WpOnly(wp));
         }
     }
 
