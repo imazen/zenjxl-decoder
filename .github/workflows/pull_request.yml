@@ -30,20 +30,20 @@ jobs:
   source_checks:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: ./ci/pull_request_checks.sh
 
   authors:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: ./ci/author_check.sh
 
   coverage:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: dtolnay/rust-toolchain@stable
 
@@ -65,7 +65,7 @@ jobs:
       run: cargo llvm-cov report --html --release --output-dir=coverage_html
 
     - name: Upload HTML report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverage_report
         path: ./coverage_html/html
@@ -73,10 +73,10 @@ jobs:
   conformance:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Checkout bench
-      uses: actions/checkout@master
+      uses: actions/checkout@v7
       with:
         repository: libjxl/bench
         path: bench
@@ -88,7 +88,7 @@ jobs:
         ( cd bench/third_party && rm -rf jxl-rs && ln -s "${GITHUB_WORKSPACE}" jxl-rs )
 
     - name: Cache conformance objects
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: bench/third_party/conformance/.objects
         key: conformance-objects
@@ -103,7 +103,7 @@ jobs:
     - name: Build CLI
       run: cargo build --release --bin zenjxl-decoder-cli
 
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       with:
         python-version: '3.x'
 
@@ -127,7 +127,7 @@ jobs:
       run: ./ci/merge_conformance_report.py "${GITHUB_WORKSPACE}/bench/docs" >> conformance_report.html
 
     - name: Upload HTML report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: conformance_report
         path: conformance_report.html
