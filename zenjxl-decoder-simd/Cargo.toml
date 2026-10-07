@@ -13,8 +13,8 @@ license = "BSD-3-Clause"
 include = ["/src/**", "/LICENSE*"]
 
 [dependencies]
-archmage = { version = "0.9"}
-paste = "1"
+archmage = { version = "0.9.29"}
+paste = "1.0.15"
 
 [dev-dependencies]
 arbtest = "0.3.2"
