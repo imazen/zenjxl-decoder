@@ -89,3 +89,15 @@ fn fuzzer_patches_ec_upsampling_dim_shift_rejected() {
         "expected the truncated fuzzer file to be rejected, got a decoded image"
     );
 }
+
+/// Fuzzer artifact (zenjxl inventory scan, 2026-10-10): an out-of-order `jxlp`
+/// splice left the box buffer sized exactly to the spliced data, and the next
+/// refill compacted a live range longer than the gap in front of it, which
+/// panicked (`process.rs`, `SmallBuffer::refill`). The decode must return.
+#[test]
+fn ooo_jxlp_splice_compaction_does_not_panic() {
+    let data = testdata("ooo_jxlp_splice_compaction.jxl");
+    let _ = with_deadline(20, "ooo_jxlp_splice_compaction", move || {
+        decode_with(&data, JxlDecoderOptions::default()).map(|_| ())
+    });
+}
