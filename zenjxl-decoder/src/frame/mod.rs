@@ -153,6 +153,9 @@ pub struct DecoderState {
     // If this is set to `true`, early flushing in the main frame
     // (before HF is available) will do nothing.
     pub lf_frame_was_rendered: bool,
+    /// Header-only scan (`JxlDecoderOptions::scan_frames_only`): frames are
+    /// framed but never decoded, so per-frame image buffers are zero-sized.
+    pub(super) scan_only: bool,
 }
 
 impl DecoderState {
@@ -191,6 +194,7 @@ impl DecoderState {
             memory_tracker: MemoryTracker::unlimited(),
             parallel: false,
             lf_frame_was_rendered: false,
+            scan_only: false,
         }
     }
 

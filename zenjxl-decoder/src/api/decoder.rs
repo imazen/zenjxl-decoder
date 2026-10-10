@@ -2973,6 +2973,37 @@ pub(crate) mod tests {
         assert_eq!(target.point.remaining_in_box, u64::MAX);
     }
 
+    /// A header-only scan allocates no per-frame pixel buffers: it finds the
+    /// codestream end of a multi-frame file under a memory limit far below
+    /// one frame's size (zenjxl inventory walker).
+    #[test]
+    fn test_scan_needs_no_frame_memory() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let mut options = JxlDecoderOptions::default().with_scan_frames_only(true);
+        options.limits.max_memory_bytes = Some(64 * 1024);
+        let mut input: &[u8] = &data;
+        let decoder = JxlDecoder::<states::Initialized>::new(options);
+        let ProcessingResult::Complete {
+            result: mut decoder,
+        } = decoder.process(&mut input).unwrap()
+        else {
+            panic!("incomplete header");
+        };
+        while decoder.has_more_frames() {
+            let ProcessingResult::Complete { result: with_frame } =
+                decoder.process(&mut input).unwrap()
+            else {
+                panic!("incomplete frame header");
+            };
+            let ProcessingResult::Complete { result } = with_frame.skip_frame(&mut input).unwrap()
+            else {
+                panic!("incomplete frame");
+            };
+            decoder = result;
+        }
+        assert_eq!(decoder.file_length(), Some(data.len() as u64));
+    }
+
     #[test]
     fn test_scan_bare_animation() {
         let data = animation_fixture("animation_icos4d_5.jxl");
