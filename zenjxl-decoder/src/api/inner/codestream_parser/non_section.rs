@@ -360,24 +360,9 @@ impl CodestreamParser {
             self.lf_global_section = None;
             self.lf_sections.clear();
             self.hf_global_section = None;
-            // Use fallible allocation: `num_groups()` is derived from the
-            // (untrusted) frame header dimensions and can be astronomically
-            // large for malformed inputs. Avoid aborting the process on OOM and
-            // return a recoverable error instead. (port libjxl/jxl-rs#774,
-            // fixes #770.)
-            let num_groups = frame_header.num_groups();
-            let num_passes = frame_header.passes.num_passes as usize;
-            let mut hf_sections =
-                Vec::new_with_capacity(num_groups).map_err(|e| at!(Error::from(e)))?;
-            for _ in 0..num_groups {
-                let mut row =
-                    Vec::new_with_capacity(num_passes).map_err(|e| at!(Error::from(e)))?;
-                for _ in 0..num_passes {
-                    row.push(None);
-                }
-                hf_sections.push(row);
-            }
-            self.hf_sections = hf_sections;
+            // The per-group section table is allocated once the TOC has been
+            // read (see below): `num_groups()` comes from the untrusted header.
+            self.hf_sections.clear();
             self.candidate_hf_sections.clear();
 
             self.frame_header = Some(frame_header);
@@ -430,6 +415,29 @@ impl CodestreamParser {
             toc,
             self.decoder_state.take().unwrap(),
         )?;
+
+        // Use fallible allocation: `num_groups()` is derived from the
+        // (untrusted) frame header dimensions and can be astronomically
+        // large for malformed inputs. Avoid aborting the process on OOM and
+        // return a recoverable error instead. (port libjxl/jxl-rs#774,
+        // fixes #770.) A header-only scan never stores sections, so it skips
+        // the table.
+        self.hf_sections = Vec::new();
+        if !decode_options.scan_frames_only {
+            let num_groups = frame.header().num_groups();
+            let num_passes = frame.header().passes.num_passes as usize;
+            let mut hf_sections =
+                Vec::new_with_capacity(num_groups).map_err(|e| at!(Error::from(e)))?;
+            for _ in 0..num_groups {
+                let mut row =
+                    Vec::new_with_capacity(num_passes).map_err(|e| at!(Error::from(e)))?;
+                for _ in 0..num_passes {
+                    row.push(None);
+                }
+                hf_sections.push(row);
+            }
+            self.hf_sections = hf_sections;
+        }
 
         let mut sections: Vec<_> = frame
             .toc()

@@ -21,6 +21,7 @@ use crate::util::NewWithCapacity;
 
 /// A single entry in the frame index.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FrameIndexEntry {
     /// Absolute byte offset of this keyframe in the codestream.
     /// (Accumulated from the delta-coded OFFi values.)
@@ -35,6 +36,7 @@ pub struct FrameIndexEntry {
 
 /// Parsed contents of a Frame Index box (`jxli`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FrameIndexBox {
     /// Tick numerator. A tick lasts `tnum / tden` seconds.
     pub tnum: u32,

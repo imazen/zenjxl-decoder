@@ -192,6 +192,9 @@ pub(super) struct CodestreamParser {
     pub(super) file_length: Option<u64>,
     /// Codestream bytes the frames used, recorded with `file_length`.
     pub(super) codestream_length: Option<u64>,
+    /// A seek restarted the codestream byte counter, so `codestream_length`
+    /// would be relative to the seek point: it stays `None`.
+    pub(super) codestream_origin_lost: bool,
 
     /// Set when `decode_and_render_hf_groups` / `maybe_preview_lf_frame`
     /// actually write to the output buffers. Read and cleared by
@@ -231,7 +234,7 @@ impl CodestreamParser {
     /// ready-but-unparsed section bytes).
     fn record_file_length(&mut self, box_parser: &BoxParser) {
         if !self.has_more_frames && self.file_length.is_none() {
-            self.codestream_length = Some(
+            self.codestream_length = (!self.codestream_origin_lost).then_some(
                 box_parser
                     .codestream_consumed
                     .saturating_sub(self.non_section_buf.len() as u64)
@@ -297,6 +300,7 @@ impl CodestreamParser {
             candidate_hf_sections: HashSet::new(),
             file_length: None,
             codestream_length: None,
+            codestream_origin_lost: false,
             pixels_dirty: false,
             has_more_frames: true,
             header_needed_bytes: None,
@@ -549,6 +553,7 @@ impl CodestreamParser {
         self.candidate_hf_sections.clear();
         self.file_length = None;
         self.codestream_length = None;
+        self.codestream_origin_lost = true;
         self.pixels_dirty = false;
         self.has_more_frames = true;
         self.header_needed_bytes = None;
@@ -846,8 +851,8 @@ impl CodestreamParser {
                     // the last box — or an incomplete trailing box, whose
                     // parsing resumes if `process` is called again with more
                     // input.
-                    match box_parser.get_more_codestream(input) {
-                        Ok(_) => {}
+                    match box_parser.drain_after_codestream(input) {
+                        Ok(()) => {}
                         Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {}
                         Err(e) => return Err(e),
                     }
