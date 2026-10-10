@@ -357,6 +357,15 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.codestream_length()
     }
 
+    /// Where the image header, ICC stream, frame headers (names and extension
+    /// fields included), TOCs and sections sit in the codestream, for the
+    /// frames parsed so far. Empty unless
+    /// [`JxlDecoderOptions::record_layout`](crate::api::JxlDecoderOptions::record_layout)
+    /// was set. Offsets are codestream offsets; see [`CodestreamLayout`].
+    pub fn codestream_layout(&self) -> &crate::api::CodestreamLayout {
+        self.inner.codestream_layout()
+    }
+
     /// Repositions the decoder to decode the visible frame described by
     /// `seek_target` (random access into an animation).
     ///
@@ -3085,6 +3094,99 @@ pub(crate) mod tests {
         jxlp(&mut f, 0, false, &padded);
         jxlp(&mut f, 1, true, b"MORE");
         assert_eq!(length(&f), Some(n), "junk inside jxlp");
+    }
+
+    /// `record_layout` reports the spans of the image header, frame header
+    /// (with its name), TOC and sections in codestream offsets, and they tile
+    /// the codestream.
+    #[test]
+    fn test_codestream_layout_spans() {
+        fn bit(data: &[u8], i: u64) -> u8 {
+            (data[(i / 8) as usize] >> (i % 8)) & 1
+        }
+        fn scan(data: &[u8]) -> (crate::api::CodestreamLayout, Option<u64>) {
+            let options = JxlDecoderOptions::default()
+                .with_scan_frames_only(true)
+                .with_record_layout(true);
+            let mut input: &[u8] = data;
+            let decoder = JxlDecoder::<states::Initialized>::new(options);
+            let ProcessingResult::Complete {
+                result: mut decoder,
+            } = decoder.process(&mut input).unwrap()
+            else {
+                panic!("incomplete header");
+            };
+            while decoder.has_more_frames() {
+                let ProcessingResult::Complete { result: wf } =
+                    decoder.process(&mut input).unwrap()
+                else {
+                    panic!("incomplete frame header");
+                };
+                let ProcessingResult::Complete { result } = wf.skip_frame(&mut input).unwrap()
+                else {
+                    panic!("incomplete frame");
+                };
+                decoder = result;
+            }
+            (
+                decoder.codestream_layout().clone(),
+                decoder.codestream_length(),
+            )
+        }
+        let data = crate::util::test::fixture_bytes("named_frame_test.jxl");
+        let (layout, len) = scan(&data);
+        let len = len.unwrap();
+        assert_eq!(len, data.len() as u64, "bare codestream");
+        let header = layout.image_header_bits.clone().unwrap();
+        assert_eq!(header.start, 16, "after the signature");
+        assert!(!layout.frames.is_empty());
+        let mut next = None;
+        for (i, f) in layout.frames.iter().enumerate() {
+            assert!(f.header_bits.start >= header.end / 8 * 8, "frame {i}");
+            assert_eq!(f.toc_bits.start, f.header_bits.end);
+            assert_eq!(f.toc_bits.end % 8, 0, "TOC ends on a byte boundary");
+            assert_eq!(
+                f.sections.first().map(|s| s.start),
+                Some(f.toc_bits.end / 8)
+            );
+            for w in f.sections.windows(2) {
+                assert_eq!(w[0].end, w[1].start);
+            }
+            if let Some(prev_end) = next {
+                assert_eq!(
+                    f.header_bits.start,
+                    prev_end * 8,
+                    "frame {i} follows the last"
+                );
+            }
+            next = f.sections.last().map(|s| s.end);
+        }
+        assert_eq!(next, Some(len), "sections end at the codestream end");
+        let named: Vec<_> = layout
+            .frames
+            .iter()
+            .filter_map(|f| f.name.as_ref())
+            .collect();
+        assert_eq!(named.len(), 1, "{layout:#?}");
+        let name = named[0];
+        assert_eq!(name.text, "TestFrameName");
+        // The text is the last 13 bytes of the span, at any bit alignment.
+        let end = name.bits.end;
+        let mut got = Vec::new();
+        for k in 0..13u64 {
+            let first = end - 8 * (13 - k);
+            let mut b = 0u8;
+            for j in 0..8 {
+                b |= bit(&data, first + j) << j;
+            }
+            got.push(b);
+        }
+        assert_eq!(got, b"TestFrameName");
+        // A file with no names or extensions reports none.
+        let plain = animation_fixture("animation_icos4d_5.jxl");
+        let (layout, _) = scan(&plain);
+        assert!(layout.frames.iter().all(|f| f.name.is_none()));
+        assert!(layout.extra_channel_names.is_empty());
     }
 
     #[test]
