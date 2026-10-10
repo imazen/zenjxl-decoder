@@ -353,6 +353,11 @@ impl JxlDecoder<WithImageInfo> {
     /// `jxlp` index words excluded), so the count is independent of box
     /// headers and of boxes the decoder entered after the last frame. For a
     /// bare codestream it equals the offset just past the codestream.
+    ///
+    /// After [`start_new_frame`](JxlDecoder::start_new_frame) the count
+    /// restarts at the seek point: it is the codestream bytes from the seek
+    /// target to the end, like `file_length()` counts from the bytes fed
+    /// after the seek.
     pub fn codestream_length(&self) -> Option<u64> {
         self.inner.codestream_length()
     }
@@ -3085,6 +3090,22 @@ pub(crate) mod tests {
         jxlp(&mut f, 0, false, &padded);
         jxlp(&mut f, 1, true, b"MORE");
         assert_eq!(length(&f), Some(n), "junk inside jxlp");
+    }
+
+    /// After a seek, `codestream_length` counts from the seek point (it is
+    /// documented as seek-relative).
+    #[test]
+    fn test_codestream_length_after_a_seek_is_seek_relative() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let scanned = scan_frames_with_decoder(&data, usize::MAX);
+        let target = scanned.last().unwrap().seek_target.expect("seekable");
+        let (decoder, _) = decoder_with_image_info(&data);
+        let (decoder, _planes, _input) = decode_after_seek(&data, decoder, target, usize::MAX);
+        assert_eq!(decoder.file_length(), Some(data.len() as u64));
+        assert_eq!(
+            decoder.codestream_length(),
+            Some(data.len() as u64 - target.decode_start_file_offset)
+        );
     }
 
     #[test]
