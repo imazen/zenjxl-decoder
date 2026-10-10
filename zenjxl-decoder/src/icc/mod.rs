@@ -48,6 +48,17 @@ fn check_preamble(
     if output_size > (1 << 28) || output_size.saturating_add(65536) < total_len {
         return Err(at!(Error::IccTooLarge));
     }
+    // The profile buffer is allocated at its declared size before any of it
+    // is decoded: a few-hundred-byte stream must not claim a profile hundreds
+    // of megabytes long. Same ratio as the decode-time amplification check
+    // (`IncrementalIccReader::MAX_AMPLIFICATION`).
+    if output_size
+        > total_len
+            .saturating_mul(1024)
+            .saturating_add(ICC_HEADER_SIZE)
+    {
+        return Err(at!(Error::IccTooLarge));
+    }
     Ok(())
 }
 
@@ -290,5 +301,19 @@ impl IncrementalIccReader {
         let profile = read_icc_inner(&mut stream)?;
         stream.finalize()?;
         Ok(profile)
+    }
+}
+
+#[cfg(test)]
+mod preamble_tests {
+    /// A tiny stream must not claim a profile far beyond what the decode-time
+    /// amplification limit could ever produce (the buffer is allocated up front).
+    #[test]
+    fn preamble_rejects_absurd_declared_output_size() {
+        // 200 stream bytes declaring a 190 MB profile.
+        assert!(super::check_preamble(190_000_000, 10, 4, 200).is_err());
+        // Plausible profiles (expansion well under 1024x) still pass.
+        assert!(super::check_preamble(3_000, 10, 4, 600).is_ok());
+        assert!(super::check_preamble(200_000, 10, 4, 400).is_ok());
     }
 }
