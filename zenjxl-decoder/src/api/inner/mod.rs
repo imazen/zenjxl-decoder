@@ -241,6 +241,10 @@ impl JxlDecoderInner {
         self.codestream_parser.codestream_length
     }
 
+    pub fn codestream_layout(&self) -> &crate::api::CodestreamLayout {
+        &self.codestream_parser.layout
+    }
+
     /// Returns the reconstructed JPEG bytes if the file contained a JBRD box.
     ///
     /// The reconstruction `JpegData` is built when the frame decodes, but the

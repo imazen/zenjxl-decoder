@@ -50,6 +50,8 @@ pub(crate) struct SeekPoint {
     /// codestream bytes consumed before the frame (a stable, monotonic key
     /// for dependency tracking), see `seekable`.
     pub(crate) file_offset: u64,
+    /// Absolute codestream position, retained when byte counters restart on seek.
+    pub(crate) codestream_offset: u64,
     /// Codestream bytes left in the containing box at `file_offset`
     /// (`u64::MAX` for a bare codestream or an unbounded box).
     pub(crate) remaining_in_box: u64,
@@ -193,6 +195,13 @@ pub(super) struct CodestreamParser {
     pub(super) file_length: Option<u64>,
     /// Codestream bytes the frames used, recorded with `file_length`.
     pub(super) codestream_length: Option<u64>,
+    /// Where the parts of the codestream sit (`JxlDecoderOptions::record_layout`).
+    pub(super) layout: crate::api::CodestreamLayout,
+    /// Codestream bytes consumed when the current non-section parse started.
+    pub(super) layout_consumed: u64,
+    pub(super) layout_origin: u64,
+    pub(super) layout_icc_start: Option<u64>,
+    pub(super) layout_frame: Option<crate::api::FrameLayout>,
 
     /// Set when `decode_and_render_hf_groups` / `maybe_preview_lf_frame`
     /// actually write to the output buffers. Read and cleared by
@@ -299,6 +308,11 @@ impl CodestreamParser {
             candidate_hf_sections: HashSet::new(),
             file_length: None,
             codestream_length: None,
+            layout: Default::default(),
+            layout_consumed: 0,
+            layout_origin: 0,
+            layout_icc_start: None,
+            layout_frame: None,
             pixels_dirty: false,
             has_more_frames: true,
             header_needed_bytes: None,
@@ -368,6 +382,7 @@ impl CodestreamParser {
             // Without a real file layout the codestream position still
             // works as the monotonic dependency-tracking key.
             file_offset: if seekable { file_offset } else { pos },
+            codestream_offset: self.layout_origin.saturating_add(pos),
             remaining_in_box,
             box_type,
             visible_count_before: self.visible_frame_index,
@@ -531,6 +546,8 @@ impl CodestreamParser {
         }
         self.decoder_state = Some(state);
 
+        self.layout_origin = target.point.codestream_offset;
+        self.layout_frame = None;
         self.frame_header = None;
         self.toc_parser = None;
         self.frame = None;
@@ -933,6 +950,9 @@ impl CodestreamParser {
                     }
 
                     let range = self.non_section_buf.range();
+                    self.layout_consumed = self
+                        .layout_origin
+                        .saturating_add(box_parser.codestream_consumed);
                     match self.process_non_section(decode_options) {
                         Ok(()) => {
                             self.header_needed_bytes = None;

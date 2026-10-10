@@ -375,6 +375,15 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.codestream_length()
     }
 
+    /// Where the image header, ICC stream, frame headers (names and extension
+    /// fields included), TOCs and sections sit in the codestream, for the
+    /// frames parsed so far. Empty unless
+    /// [`JxlDecoderOptions::record_layout`](crate::api::JxlDecoderOptions::record_layout)
+    /// was set. Offsets are codestream offsets; see [`CodestreamLayout`].
+    pub fn codestream_layout(&self) -> &crate::api::CodestreamLayout {
+        self.inner.codestream_layout()
+    }
+
     /// Repositions the decoder to decode the visible frame described by
     /// `seek_target` (random access into an animation).
     ///
@@ -3232,6 +3241,201 @@ pub(crate) mod tests {
         tbx(&mut f, b"jxlp", &p1);
         tbx(&mut f, b"Exif", b"\0\0\0\0U");
         assert_eq!(exif_after_scan(&f), Some(b"U".to_vec()));
+    }
+
+    /// `record_layout` reports the spans of the image header, frame header
+    /// (with its name), TOC and sections in codestream offsets, and they tile
+    /// the codestream.
+    #[test]
+    fn test_codestream_layout_spans() {
+        fn bit(data: &[u8], i: u64) -> u8 {
+            (data[(i / 8) as usize] >> (i % 8)) & 1
+        }
+        fn scan(data: &[u8]) -> (crate::api::CodestreamLayout, Option<u64>) {
+            let options = JxlDecoderOptions::default()
+                .with_scan_frames_only(true)
+                .with_record_layout(true);
+            let mut input: &[u8] = data;
+            let decoder = JxlDecoder::<states::Initialized>::new(options);
+            let ProcessingResult::Complete {
+                result: mut decoder,
+            } = decoder.process(&mut input).unwrap()
+            else {
+                panic!("incomplete header");
+            };
+            while decoder.has_more_frames() {
+                let ProcessingResult::Complete { result: wf } =
+                    decoder.process(&mut input).unwrap()
+                else {
+                    panic!("incomplete frame header");
+                };
+                let ProcessingResult::Complete { result } = wf.skip_frame(&mut input).unwrap()
+                else {
+                    panic!("incomplete frame");
+                };
+                decoder = result;
+            }
+            (
+                decoder.codestream_layout().clone(),
+                decoder.codestream_length(),
+            )
+        }
+        let data = crate::util::test::fixture_bytes("named_frame_test.jxl");
+        let (layout, len) = scan(&data);
+        let len = len.unwrap();
+        assert_eq!(len, data.len() as u64, "bare codestream");
+        let header = layout.image_header_bits.clone().unwrap();
+        assert_eq!(header.start, 16, "after the signature");
+        assert!(!layout.frames.is_empty());
+        let mut next = None;
+        for (i, f) in layout.frames.iter().enumerate() {
+            assert!(f.header_bits.start >= header.end / 8 * 8, "frame {i}");
+            assert_eq!(f.toc_bits.start, f.header_bits.end);
+            assert_eq!(f.toc_bits.end % 8, 0, "TOC ends on a byte boundary");
+            assert_eq!(
+                f.sections.first().map(|s| s.start),
+                Some(f.toc_bits.end / 8)
+            );
+            for w in f.sections.windows(2) {
+                assert_eq!(w[0].end, w[1].start);
+            }
+            if let Some(prev_end) = next {
+                assert_eq!(
+                    f.header_bits.start,
+                    prev_end * 8,
+                    "frame {i} follows the last"
+                );
+            }
+            next = f.sections.last().map(|s| s.end);
+        }
+        assert_eq!(next, Some(len), "sections end at the codestream end");
+        let named: Vec<_> = layout
+            .frames
+            .iter()
+            .filter_map(|f| f.name.as_ref())
+            .collect();
+        assert_eq!(named.len(), 1, "{layout:#?}");
+        let name = named[0];
+        assert_eq!(name.text, "TestFrameName");
+        // The text is the last 13 bytes of the span, at any bit alignment.
+        let end = name.bits.end;
+        let mut got = Vec::new();
+        for k in 0..13u64 {
+            let first = end - 8 * (13 - k);
+            let mut b = 0u8;
+            for j in 0..8 {
+                b |= bit(&data, first + j) << j;
+            }
+            got.push(b);
+        }
+        assert_eq!(got, b"TestFrameName");
+        // A file with no names or extensions reports none.
+        let plain = animation_fixture("animation_icos4d_5.jxl");
+        let (layout, _) = scan(&plain);
+        assert!(layout.frames.iter().all(|f| f.name.is_none()));
+        assert!(layout.extra_channel_names.is_empty());
+    }
+
+    fn scan_layout_for_test(
+        mut input: &[u8],
+        chunk_size: usize,
+        record: bool,
+    ) -> JxlDecoder<states::WithImageInfo> {
+        let options = JxlDecoderOptions::default()
+            .with_scan_frames_only(true)
+            .with_record_layout(record);
+        let mut chunk_input = &input[0..0];
+        let mut initialized = JxlDecoder::<states::Initialized>::new(options);
+        let mut decoder = advance_chunked!(input, chunk_input, chunk_size, initialized.process());
+        while decoder.has_more_frames() {
+            let mut frame = advance_chunked!(input, chunk_input, chunk_size, decoder.process());
+            decoder = advance_chunked!(input, chunk_input, chunk_size, frame.skip_frame());
+        }
+        decoder
+    }
+
+    #[test]
+    fn test_codestream_layout_incremental_container_and_seek_parity() {
+        for name in ["named_frame_test.jxl", "animation_icos4d_5.jxl"] {
+            let data = animation_fixture(name);
+            let expected = scan_layout_for_test(&data, usize::MAX, true)
+                .codestream_layout()
+                .clone();
+            assert_eq!(
+                scan_layout_for_test(&data, usize::MAX, false).codestream_layout(),
+                &crate::api::CodestreamLayout::default()
+            );
+            for chunk in [1, 7, 128] {
+                assert_eq!(
+                    scan_layout_for_test(&data, chunk, true).codestream_layout(),
+                    &expected
+                );
+            }
+            let starts: Vec<_> = (0..data.len()).step_by(97).collect();
+            let container = wrap_with_jxlp_chunks(&data, &starts);
+            let mut decoder = scan_layout_for_test(&container, 7, true);
+            assert_eq!(decoder.codestream_layout(), &expected);
+            let frames = decoder.scanned_frames().to_vec();
+            for frame in frames.iter().rev() {
+                let target = frame.seek_target.expect("ordered container is seekable");
+                decoder.start_new_frame(target);
+                let mut input = &container[target.decode_start_file_offset as usize..];
+                let mut chunk_input = &input[0..0];
+                while decoder.has_more_frames() {
+                    let mut with_frame = advance_chunked!(input, chunk_input, 7, decoder.process());
+                    decoder = advance_chunked!(input, chunk_input, 7, with_frame.skip_frame());
+                }
+                assert_eq!(
+                    decoder.codestream_layout(),
+                    &expected,
+                    "{name} seek {}",
+                    frame.index
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_codestream_layout_does_not_change_decoded_pixels() {
+        for name in ["named_frame_test.jxl", "animation_icos4d_5.jxl"] {
+            let data = animation_fixture(name);
+            let mut baseline = None;
+            for record in [false, true] {
+                let options = JxlDecoderOptions::default().with_record_layout(record);
+                let mut input = data.as_slice();
+                let initialized = JxlDecoder::<states::Initialized>::new(options);
+                let ProcessingResult::Complete {
+                    result: mut decoder,
+                } = initialized.process(&mut input).unwrap()
+                else {
+                    panic!("complete fixture header");
+                };
+                let format = decoder.current_pixel_format().clone();
+                decoder.set_pixel_format(JxlPixelFormat {
+                    color_type: format.color_type,
+                    color_data_format: Some(JxlDataFormat::f32()),
+                    extra_channel_format: format
+                        .extra_channel_format
+                        .iter()
+                        .map(|_| Some(JxlDataFormat::f32()))
+                        .collect(),
+                });
+                let mut frames = Vec::new();
+                while decoder.has_more_frames() {
+                    let (next, planes) = decode_next_frame(decoder, &mut input, 7);
+                    decoder = next;
+                    frames.push(planes);
+                }
+                if let Some(expected) = &baseline {
+                    assert_eq!(frames.len(), expected.len());
+                    for (index, (before, after)) in expected.iter().zip(&frames).enumerate() {
+                        compare_frames(Path::new(name), index, before, after).unwrap();
+                    }
+                } else {
+                    baseline = Some(frames);
+                }
+            }
+        }
     }
 
     #[test]
