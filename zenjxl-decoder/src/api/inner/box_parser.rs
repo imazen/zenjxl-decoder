@@ -265,10 +265,59 @@ impl BoxParser {
             inner: input,
             count: 0,
         };
-        let result = self.get_more_codestream_impl(&mut counting);
+        let mut result = self.get_more_codestream_impl(&mut counting);
         self.total_file_read += counting.count;
         self.record_entered_codestream_box();
+        // Once the last codestream box has been entered, a box after it that
+        // fails to parse cannot affect the image: the codestream is whole. Stop
+        // parsing boxes instead of failing the decode (an end of input inside
+        // such a box is already handled by the callers).
+        if let Err(e) = &result
+            && !matches!(e.error(), Error::OutOfBounds(_))
+            && matches!(
+                self.box_type,
+                CodestreamBoxType::Jxlc | CodestreamBoxType::LastJxlp
+            )
+            && !matches!(self.state, ParseState::CodestreamBox(_))
+        {
+            crate::util::tracing_wrappers::trace!("ignoring a box error after the codestream");
+            self.state = ParseState::Exhausted;
+            result = Ok(0);
+        }
         result
+    }
+
+    /// Parses the boxes after the codestream: skips whatever is left of the
+    /// current codestream box (bytes the image no longer needs, such as junk
+    /// after the last frame) and carries on with the next box, until the end
+    /// of the input or a box that cannot be parsed. Captures `Exif`, `xml `,
+    /// `jhgm` and `jxli` boxes on the way.
+    pub(super) fn drain_after_codestream(
+        &mut self,
+        input: &mut dyn JxlBitstreamInput,
+    ) -> Result<()> {
+        loop {
+            let avail = match self.get_more_codestream(input) {
+                Ok(n) => n,
+                Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => return Ok(()),
+                Err(e) => return Err(e),
+            };
+            if avail == 0 || avail == u64::MAX {
+                return Ok(());
+            }
+            let want = avail.min(usize::MAX as u64) as usize;
+            let skipped = if !self.box_buffer.is_empty() {
+                self.box_buffer.consume(want)
+            } else {
+                let n = input.skip(want).map_err(|e| at!(Error::from(e)))?;
+                self.total_file_read += n as u64;
+                n
+            };
+            if skipped == 0 {
+                return Ok(());
+            }
+            self.consume_codestream(skipped as u64);
+        }
     }
 
     /// Records the codestream box the parser is in, if it is a new one (each

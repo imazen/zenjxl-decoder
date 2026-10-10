@@ -23,7 +23,7 @@ use crate::{
         encodings::UnconditionalCoder, frame_header::FrameHeader, toc::IncrementalTocReader,
     },
     icc::IncrementalIccReader,
-    util::{MemoryTracker, NewWithCapacity},
+    util::{MemoryGuard, MemoryTracker, NewWithCapacity},
 };
 
 use super::{CodestreamParser, SectionBuffer};
@@ -360,24 +360,10 @@ impl CodestreamParser {
             self.lf_global_section = None;
             self.lf_sections.clear();
             self.hf_global_section = None;
-            // Use fallible allocation: `num_groups()` is derived from the
-            // (untrusted) frame header dimensions and can be astronomically
-            // large for malformed inputs. Avoid aborting the process on OOM and
-            // return a recoverable error instead. (port libjxl/jxl-rs#774,
-            // fixes #770.)
-            let num_groups = frame_header.num_groups();
-            let num_passes = frame_header.passes.num_passes as usize;
-            let mut hf_sections =
-                Vec::new_with_capacity(num_groups).map_err(|e| at!(Error::from(e)))?;
-            for _ in 0..num_groups {
-                let mut row =
-                    Vec::new_with_capacity(num_passes).map_err(|e| at!(Error::from(e)))?;
-                for _ in 0..num_passes {
-                    row.push(None);
-                }
-                hf_sections.push(row);
-            }
-            self.hf_sections = hf_sections;
+            // The per-group section table is allocated once the TOC has been
+            // read (see below): `num_groups()` comes from the untrusted header.
+            self.hf_sections = Vec::new();
+            self.hf_sections_memory = None;
             self.candidate_hf_sections.clear();
 
             self.frame_header = Some(frame_header);
@@ -430,6 +416,22 @@ impl CodestreamParser {
             toc,
             self.decoder_state.take().unwrap(),
         )?;
+
+        // Use fallible allocation: `num_groups()` is derived from the
+        // (untrusted) frame header dimensions and can be astronomically
+        // large for malformed inputs. Avoid aborting the process on OOM and
+        // return a recoverable error instead. (port libjxl/jxl-rs#774,
+        // fixes #770.) A header-only scan never stores sections, so it skips
+        // the table.
+        if !decode_options.scan_frames_only {
+            let (table, guard) = allocate_hf_sections(
+                frame.header().num_groups(),
+                frame.header().passes.num_passes as usize,
+                &frame.decoder_state.memory_tracker,
+            )?;
+            self.hf_sections = table;
+            self.hf_sections_memory = Some(guard);
+        }
 
         let mut sections: Vec<_> = frame
             .toc()
@@ -502,5 +504,72 @@ impl CodestreamParser {
         self.frame = Some(frame);
 
         Ok(())
+    }
+}
+
+// Reserve the complete table before allocating any rows. The guard follows the
+// table across incremental input, and releases the charge on frame reset/seek.
+fn allocate_hf_sections(
+    groups: usize,
+    passes: usize,
+    tracker: &MemoryTracker,
+) -> Result<(Vec<Vec<Option<SectionBuffer>>>, MemoryGuard)> {
+    let bytes = groups
+        .checked_mul(std::mem::size_of::<Vec<Option<SectionBuffer>>>())
+        .and_then(|outer| {
+            groups
+                .checked_mul(passes)
+                .and_then(|n| n.checked_mul(std::mem::size_of::<Option<SectionBuffer>>()))
+                .and_then(|inner| outer.checked_add(inner))
+        })
+        .ok_or_else(|| at!(Error::SizeOverflow))?;
+    tracker.try_allocate(bytes as u64)?;
+    let guard = MemoryGuard::new(tracker.clone(), bytes as u64);
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(groups)
+        .map_err(|e| at!(Error::from(e)))?;
+    for _ in 0..groups {
+        let mut row = Vec::new();
+        row.try_reserve_exact(passes)
+            .map_err(|e| at!(Error::from(e)))?;
+        row.resize_with(passes, || None);
+        table.push(row);
+    }
+    Ok((table, guard))
+}
+
+#[cfg(test)]
+mod hf_table_budget_tests {
+    use super::*;
+
+    #[test]
+    fn table_reservation_competes_with_other_frame_memory_and_releases() {
+        let tracker = MemoryTracker::with_limit(4096);
+        tracker.try_allocate(4000).unwrap();
+        assert!(allocate_hf_sections(10, 4, &tracker).is_err());
+        assert_eq!(tracker.allocated(), 4000);
+        tracker.release(4000);
+        let (table, guard) = allocate_hf_sections(10, 4, &tracker).unwrap();
+        assert_eq!(table.len(), 10);
+        assert!(
+            table
+                .iter()
+                .all(|row| row.len() == 4 && row.iter().all(Option::is_none))
+        );
+        assert!(tracker.allocated() > 0);
+        assert!(tracker.try_allocate(4096).is_err());
+        drop(table);
+        drop(guard);
+        assert_eq!(tracker.allocated(), 0);
+    }
+
+    #[test]
+    fn oversized_table_is_rejected_before_allocation() {
+        let tracker = MemoryTracker::with_limit(8 << 20);
+        assert!(allocate_hf_sections(1 << 20, 4, &tracker).is_err());
+        assert_eq!(tracker.allocated(), 0);
+        assert!(allocate_hf_sections(usize::MAX, 4, &tracker).is_err());
+        assert_eq!(tracker.allocated(), 0);
     }
 }
