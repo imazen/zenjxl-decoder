@@ -52,6 +52,7 @@ pub use crate::headers::extra_channels::ExtraChannel;
 pub use crate::headers::image_metadata::Orientation;
 
 // Container box types
+pub use crate::container::frame_index::{FrameIndexBox, FrameIndexEntry};
 pub use crate::container::gain_map::GainMapBundle;
 
 // Point type used in Error variants

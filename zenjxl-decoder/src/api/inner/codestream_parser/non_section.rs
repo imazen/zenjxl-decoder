@@ -56,6 +56,7 @@ pub(super) fn apply_decoder_options(
     state.stop = Arc::clone(&decode_options.stop);
     state.memory_tracker = MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
     state.parallel = decode_options.parallel;
+    state.scan_only = decode_options.scan_frames_only;
 }
 
 /// Whether `frame_header` describes progressive content for the purposes of the

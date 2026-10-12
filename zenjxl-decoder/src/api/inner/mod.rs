@@ -237,6 +237,10 @@ impl JxlDecoderInner {
         self.codestream_parser.file_length
     }
 
+    pub fn codestream_length(&self) -> Option<u64> {
+        self.codestream_parser.codestream_length
+    }
+
     /// Returns the reconstructed JPEG bytes if the file contained a JBRD box.
     ///
     /// The reconstruction `JpegData` is built when the frame decodes, but the

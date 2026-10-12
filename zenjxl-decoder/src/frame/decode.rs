@@ -178,7 +178,11 @@ impl Frame {
             && !image_metadata.xyb_encoded
             && image_metadata.color_encoding.color_space == ColorSpace::Gray;
         let color_channels = if is_gray { 1 } else { 3 };
-        let size_blocks = frame_header.size_blocks();
+        // A header-only scan never decodes sections, so it needs the slots to
+        // exist (later frames look them up) but not their pixels.
+        let scan_only = decoder_state.scan_only;
+        let shrink = |size: (usize, usize)| if scan_only { (0, 0) } else { size };
+        let size_blocks = shrink(frame_header.size_blocks());
         let tracker = &decoder_state.memory_tracker;
         let lf_image = if frame_header.encoding == Encoding::VarDCT {
             if frame_header.has_lf_frame() {
@@ -227,7 +231,7 @@ impl Frame {
             let num_ref_channels = 3 + image_metadata.extra_channel_info.len();
             Some(
                 (0..num_ref_channels)
-                    .map(|_| Image::new_tracked(sz, tracker))
+                    .map(|_| Image::new_tracked(shrink(sz), tracker))
                     .collect::<Result<Vec<_>>>()?,
             )
         } else {
@@ -235,7 +239,7 @@ impl Frame {
         };
 
         let lf_frame_data = if frame_header.lf_level != 0 {
-            let upsampled = frame_header.size_upsampled();
+            let upsampled = shrink(frame_header.size_upsampled());
             Some(
                 (0..3)
                     .map(|_| Image::new_tracked(upsampled, tracker))

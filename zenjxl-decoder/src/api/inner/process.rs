@@ -34,9 +34,11 @@ impl SmallBuffer {
         loop {
             if self.range.start >= self.buf.len() / 2 {
                 let start = self.range.start;
-                let len = self.range.len();
-                let (pre, post) = self.buf.split_at_mut(start);
-                pre[0..len].copy_from_slice(&post[0..len]);
+                // `copy_within` handles a live range longer than the gap in
+                // front of it, which an out-of-order `jxlp` splice
+                // (`inject_bytes_front` sizes the buffer to the data) creates;
+                // splitting at `start` panicked there.
+                self.buf.copy_within(self.range.clone(), 0);
                 self.range.start -= start;
                 self.range.end -= start;
             }
@@ -198,5 +200,23 @@ impl JxlDecoderInner {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod small_buffer_tests {
+    use super::SmallBuffer;
+
+    /// A spliced buffer sized exactly to its data, consumed just past half,
+    /// then refilled: the live range is longer than the gap in front of it.
+    #[test]
+    fn refill_after_splice_compacts_without_panicking() {
+        let mut b = SmallBuffer::new(4);
+        b.inject_bytes_front((0u8..27).collect());
+        assert_eq!(b.consume(13), 13);
+        let mut src: &[u8] = &[100, 101];
+        b.refill(|bufs| std::io::Read::read_vectored(&mut src, bufs), None)
+            .unwrap();
+        assert_eq!(&b[..14], &(13u8..27).collect::<Vec<_>>()[..]);
     }
 }

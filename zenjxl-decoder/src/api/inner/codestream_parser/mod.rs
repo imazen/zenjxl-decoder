@@ -190,6 +190,8 @@ pub(super) struct CodestreamParser {
     /// by the file (excluding bytes over-read into internal buffers). `None`
     /// until decoding is finished.
     pub(super) file_length: Option<u64>,
+    /// Codestream bytes the frames used, recorded with `file_length`.
+    pub(super) codestream_length: Option<u64>,
 
     /// Set when `decode_and_render_hf_groups` / `maybe_preview_lf_frame`
     /// actually write to the output buffers. Read and cleared by
@@ -229,6 +231,12 @@ impl CodestreamParser {
     /// ready-but-unparsed section bytes).
     fn record_file_length(&mut self, box_parser: &BoxParser) {
         if !self.has_more_frames && self.file_length.is_none() {
+            self.codestream_length = Some(
+                box_parser
+                    .codestream_consumed
+                    .saturating_sub(self.non_section_buf.len() as u64)
+                    .saturating_sub(self.ready_section_data as u64),
+            );
             self.file_length = Some(
                 box_parser
                     .total_file_read
@@ -288,6 +296,7 @@ impl CodestreamParser {
             hf_sections: vec![],
             candidate_hf_sections: HashSet::new(),
             file_length: None,
+            codestream_length: None,
             pixels_dirty: false,
             has_more_frames: true,
             header_needed_bytes: None,
@@ -539,6 +548,7 @@ impl CodestreamParser {
         self.hf_sections.clear();
         self.candidate_hf_sections.clear();
         self.file_length = None;
+        self.codestream_length = None;
         self.pixels_dirty = false;
         self.has_more_frames = true;
         self.header_needed_bytes = None;

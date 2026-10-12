@@ -347,6 +347,21 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.file_length()
     }
 
+    /// Returns how many codestream bytes the image used, once decoding is
+    /// finished; `None` while decoding is still in progress. In a container
+    /// these are the bytes of the `jxlc` / `jxlp` payloads concatenated (the
+    /// `jxlp` index words excluded), so the count is independent of box
+    /// headers and of boxes the decoder entered after the last frame. For a
+    /// bare codestream it equals the offset just past the codestream.
+    ///
+    /// After [`start_new_frame`](JxlDecoder::start_new_frame) the count
+    /// restarts at the seek point: it is the codestream bytes from the seek
+    /// target to the end, like `file_length()` counts from the bytes fed
+    /// after the seek.
+    pub fn codestream_length(&self) -> Option<u64> {
+        self.inner.codestream_length()
+    }
+
     /// Repositions the decoder to decode the visible frame described by
     /// `seek_target` (random access into an animation).
     ///
@@ -2971,6 +2986,126 @@ pub(crate) mod tests {
         assert_eq!(Some(target.decode_start_file_offset), f.file_offset);
         assert_eq!(target.visible_frames_to_skip, 0);
         assert_eq!(target.point.remaining_in_box, u64::MAX);
+    }
+
+    /// A header-only scan allocates no per-frame pixel buffers: it finds the
+    /// codestream end of a multi-frame file under a memory limit far below
+    /// one frame's size (zenjxl inventory walker).
+    #[test]
+    fn test_scan_needs_no_frame_memory() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let mut options = JxlDecoderOptions::default().with_scan_frames_only(true);
+        options.limits.max_memory_bytes = Some(64 * 1024);
+        let mut input: &[u8] = &data;
+        let decoder = JxlDecoder::<states::Initialized>::new(options);
+        let ProcessingResult::Complete {
+            result: mut decoder,
+        } = decoder.process(&mut input).unwrap()
+        else {
+            panic!("incomplete header");
+        };
+        while decoder.has_more_frames() {
+            let ProcessingResult::Complete { result: with_frame } =
+                decoder.process(&mut input).unwrap()
+            else {
+                panic!("incomplete frame header");
+            };
+            let ProcessingResult::Complete { result } = with_frame.skip_frame(&mut input).unwrap()
+            else {
+                panic!("incomplete frame");
+            };
+            decoder = result;
+        }
+        assert_eq!(decoder.file_length(), Some(data.len() as u64));
+    }
+
+    /// `codestream_length` counts codestream bytes only: it is independent of
+    /// box headers, `jxlp` index words, junk inside a codestream box and boxes
+    /// after the codestream (`file_length` is not, for `jxlp` containers).
+    #[test]
+    fn test_codestream_length_ignores_container_framing() {
+        fn bx(out: &mut Vec<u8>, ty: &[u8; 4], p: &[u8]) {
+            out.extend((8 + p.len() as u32).to_be_bytes());
+            out.extend(ty);
+            out.extend(p);
+        }
+        fn jxlp(out: &mut Vec<u8>, idx: u32, last: bool, p: &[u8]) {
+            let mut q = (idx | if last { 0x8000_0000 } else { 0 })
+                .to_be_bytes()
+                .to_vec();
+            q.extend(p);
+            bx(out, b"jxlp", &q);
+        }
+        fn length(data: &[u8]) -> Option<u64> {
+            let options = JxlDecoderOptions::default().with_scan_frames_only(true);
+            let mut input: &[u8] = data;
+            let decoder = JxlDecoder::<states::Initialized>::new(options);
+            let ProcessingResult::Complete {
+                result: mut decoder,
+            } = decoder.process(&mut input).unwrap()
+            else {
+                panic!("incomplete header");
+            };
+            while decoder.has_more_frames() {
+                let ProcessingResult::Complete { result: wf } =
+                    decoder.process(&mut input).unwrap()
+                else {
+                    panic!("incomplete frame header");
+                };
+                let ProcessingResult::Complete { result } = wf.skip_frame(&mut input).unwrap()
+                else {
+                    panic!("incomplete frame");
+                };
+                decoder = result;
+            }
+            decoder.codestream_length()
+        }
+        let cs = animation_fixture("animation_icos4d_5.jxl");
+        let n = cs.len() as u64;
+        assert_eq!(length(&cs), Some(n), "bare");
+        let head = |out: &mut Vec<u8>| {
+            out.extend([0, 0, 0, 12, b'J', b'X', b'L', b' ', 13, 10, 0x87, 10]);
+            bx(out, b"ftyp", b"jxl \0\0\0\0jxl ");
+        };
+        let mut f = vec![];
+        head(&mut f);
+        bx(&mut f, b"jxlc", &cs);
+        bx(&mut f, b"Exif", b"\0\0\0\0x");
+        assert_eq!(length(&f), Some(n), "jxlc + Exif");
+        let mut padded = cs.clone();
+        padded.extend(vec![7u8; 100]);
+        let mut f = vec![];
+        head(&mut f);
+        bx(&mut f, b"jxlc", &padded);
+        assert_eq!(length(&f), Some(n), "junk inside jxlc");
+        for cut in [10, cs.len() / 2, cs.len() - 1] {
+            let mut f = vec![];
+            head(&mut f);
+            jxlp(&mut f, 0, false, &cs[..cut]);
+            jxlp(&mut f, 1, true, &cs[cut..]);
+            assert_eq!(length(&f), Some(n), "jxlp split at {cut}");
+        }
+        let mut f = vec![];
+        head(&mut f);
+        jxlp(&mut f, 0, false, &padded);
+        jxlp(&mut f, 1, true, b"MORE");
+        assert_eq!(length(&f), Some(n), "junk inside jxlp");
+    }
+
+    /// After a seek, `codestream_length` counts from the seek point (it is
+    /// documented as seek-relative).
+    #[test]
+    fn test_codestream_length_after_a_seek_is_seek_relative() {
+        let data = animation_fixture("animation_icos4d_5.jxl");
+        let scanned = scan_frames_with_decoder(&data, usize::MAX);
+        let target = scanned.last().unwrap().seek_target.expect("seekable");
+        let (decoder, _) = decoder_with_image_info(&data);
+        let (decoder, _planes, _input) = decode_after_seek(&data, decoder, target, usize::MAX);
+        assert_eq!(decoder.file_length(), Some(data.len() as u64));
+        assert_eq!(
+            decoder.codestream_length(),
+            Some(data.len() as u64 - target.decode_start_file_offset)
+        );
     }
 
     #[test]
