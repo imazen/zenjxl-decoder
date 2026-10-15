@@ -142,6 +142,19 @@ impl<S: JxlState> JxlDecoder<S> {
         self.inner.take_jpeg_reconstruction()
     }
 
+    /// [`Self::take_jpeg_reconstruction`], with a failed rebuild as an error (#59).
+    #[cfg(feature = "jpeg")]
+    pub(crate) fn take_jpeg_reconstruction_checked(
+        &mut self,
+    ) -> crate::error::Result<Option<Vec<u8>>> {
+        self.inner.take_jpeg_reconstruction_checked()
+    }
+
+    #[cfg(all(test, feature = "jpeg"))]
+    pub(crate) fn jpeg_recon_mut(&mut self) -> Option<&mut crate::jpeg::data::JpegData> {
+        self.inner.jpeg_recon_mut()
+    }
+
     /// Returns the parsed frame index box, if the file contained one.
     ///
     /// The frame index box (`jxli`) is an optional part of the JXL container

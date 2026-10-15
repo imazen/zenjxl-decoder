@@ -293,8 +293,10 @@ fn take_box_metadata<S: states::JxlState>(
 ///
 /// Returns `Ok(Some(bytes))` with the **byte-exact** original JPEG when the
 /// file carries reconstruction data, or `Ok(None)` when it does not (a JXL that
-/// was not produced from a JPEG). This is the pure-Rust counterpart to
-/// `djxl <in.jxl> <out.jpg> --reconstruct_jpeg`.
+/// was not produced from a JPEG). Reconstruction data from which no JPEG can be
+/// written (for example a jbrd box whose counts a writer truncated) is an
+/// [`Error::InvalidJbrd`](crate::error::Error::InvalidJbrd), not `Ok(None)`.
+/// This is the pure-Rust counterpart to `djxl <in.jxl> <out.jpg> --reconstruct_jpeg`.
 ///
 /// Requires the `jpeg` cargo feature.
 ///
@@ -413,12 +415,12 @@ pub fn reconstruct_jpeg_with(data: &[u8], options: JxlDecoderOptions) -> Result<
             }
             // Unexpected second frame; the trailing boxes before it are parsed.
             ProcessingResult::Complete { mut result } => {
-                return Ok(result.take_jpeg_reconstruction());
+                return result.take_jpeg_reconstruction_checked();
             }
         }
     }
 
-    Ok(decoder.take_jpeg_reconstruction())
+    decoder.take_jpeg_reconstruction_checked()
 }
 
 /// Read image metadata without decoding pixels.

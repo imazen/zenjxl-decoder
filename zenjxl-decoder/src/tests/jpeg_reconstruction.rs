@@ -13,6 +13,11 @@ use crate::image::{Image, Rect};
 
 /// Helper: decode a JXL file and return the reconstructed JPEG bytes (if any).
 fn decode_jpeg_reconstruction(jxl_data: &[u8]) -> Option<Vec<u8>> {
+    decoded(jxl_data).take_jpeg_reconstruction()
+}
+
+/// Helper: a decoder that has decoded the file's frame.
+fn decoded(jxl_data: &[u8]) -> JxlDecoder<states::WithImageInfo> {
     let options = JxlDecoderOptions::default();
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = jxl_data;
@@ -66,7 +71,7 @@ fn decode_jpeg_reconstruction(jxl_data: &[u8]) -> Option<Vec<u8>> {
     )];
 
     // Decode frame
-    let mut decoder = loop {
+    loop {
         match decoder.process(&mut input, &mut buffers).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
@@ -76,10 +81,7 @@ fn decode_jpeg_reconstruction(jxl_data: &[u8]) -> Option<Vec<u8>> {
                 decoder = fallback;
             }
         }
-    };
-
-    // Get reconstructed JPEG bytes
-    decoder.take_jpeg_reconstruction()
+    }
 }
 
 /// Helper: assert byte-exact JPEG reconstruction match.
@@ -272,4 +274,29 @@ fn test_jpeg_reconstruction_multigroup_default_options() {
         &reference,
         "520x264 multi-group (decoder API)",
     );
+}
+
+/// #59: reconstruction data from which no JPEG can be written is an error, so a caller
+/// can tell it from a JXL that carries none.
+#[test]
+fn failed_jpeg_rebuild_is_an_error_not_none() {
+    let jxl_data = std::fs::read(crate::util::test::fixture_path(
+        "test_16x16_jpeg_recompression.jxl",
+    ))
+    .unwrap();
+    let mut decoder = decoded(&jxl_data);
+    // One SOS marker more than the scans the data describes: write_jpeg refuses it.
+    decoder
+        .jpeg_recon_mut()
+        .expect("fixture carries jbrd")
+        .marker_order
+        .push(0xDA);
+    let err = decoder.take_jpeg_reconstruction_checked().unwrap_err();
+    assert!(
+        matches!(err.error(), crate::error::Error::InvalidJbrd(_)),
+        "{err:?}"
+    );
+    // A JXL without reconstruction data is still Ok(None).
+    let basic = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+    assert!(crate::reconstruct_jpeg(&basic).unwrap().is_none());
 }

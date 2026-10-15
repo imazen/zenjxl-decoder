@@ -275,6 +275,28 @@ impl JxlDecoderInner {
         }
     }
 
+    /// Like [`Self::take_jpeg_reconstruction`], but a jbrd box whose JPEG could not
+    /// be written is an error instead of `None`, so a caller can tell "not a
+    /// transcode" from "a transcode that cannot be rebuilt" (#59).
+    #[cfg(feature = "jpeg")]
+    pub(crate) fn take_jpeg_reconstruction_checked(
+        &mut self,
+    ) -> crate::error::Result<Option<Vec<u8>>> {
+        match self.take_jpeg_reconstruction() {
+            Some(bytes) => Ok(Some(bytes)),
+            None => match self.jpeg_reconstruction_error.take() {
+                Some(e) => Err(at!(e)),
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// Test hook: the parsed reconstruction data, before it is written.
+    #[cfg(all(test, feature = "jpeg"))]
+    pub(crate) fn jpeg_recon_mut(&mut self) -> Option<&mut crate::jpeg::data::JpegData> {
+        self.codestream_parser.jpeg_recon.as_mut()
+    }
+
     /// The error from the last failed JPEG-reconstruction serialization, if
     /// any. `take_jpeg_reconstruction` returning `None` with this set means
     /// the file DID carry reconstruction data but it was invalid — callers
