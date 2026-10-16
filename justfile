@@ -42,7 +42,7 @@ speed-compare *ARGS:
 # Interleaved ARM decode comparisons, full output preserved.
 arm-decode-tiers-macos:
     mkdir -p "$HOME/tmp"
-    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench --locked -p zenjxl-decoder --bench decode_bench -- --group=decode_tiers --format=llm > "$HOME/tmp/zenjxl-decode-tiers.log" 2>&1
+    CARGO_BUILD_JOBS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 TMPDIR="$HOME/tmp" nice -n 19 cargo bench -p zenjxl-decoder --bench decode_bench -- --group=decode_tiers --cpu-policy=unrestricted --format=llm > "$HOME/tmp/zenjxl-decode-tiers.log" 2>&1
 
 arm-kernel-tiers-macos:
     mkdir -p "$HOME/tmp"
