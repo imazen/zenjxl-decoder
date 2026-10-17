@@ -224,6 +224,8 @@ u8 conversion), MP/s, ours / djxl v0.12:
 
 ## Multi-threaded parity work — 2026-10-03
 
+Scripts used for these measurements: `scripts/perf/` (see its README).
+
 [MEASURED] M4 Pro (8 P + 4 E cores), f32, interleaved runs; the machine
 was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
 
