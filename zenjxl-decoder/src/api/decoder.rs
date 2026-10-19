@@ -3357,6 +3357,66 @@ pub(crate) mod tests {
         decoder
     }
 
+    /// A valid highly compressible ICC must finish when the supplied bytes do.
+    /// libjxl 0.12 independently gives RGB (200, 30, 90) and the full profile.
+    #[test]
+    fn test_large_compressible_icc_one_shot_and_fragmented() {
+        let data = crate::util::test::fixture_bytes("icc_zero_2m.jxl");
+        let header = crate::read_header(&data).unwrap();
+        let crate::api::JxlColorProfile::Icc(profile) = &header.embedded_profile else {
+            panic!("fixture must contain ICC");
+        };
+        assert_eq!(profile.len(), 2_121_892);
+        let image = crate::decode(&data).unwrap();
+        assert_eq!((image.width, image.height, image.channels), (1, 1, 4));
+        assert_eq!(image.data, [200, 30, 90, 255]);
+        assert_eq!(image.embedded_profile, header.embedded_profile);
+        let mut expected_span = None;
+        for record in [false, true] {
+            for chunk_size in [1, 7, 64, 4096] {
+                let mut remaining = data.as_slice();
+                let mut chunk_input = &remaining[0..0];
+                let options = JxlDecoderOptions::default().with_record_layout(record);
+                let mut decoder = JxlDecoder::new(options);
+                let ready = advance_chunked!(remaining, chunk_input, chunk_size, decoder.process());
+                assert_eq!(ready.embedded_color_profile(), &header.embedded_profile);
+                let span = ready.codestream_layout().icc_bits.clone();
+                if record {
+                    let span = span.unwrap();
+                    assert!(span.start < span.end && span.end <= data.len() as u64 * 8);
+                    if let Some(expected) = &expected_span {
+                        assert_eq!(&span, expected);
+                    } else {
+                        expected_span = Some(span);
+                    }
+                } else {
+                    assert!(span.is_none());
+                }
+            }
+        }
+        let limits = crate::api::JxlDecoderLimits {
+            max_icc_size: Some(128),
+            ..Default::default()
+        };
+        assert!(crate::read_header_with(&data, limits).is_err());
+    }
+
+    #[test]
+    fn test_codestream_layout_marks_preview_separately() {
+        let data = crate::util::test::fixture_bytes("with_preview.jxl");
+        let full = scan_layout_for_test(&data, usize::MAX, true);
+        assert!(full.basic_info().preview_size.is_some());
+        let layout = full.codestream_layout();
+        assert!(layout.frames.first().unwrap().is_preview);
+        assert!(layout.frames.iter().skip(1).all(|frame| !frame.is_preview));
+        assert!(layout.frames.len() > 1);
+        assert_eq!(full.scanned_frames().len(), 1);
+        assert_eq!(
+            scan_layout_for_test(&data, 7, true).codestream_layout(),
+            layout
+        );
+    }
+
     #[test]
     fn test_codestream_layout_incremental_container_and_seek_parity() {
         for name in [
