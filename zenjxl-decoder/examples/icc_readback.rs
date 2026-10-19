@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Exercise one-shot and fragmented ICC header parsing on caller-supplied files.
 //! Inputs are mandatory; a missing file or failed case exits unsuccessfully.
 use zenjxl_decoder::api::{JxlColorProfile, JxlDecoder, JxlDecoderOptions, ProcessingResult};
