@@ -162,3 +162,8 @@ large-icc-layout-check:
 minimal-release-check:
     cargo test --release --locked --workspace --no-default-features --no-fail-fast
 
+# Full minimal CI already covers the implementation; exercise the new assertions directly.
+minimal-layout-check:
+    cargo test --release --locked -p zenjxl-decoder --no-default-features --lib test_large_compressible_icc_one_shot_and_fragmented
+    cargo test --release --locked -p zenjxl-decoder --no-default-features --lib test_codestream_layout_does_not_change_decoded_pixels
+
