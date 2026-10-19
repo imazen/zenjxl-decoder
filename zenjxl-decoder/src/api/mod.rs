@@ -16,6 +16,7 @@ mod decoder;
 pub(crate) mod decoder;
 mod inner;
 mod input;
+mod layout;
 #[cfg(feature = "cms")]
 mod moxcms_wrapper;
 mod options;
@@ -32,6 +33,7 @@ pub use decoder::*;
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use inner::*;
 pub use input::*;
+pub use layout::{CodestreamLayout, FrameLayout, NamedSpan};
 #[cfg(feature = "cms")]
 pub use moxcms_wrapper::*;
 pub use options::*;

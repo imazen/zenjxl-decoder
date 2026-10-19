@@ -27,7 +27,8 @@ use crate::{
 };
 
 use super::{CodestreamParser, SectionBuffer};
-use crate::api::ToneMapping;
+use crate::api::{CodestreamLayout, FrameLayout, NamedSpan, ToneMapping};
+use crate::headers::{span_log, toc::Toc};
 
 /// Populate a freshly constructed [`DecoderState`] with per-run settings pulled
 /// from [`JxlDecoderOptions`] and the previously parsed embedded color profile.
@@ -44,6 +45,7 @@ pub(super) fn apply_decoder_options(
     state: &mut DecoderState,
     decode_options: &JxlDecoderOptions,
     embedded_color_profile: &Option<JxlColorProfile>,
+    memory_tracker: &MemoryTracker,
 ) {
     state.render_spotcolors = decode_options.render_spot_colors;
     state.high_precision = decode_options.high_precision;
@@ -54,7 +56,7 @@ pub(super) fn apply_decoder_options(
     state.embedded_color_profile = embedded_color_profile.clone();
     state.limits = decode_options.limits.clone();
     state.stop = Arc::clone(&decode_options.stop);
-    state.memory_tracker = MemoryTracker::from_limit(decode_options.limits.max_memory_bytes);
+    state.memory_tracker = memory_tracker.clone();
     state.parallel = decode_options.parallel;
     state.scan_only = decode_options.scan_frames_only;
 }
@@ -114,7 +116,23 @@ impl CodestreamParser {
             // We don't have a file header yet. Try parsing that.
             let mut br = BitReader::new(&self.non_section_buf);
             br.skip_bits(self.non_section_bit_offset as usize)?;
+            let layout_start = self.abs_bits(br.total_bits_read());
+            let _span_log = decode_options
+                .record_layout
+                .then(|| span_log::begin(self.memory_tracker.clone()));
             let file_header = FileHeader::read(&mut br)?;
+            if decode_options.record_layout {
+                let end = self.abs_bits(br.total_bits_read());
+                let base = self.abs_bits(0);
+                record_file_header_layout(
+                    &mut self.layout,
+                    &mut self.layout_memory,
+                    &file_header,
+                    layout_start,
+                    end,
+                    base,
+                )?;
+            }
             let xsize = file_header.size.xsize() as usize;
             let ysize = file_header.size.ysize() as usize;
             check_size_limit(
@@ -218,6 +236,7 @@ impl CodestreamParser {
             br.skip_bits(self.non_section_bit_offset as usize)?;
             let embedded_color_profile = if file_header.image_metadata.color_encoding.want_icc {
                 if self.icc_parser.is_none() {
+                    self.layout_icc_start = Some(self.abs_bits(br.total_bits_read()));
                     self.icc_parser = Some(IncrementalIccReader::new(
                         &mut br,
                         decode_options.limits.max_icc_size,
@@ -243,6 +262,11 @@ impl CodestreamParser {
                     }
                 }
                 let icc_result = self.icc_parser.take().unwrap().finalize(&mut br);
+                if decode_options.record_layout
+                    && let Some(start) = self.layout_icc_start.take()
+                {
+                    self.layout.icc_bits = Some(start..self.abs_bits(br.total_bits_read()));
+                }
                 self.non_section_buf.consume(bits / 8);
                 self.non_section_bit_offset = (bits % 8) as u8;
                 JxlColorProfile::Icc(icc_result?)
@@ -304,6 +328,7 @@ impl CodestreamParser {
                 &mut decoder_state,
                 decode_options,
                 &self.embedded_color_profile,
+                &self.memory_tracker,
             );
             self.decoder_state = Some(decoder_state);
             // Reset bit offset to 0 since we've consumed everything up to a byte boundary
@@ -328,7 +353,28 @@ impl CodestreamParser {
                 decoder_state.file_header.frame_header_nonserialized()
             };
 
+            let header_start = self.abs_bits(br.total_bits_read());
+            let _span_log = decode_options
+                .record_layout
+                .then(|| span_log::begin(self.memory_tracker.clone()));
             let mut frame_header = FrameHeader::read_unconditional(&(), &mut br, &nonserialized)?;
+            if decode_options.record_layout {
+                let end = self.abs_bits(br.total_bits_read());
+                let base = self.abs_bits(0);
+                record_frame_header_layout(
+                    &mut self.layout_frame,
+                    &mut self.layout_memory,
+                    !self.preview_done
+                        && self
+                            .basic_info
+                            .as_ref()
+                            .is_some_and(|info| info.preview_size.is_some()),
+                    &frame_header,
+                    header_start,
+                    end,
+                    base,
+                )?;
+            }
             frame_header.postprocess(&nonserialized);
             // The frame is rendered at its upsampled size (up to 8x per axis),
             // so that is what the pixel limit must bound. Upstream jxl-rs c07c7d5.
@@ -405,9 +451,20 @@ impl CodestreamParser {
             br.jump_to_byte_boundary()?;
 
             bits = br.total_bits_read();
+            let toc_end = self.abs_bits(bits);
             self.non_section_buf.consume(bits / 8);
             self.non_section_bit_offset = (bits % 8) as u8;
-            self.toc_parser.take().unwrap().finalize()
+            let toc = self.toc_parser.take().unwrap().finalize();
+            if decode_options.record_layout {
+                record_toc_layout(
+                    &mut self.layout,
+                    &mut self.layout_frame,
+                    &mut self.layout_memory,
+                    &toc,
+                    toc_end,
+                )?;
+            }
+            toc
         };
 
         // Save file_header before creating frame (for preview frame recovery)
@@ -539,6 +596,140 @@ fn allocate_hf_sections(
         table.push(row);
     }
     Ok((table, guard))
+}
+
+// ── codestream layout recording ────────────────────────────────────────────
+
+impl CodestreamParser {
+    /// Codestream bit offset of bit `br_bits` of a reader over the current
+    /// non-section buffer. `layout_consumed` is the codestream byte count when
+    /// this parse call started, and the buffer holds the last `len` of those.
+    pub(super) fn abs_bits(&self, br_bits: usize) -> u64 {
+        self.layout_consumed
+            .saturating_mul(8)
+            .saturating_sub(self.non_section_buf.len() as u64 * 8)
+            .saturating_add(br_bits as u64)
+    }
+}
+
+fn record_file_header_layout(
+    layout: &mut CodestreamLayout,
+    memory: &mut crate::util::LayoutMemory,
+    fh: &FileHeader,
+    start: u64,
+    end: u64,
+    base: u64,
+) -> Result<()> {
+    let log = span_log::take();
+    // The first 16 bits are the `FF0A` signature.
+    layout.image_header_bits = Some(start.saturating_add(16).min(end)..end);
+    layout.extra_channel_names.clear();
+    layout.image_extensions.clear();
+    let mut channel = 0usize;
+    for (field, a, b) in log.iter().copied() {
+        let bits = base.saturating_add(a)..base.saturating_add(b);
+        match field {
+            "name" => {
+                let text = fh
+                    .image_metadata
+                    .extra_channel_info
+                    .get(channel)
+                    .map(|c| c.name())
+                    .unwrap_or_default();
+                if !text.is_empty() {
+                    let text = memory.string(text)?;
+                    memory.push(
+                        &mut layout.extra_channel_names,
+                        (channel, NamedSpan { bits, text }),
+                    )?;
+                }
+                channel += 1;
+            }
+            // The empty selector is two bits; anything longer holds data.
+            "extensions" if b - a > 2 => memory.push(&mut layout.image_extensions, bits)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn record_frame_header_layout(
+    pending: &mut Option<FrameLayout>,
+    memory: &mut crate::util::LayoutMemory,
+    is_preview: bool,
+    fh: &FrameHeader,
+    start: u64,
+    end: u64,
+    base: u64,
+) -> Result<()> {
+    let log = span_log::take();
+    let mut name = None;
+    let mut extensions = Vec::new();
+    for (field, a, b) in log.iter().copied() {
+        let bits = base.saturating_add(a)..base.saturating_add(b);
+        match field {
+            "name" if !fh.name.is_empty() => {
+                name = Some(NamedSpan {
+                    bits,
+                    text: memory.string(&fh.name)?,
+                });
+            }
+            "extensions" if b - a > 2 => memory.push(&mut extensions, bits)?,
+            _ => {}
+        }
+    }
+    *pending = Some(FrameLayout {
+        is_preview,
+        is_visible: fh.is_visible(),
+        can_be_referenced: fh.can_be_referenced,
+        header_bits: start..end,
+        name,
+        extensions,
+        toc_bits: end..end,
+        sections: Vec::new(),
+    });
+    Ok(())
+}
+
+fn record_toc_layout(
+    layout: &mut CodestreamLayout,
+    pending: &mut Option<FrameLayout>,
+    memory: &mut crate::util::LayoutMemory,
+    toc: &Toc,
+    toc_end: u64,
+) -> Result<()> {
+    let Some(mut frame) = pending.take() else {
+        return Ok(());
+    };
+    frame.toc_bits = frame.header_bits.end..toc_end;
+    let mut at = toc_end / 8;
+    memory.reserve(&mut frame.sections, toc.entries.len())?;
+    for &len in &toc.entries {
+        frame.sections.push(at..at.saturating_add(u64::from(len)));
+        at = at.saturating_add(u64::from(len));
+    }
+    match layout
+        .frames
+        .binary_search_by_key(&frame.header_bits.start, |f| f.header_bits.start)
+    {
+        Ok(index) => {
+            let previous = std::mem::replace(&mut layout.frames[index], frame);
+            release_frame_memory(memory, &previous);
+        }
+        Err(index) => {
+            memory.reserve(&mut layout.frames, 1)?;
+            layout.frames.insert(index, frame);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn release_frame_memory(memory: &mut crate::util::LayoutMemory, frame: &FrameLayout) {
+    memory.release(frame.sections.capacity() * size_of::<std::ops::Range<u64>>());
+    memory.release(frame.extensions.capacity() * size_of::<std::ops::Range<u64>>());
+    if let Some(name) = &frame.name {
+        memory.release(name.text.capacity());
+    }
 }
 
 #[cfg(test)]

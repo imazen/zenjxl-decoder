@@ -50,6 +50,8 @@ pub(crate) struct SeekPoint {
     /// codestream bytes consumed before the frame (a stable, monotonic key
     /// for dependency tracking), see `seekable`.
     pub(crate) file_offset: u64,
+    /// Absolute codestream position, retained when byte counters restart on seek.
+    pub(crate) codestream_offset: u64,
     /// Codestream bytes left in the containing box at `file_offset`
     /// (`u64::MAX` for a bare codestream or an unbounded box).
     pub(crate) remaining_in_box: u64,
@@ -114,6 +116,8 @@ fn grow_section_buffer(buf: &mut SectionBuffer, readable: usize) -> Result<()> {
 }
 
 pub(super) struct CodestreamParser {
+    pub(super) memory_tracker: crate::util::MemoryTracker,
+    layout_memory: crate::util::LayoutMemory,
     // TODO(veluca): this would probably be cleaner with some kind of state enum.
     pub(super) file_header: Option<FileHeader>,
     icc_parser: Option<IncrementalIccReader>,
@@ -193,6 +197,13 @@ pub(super) struct CodestreamParser {
     pub(super) file_length: Option<u64>,
     /// Codestream bytes the frames used, recorded with `file_length`.
     pub(super) codestream_length: Option<u64>,
+    /// Where the parts of the codestream sit (`JxlDecoderOptions::record_layout`).
+    pub(super) layout: crate::api::CodestreamLayout,
+    /// Codestream bytes consumed when the current non-section parse started.
+    pub(super) layout_consumed: u64,
+    pub(super) layout_origin: u64,
+    pub(super) layout_icc_start: Option<u64>,
+    pub(super) layout_frame: Option<crate::api::FrameLayout>,
 
     /// Set when `decode_and_render_hf_groups` / `maybe_preview_lf_frame`
     /// actually write to the output buffers. Read and cleared by
@@ -256,8 +267,11 @@ impl CodestreamParser {
         r
     }
 
-    pub(super) fn new() -> Self {
+    pub(super) fn new(limit: Option<u64>) -> Self {
+        let memory_tracker = crate::util::MemoryTracker::from_limit(limit);
         Self {
+            layout_memory: crate::util::LayoutMemory::new(memory_tracker.clone()),
+            memory_tracker,
             file_header: None,
             icc_parser: None,
             decoder_state: None,
@@ -299,6 +313,11 @@ impl CodestreamParser {
             candidate_hf_sections: HashSet::new(),
             file_length: None,
             codestream_length: None,
+            layout: Default::default(),
+            layout_consumed: 0,
+            layout_origin: 0,
+            layout_icc_start: None,
+            layout_frame: None,
             pixels_dirty: false,
             has_more_frames: true,
             header_needed_bytes: None,
@@ -337,7 +356,7 @@ impl CodestreamParser {
     /// Rewinds for animation loop replay, keeping pixel_format setting.
     pub(super) fn rewind(&mut self) -> Option<JxlPixelFormat> {
         let pixel_format = self.pixel_format.take();
-        *self = Self::new();
+        *self = Self::new(self.memory_tracker.limit());
         self.pixel_format = pixel_format.clone();
         pixel_format
     }
@@ -368,6 +387,7 @@ impl CodestreamParser {
             // Without a real file layout the codestream position still
             // works as the monotonic dependency-tracking key.
             file_offset: if seekable { file_offset } else { pos },
+            codestream_offset: self.layout_origin.saturating_add(pos),
             remaining_in_box,
             box_type,
             visible_count_before: self.visible_frame_index,
@@ -522,6 +542,7 @@ impl CodestreamParser {
             &mut state,
             decode_options,
             &self.embedded_color_profile,
+            &self.memory_tracker,
         );
         state.visible_frame_index = target.point.visible_counter;
         state.nonvisible_frame_index = target.point.nonvisible_counter;
@@ -531,6 +552,10 @@ impl CodestreamParser {
         }
         self.decoder_state = Some(state);
 
+        self.layout_origin = target.point.codestream_offset;
+        if let Some(frame) = self.layout_frame.take() {
+            non_section::release_frame_memory(&mut self.layout_memory, &frame);
+        }
         self.frame_header = None;
         self.toc_parser = None;
         self.frame = None;
@@ -585,6 +610,7 @@ impl CodestreamParser {
                     &mut new_state,
                     decode_options,
                     &self.embedded_color_profile,
+                    &self.memory_tracker,
                 );
                 self.decoder_state = Some(new_state);
             }
@@ -933,6 +959,9 @@ impl CodestreamParser {
                     }
 
                     let range = self.non_section_buf.range();
+                    self.layout_consumed = self
+                        .layout_origin
+                        .saturating_add(box_parser.codestream_consumed);
                     match self.process_non_section(decode_options) {
                         Ok(()) => {
                             self.header_needed_bytes = None;

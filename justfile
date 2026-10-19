@@ -102,8 +102,68 @@ inventory-behavior-check:
 icc-readback +files:
     cargo run --locked -p zenjxl-decoder --example icc_readback -- {{files}}
 
+layout-check:
+    cargo test --locked -p zenjxl-decoder --lib test_codestream_layout
+    cargo test --locked -p zenjxl-decoder --lib failed_or_nested_parse
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+scan-profile-build:
+    cargo build --locked -p zenjxl-decoder --example header_scan --example icc_readback
+
+layout-memory-check:
+    cargo test --locked -p zenjxl-decoder --lib layout_
+    cargo test --locked -p zenjxl-decoder --lib failed_or_nested_parse
+    cargo test --locked -p zenjxl-decoder --lib failed_log_reservation
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+icc-valid-check list out:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t cases < {{quote(list)}}
+    target/debug/examples/icc_readback --write-icc {{quote(out)}} "${cases[@]}"
+
+# Keep the expected malformed-input status while retaining the heap trace.
+scan-heap-profile input output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    result=0
+    heaptrack -o {{quote(output)}} target/debug/examples/header_scan {{quote(input)}} || result=$?
+    test "$result" -eq 1
+
+icc-oracle list native out djxl:
+    just icc-valid-check {{quote(list)}} {{quote(native)}}
+    python3 scripts/check_icc_oracle.py {{quote(list)}} {{quote(native)}} {{quote(out)}} {{quote(djxl)}}
+
 # Check compatibility after admitting the current archmage/magetypes beta.
 beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked --workspace --lib -- -D warnings
     cargo test --locked --workspace --lib --no-fail-fast
+
+# Header/layout changes: full native suites and standalone fuzz compilation.
+inventory-final-check:
+    cargo fmt --all -- --check
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+    cargo test --locked --workspace --all-features --no-fail-fast
+    cargo test --locked --workspace --no-default-features --no-fail-fast
+    cargo check --manifest-path fuzz/Cargo.toml --bin layout_scan --bin container_boxes
+
+# Call through run-heavy; artifacts and accumulated inputs stay in block storage.
+layout-fuzz seconds="600":
+    cargo +nightly fuzz run --target x86_64-unknown-linux-gnu layout_scan /mnt/v/fuzzes/zenjxl-decoder/corpus/layout_scan -- -max_total_time={{seconds}} -max_len=65536 -rss_limit_mb=16384 -timeout=30 -artifact_prefix=/mnt/v/fuzzes/zenjxl-decoder/artifacts/
+
+large-icc-layout-check:
+    cargo test --locked -p zenjxl-decoder --lib test_large_compressible_icc_one_shot_and_fragmented
+    cargo test --locked -p zenjxl-decoder --lib test_codestream_layout_does_not_change_decoded_pixels
+    cargo clippy --locked -p zenjxl-decoder --lib --tests --all-features -- -D warnings
+
+# Match CI's optimized minimal-feature matrix; scalar decode sweeps are expensive in debug.
+minimal-release-check:
+    cargo test --release --locked --workspace --no-default-features --no-fail-fast
+
+# Full minimal CI already covers the implementation; exercise the new assertions directly.
+minimal-layout-check:
+    cargo test --release --locked -p zenjxl-decoder --no-default-features --lib test_large_compressible_icc_one_shot_and_fragmented
+    cargo test --release --locked -p zenjxl-decoder --no-default-features --lib test_codestream_layout_does_not_change_decoded_pixels
+

@@ -357,6 +357,16 @@ pub struct JxlDecoderOptions {
     /// Default: `false`.
     pub scan_frames_only: bool,
 
+    /// Record where the image header, ICC stream, frame headers (with their
+    /// names and extension fields), TOCs and sections sit in the codestream.
+    /// Read the result with
+    /// [`JxlDecoder::codestream_layout`](crate::api::JxlDecoder::codestream_layout).
+    /// Retains per-frame and per-section records; no extra parsing. These
+    /// allocations share `limits.max_memory_bytes` with pixel decoding.
+    ///
+    /// Default: `false`.
+    pub record_layout: bool,
+
     /// Keep the decoder when a container file's codestream ends early, so
     /// the pixels decoded so far can be recovered.
     ///
@@ -400,6 +410,7 @@ impl Default for JxlDecoderOptions {
             stop: Arc::new(enough::Unstoppable),
             parallel: cfg!(feature = "threads"),
             scan_frames_only: false,
+            record_layout: false,
             recover_partial_image: false,
         }
     }
@@ -501,6 +512,13 @@ impl JxlDecoderOptions {
     #[must_use]
     pub fn with_scan_frames_only(mut self, v: bool) -> Self {
         self.scan_frames_only = v;
+        self
+    }
+
+    /// Record the codestream layout (see [`record_layout`](Self::record_layout)).
+    #[must_use]
+    pub fn with_record_layout(mut self, v: bool) -> Self {
+        self.record_layout = v;
         self
     }
 
