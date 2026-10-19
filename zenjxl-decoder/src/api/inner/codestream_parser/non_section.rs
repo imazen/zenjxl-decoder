@@ -234,8 +234,10 @@ impl CodestreamParser {
                             };
                             self.non_section_buf.consume(bits / 8);
                             self.non_section_bit_offset = (bits % 8) as u8;
-                            // Estimate >= one bit per remaining character to read.
-                            return Err(at!(Error::OutOfBounds(c + icc_parser.remaining() / 8)));
+                            // Entropy/LZ77 output can require no new bits. Ask only
+                            // for the actual failed read; a size-based estimate can
+                            // exceed the entire remaining compressed file.
+                            return Err(at!(Error::OutOfBounds(c)));
                         }
                         Err(e) => return Err(e),
                     }
