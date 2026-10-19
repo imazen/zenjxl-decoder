@@ -23,7 +23,7 @@ use crate::{
         encodings::UnconditionalCoder, frame_header::FrameHeader, toc::IncrementalTocReader,
     },
     icc::IncrementalIccReader,
-    util::{MemoryGuard, MemoryTracker, NewWithCapacity},
+    util::{MemoryGuard, MemoryTracker},
 };
 
 use super::{CodestreamParser, SectionBuffer};
