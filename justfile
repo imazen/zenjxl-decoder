@@ -102,6 +102,38 @@ inventory-behavior-check:
 icc-readback +files:
     cargo run --locked -p zenjxl-decoder --example icc_readback -- {{files}}
 
+layout-check:
+    cargo test --locked -p zenjxl-decoder --lib test_codestream_layout
+    cargo test --locked -p zenjxl-decoder --lib failed_or_nested_parse
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+scan-profile-build:
+    cargo build --locked -p zenjxl-decoder --example header_scan --example icc_readback
+
+layout-memory-check:
+    cargo test --locked -p zenjxl-decoder --lib layout_
+    cargo test --locked -p zenjxl-decoder --lib failed_or_nested_parse
+    cargo test --locked -p zenjxl-decoder --lib failed_log_reservation
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+icc-valid-check list out:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t cases < {{quote(list)}}
+    target/debug/examples/icc_readback --write-icc {{quote(out)}} "${cases[@]}"
+
+# Keep the expected malformed-input status while retaining the heap trace.
+scan-heap-profile input output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    result=0
+    heaptrack -o {{quote(output)}} target/debug/examples/header_scan {{quote(input)}} || result=$?
+    test "$result" -eq 1
+
+icc-oracle list native out djxl:
+    just icc-valid-check {{quote(list)}} {{quote(native)}}
+    python3 scripts/check_icc_oracle.py {{quote(list)}} {{quote(native)}} {{quote(out)}} {{quote(djxl)}}
+
 # Check compatibility after admitting the current archmage/magetypes beta.
 beta-cohort-check:
     cargo fmt --check

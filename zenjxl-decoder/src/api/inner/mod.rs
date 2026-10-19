@@ -37,10 +37,11 @@ pub struct JxlDecoderInner {
 impl JxlDecoderInner {
     /// Creates a new decoder with the given options and, optionally, CMS.
     pub fn new(options: JxlDecoderOptions) -> Self {
+        let codestream_parser = CodestreamParser::new(options.limits.max_memory_bytes);
         JxlDecoderInner {
             options,
             box_parser: BoxParser::new(),
-            codestream_parser: CodestreamParser::new(),
+            codestream_parser,
             #[cfg(feature = "jpeg")]
             jpeg_reconstruction_error: None,
         }
@@ -75,15 +76,12 @@ impl JxlDecoderInner {
     /// caller's output buffers and the decoder's internal buffers share one
     /// budget — else a fresh tracker built from the options.
     pub(crate) fn memory_tracker(&self) -> crate::util::MemoryTracker {
-        self.decoder_state()
-            .map(|state| state.memory_tracker.clone())
-            .unwrap_or_else(|| {
-                crate::util::MemoryTracker::from_limit(self.options.limits.max_memory_bytes)
-            })
+        self.codestream_parser.memory_tracker.clone()
     }
 
     /// The active [`crate::frame::DecoderState`]: the parser-owned state if it
     /// has not yet been moved into a Frame, otherwise the in-progress frame's.
+    #[cfg(test)]
     pub(crate) fn decoder_state(&self) -> Option<&crate::frame::DecoderState> {
         if let Some(state) = self.codestream_parser.decoder_state.as_ref() {
             Some(state)
@@ -185,7 +183,7 @@ impl JxlDecoderInner {
     /// After calling this, the caller should provide input from the beginning of the file.
     pub fn reset(&mut self) {
         self.box_parser = BoxParser::new();
-        self.codestream_parser = CodestreamParser::new();
+        self.codestream_parser = CodestreamParser::new(self.options.limits.max_memory_bytes);
     }
 
     /// Visible frames discovered so far (see

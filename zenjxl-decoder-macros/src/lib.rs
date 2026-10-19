@@ -468,7 +468,7 @@ impl Field {
         let (span_start, span_end) = if tracked {
             (
                 quote! { let __span_start = br.total_bits_read(); },
-                quote! { crate::headers::span_log::record(stringify!(#ident), __span_start, br.total_bits_read()); },
+                quote! { crate::headers::span_log::record(stringify!(#ident), __span_start, br.total_bits_read())?; },
             )
         } else {
             (quote! {}, quote! {})

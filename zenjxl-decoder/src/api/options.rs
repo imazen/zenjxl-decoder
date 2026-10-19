@@ -361,7 +361,8 @@ pub struct JxlDecoderOptions {
     /// names and extension fields), TOCs and sections sit in the codestream.
     /// Read the result with
     /// [`JxlDecoder::codestream_layout`](crate::api::JxlDecoder::codestream_layout).
-    /// Costs a few small vectors; no extra parsing.
+    /// Retains per-frame and per-section records; no extra parsing. These
+    /// allocations share `limits.max_memory_bytes` with pixel decoding.
     ///
     /// Default: `false`.
     pub record_layout: bool,

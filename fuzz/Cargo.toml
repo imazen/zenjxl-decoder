@@ -59,3 +59,8 @@ doc = false
 name = "container_boxes"
 path = "fuzz_targets/container_boxes.rs"
 doc = false
+
+[[bin]]
+name = "layout_scan"
+path = "fuzz_targets/layout_scan.rs"
+doc = false

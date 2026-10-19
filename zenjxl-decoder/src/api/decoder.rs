@@ -3280,13 +3280,16 @@ pub(crate) mod tests {
                 decoder.codestream_length(),
             )
         }
-        let data = crate::util::test::fixture_bytes("named_frame_test.jxl");
+        let container = crate::util::test::fixture_bytes("named_frame_test.jxl");
+        let data = crate::container::ContainerParser::collect_codestream(&container).unwrap();
         let (layout, len) = scan(&data);
+        assert_eq!(scan(&container), (layout.clone(), len));
         let len = len.unwrap();
         assert_eq!(len, data.len() as u64, "bare codestream");
         let header = layout.image_header_bits.clone().unwrap();
         assert_eq!(header.start, 16, "after the signature");
         assert!(!layout.frames.is_empty());
+        assert!(layout.frames.iter().all(|frame| !frame.is_preview));
         let mut next = None;
         for (i, f) in layout.frames.iter().enumerate() {
             assert!(f.header_bits.start >= header.end / 8 * 8, "frame {i}");
@@ -3356,11 +3359,19 @@ pub(crate) mod tests {
 
     #[test]
     fn test_codestream_layout_incremental_container_and_seek_parity() {
-        for name in ["named_frame_test.jxl", "animation_icos4d_5.jxl"] {
-            let data = animation_fixture(name);
+        for name in [
+            "named_frame_test.jxl",
+            "conformance_test_images/animation_icos4d_5.jxl",
+        ] {
+            let original = crate::util::test::fixture_bytes(name);
+            let data = crate::container::ContainerParser::collect_codestream(&original).unwrap();
             let expected = scan_layout_for_test(&data, usize::MAX, true)
                 .codestream_layout()
                 .clone();
+            assert_eq!(
+                scan_layout_for_test(&original, 7, true).codestream_layout(),
+                &expected
+            );
             assert_eq!(
                 scan_layout_for_test(&data, usize::MAX, false).codestream_layout(),
                 &crate::api::CodestreamLayout::default()
@@ -3397,9 +3408,12 @@ pub(crate) mod tests {
 
     #[test]
     fn test_codestream_layout_does_not_change_decoded_pixels() {
-        for name in ["named_frame_test.jxl", "animation_icos4d_5.jxl"] {
-            let data = animation_fixture(name);
-            let mut baseline = None;
+        for name in [
+            "named_frame_test.jxl",
+            "conformance_test_images/animation_icos4d_5.jxl",
+        ] {
+            let data = crate::util::test::fixture_bytes(name);
+            let mut baseline: Option<Vec<Vec<Image<f32>>>> = None;
             for record in [false, true] {
                 let options = JxlDecoderOptions::default().with_record_layout(record);
                 let mut input = data.as_slice();

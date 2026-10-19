@@ -116,6 +116,8 @@ fn grow_section_buffer(buf: &mut SectionBuffer, readable: usize) -> Result<()> {
 }
 
 pub(super) struct CodestreamParser {
+    pub(super) memory_tracker: crate::util::MemoryTracker,
+    layout_memory: crate::util::LayoutMemory,
     // TODO(veluca): this would probably be cleaner with some kind of state enum.
     pub(super) file_header: Option<FileHeader>,
     icc_parser: Option<IncrementalIccReader>,
@@ -265,8 +267,11 @@ impl CodestreamParser {
         r
     }
 
-    pub(super) fn new() -> Self {
+    pub(super) fn new(limit: Option<u64>) -> Self {
+        let memory_tracker = crate::util::MemoryTracker::from_limit(limit);
         Self {
+            layout_memory: crate::util::LayoutMemory::new(memory_tracker.clone()),
+            memory_tracker,
             file_header: None,
             icc_parser: None,
             decoder_state: None,
@@ -351,7 +356,7 @@ impl CodestreamParser {
     /// Rewinds for animation loop replay, keeping pixel_format setting.
     pub(super) fn rewind(&mut self) -> Option<JxlPixelFormat> {
         let pixel_format = self.pixel_format.take();
-        *self = Self::new();
+        *self = Self::new(self.memory_tracker.limit());
         self.pixel_format = pixel_format.clone();
         pixel_format
     }
@@ -537,6 +542,7 @@ impl CodestreamParser {
             &mut state,
             decode_options,
             &self.embedded_color_profile,
+            &self.memory_tracker,
         );
         state.visible_frame_index = target.point.visible_counter;
         state.nonvisible_frame_index = target.point.nonvisible_counter;
@@ -547,7 +553,9 @@ impl CodestreamParser {
         self.decoder_state = Some(state);
 
         self.layout_origin = target.point.codestream_offset;
-        self.layout_frame = None;
+        if let Some(frame) = self.layout_frame.take() {
+            non_section::release_frame_memory(&mut self.layout_memory, &frame);
+        }
         self.frame_header = None;
         self.toc_parser = None;
         self.frame = None;
@@ -602,6 +610,7 @@ impl CodestreamParser {
                     &mut new_state,
                     decode_options,
                     &self.embedded_color_profile,
+                    &self.memory_tracker,
                 );
                 self.decoder_state = Some(new_state);
             }
