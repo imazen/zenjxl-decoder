@@ -62,10 +62,14 @@ fn scan(
         };
         decoder = result;
     }
-    Ok((
-        decoder.codestream_layout().clone(),
-        decoder.scanned_frames().to_vec(),
-    ))
+    let layout = decoder.codestream_layout().clone();
+    let frames = decoder.scanned_frames().to_vec();
+    // Poll past the final frame so junk draining and trailing-box errors
+    // participate in the same acceptance comparison as the codestream scan.
+    let _ = decoder
+        .process(&mut input)
+        .map_err(|e| classify(e.decompose().0))?;
+    Ok((layout, frames))
 }
 
 fuzz_target!(|data: &[u8]| {

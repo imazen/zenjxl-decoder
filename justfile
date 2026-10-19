@@ -139,3 +139,25 @@ beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked --workspace --lib -- -D warnings
     cargo test --locked --workspace --lib --no-fail-fast
+
+# Header/layout changes: full native suites and standalone fuzz compilation.
+inventory-final-check:
+    cargo fmt --all -- --check
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+    cargo test --locked --workspace --all-features --no-fail-fast
+    cargo test --locked --workspace --no-default-features --no-fail-fast
+    cargo check --manifest-path fuzz/Cargo.toml --bin layout_scan --bin container_boxes
+
+# Call through run-heavy; artifacts and accumulated inputs stay in block storage.
+layout-fuzz seconds="600":
+    cargo +nightly fuzz run --target x86_64-unknown-linux-gnu layout_scan /mnt/v/fuzzes/zenjxl-decoder/corpus/layout_scan -- -max_total_time={{seconds}} -max_len=65536 -rss_limit_mb=16384 -timeout=30 -artifact_prefix=/mnt/v/fuzzes/zenjxl-decoder/artifacts/
+
+large-icc-layout-check:
+    cargo test --locked -p zenjxl-decoder --lib test_large_compressible_icc_one_shot_and_fragmented
+    cargo clippy --locked -p zenjxl-decoder --lib --tests --all-features -- -D warnings
+
+# Match CI's optimized minimal-feature matrix; scalar decode sweeps are expensive in debug.
+minimal-release-check:
+    cargo test --release --locked --workspace --no-default-features --no-fail-fast
+
