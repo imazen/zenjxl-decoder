@@ -101,3 +101,9 @@ inventory-behavior-check:
 # Explicit fixtures; no missing-file skips. Supply only independently valid cases.
 icc-readback +files:
     cargo run --locked -p zenjxl-decoder --example icc_readback -- {{files}}
+
+# Check compatibility after admitting the current archmage/magetypes beta.
+beta-cohort-check:
+    cargo fmt --check
+    cargo clippy --locked --workspace --lib -- -D warnings
+    cargo test --locked --workspace --lib --no-fail-fast
