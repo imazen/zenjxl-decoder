@@ -3370,7 +3370,10 @@ pub(crate) mod tests {
         let image = crate::decode(&data).unwrap();
         assert_eq!((image.width, image.height, image.channels), (1, 1, 4));
         assert_eq!(image.data, [200, 30, 90, 255]);
-        assert_eq!(image.embedded_profile, header.embedded_profile);
+        assert!(
+            image.embedded_profile == header.embedded_profile,
+            "one-shot ICC bytes must match the header"
+        );
         let mut expected_span = None;
         for record in [false, true] {
             for chunk_size in [1, 7, 64, 4096] {
@@ -3379,7 +3382,10 @@ pub(crate) mod tests {
                 let options = JxlDecoderOptions::default().with_record_layout(record);
                 let mut decoder = JxlDecoder::new(options);
                 let ready = advance_chunked!(remaining, chunk_input, chunk_size, decoder.process());
-                assert_eq!(ready.embedded_color_profile(), &header.embedded_profile);
+                assert!(
+                    ready.embedded_color_profile() == &header.embedded_profile,
+                    "fragmented ICC bytes changed (chunk {chunk_size}, record {record})"
+                );
                 let span = ready.codestream_layout().icc_bits.clone();
                 if record {
                     let span = span.unwrap();
@@ -3470,6 +3476,8 @@ pub(crate) mod tests {
     fn test_codestream_layout_does_not_change_decoded_pixels() {
         for name in [
             "named_frame_test.jxl",
+            "gray_alpha_lossless.jxl",
+            "conformance_test_images/spot.jxl",
             "conformance_test_images/animation_icos4d_5.jxl",
         ] {
             let data = crate::util::test::fixture_bytes(name);
@@ -3498,12 +3506,26 @@ pub(crate) mod tests {
                 while decoder.has_more_frames() {
                     let (next, planes) = decode_next_frame(decoder, &mut input, 7);
                     decoder = next;
+                    if name.ends_with("/spot.jxl") {
+                        // jxlinfo independently reports alpha plus two spot channels.
+                        assert_eq!(planes.len(), 4, "color and all three extra planes");
+                    }
                     frames.push(planes);
                 }
                 if let Some(expected) = &baseline {
                     assert_eq!(frames.len(), expected.len());
                     for (index, (before, after)) in expected.iter().zip(&frames).enumerate() {
                         compare_frames(Path::new(name), index, before, after).unwrap();
+                        for (plane, (a, b)) in before.iter().zip(after).enumerate() {
+                            for y in 0..a.size().1 {
+                                for (x, (a, b)) in a.row(y).iter().zip(b.row(y)).enumerate() {
+                                    assert!(
+                                        a.to_bits() == b.to_bits(),
+                                        "{name}: frame {index}, plane {plane}, ({x}, {y}) changed bits"
+                                    );
+                                }
+                            }
+                        }
                     }
                 } else {
                     baseline = Some(frames);

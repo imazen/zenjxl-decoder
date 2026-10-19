@@ -155,6 +155,7 @@ layout-fuzz seconds="600":
 
 large-icc-layout-check:
     cargo test --locked -p zenjxl-decoder --lib test_large_compressible_icc_one_shot_and_fragmented
+    cargo test --locked -p zenjxl-decoder --lib test_codestream_layout_does_not_change_decoded_pixels
     cargo clippy --locked -p zenjxl-decoder --lib --tests --all-features -- -D warnings
 
 # Match CI's optimized minimal-feature matrix; scalar decode sweeps are expensive in debug.
