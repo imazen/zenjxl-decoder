@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Resolved 2026-10-22: short out-of-order `jxlp` splice stalled the box parser
+
+[RESOLVED] `SmallBuffer::inject_bytes_front` (`src/api/inner/process.rs`)
+shrank the buffer to the spliced payload; a payload shorter than the next box
+header (12 bytes, 20 with a 64-bit size) left `refill()` unable to ever hold
+that header, so `process` returned `NeedsMoreInput` forever without consuming
+input (`decode`: `OutOfBounds`). The buffer now keeps its capacity. Test
+`short_spliced_ooo_jxlp_followed_by_more_boxes`, 12 procedurally built files;
+it fails without the fix. djxl v0.12 renders all 12 with the in-order file's
+pixels. The chunked helper `api::decoder::tests::decode` now panics after 64
+consecutive zero-consumption `NeedsMoreInput` calls with all input offered,
+so a stall fails the test instead of hanging it.
+
 ## JPEG standalone restart markers — 2026-09-24
 
 [PROVEN] `jpeg::writer::write_jpeg` omitted RST0–RST7 entries from JBRD

@@ -378,3 +378,69 @@ fn ooo_jxlp_buffers_more_than_a_thousand_boxes() {
     assert!(data.len() < 32 * 1024, "synthetic file stays small");
     decodes_like_bare_codestream(&data, &codestream);
 }
+
+/// A `jxlp` box with index 1 stored ahead of index 0 is held back and later
+/// spliced in front of the remaining file input. When its payload was shorter
+/// than the header of the box after it (12 bytes for a `jxlp`, 20 when the
+/// size is written as a 64-bit XLBox), the splice left the box parser with a
+/// buffer too small to ever hold that header: streaming callers got
+/// `NeedsMoreInput` forever with nothing consumed, and `decode` failed with
+/// `OutOfBounds`. The early box here carries only bytes from the middle of
+/// the second frame's TOC, so no frame header starts in it and the files are
+/// valid out-of-order containers (`ftyp` minor version 1).
+#[test]
+fn short_spliced_ooo_jxlp_followed_by_more_boxes() {
+    let in_order = in_order_rewrite(&ooo_fixture());
+    let codestream: Vec<u8> = boxes(&in_order)
+        .into_iter()
+        .filter(|(t, _)| t == b"jxlp")
+        .flat_map(|(_, b)| b[12..].to_vec())
+        .collect();
+    // In the 500x160 4-frame fixture, offset 600 lies inside the second
+    // frame's TOC.
+    let (head, rest) = codestream.split_at(600);
+
+    fn jxlp_box(index: u32, payload: &[u8], xlbox: bool) -> Vec<u8> {
+        let mut body = index.to_be_bytes().to_vec();
+        body.extend_from_slice(payload);
+        if !xlbox {
+            return box_(b"jxlp", &body);
+        }
+        // Size field 1 means "a 64-bit size follows the type".
+        let mut v = 1u32.to_be_bytes().to_vec();
+        v.extend_from_slice(b"jxlp");
+        v.extend_from_slice(&(16 + body.len() as u64).to_be_bytes());
+        v.extend_from_slice(&body);
+        v
+    }
+
+    let reference = frames(&in_order, usize::MAX);
+    let mut cases = 0;
+    for splice_len in [1usize, 4, 11, 19] {
+        let (spliced, tail) = rest.split_at(splice_len);
+        for next in ["jxlp", "Exif box, then jxlp", "XLBox jxlp"] {
+            let mut data = vec![
+                0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a,
+            ];
+            data.extend_from_slice(&box_(b"ftyp", b"jxl \0\0\0\x01jxl "));
+            data.extend(jxlp_box(1, spliced, false));
+            data.extend(jxlp_box(0, head, false));
+            if next.starts_with("Exif") {
+                data.extend(box_(b"Exif", b"\0\0\0\0MM\0*"));
+            }
+            data.extend(jxlp_box(0x8000_0002, tail, next.starts_with("XLBox")));
+            let what = format!("{splice_len}-byte splice followed by {next}");
+
+            // One-shot first: before the fix this returned an error.
+            let img = crate::decode(&data).unwrap_or_else(|e| panic!("{what}: {e:?}"));
+            assert_eq!((img.width, img.height), (500, 160), "{what}");
+            // Every chunk size, against the bare codestream; the test decode
+            // helper fails (rather than hangs) if the decoder stops consuming.
+            decodes_like_bare_codestream(&data, &codestream);
+            // And bit-exact against the in-order container.
+            assert_same_frames(&frames(&data, usize::MAX), &reference, &what);
+            cases += 1;
+        }
+    }
+    assert_eq!(cases, 12);
+}

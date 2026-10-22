@@ -586,6 +586,10 @@ pub(crate) mod tests {
         }
 
         let mut chunk_input = &input[0..0];
+        // Consecutive calls that were offered all of the remaining input and
+        // consumed none of it. A decoder that keeps doing this would make the
+        // loop below spin forever, so fail the test instead of hanging it.
+        let mut stalled_calls = 0usize;
 
         macro_rules! advance_decoder {
             ($decoder: ident $(, $extra_arg: expr)? $(; $flush_arg: expr)?) => {
@@ -593,11 +597,27 @@ pub(crate) mod tests {
                     chunk_input =
                         &input[..(chunk_input.len().saturating_add(chunk_size)).min(input.len())];
                     let available_before = chunk_input.len();
+                    let offered_everything = available_before == input.len();
                     let process_result = $decoder.process(&mut chunk_input $(, $extra_arg)?);
-                    input = &input[(available_before - chunk_input.len())..];
+                    let consumed = available_before - chunk_input.len();
+                    input = &input[consumed..];
                     match process_result.unwrap() {
-                        ProcessingResult::Complete { result } => break result,
+                        ProcessingResult::Complete { result } => {
+                            stalled_calls = 0;
+                            break result;
+                        }
                         ProcessingResult::NeedsMoreInput { fallback, .. } => {
+                            if consumed == 0 && offered_everything && !input.is_empty() {
+                                stalled_calls += 1;
+                                assert!(
+                                    stalled_calls < 64,
+                                    "decoder stalled: asked for more input {stalled_calls} times \
+                                     while holding {} unconsumed bytes",
+                                    input.len()
+                                );
+                            } else {
+                                stalled_calls = 0;
+                            }
                             $(
                                 let mut fallback = fallback;
                                 if do_flush && !input.is_empty() {

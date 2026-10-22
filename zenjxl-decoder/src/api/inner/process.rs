@@ -100,19 +100,24 @@ impl SmallBuffer {
     /// Prepend bytes so they are returned next by [`Self::take`] (and come
     /// first in the `Deref` view). Used to splice a buffered out-of-order
     /// `jxlp` payload in front of the container input.
+    ///
+    /// The backing buffer never shrinks here. If it were replaced by just the
+    /// spliced bytes, a payload shorter than the next box header would leave
+    /// a buffer that [`Self::refill`] can never fill up to a whole header, and
+    /// the box parser would ask for more input forever without consuming any.
     pub(super) fn inject_bytes_front(&mut self, data: Vec<u8>) {
         if data.is_empty() {
             return;
         }
-        if self.range.is_empty() {
-            self.buf = data;
-            self.range = 0..self.buf.len();
-            return;
-        }
+        let capacity = self.buf.len();
         let mut combined = data;
         combined.extend_from_slice(&self.buf[self.range.clone()]);
+        let live = combined.len();
+        if live < capacity {
+            combined.resize(capacity, 0);
+        }
         self.buf = combined;
-        self.range = 0..self.buf.len();
+        self.range = 0..live;
     }
 
     pub(super) fn enlarge(&mut self) {
