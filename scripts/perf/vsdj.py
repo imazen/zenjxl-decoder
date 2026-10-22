@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
 # usage: vsdj.py <zen-cli> <threads> <rounds> <files...>: interleaved zen/djxl/up runs; median of per-round mean MP/s
 import sys, subprocess, re, statistics as st, os
 cli, T, R, files = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4:]

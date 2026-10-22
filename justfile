@@ -90,6 +90,18 @@ i686-ci-check label:
         rg 'test result:' "$HOME/tmp/zenjxl-decoder/i686-{{label}}-$features.log"
     done
 
+# Reproduce configured-memory and post-codestream parser regressions.
+inventory-behavior-check:
+    cargo test --locked -p zenjxl-decoder --lib hf_table_budget_tests
+    cargo test --locked -p zenjxl-decoder --lib test_box_errors_after_the_codestream
+    cargo test --locked -p zenjxl-decoder --lib test_junk_after_the_codestream
+    cargo test --locked -p zenjxl-decoder --lib test_codestream_length_after_a_seek
+    cargo test --locked -p zenjxl-decoder --lib test_scan_needs_no_frame_memory
+
+# Explicit fixtures; no missing-file skips. Supply only independently valid cases.
+icc-readback +files:
+    cargo run --locked -p zenjxl-decoder --example icc_readback -- {{files}}
+
 # Check compatibility after admitting the current archmage/magetypes beta.
 beta-cohort-check:
     cargo fmt --check

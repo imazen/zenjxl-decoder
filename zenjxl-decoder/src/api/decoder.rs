@@ -3141,6 +3141,119 @@ pub(crate) mod tests {
         );
     }
 
+    // ── boxes after the codestream ─────────────────────────────────────────
+
+    fn tbx(out: &mut Vec<u8>, ty: &[u8; 4], p: &[u8]) {
+        out.extend((8 + p.len() as u32).to_be_bytes());
+        out.extend(ty);
+        out.extend(p);
+    }
+
+    fn container_with(cs: &[u8], tail: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+        let mut f = vec![0, 0, 0, 12, b'J', b'X', b'L', b' ', 13, 10, 0x87, 10];
+        tbx(&mut f, b"ftyp", b"jxl \0\0\0\0jxl ");
+        tbx(&mut f, b"jxlc", cs);
+        tail(&mut f);
+        f
+    }
+
+    /// Scans `data` to the end and polls once more; returns the Exif found.
+    fn exif_after_scan(data: &[u8]) -> Option<Vec<u8>> {
+        let options = JxlDecoderOptions::default().with_scan_frames_only(true);
+        let mut input: &[u8] = data;
+        let decoder = JxlDecoder::<states::Initialized>::new(options);
+        let ProcessingResult::Complete {
+            result: mut decoder,
+        } = decoder.process(&mut input).unwrap()
+        else {
+            panic!("incomplete header");
+        };
+        while decoder.has_more_frames() {
+            let ProcessingResult::Complete { result: wf } = decoder.process(&mut input).unwrap()
+            else {
+                panic!("incomplete frame header");
+            };
+            let ProcessingResult::Complete { result } = wf.skip_frame(&mut input).unwrap() else {
+                panic!("incomplete frame");
+            };
+            decoder = result;
+        }
+        match decoder.process(&mut input).unwrap() {
+            ProcessingResult::Complete { result: mut d } => d.take_exif(),
+            ProcessingResult::NeedsMoreInput {
+                fallback: mut d, ..
+            } => d.take_exif(),
+        }
+    }
+
+    /// A box that fails to parse after the last codestream box cannot fail a
+    /// decode whose codestream is whole (it used to, for small codestreams).
+    #[test]
+    fn test_box_errors_after_the_codestream_do_not_fail_the_decode() {
+        let cs = crate::util::test::fixture_bytes("basic.jxl");
+        let exif = [0u8, 0, 0, 0, b'E', b'X'];
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            (
+                "second ftyp",
+                container_with(&cs, |f| tbx(f, b"ftyp", b"jxl \0\0\0\0jxl ")),
+            ),
+            (
+                "size-0 jhgm",
+                container_with(&cs, |f| {
+                    f.extend(0u32.to_be_bytes());
+                    f.extend(b"jhgm");
+                    f.extend([0u8; 8]);
+                }),
+            ),
+            (
+                "unparseable jxli",
+                container_with(&cs, |f| tbx(f, b"jxli", &[0xff; 9])),
+            ),
+            (
+                "unparseable jhgm",
+                container_with(&cs, |f| tbx(f, b"jhgm", &[0xff; 9])),
+            ),
+        ];
+        for (name, bytes) in cases {
+            decode(&bytes, usize::MAX, false, false, None)
+                .unwrap_or_else(|e| panic!("{name}: the decode fails: {e:?}"));
+        }
+        // The Exif box before the bad box is kept; the one after is not read.
+        let bytes = container_with(&cs, |f| {
+            tbx(f, b"Exif", &exif);
+            tbx(f, b"ftyp", b"jxl \0\0\0\0jxl ");
+            tbx(f, b"Exif", b"\0\0\0\0LATER");
+        });
+        decode(&bytes, usize::MAX, false, false, None).expect("decodes");
+        assert_eq!(exif_after_scan(&bytes), Some(b"EX".to_vec()));
+    }
+
+    /// Junk after the codestream inside the codestream box does not hide the
+    /// boxes after it, for any amount of junk.
+    #[test]
+    fn test_junk_after_the_codestream_does_not_hide_later_boxes() {
+        let cs = crate::util::test::fixture_bytes("basic.jxl");
+        for junk in [0usize, 1, 25, 300, 5000, 70_000] {
+            let mut padded = cs.clone();
+            padded.extend(vec![0x55u8; junk]);
+            let bytes = container_with(&padded, |f| tbx(f, b"Exif", b"\0\0\0\0T"));
+            assert_eq!(exif_after_scan(&bytes), Some(b"T".to_vec()), "junk {junk}");
+        }
+        // The same across `jxlp` parts: junk in a part, then a part with only
+        // junk, then Exif.
+        let mut f = vec![0, 0, 0, 12, b'J', b'X', b'L', b' ', 13, 10, 0x87, 10];
+        tbx(&mut f, b"ftyp", b"jxl \0\0\0\0jxl ");
+        let mut p0 = 0u32.to_be_bytes().to_vec();
+        p0.extend(&cs);
+        p0.extend(vec![7u8; 4000]);
+        tbx(&mut f, b"jxlp", &p0);
+        let mut p1 = 0x8000_0001u32.to_be_bytes().to_vec();
+        p1.extend(vec![9u8; 6000]);
+        tbx(&mut f, b"jxlp", &p1);
+        tbx(&mut f, b"Exif", b"\0\0\0\0U");
+        assert_eq!(exif_after_scan(&f), Some(b"U".to_vec()));
+    }
+
     #[test]
     fn test_scan_bare_animation() {
         let data = animation_fixture("animation_icos4d_5.jxl");
