@@ -16,6 +16,10 @@ pub enum JxlColorType {
     /// Four interleaved channels: C, M, Y and K, where K is taken from the
     /// image's Black extra channel. Only valid for color images with a Black
     /// extra channel.
+    /// CMY plus black, using native reversed ink polarity: zero means full
+    /// ink and one means no ink for normalized floating-point output.
+    /// An embedded ICC profile uses conventional device values; its consumer
+    /// must account for this polarity before applying a transform.
     Cmyk,
 }
 

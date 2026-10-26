@@ -234,6 +234,13 @@ contain a different representation from these reconstructed local samples;
 `saved_before_color_transform` reports that fact without claiming those internal
 samples are exposed.
 
+Native CMYK components, including a separate black plane, use reversed ink
+polarity: zero means full ink, one means no ink for normalized F32. This matches
+[libjxl's CMS sample convention](https://github.com/libjxl/libjxl/blob/v0.11.1/lib/include/jxl/cms_interface.h#L119).
+The embedded ICC profile alone does not declare this sample convention. A
+consumer must retain polarity with its samples and explicitly qualify conversion
+to conventional ICC device values. No inversion is performed by raw output.
+
 Raw CMYK retains the black component, packed or as an extra plane, and reports
 its embedded CMYK profile as soon as the output format is configured. A packed
 three-component buffer in that configuration holds CMY, not display RGB; its
