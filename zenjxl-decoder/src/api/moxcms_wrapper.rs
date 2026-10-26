@@ -38,6 +38,10 @@ struct MoxCmsTransformer {
     /// Luminance of the source black point for black-point compensation, applied
     /// in linear light before encoding; 0 disables it.
     black_point_y: f32,
+    /// The public CMS boundary uses native JXL polarity. moxcms uses ICC ink.
+    invert_input: bool,
+    invert_output: bool,
+    input_scratch: Vec<f32>,
 }
 
 /// Black-point compensation for a neutral source black point, then sign-preserving
@@ -63,9 +67,27 @@ fn bpc_and_encode_srgb_in_place(samples: &mut [f32], black_point_y: f32) {
 
 impl JxlCmsTransformer for MoxCmsTransformer {
     fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
+        let input = if self.invert_input {
+            let scratch = self.input_scratch.get_mut(..input.len()).ok_or_else(|| {
+                at!(Error::CmsError(
+                    "CMS input exceeds its configured maximum".into()
+                ))
+            })?;
+            for (dst, src) in scratch.iter_mut().zip(input) {
+                *dst = 1.0 - src;
+            }
+            &*scratch
+        } else {
+            input
+        };
         self.transform
             .transform(input, output)
             .map_err(|e| at!(Error::CmsError(format!("moxcms transform error: {:?}", e))))?;
+        if self.invert_output {
+            for v in output.iter_mut() {
+                *v = 1.0 - *v;
+            }
+        }
         if self.encode_srgb {
             bpc_and_encode_srgb_in_place(output, self.black_point_y);
         }
@@ -79,16 +101,13 @@ impl JxlCmsTransformer for MoxCmsTransformer {
             )));
         }
 
-        // moxcms doesn't support in-place transforms, so we need a temporary buffer.
-        // For efficiency, we could pool these buffers, but for now just allocate.
-        let input_copy = inout.to_vec();
-        self.transform
-            .transform(&input_copy, inout)
-            .map_err(|e| at!(Error::CmsError(format!("moxcms transform error: {:?}", e))))?;
-        if self.encode_srgb {
-            bpc_and_encode_srgb_in_place(inout, self.black_point_y);
-        }
-        Ok(())
+        // Keep the same polarity adaptation for both callback entry points.
+        let mut input_copy = Vec::new();
+        input_copy
+            .try_reserve_exact(inout.len())
+            .map_err(Error::from)?;
+        input_copy.extend_from_slice(inout);
+        self.do_transform(&input_copy, inout)
     }
 }
 
@@ -235,7 +254,7 @@ impl JxlCms for MoxCms {
     fn initialize_transforms(
         &self,
         n: usize,
-        _max_pixels_per_transform: usize,
+        max_pixels_per_transform: usize,
         input: JxlColorProfile,
         output: JxlColorProfile,
         _intensity_target: f32,
@@ -307,9 +326,20 @@ impl JxlCms for MoxCms {
             0.0
         };
 
-        let mut transforms: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = Vec::with_capacity(n);
+        let mut transforms: Vec<Box<dyn JxlCmsTransformer + Send + Sync>> = Vec::new();
+        transforms.try_reserve_exact(n).map_err(Error::from)?;
 
         for _ in 0..n {
+            let mut input_scratch = Vec::new();
+            if src_is_cmyk {
+                let length = max_pixels_per_transform
+                    .checked_mul(input_channels)
+                    .ok_or_else(|| at!(Error::CmsError("CMS input size overflow".into())))?;
+                input_scratch
+                    .try_reserve_exact(length)
+                    .map_err(Error::from)?;
+                input_scratch.resize(length, 0.0);
+            }
             let transform = src_profile
                 .create_transform_f32(src_layout, &dst_profile, dst_layout, options)
                 .map_err(|e| Error::CmsError(format!("moxcms create_transform error: {:?}", e)))?;
@@ -320,6 +350,9 @@ impl JxlCms for MoxCms {
                 output_channels,
                 encode_srgb,
                 black_point_y,
+                invert_input: src_is_cmyk,
+                invert_output: output.is_cmyk(),
+                input_scratch,
             }));
         }
 
@@ -387,10 +420,9 @@ mod tests {
             ([1.0, 1.0, 1.0, 1.0], [Some(1.0), Some(1.0), Some(1.0)]),
         ];
         for (jxl, want) in cases {
-            // The pipeline hands the CMS ICC-convention ink (0 = no ink).
-            let ink = jxl.map(|v| 1.0 - v);
+            // The public callback accepts native JXL polarity (one = no ink).
             let mut got = [0.0f32; 3];
-            transforms[0].do_transform(&ink, &mut got)?;
+            transforms[0].do_transform(&jxl, &mut got)?;
             for (c, want) in want.iter().enumerate() {
                 let Some(want) = *want else { continue };
                 // Under a third of an 8-bit code.

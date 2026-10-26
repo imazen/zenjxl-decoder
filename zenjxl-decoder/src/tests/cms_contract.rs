@@ -21,6 +21,8 @@ const CMYK: &str = "conformance_test_images/cmyk_layers.jxl";
 #[derive(Clone, Copy, Debug)]
 enum Behavior {
     Refuse,
+    RefuseAfterOne,
+    RefuseInit,
     Copy,
     Empty,
     Extra,
@@ -42,13 +44,14 @@ struct TestTransform {
     behavior: Behavior,
     observed: Arc<Observed>,
     input_channels: usize,
+    max_pixels: usize,
 }
 
 impl JxlCms for TestCms {
     fn initialize_transforms(
         &self,
         n: usize,
-        _: usize,
+        max_pixels: usize,
         input: JxlColorProfile,
         output: JxlColorProfile,
         _: f32,
@@ -58,6 +61,11 @@ impl JxlCms for TestCms {
             .lock()
             .unwrap()
             .push(output.clone());
+        if matches!(self.behavior, Behavior::RefuseInit) {
+            let error = whereat::at!(Error::CmsError(REFUSAL.into()));
+            *self.observed.error.lock().unwrap() = Some(format!("{error:?}"));
+            return Err(error);
+        }
         let count = match self.behavior {
             Behavior::Empty => 0,
             Behavior::Extra => n + 1,
@@ -75,6 +83,7 @@ impl JxlCms for TestCms {
                         behavior: self.behavior,
                         observed: Arc::clone(&self.observed),
                         input_channels: input.channels(),
+                        max_pixels,
                     }) as Box<dyn JxlCmsTransformer + Send + Sync>
                 })
                 .collect(),
@@ -84,8 +93,14 @@ impl JxlCms for TestCms {
 
 impl JxlCmsTransformer for TestTransform {
     fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
-        self.observed.calls.fetch_add(1, Ordering::Relaxed);
-        if matches!(self.behavior, Behavior::Refuse) {
+        assert!(
+            input.len() / self.input_channels <= self.max_pixels,
+            "decoder exceeded the admitted callback chunk size"
+        );
+        let prior = self.observed.calls.fetch_add(1, Ordering::Relaxed);
+        if matches!(self.behavior, Behavior::Refuse)
+            || matches!(self.behavior, Behavior::RefuseAfterOne) && prior > 0
+        {
             let error = whereat::at!(Error::CmsError(REFUSAL.into()));
             *self.observed.error.lock().unwrap() = Some(format!("{error:?}"));
             return Err(error);
@@ -101,7 +116,8 @@ impl JxlCmsTransformer for TestTransform {
         Ok(())
     }
     fn do_transform_inplace(&mut self, data: &mut [f32]) -> Result<()> {
-        self.do_transform(&data.to_vec(), data)
+        let copy = data.to_vec();
+        self.do_transform(&copy, data)
     }
 }
 
@@ -130,11 +146,23 @@ fn first_image(
     cms: Option<TestCms>,
     target: Option<JxlColorProfile>,
 ) -> Result<Vec<f32>> {
+    first_image_with_mode(name, simple, false, color_type, cms, target)
+}
+
+fn first_image_with_mode(
+    name: &str,
+    simple: bool,
+    parallel: bool,
+    color_type: JxlColorType,
+    cms: Option<TestCms>,
+    target: Option<JxlColorProfile>,
+) -> Result<Vec<f32>> {
     let bytes = crate::util::test::fixture_bytes(name);
     let mut input = bytes.as_slice();
     let mut options = JxlDecoderOptions::default()
         .with_adjust_orientation(false)
-        .with_render_spot_colors(false);
+        .with_render_spot_colors(false)
+        .with_parallel(parallel);
     if let Some(cms) = cms {
         options = options.with_cms(Box::new(cms));
     }
@@ -302,6 +330,88 @@ fn cms_contract_invalid_initialization_refuses_before_transform() {
                     "invalid setup reached pixel transform"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn cms_contract_late_refusal_ends_decode() {
+    for simple in [true, false] {
+        for name in ["3x3_srgb_lossless.jxl", "gray_alpha_lossless.jxl", CMYK] {
+            let color = if name.starts_with("gray") {
+                JxlColorType::Grayscale
+            } else {
+                JxlColorType::Rgb
+            };
+            let observed = Arc::<Observed>::default();
+            let cms = TestCms {
+                behavior: Behavior::RefuseAfterOne,
+                observed: Arc::clone(&observed),
+            };
+            let target = JxlColorProfile::Simple(JxlColorEncoding::linear_srgb(
+                color == JxlColorType::Grayscale,
+            ));
+            let result = first_image(name, simple, color, Some(cms), Some(target));
+            assert!(
+                observed.calls.load(Ordering::Relaxed) >= 2,
+                "no successful chunk before refusal"
+            );
+            let Err(error) = result else {
+                panic!("late refusal returned a completed image")
+            };
+            assert_eq!(Some(format!("{error:?}")), *observed.error.lock().unwrap());
+        }
+    }
+}
+
+#[cfg(feature = "threads")]
+#[test]
+fn cms_contract_parallel_refusal_preserves_original_error() {
+    for threads in [1, 2] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            let observed = Arc::<Observed>::default();
+            let cms = TestCms {
+                behavior: Behavior::RefuseAfterOne,
+                observed: Arc::clone(&observed),
+            };
+            let target = JxlColorProfile::Simple(JxlColorEncoding::linear_srgb(false));
+            let result = first_image_with_mode(
+                CMYK,
+                false,
+                true,
+                JxlColorType::Rgb,
+                Some(cms),
+                Some(target),
+            );
+            assert!(observed.calls.load(Ordering::Relaxed) >= 2);
+            let Err(error) = result else {
+                panic!("parallel refusal returned a completed image")
+            };
+            assert_eq!(Some(format!("{error:?}")), *observed.error.lock().unwrap());
+        });
+    }
+}
+
+#[test]
+fn cms_contract_initialization_error_keeps_its_origin() {
+    for name in ["3x3_srgb_lossless.jxl", CMYK] {
+        for simple in [true, false] {
+            let observed = Arc::<Observed>::default();
+            let cms = TestCms {
+                behavior: Behavior::RefuseInit,
+                observed: Arc::clone(&observed),
+            };
+            let target = JxlColorProfile::Simple(JxlColorEncoding::linear_srgb(false));
+            let result = first_image(name, simple, JxlColorType::Rgb, Some(cms), Some(target));
+            let Err(error) = result else {
+                panic!("failed initialization returned pixels")
+            };
+            assert_eq!(observed.calls.load(Ordering::Relaxed), 0);
+            assert_eq!(Some(format!("{error:?}")), *observed.error.lock().unwrap());
         }
     }
 }
