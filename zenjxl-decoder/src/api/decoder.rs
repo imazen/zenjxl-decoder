@@ -288,6 +288,15 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.basic_info().unwrap()
     }
 
+    /// Inspect source precision and spot/CFA parameters without decoding pixels.
+    ///
+    /// `index` addresses [`JxlBasicInfo::extra_channels`]; `None` means the index
+    /// is out of range. The returned snapshot is independent of the decoder and
+    /// of the selected output format. No additional channel buffer is allocated.
+    pub fn extra_channel_details(&self, index: usize) -> Option<super::JxlExtraChannelDetails> {
+        self.inner.extra_channel_details(index)
+    }
+
     /// Retrieves the file's color profile.
     pub fn embedded_color_profile(&self) -> &JxlColorProfile {
         self.inner.embedded_color_profile().unwrap()
@@ -440,6 +449,13 @@ impl JxlDecoder<WithFrameInfo> {
 
     pub fn frame_header(&self) -> JxlFrameHeader {
         self.inner.frame_header().unwrap()
+    }
+
+    /// The selected frame's original timecode, separate from presentation time
+    /// and duration. `Some(0)` is a present zero timecode; `None` means absent.
+    /// The value is the encoded 32-bit timecode, without decimal reinterpretation.
+    pub fn frame_timecode(&self) -> Option<u32> {
+        self.inner.frame_timecode()
     }
 
     /// Number of passes we have full data for.

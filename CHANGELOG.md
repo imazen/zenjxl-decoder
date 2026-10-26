@@ -11,6 +11,11 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions. Formatting, strict library lint and library tests pass (`4a576da1`).
 
 ### Added
+- Add source-interpretation accessors for extra-channel integer/float precision,
+  spot RGBA/CFA parameters and selected-frame timecodes. Preserve existing public
+  struct fields and distinguish a present zero timecode from absence. The
+  standalone native-encoder/libjxl qualification covers seven named extra roles;
+  see [source interpretation](docs/source-interpretation.md).
 - **An ICC stream can no longer claim a profile far larger than it could decode to.** The profile buffer is allocated at its declared size before decoding, so a 224-byte file could make `process` allocate 190 MB (found by fuzzing the zenjxl inventory scan with a 64 MB malloc limit). The preamble now rejects a declared size above 1024x the length of the decoded ICC command/data stream (+128 for the header), the ratio the decode-time amplification check already enforces. Test `preamble_rejects_absurd_declared_output_size`.
 - **`JxlDecoder::codestream_length()`**: after the last frame, how many codestream bytes the image used, counted over the `jxlc`/`jxlp` payloads (index words excluded). After `start_new_frame` it counts from the seek point, as `file_length()` does. Unlike `file_length()` it does not move with box headers the parser entered after the last frame (for `jxlp` containers `file_length()` can include the next box's header) or with junk after the codestream inside a codestream box. Test `test_codestream_length_ignores_container_framing`.
 - **`scan_frames_only` allocates no per-frame pixel buffers.** The header-only scan frames every frame (header + TOC) without building image-sized state: reference-frame, LF and metadata planes are zero-sized placeholders. A multi-frame file scans under a memory limit far below one frame (`test_scan_needs_no_frame_memory`); before, a 7168x7168 header cost 196 MiB. `file_length()` after a scan is unchanged. Also exports `api::FrameIndexBox` and `FrameIndexEntry` (the types `frame_index()` already returns), both `#[non_exhaustive]` so fields can be added later. Used by zenjxl's structural inventory.

@@ -95,6 +95,9 @@ impl ExtraChannelInfo {
     pub fn name(&self) -> &str {
         &self.name
     }
+    pub(crate) fn cfa_channel(&self) -> Option<u32> {
+        self.cfa_channel
+    }
     fn check(&self, _: &Empty) -> Result<(), Error> {
         if self.dim_shift > 3 {
             Err(Error::DimShiftTooLarge(self.dim_shift))

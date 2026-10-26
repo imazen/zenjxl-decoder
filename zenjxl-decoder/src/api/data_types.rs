@@ -325,6 +325,22 @@ pub struct JxlExtraChannel {
     pub dim_shift: u32,
 }
 
+/// Source sample precision and rendering parameters for one extra channel.
+///
+/// These describe the encoded channel, not the requested output sample format.
+/// Obtain them with [`crate::api::JxlDecoder::extra_channel_details`] using the
+/// same index as [`crate::api::JxlBasicInfo::extra_channels`].
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct JxlExtraChannelDetails {
+    /// Original integer or floating-point precision, including exponent bits.
+    pub bit_depth: JxlBitDepth,
+    /// Spot-color RGBA parameters, present only for a spot-color channel.
+    pub spot_color: Option<[f32; 4]>,
+    /// CFA channel index, present only for a CFA channel.
+    pub cfa_channel: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JxlAnimation {
     pub tps_numerator: u32,

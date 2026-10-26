@@ -108,6 +108,31 @@ impl JxlDecoderInner {
         self.codestream_parser.basic_info.as_ref()
     }
 
+    /// Extra-channel source details, once image information is available.
+    /// Returns `None` before image info or for an out-of-range channel index.
+    pub fn extra_channel_details(
+        &self,
+        index: usize,
+    ) -> Option<crate::api::JxlExtraChannelDetails> {
+        self.basic_info()?;
+        let info = self.codestream_parser.extra_channel_info(index)?;
+        let depth = info.bit_depth();
+        Some(crate::api::JxlExtraChannelDetails {
+            bit_depth: if depth.floating_point_sample() {
+                crate::api::JxlBitDepth::Float {
+                    bits_per_sample: depth.bits_per_sample(),
+                    exponent_bits_per_sample: depth.exponent_bits_per_sample(),
+                }
+            } else {
+                crate::api::JxlBitDepth::Int {
+                    bits_per_sample: depth.bits_per_sample(),
+                }
+            },
+            spot_color: info.spot_color,
+            cfa_channel: info.cfa_channel(),
+        })
+    }
+
     /// Retrieves the file's color profile, if available.
     pub fn embedded_color_profile(&self) -> Option<&JxlColorProfile> {
         self.codestream_parser.embedded_color_profile.as_ref()
@@ -169,6 +194,16 @@ impl JxlDecoderInner {
                 .map(|anim| frame_header.duration(anim)),
             size,
         })
+    }
+
+    /// Current frame's source timecode, when the stream declares timecodes.
+    /// `None` before a frame header or when this frame has no timecode field.
+    pub fn frame_timecode(&self) -> Option<u32> {
+        self.codestream_parser
+            .frame
+            .as_ref()?
+            .header()
+            .timecode(self.codestream_parser.animation.as_ref())
     }
 
     /// Number of passes we have full data for.

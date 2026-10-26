@@ -224,6 +224,16 @@ pub(super) struct CodestreamParser {
 }
 
 impl CodestreamParser {
+    pub(super) fn extra_channel_info(
+        &self,
+        index: usize,
+    ) -> Option<&crate::headers::extra_channels::ExtraChannelInfo> {
+        self.image_file_header
+            .as_ref()?
+            .image_metadata
+            .extra_channel_info
+            .get(index)
+    }
     /// Once the last frame has finished decoding, computes the number of
     /// input bytes the file actually used: everything pulled from the input so
     /// far minus what still sits unconsumed in internal buffers (box buffer,
