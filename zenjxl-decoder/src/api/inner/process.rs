@@ -149,6 +149,11 @@ impl JxlDecoderInner {
         input: &mut dyn JxlBitstreamInput,
         buffers: Option<&mut [JxlOutputBuffer]>,
     ) -> Result<ProcessingResult<(), ()>> {
+        if !self.options.coalescing {
+            return Err(whereat::at!(
+                crate::error::Error::UncoalescedOutputUnsupported
+            ));
+        }
         let result = self.codestream_parser.process(
             &mut self.box_parser,
             input,

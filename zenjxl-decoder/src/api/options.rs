@@ -299,21 +299,14 @@ pub struct JxlDecoderOptions {
     /// Default: `true`. Set to `false` for plain round-to-nearest.
     pub dither_u8: bool,
     pub render_spot_colors: bool,
-    /// **Not implemented — this field is read nowhere in the decoder.**
+    /// Coalesce frames onto the full canvas. Default: `true`.
     ///
-    /// The decoder always coalesces: every frame is composited onto the canvas
-    /// and returned full-size, which is what `coalescing: true` means, so the
-    /// default is honest and setting it to `true` is a no-op. Setting it to
-    /// `false` — libjxl's `JXL_DEC_SET_COALESCING(false)`, which returns each
-    /// frame's raw uncomposited rectangle plus its crop origin and blend mode —
-    /// is silently ignored and you still get coalesced output.
-    ///
-    /// Tracked in imazen/zenjxl-decoder#57. Either the option gets implemented
-    /// or it gets removed; until then it is documented rather than advertised,
-    /// because removing a public field is a breaking change and this crate
-    /// batches those (see the changelog's QUEUED BREAKING CHANGES).
-    ///
-    /// Default: `true`.
+    /// Raw uncoalesced rectangles, their blend information and uncoalesced
+    /// enumeration are not implemented (issue 57). Setting this to `false`
+    /// returns [`Error::UncoalescedOutputUnsupported`](crate::api::Error::UncoalescedOutputUnsupported)
+    /// on the first `process` call, before consuming input, for both pixel
+    /// decoding and scan-only operation. The decoder never substitutes a
+    /// composited presentation for the requested raw view.
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
     pub skip_preview: bool,
@@ -437,9 +430,9 @@ impl JxlDecoderOptions {
 
     /// Coalesce animation frames onto the canvas.
     ///
-    /// **Not implemented.** The decoder always coalesces; passing `false` has
-    /// no effect. See [`JxlDecoderOptions::coalescing`] and
-    /// imazen/zenjxl-decoder#57.
+    /// Passing `false` refuses on the first `process` call with
+    /// [`Error::UncoalescedOutputUnsupported`](crate::api::Error::UncoalescedOutputUnsupported).
+    /// See [`JxlDecoderOptions::coalescing`]; raw layer support remains issue 57.
     #[must_use]
     pub fn with_coalescing(mut self, v: bool) -> Self {
         self.coalescing = v;

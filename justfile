@@ -34,6 +34,15 @@ stop-reason-docs:
     RUSTDOCFLAGS="-D warnings" cargo doc --locked -p zenjxl-decoder --no-deps
     just api-doc
 
+coalescing-sync export:
+    just stop-reason-sync "{{export}}"
+    cp zenjxl-decoder/src/api/options.rs "{{export}}/zenjxl-decoder/src/api/options.rs"
+    cp zenjxl-decoder/src/api/inner/process.rs "{{export}}/zenjxl-decoder/src/api/inner/process.rs"
+
+coalescing-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib coalescing_
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
 interpretation-resolve:
     cargo metadata --manifest-path perf/interpretation-validation/Cargo.toml --format-version 1 > /dev/null
 

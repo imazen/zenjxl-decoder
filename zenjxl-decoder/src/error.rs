@@ -335,6 +335,10 @@ pub enum Error {
         "start_new_frame called before the image header was parsed: seeking needs the image info first"
     )]
     SeekBeforeImageInfo,
+    /// Raw frame rectangles, blend information and uncoalesced enumeration are
+    /// not implemented. The requested view must not become composited output.
+    #[error("Uncoalesced JPEG XL output is not implemented")]
+    UncoalescedOutputUnsupported,
 }
 
 /// A coarse, best-effort classification of an [`Error`](enum@crate::api::Error), for operational
@@ -423,7 +427,9 @@ impl Error {
             | Error::SeekBeforeImageInfo => ErrorClass::OutputConfiguration,
 
             // Valid input using a feature this decoder / configuration refuses.
-            Error::ProgressiveRejected | Error::InvalidRenderingIntent => ErrorClass::Unsupported,
+            Error::ProgressiveRejected
+            | Error::InvalidRenderingIntent
+            | Error::UncoalescedOutputUnsupported => ErrorClass::Unsupported,
 
             // Internal invariant violations — most likely a decoder bug. Includes
             // failures while *synthesising* an output ICC profile.

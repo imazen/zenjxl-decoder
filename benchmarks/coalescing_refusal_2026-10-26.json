@@ -1,0 +1,41 @@
+{
+  "base": "b25516b5a7ccf8204c6e1f9bd4d252b0f6ecc68a",
+  "issue": "https://github.com/imazen/zenjxl-decoder/issues/57",
+  "scope": "Refuse the unsupported uncoalesced requirement before consuming input. This is configuration honesty, not raw-layer implementation.",
+  "cases": [
+    "Native processing of real and empty input, with both scan-only and normal decode options",
+    "One-shot decode retains Unsupported classification",
+    "Explicit coalescing(true) matches default pixels"
+  ],
+  "receipts": [
+    {
+      "log": "zenjxl-coalescing-before-2026-10-26.log",
+      "sha256": "4b54a04fd6e14662048b8e3c75ba0f28fab15efef9dae7807b736f7a483fb5c5",
+      "results": [
+        "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 851 filtered out; finished in 0.02s",
+        "run-heavy: done rc=101 3s | peak-RSS 0.76GiB | min-avail 13003MiB | peak-load 0.46"
+      ]
+    },
+    {
+      "log": "zenjxl-coalescing-after-2026-10-26.log",
+      "sha256": "182e90621ee4c4c8482051786b40f4ea189465417420ed747509c2fb22329f79",
+      "results": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 851 filtered out; finished in 0.02s",
+        "run-heavy: done rc=0 10s | peak-RSS 0.96GiB | min-avail 12767MiB | peak-load 0.50"
+      ]
+    },
+    {
+      "log": "zenjxl-coalescing-docs-2026-10-26.log",
+      "sha256": "1d56b8b7fedd2c073c1ff378637ae2ac035c5f9d4cf10b2cf24d5b772411c520",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.45s",
+        "run-heavy: done rc=0 6s | peak-RSS 0.35GiB | min-avail 13475MiB | peak-load 0.20"
+      ]
+    }
+  ],
+  "limits": [
+    "Raw rectangles, blend instructions and uncoalesced enumeration remain unimplemented",
+    "No performance or native-memory-bound claim",
+    "Downstream native layer probe must be updated when pinning this change"
+  ]
+}

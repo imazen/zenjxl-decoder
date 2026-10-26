@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 711 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 110 lines (122 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 712 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 110 lines (122 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -17,7 +17,7 @@
 #   free functions                             10
 #   inherent methods                          210
 #   struct fields                             139
-#   enum variants                             222
+#   enum variants                             223
 #   re-exports                                  3
 #   trait roster entries (type × trait)       169
 #   auto-trait-complete types                  39
@@ -25,9 +25,9 @@
 #
 # per-module pub lines:
 #   (root)                            9
-#   api                             638
+#   api                             639
 
-## items (643 lines)
+## items (644 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -203,6 +203,7 @@ pub api::Error::TreeMultiplierTooLarge(u32, u32)
 pub api::Error::TreeSplitOnEmptyRange(u8, i32, i32, i32)
 pub api::Error::TreeTooLarge(usize, usize)
 pub api::Error::TreeTooTall(usize, usize)
+pub api::Error::UncoalescedOutputUnsupported
 pub api::Error::UnexpectedCodestreamBoxEnd
 pub api::Error::UnexpectedLz77Repeat
 pub api::Error::WrongBufferCount(usize, usize)

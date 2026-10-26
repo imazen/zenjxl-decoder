@@ -1,5 +1,13 @@
 # Decoder investigation notes
 
+## Known Bugs: ignored uncoalesced requirement — 2026-10-26
+
+Issue 57 remains open for actual raw-layer implementation. A native regression
+reproduced `coalescing(false)` being ignored. The first processing call now
+returns typed `UncoalescedOutputUnsupported` before consuming input, including
+scan-only mode; one-shot decode retains that error. Explicit/default `true`
+retain identical pixels. This fixes request honesty, not raw-layer support.
+
 ## Known Bugs: timeout reason loss — 2026-10-26
 
 Issue 70: converting `enough::StopReason::TimedOut` into the native error

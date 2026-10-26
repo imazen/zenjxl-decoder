@@ -3550,6 +3550,48 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn coalescing_requirement_refuses_before_input_or_scan() {
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        for scan_only in [false, true] {
+            for bytes in [data.as_slice(), &[]] {
+                let mut input = bytes;
+                let decoder = JxlDecoder::new(
+                    JxlDecoderOptions::default()
+                        .with_coalescing(false)
+                        .with_scan_frames_only(scan_only),
+                );
+                let error = decoder
+                    .process(&mut input)
+                    .err()
+                    .expect("required uncoalesced output was silently ignored");
+                assert_eq!(error.error().kind(), crate::error::ErrorClass::Unsupported);
+                assert!(matches!(
+                    error.error(),
+                    crate::error::Error::UncoalescedOutputUnsupported
+                ));
+                assert_eq!(input.len(), bytes.len(), "refusal consumed caller input");
+            }
+        }
+        let error = crate::decode_with(&data, JxlDecoderOptions::default().with_coalescing(false))
+            .err()
+            .expect("one-shot decode substituted a composited image");
+        assert_eq!(error.error().kind(), crate::error::ErrorClass::Unsupported);
+    }
+
+    #[test]
+    fn coalescing_explicit_default_preserves_pixels() {
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        let normal = crate::decode(&data).unwrap();
+        let explicit =
+            crate::decode_with(&data, JxlDecoderOptions::default().with_coalescing(true)).unwrap();
+        assert_eq!(
+            (normal.width, normal.height, normal.channels),
+            (explicit.width, explicit.height, explicit.channels)
+        );
+        assert_eq!(normal.data, explicit.data);
+    }
+
+    #[test]
     fn test_native_stop_reasons_before_pixel_output() {
         use std::sync::{
             Arc,

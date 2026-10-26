@@ -8,6 +8,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Refuse `coalescing(false)` with typed `UncoalescedOutputUnsupported` before
+  consuming input, including scan-only mode. It previously silently returned
+  composited output. Raw-layer implementation remains issue 57.
+
 - Preserve deadline and future cooperative-stop reasons in `Error::Stopped`;
   expose the exact reason through `Error::stop_reason`. Explicit cancellation
   keeps `Error::Cancelled`, and both retain the coarse cancelled error class.
