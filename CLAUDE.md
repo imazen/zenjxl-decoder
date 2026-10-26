@@ -1,5 +1,16 @@
 # Decoder investigation notes
 
+## Known Bugs: subsampled extra channels — 2026-10-26
+
+Issue 69: valid lossless 17x13 images with subsampled extra channels failed with
+`SectionTooShort` when color upsampling was 1. `FrameHeader::postprocess` applied
+the source dimensional shift only when color also required upsampling. The correction in `6f6a457e` always forms the effective extra-channel factor and validates its
+8x ceiling before rendering. The standalone native-encoder/libjxl test covers
+all seven named roles at shifts 1/2/3 with exact no-dither u8 samples. libjxl's
+float output is quantized by an explicit matching rule, because its own u8 path
+uses a different dither. The 12 header checks, profile/reset and scan/decode regressions, and strict
+workspace lint pass. The fix remains under review on PR 68.
+
 ## Resolved 2026-10-22: short out-of-order `jxlp` splice stalled the box parser
 
 [RESOLVED] `SmallBuffer::inject_bytes_front` (`src/api/inner/process.rs`)

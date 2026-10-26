@@ -36,7 +36,19 @@ original u8 extra samples. Tests also check half/float alpha source precision,
 non-default intrinsic size and tone-mapping fields, and absent/present-zero/
 nonzero timecodes across reverse and repeated frame selection. The float-alpha
 test qualifies headers, not float pixel equivalence. Unknown/reserved channel
-roles, nonzero source dimension shifts and arbitrary combinations remain open.
+roles and arbitrary combinations remain open.
+
+The subsampled-channel extension generates an odd 17x13 canvas for every named
+role at source shifts 1/2/3. libjxl decodes the full image and supplies independent
+float samples; applying the requested no-dither round-to-even conversion gives
+exact native u8 color and auxiliary samples. Direct u8 comparison is not an
+equivalent configuration: libjxl 0.11.1 uses ordered dithering, while this decoder
+offers blue-noise dithering. No numeric tolerance is used. These checks qualify
+that sample representation, not cross-decoder bit-identical F32 arithmetic.
+They exposed [issue 69](https://github.com/imazen/zenjxl-decoder/issues/69): the
+source extra-channel shift must apply even when color is full resolution.
+The fix also checks the effective 8x maximum in that case. Source `dim_shift`
+stays distinct from the full-size emitted plane geometry.
 
 From an export outside workspace dependency overrides, run:
 
@@ -60,3 +72,8 @@ The integration requirement is tracked in
 [issue 67](https://github.com/imazen/zenjxl-decoder/issues/67). Raw layer output
 remains a separate contract in
 [issue 57](https://github.com/imazen/zenjxl-decoder/issues/57).
+
+The [source-subsampling receipt](../benchmarks/source_subsampling_2026-10-26.json)
+records the 21 independent decodes, corrected header-test selection and native
+regression checks. Native comparison: run-heavy rc=0, 6 s, peak RSS 0.40 GiB,
+minimum available 13688 MiB, peak load 0.23 (test-process usage).

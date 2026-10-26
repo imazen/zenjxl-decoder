@@ -6,6 +6,14 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Fixed
+
+- Apply source extra-channel dimensional shifts when color remains full
+  resolution, and validate the effective upsampling ceiling in that case.
+  Native lossless fixtures with seven auxiliary roles and shifts 1/2/3 now
+  match independent libjxl samples under the same no-dither quantization.
+  See [issue 69](https://github.com/imazen/zenjxl-decoder/issues/69).
+
 ### Dependency compatibility
 
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions. Formatting, strict library lint and library tests pass (`4a576da1`).

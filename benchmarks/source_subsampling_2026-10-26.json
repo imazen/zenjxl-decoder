@@ -1,0 +1,59 @@
+{
+  "implementation": "6f6a457eefdb40f4af18b247f1a854751a800933",
+  "issue": "https://github.com/imazen/zenjxl-decoder/issues/69",
+  "cases": {
+    "roles": 7,
+    "shifts": [
+      1,
+      2,
+      3
+    ],
+    "canvas": [
+      17,
+      13
+    ],
+    "independent_full_decodes": 21
+  },
+  "comparison": "Native U8 with dithering disabled versus libjxl FLOAT with explicit clamp/round-to-even U8 quantization. Exact equality, no tolerance. libjxl native U8 adds ordered dithering and is not an equivalent output configuration.",
+  "commands": [
+    "run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 4m just interpretation-check <fresh-artifacts>",
+    "run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 6m just interpretation-header-check interpretation-core-check",
+    "run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 2m just interpretation-header-check"
+  ],
+  "receipts": [
+    {
+      "log": "zenjxl-interpretation-shift4-2026-10-26.log",
+      "sha256": "6539444b54353f4df3609d6eaebad4e0b6d4ea96b7e233a8d9021a9535a4d5f3",
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.87s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "run-heavy: done rc=0 6s | peak-RSS 0.40GiB | min-avail 13688MiB | peak-load 0.23"
+      ]
+    },
+    {
+      "log": "zenjxl-interpretation-shift-core-2026-10-26.log",
+      "sha256": "4095c9c18ba525c15add9419e7d6349ba5736c61fd0e641745037a832c2629a5",
+      "results": [
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 849 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 847 filtered out; finished in 0.16s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 848 filtered out; finished in 17.44s",
+        "run-heavy: done rc=0 24s | peak-RSS 0.78GiB | min-avail 13158MiB | peak-load 0.81"
+      ]
+    },
+    {
+      "log": "zenjxl-interpretation-shift-header-2026-10-26.log",
+      "sha256": "87c04de05fc5411249b4c971b66e7597c6ed34c5f657af3a34892a57e3671ad1",
+      "results": [
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 837 filtered out; finished in 0.00s",
+        "run-heavy: done rc=0 0s | peak-RSS 0.05GiB | min-avail 13788MiB | peak-load 0.73"
+      ]
+    }
+  ],
+  "qualification_note": "The first combined invocation accidentally selected zero header tests. The corrected recipe then executed all 12; both results are retained. Resource lines measure test processes, not decoder workspace bounds.",
+  "artifacts": "/mnt/v/output/zencodec/platform-regions-20261026-run/",
+  "unqualified": [
+    "arbitrary extra-channel combinations",
+    "unknown/reserved roles",
+    "bit-identical cross-decoder F32 output"
+  ]
+}
