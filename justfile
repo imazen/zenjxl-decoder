@@ -63,6 +63,13 @@ raw-layer-probe artifacts:
     JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --no-default-features --lib raw_layer_probe_ -- --nocapture --test-threads=1
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+raw-layer-oracle captured output python="python3":
+    test ! -e "{{output}}"
+    mkdir -p "{{output}}"
+    cc -std=c11 -Wall -Wextra -Werror perf/raw-layer-validation/oracle.c -ljxl -o "{{output}}/oracle"
+    "{{python}}" perf/raw-layer-validation/compare.py "{{captured}}" zenjxl-decoder/resources/test "{{output}}/oracle" "{{output}}"
+    "{{python}}" perf/raw-layer-validation/negative.py "{{captured}}" zenjxl-decoder/resources/test "{{output}}/oracle" "{{output}}/negative"
+
 interpretation-resolve:
     cargo metadata --manifest-path perf/interpretation-validation/Cargo.toml --format-version 1 > /dev/null
 

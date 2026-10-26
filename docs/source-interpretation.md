@@ -162,3 +162,29 @@ strict lint gate and test-process resource observation:
 Independent raw-sample comparison, public publication/selection and blend facts,
 preview/state restoration, output conversion and complete workspace bounds are
 not established by this gate.
+
+### Independent layer samples and composition facts
+
+The next [oracle gate](../perf/raw-layer-validation/compare.py) runs libjxl
+0.11.1 with coalescing and spot rendering disabled and stored orientation kept.
+It compares all nine captured local planesets and exact placement, color and
+extra-channel blend facts, reference-save slots, duration and last-frame flags.
+CMYK/alpha samples agree bit-for-bit (1,587,120 samples), as do the alpha planes
+of the RGB fixture. The lossy RGB/alpha fixture contains 18,874,368 samples;
+5,485,741 float bit patterns differ, with maximum absolute difference
+0.00036650896072387695. All satisfy the pre-existing F32 conformance threshold
+1/256 from `src/tests/parity.rs`. This is conformance, not bit-identical RGB
+arithmetic between independent decoders. Native cross-path equality stays exact.
+
+The oracle also rejects a deliberately changed single mantissa bit in a CMYK
+plane, even though that error is below the lossy threshold, and verifies the
+original artifact is unchanged. Each run creates fresh artifact directories.
+The [receipt](../benchmarks/raw_layer_oracle_2026-10-26.json) preserves the initial
+missing-NumPy failure and the dependency-free standard-library replacement.
+Run `just raw-layer-oracle <native-artifacts> <fresh-oracle-artifacts>` after
+the native probe; it requires a C compiler, libjxl development files and Python.
+
+These fixtures exercise replace, add and alpha blending, but do not establish
+all modes or independent extra-channel blend combinations. Public raw-layer
+publication, selection and representation conversion remain open. No binary
+fixture or sample dump is committed.

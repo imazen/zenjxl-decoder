@@ -8,7 +8,7 @@ use std::{cell::RefCell, io::Write, rc::Rc};
 use crate::{
     api::decoder::tests::{decode, decode_with_layer_capture},
     frame::Frame,
-    headers::frame_header::FrameType,
+    headers::frame_header::{BlendingInfo, FrameType},
     image::Image,
 };
 
@@ -17,6 +17,7 @@ struct Layer {
     origin: (i32, i32),
     size: (usize, usize),
     planes: Vec<Vec<u32>>,
+    composition: serde_json::Value,
 }
 
 fn bits(plane: &Image<f32>) -> Vec<u32> {
@@ -59,6 +60,20 @@ fn layer(frame: &Frame) -> Option<Layer> {
         origin: (header.x0, header.y0),
         size,
         planes: planes.iter().map(bits).collect(),
+        composition: serde_json::json!({
+            "blend": blend(&header.blending_info),
+            "extra_blends": header.ec_blending_info.iter().map(blend).collect::<Vec<_>>(),
+            "save_as_reference": header.save_as_reference,
+            "duration": header.duration,
+            "is_last": u32::from(header.is_last),
+        }),
+    })
+}
+
+fn blend(info: &BlendingInfo) -> serde_json::Value {
+    serde_json::json!({
+        "mode": info.mode as u32, "source": info.source,
+        "alpha": info.alpha_channel, "clamp": u32::from(info.clamp),
     })
 }
 
@@ -85,9 +100,12 @@ fn export(name: &str, layers: &[Layer]) {
                 file.flush().unwrap();
                 files.push(name);
             }
-            metadata.push(serde_json::json!({
-                "origin": layer.origin, "size": layer.size, "planes": files,
-            }));
+            let mut item = layer.composition.clone();
+            let item = item.as_object_mut().unwrap();
+            item.insert("origin".into(), serde_json::json!(layer.origin));
+            item.insert("size".into(), serde_json::json!(layer.size));
+            item.insert("planes".into(), serde_json::json!(files));
+            metadata.push(serde_json::Value::Object(item.clone()));
         }
         let file = std::fs::OpenOptions::new()
             .write(true)
@@ -143,6 +161,7 @@ fn raw_layer_probe_keeps_reference_pixels_and_all_local_samples() {
                             (expected.origin, expected.size)
                         );
                         assert_eq!(actual.planes.len(), expected.planes.len());
+                        assert_eq!(actual.composition, expected.composition);
                         for (actual, expected) in actual.planes.iter().zip(&expected.planes) {
                             exact_samples(actual, expected);
                         }
