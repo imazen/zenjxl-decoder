@@ -46,6 +46,7 @@ pub(super) fn apply_decoder_options(
     embedded_color_profile: &Option<JxlColorProfile>,
 ) {
     state.render_spotcolors = decode_options.render_spot_colors;
+    state.coalescing = decode_options.coalescing;
     state.high_precision = decode_options.high_precision;
     state.premultiply_output = decode_options.premultiply_output;
     state.dither_u8 = decode_options.dither_u8;
@@ -286,7 +287,7 @@ impl CodestreamParser {
                     return Err(at!(Error::NonXybOutputNoCMS));
                 }
             } else {
-                self.update_default_output_color_profile();
+                self.update_default_output_color_profile(decode_options.coalescing);
             }
 
             let mut br = BitReader::new(&self.non_section_buf);
@@ -344,6 +345,17 @@ impl CodestreamParser {
             // header remains charged even if later validation or allocation fails.
             self.parsed_frame_headers = next_header;
             frame_header.postprocess(&nonserialized);
+            if !decode_options.coalescing {
+                // Helper/reference frames remain internal. Only the regular
+                // layer representation is qualified for public raw output.
+                if frame_header.frame_type
+                    == crate::headers::frame_header::FrameType::SkipProgressive
+                {
+                    return Err(at!(Error::UncoalescedOutputRequirement(
+                        "regular frame layers"
+                    )));
+                }
+            }
             // The frame is rendered at its upsampled size (up to 8x per axis),
             // so that is what the pixel limit must bound. Upstream jxl-rs c07c7d5.
             check_size_limit(

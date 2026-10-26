@@ -327,7 +327,11 @@ impl CodestreamParser {
 
     fn has_visible_frame(&self) -> bool {
         if let Some(frame) = &self.frame {
-            frame.header().is_visible()
+            if frame.decoder_state.coalescing {
+                frame.header().is_visible()
+            } else {
+                frame.header().frame_type == crate::headers::frame_header::FrameType::RegularFrame
+            }
         } else {
             false
         }
@@ -1038,7 +1042,7 @@ impl CodestreamParser {
         }
     }
 
-    pub(super) fn update_default_output_color_profile(&mut self) {
+    pub(super) fn update_default_output_color_profile(&mut self, coalescing: bool) {
         // Only set default output_color_profile if not already configured by user
         if self.output_color_profile_set_by_user {
             return;
@@ -1046,6 +1050,27 @@ impl CodestreamParser {
 
         let embedded_color_profile = self.embedded_color_profile.as_ref().unwrap();
         let pixel_format = self.pixel_format.as_ref().unwrap();
+
+        // Raw CMYK components retain their interpretation before any layer
+        // header or samples are published. The black component may be packed
+        // or requested separately; composited RGB retains its existing default.
+        let preserves_black = pixel_format.color_type == crate::api::JxlColorType::Cmyk
+            || self.basic_info.as_ref().is_some_and(|info| {
+                info.extra_channels
+                    .iter()
+                    .enumerate()
+                    .any(|(index, extra)| {
+                        extra.ec_type == crate::headers::extra_channels::ExtraChannel::Black
+                            && pixel_format
+                                .extra_channel_format
+                                .get(index)
+                                .is_some_and(Option::is_some)
+                    })
+            });
+        if !coalescing && embedded_color_profile.is_cmyk() && preserves_black {
+            self.output_color_profile = Some(embedded_color_profile.clone());
+            return;
+        }
 
         // Determine default output color profile following libjxl logic:
         // - For XYB: use embedded if can_output_to(), else:

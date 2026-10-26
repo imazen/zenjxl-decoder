@@ -118,6 +118,7 @@ pub struct DecoderState {
     pub(super) reference_frames: Arc<[Option<ReferenceFrame>; Self::MAX_STORED_FRAMES]>,
     pub(super) lf_frames: [Option<[Image<f32>; 3]>; Self::NUM_LF_FRAMES],
     pub render_spotcolors: bool,
+    pub(crate) coalescing: bool,
     #[cfg(test)]
     pub use_simple_pipeline: bool,
     /// Probe only: retain local planes before composition without changing references.
@@ -182,6 +183,7 @@ impl DecoderState {
             reference_frames: Arc::new([None, None, None, None]),
             lf_frames: std::array::from_fn(|_| None),
             render_spotcolors: true,
+            coalescing: true,
             #[cfg(test)]
             use_simple_pipeline: false,
             #[cfg(test)]

@@ -322,12 +322,19 @@ pub struct JxlDecoderOptions {
     pub render_spot_colors: bool,
     /// Coalesce frames onto the full canvas. Default: `true`.
     ///
-    /// Raw uncoalesced rectangles, their blend information and uncoalesced
-    /// enumeration are not implemented (issue 57). Setting this to `false`
-    /// returns [`Error::UncoalescedOutputUnsupported`](crate::api::Error::UncoalescedOutputUnsupported)
-    /// on the first `process` call, before consuming input, for both pixel
-    /// decoding and scan-only operation. The decoder never substitutes a
-    /// composited presentation for the requested raw view.
+    /// Setting this to `false` selects regular local layers before composition.
+    /// The qualified mode requires stored orientation (`adjust_orientation =
+    /// false`), skipped previews, no CMS/tone mapping/premultiplication, and F32
+    /// pixel formats. Spot channels must remain unrendered, and CMYK must retain
+    /// its black channel. Configure the pixel format after image information is
+    /// available. Header-only scanning does not require F32 buffers.
+    ///
+    /// [`crate::api::JxlDecoder::frame_layer_info`] returns signed placement and
+    /// per-channel blend facts. The caller's buffers use the local frame size,
+    /// including off-canvas samples. Composed references remain internal for
+    /// subsequent decoding. Visible-frame seeks, progressive flushing and
+    /// other representations refuse; no flattened substitute is returned.
+    /// Further configurations remain tracked in issue 57.
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
     pub skip_preview: bool,
@@ -451,9 +458,8 @@ impl JxlDecoderOptions {
 
     /// Coalesce animation frames onto the canvas.
     ///
-    /// Passing `false` refuses on the first `process` call with
-    /// [`Error::UncoalescedOutputUnsupported`](crate::api::Error::UncoalescedOutputUnsupported).
-    /// See [`JxlDecoderOptions::coalescing`]; raw layer support remains issue 57.
+    /// See [`JxlDecoderOptions::coalescing`] for the qualified F32 local-layer
+    /// mode and explicit refusals for other configurations.
     #[must_use]
     pub fn with_coalescing(mut self, v: bool) -> Self {
         self.coalescing = v;

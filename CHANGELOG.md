@@ -8,9 +8,12 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
-- Refuse `coalescing(false)` with typed `UncoalescedOutputUnsupported` before
-  consuming input, including scan-only mode. It previously silently returned
-  composited output. Raw-layer implementation remains issue 57.
+- Honor `coalescing(false)` for regular local F32 layers in stored orientation,
+  preserving off-canvas samples and internal composed references. Unqualified
+  transforms/representations refuse explicitly; progressive raw flushing and
+  visible-frame seeks refuse without changing buffers or decoder state. This
+  request previously silently returned composited output. Further modes remain
+  tracked in issue 57; see [qualification](docs/source-interpretation.md).
 
 - Preserve deadline and future cooperative-stop reasons in `Error::Stopped`;
   expose the exact reason through `Error::stop_reason`. Explicit cancellation
@@ -28,6 +31,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions. Formatting, strict library lint and library tests pass (`4a576da1`).
 
 ### Added
+- Add `frame_layer_info()` with signed local geometry and per-channel blend,
+  reference-save and timing facts. Expose `try_start_new_frame` for fallible
+  visible-presentation seeking without breaking the existing convenience method.
 - Add an opt-in `max_frame_headers` allowance covering hidden frames and
   replayed headers as well as visible presentations. Preserve charges through
   seek/rewind; reset starts a new operation. Refusal retains the existing typed
@@ -153,11 +159,6 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next 0.x minor release.
      Add items here as you discover them. Do NOT ship these piecemeal. -->
-- `JxlDecoderOptions::coalescing` and `with_coalescing()` — accepted but read
-  nowhere; either implement the `false` case (return each frame's uncomposited
-  rectangle with its crop origin and blend mode, as libjxl's
-  `JXL_DEC_SET_COALESCING(false)` does) or remove both. Documented as
-  unimplemented in the meantime (#57).
 - Consider upstream jxl-rs `d7ecec1`'s `set_pixel_format(..) -> Result`,
   which rejects format changes after the first frame header. Not needed for
   safety here: format changes between frames decode correctly

@@ -1,0 +1,119 @@
+{
+  "base": "10d084f9b939069fb93ee1fb39507f51d8d9827e",
+  "scope": "Public typed decoder emits complete local F32 regular layers into caller buffers before blending; reference reconstruction remains internal. Stored orientation, skipped previews, unrendered spots and retained black components only.",
+  "commands": [
+    "just raw-layer-output-check <fresh-artifacts>",
+    "just raw-layer-output-all <fresh-artifacts>",
+    "just raw-layer-oracle <native-artifacts> <fresh-oracle-artifacts>",
+    "just raw-layer-regressions",
+    "just stop-reason-docs"
+  ],
+  "receipts": [
+    {
+      "log": "zenjxl-raw-layer-output-1-2026-10-26.log",
+      "sha256": "5518639f2632b5909bc55123d20931b78f4ff5a4935ed636bf9f33cebdf184bb",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 859 filtered out; finished in 67.97s",
+        "run-heavy: done rc=0 82s | peak-RSS 1.11GiB | min-avail 12563MiB | peak-load 1.07"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-output-2-2026-10-26.log",
+      "sha256": "92eb6a062e11a2ac2273cfb60d639238f1cb59c6e12c16cbcf9d30e883c9e16a",
+      "results": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 859 filtered out; finished in 67.66s",
+        "run-heavy: done rc=0 75s | peak-RSS 0.87GiB | min-avail 12915MiB | peak-load 0.96"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-output-3-2026-10-26.log",
+      "sha256": "f46dd3b6caad6f5a97229dce4bb0a015b9df90262afe838eeb449651da4b676b",
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 859 filtered out; finished in 66.53s",
+        "run-heavy: done rc=0 73s | peak-RSS 0.86GiB | min-avail 12812MiB | peak-load 0.94"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-output-all-2026-10-26.log",
+      "sha256": "f71d73bc28a899862ec4a6eb34f0d1659fe094fd2c4dd3f70d36966c35e2057c",
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1026 filtered out; finished in 35.35s",
+        "run-heavy: done rc=0 46s | peak-RSS 1.46GiB | min-avail 12151MiB | peak-load 0.86"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-output-oracle-3-2026-10-26.log",
+      "sha256": "bae02e974be31ddddf841d6f415b6f2b08d4e46f0c965764ef6c518456b0e5af",
+      "results": [
+        "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
+        "run-heavy: done rc=0 6s | peak-RSS 0.09GiB | min-avail 13550MiB | peak-load 0.47"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-regressions-2026-10-26.log",
+      "sha256": "1003557d360766b78524ebf7860a4d3c9c82dde60a25f9f88ac6384012f4955f",
+      "results": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 860 filtered out; finished in 11.81s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 859 filtered out; finished in 35.98s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 859 filtered out; finished in 0.04s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 861 filtered out; finished in 0.12s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 862 filtered out; finished in 17.41s",
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 852 filtered out; finished in 145.59s",
+        "run-heavy: done rc=0 212s | peak-RSS 0.38GiB | min-avail 13213MiB | peak-load 2.35"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-docs-2026-10-26.log",
+      "sha256": "63df7cb90fa6e50fb4505319c55b8c809483adb6c01d3787c7c19556789ef302",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.56s",
+        "run-heavy: done rc=0 5s | peak-RSS 0.35GiB | min-avail 13214MiB | peak-load 0.91"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-output-oracle-all-2026-10-26.log",
+      "sha256": "3a9a635fab9ed0f3426a2910ceaeeff2c22e2ddc8ebdb7b17d34ee96eb25aa4e",
+      "results": [
+        "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
+        "run-heavy: done rc=0 7s | peak-RSS 0.09GiB | min-avail 13555MiB | peak-load 0.66"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture": "multiple_layers_noise_spline.jxl",
+      "sha256": "1912b0df8917c26f6f9a7a0fc07e5dda8b712b101be0194264e19fabd169ddbf",
+      "libjxl": 11001,
+      "layers": 5,
+      "samples": 18874368,
+      "different_float_bits": 5485741,
+      "max_absolute_error": 0.00036650896072387695,
+      "over_threshold": 0
+    },
+    {
+      "fixture": "conformance_test_images/cmyk_layers.jxl",
+      "sha256": "d732c8836bf1abeadf310d2e07387a32813ed4690d32650c1c25e541b80eed4a",
+      "libjxl": 11001,
+      "layers": 4,
+      "samples": 1587120,
+      "different_float_bits": 0,
+      "max_absolute_error": 0.0,
+      "over_threshold": 0
+    }
+  ],
+  "report": "/mnt/v/output/zencodec/platform-regions-20261026-run/raw-layer-output-oracle-3/comparison.json",
+  "report_sha256": "3d54c2c32eb15ff303496d3054ffa30fee3e01e927021825de81aaaad44c32fe",
+  "limits": [
+    "No performance or native workspace bound is claimed. Resource receipts measure test/build processes.",
+    "Independent lossy RGB is conformance-qualified at the unchanged 1/256 gate, not bit-exact. Native cross-path, CMYK and alpha gates are exact.",
+    "Not all blend modes, independently differing extra blends, preview/reference combinations, negative origins or output conversions are qualified.",
+    "No random raw-layer seek, progressive raw publication or internal reference-plane export."
+  ],
+  "source_sha256": {
+    "zenjxl-decoder/src/api/data_types.rs": "0ed8f92b76fd7a9ab9c69ed9887c28e502a9d4e394afd6493f2dc955a91a449a",
+    "zenjxl-decoder/src/api/inner/process.rs": "529a737eecbf5b02921401aa994b4e8049a7ba5c232bc315ec474b25e576fe51",
+    "zenjxl-decoder/src/api/inner/codestream_parser/mod.rs": "21377e3bd3e87a41f437a8ff7cb3870606bcf6fcf46c21305ebd1e4ffdbee153",
+    "zenjxl-decoder/src/frame/render.rs": "40416bdddd6da5e4497f8bb07b611f4c962658f01fcc3fdfb45d6798d9a893e2",
+    "zenjxl-decoder/src/tests/raw_layers.rs": "4b77fc7e299033ee4b9e74b88277de94d73185d7c3f102ae16d1030ddb2e0625"
+  }
+}

@@ -415,14 +415,25 @@ impl JxlDecoder<WithImageInfo> {
     ///
     /// // 2. Seek to visible frame n with a normal decoder that has parsed image info.
     /// let target = frames[n].seek_target.expect("seekable");
-    /// decoder.start_new_frame(target);
+    /// decoder.try_start_new_frame(target)?;
     /// let mut input = &file[target.decode_start_file_offset as usize..];
     /// // 3. process() -> WithFrameInfo for frame n; process(buffers) decodes it.
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the seek is unsupported, including uncoalesced output. Prefer
+    /// [`Self::try_start_new_frame`] to receive the native error.
     pub fn start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) {
-        self.inner
-            .start_new_frame(seek_target)
-            .expect("image info is available in the WithImageInfo state");
+        self.try_start_new_frame(seek_target)
+            .expect("visible-frame seek must be supported");
+    }
+
+    /// Fallible form of [`Self::start_new_frame`]. A raw-layer decoder refuses
+    /// visible-presentation targets before changing state; sequential decoding
+    /// can continue after that refusal. The existing infallible method remains
+    /// for source compatibility.
+    pub fn try_start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) -> Result<()> {
+        self.inner.start_new_frame(seek_target)
     }
 
     #[cfg(test)]
@@ -449,6 +460,12 @@ impl JxlDecoder<WithFrameInfo> {
 
     pub fn frame_header(&self) -> JxlFrameHeader {
         self.inner.frame_header().unwrap()
+    }
+
+    /// Local source extent and per-channel composition facts. Reference slots
+    /// belong to this decoding context; they are not portable image identities.
+    pub fn frame_layer_info(&self) -> crate::api::JxlLayerInfo {
+        self.inner.frame_layer_info().unwrap()
     }
 
     /// The selected frame's original timecode, separate from presentation time

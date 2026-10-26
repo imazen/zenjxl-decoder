@@ -1,6 +1,6 @@
 # Source interpretation for selected images
 
-Two additive accessors expose source fields needed by image collections and
+Additive accessors expose source fields needed by image collections and
 transcoders. They leave existing public struct literals and `Eq` implementations
 unchanged.
 
@@ -88,12 +88,10 @@ headers match independent libjxl 0.11.1 discovery with coalescing disabled.
 Two layers extend beyond the 2048x1152 presentation canvas: the 1024x576 frames
 at (512,640) and (1860,950). Their stored extents remain intact.
 
-This is source-header qualification, not a raw-layer output API. The native
-consumer still receives one composited presentation, and requesting
-`coalescing=false` refuses before consuming input. A raw-output implementation
-must preserve the composed references needed by later frames while exposing
-uncomposited samples, geometry and blend instructions. A contained pixel-region
-type cannot substitute for signed layer placement.
+This initial gate qualifies source headers. The public F32 path described below
+now returns those local layers while retaining the composed references needed
+by later frames. A contained pixel-region type cannot substitute for signed
+layer placement.
 
 The [placement receipt](../benchmarks/layer_placement_2026-10-26.json) records
 `just coalescing-check`; it makes no latency or total-memory claim.
@@ -143,9 +141,9 @@ Tracking: [issue 71](https://github.com/imazen/zenjxl-decoder/issues/71).
 A test-only output tap now retains F32 planes immediately before blending and
 canvas extension. It saves every local sample, including off-canvas pixels,
 while the existing pipeline continues producing composed references and display
-output. Allocation uses the decoder's existing memory tracker. The public
-`coalescing(false)` request still refuses: this is an implementation probe, not
-a completed layer API.
+output. Allocation uses the decoder's existing memory tracker. This test-only
+tap supplied the native reference for the public F32 path below; production raw
+output writes into the caller's buffers without allocating these tap planes.
 
 `just raw-layer-probe <fresh-artifacts>` qualifies five RGB/alpha layers from
 `multiple_layers_noise_spline.jxl` and four CMYK/alpha layers from
@@ -185,9 +183,9 @@ Run `just raw-layer-oracle <native-artifacts> <fresh-oracle-artifacts>` after
 the native probe; it requires a C compiler, libjxl development files and Python.
 
 These fixtures exercise replace, add and alpha blending, but do not establish
-all modes or independent extra-channel blend combinations. Public raw-layer
-publication, selection and representation conversion remain open. No binary
-fixture or sample dump is committed.
+all modes or independent extra-channel blend combinations. Random layer
+selection and representation conversion remain open. No binary fixture or
+sample dump is committed.
 
 The all-feature configuration also passes the same native and independent gates,
 including threaded and SIMD rendering: `just raw-layer-probe-all <artifacts>`,
@@ -195,3 +193,87 @@ then the same oracle command. Native gate:
 `run-heavy: done rc=0 61s | peak-RSS 1.55GiB | min-avail 12162MiB | peak-load 1.16`.
 These observations cover the test process, not a layer workspace guarantee or a
 throughput comparison. The oracle receipt includes both configurations.
+
+## Qualified public raw-layer output
+
+Use the existing typed decoder and buffers. Disable coalescing and orientation
+adjustment before feeding input; keep previews skipped and spot channels separate.
+After image information arrives, select F32 color and extra-channel formats.
+The next frame header reports the **local** dimensions, including samples beyond
+the canvas. Allocate buffers at that size and decode normally. Both tightly
+packed and padded rows are supported.
+
+```rust
+let options = JxlDecoderOptions::default()
+    .with_coalescing(false)
+    .with_adjust_orientation(false)
+    .with_render_spot_colors(false);
+// Feed input until the existing WithImageInfo state is returned.
+decoder.set_pixel_format(JxlPixelFormat {
+    color_type: JxlColorType::Rgb,
+    color_data_format: Some(JxlDataFormat::f32()),
+    extra_channel_format: vec![Some(JxlDataFormat::f32()); extra_count],
+});
+// Feed input until WithFrameInfo; allocate each row buffer from this local size.
+let layer = frame.frame_layer_info();
+let size = frame.frame_header().size;
+assert_eq!(size, layer.size);
+// frame.process(input, buffers) writes this local layer; repeat for subsequent layers.
+```
+
+`frame_layer_info()` supplies signed origin, complete local extent, color and
+per-source-extra blend instructions, reference slot saves, source duration ticks
+and the last-frame flag. Reference slots belong to this decoder's context; they
+are not stable collection IDs. LF and reference-only helpers remain internal.
+In coalesced mode the same accessor supplies source facts, while output size
+continues to describe the composed canvas.
+
+This is not a lossless re-encoding instruction set. LF and reference-only helpers
+are not published as images. A reference saved before color transformation can
+contain a different representation from these reconstructed local samples;
+`saved_before_color_transform` reports that fact without claiming those internal
+samples are exposed.
+
+Raw CMYK retains the black component, packed or as an extra plane, and reports
+its embedded CMYK profile as soon as the output format is configured. A packed
+three-component buffer in that configuration holds CMY, not display RGB; its
+profile and separate black plane are essential. Source-associated alpha remains
+source-associated. No tone mapping, CMS conversion, orientation adjustment,
+premultiplication, spot flattening or integer/half output is implied.
+
+Unqualified requests return `UncoalescedOutputUnsupported` (global configuration)
+or `UncoalescedOutputRequirement` (the unmet requirement). Format validation runs
+before processing, including low-level changes after a header. Progressive
+`flush_pixels` refuses before writing. Full sequential decode can continue after
+that refusal. The F32 path saves local samples before the existing composition
+stages, so future frames still receive the composed references they require.
+
+Visible-presentation seek targets do not identify raw layers. Use the new
+`try_start_new_frame(target) -> Result<()>`: raw mode refuses before changing
+state, and sequential decoding can continue. The existing infallible
+`start_new_frame` remains for compatibility and panics on refusal; new callers
+should use the fallible method. A future breaking revision can consolidate them.
+
+Run `just raw-layer-output-check <fresh-artifacts>` and
+`just raw-layer-output-all <fresh-artifacts>`, then apply `raw-layer-oracle`
+to each output. The public-path gate checks all nine local layers against the
+independently qualified tap, both renderers, complete/chunked input, untouched
+row padding, early CMYK interpretation and refusal recovery. The
+[public-output receipt](../benchmarks/raw_layer_output_2026-10-26.json) records
+actual gate results. `just raw-layer-regressions` retains existing coalesced,
+scan/seek, profile, header-allowance and cooperative-stop checks.
+
+Still unqualified: all blend-mode combinations, random raw-layer seeks,
+progressive publication, other sample representations/display transformations,
+negative-origin pixel fixtures, arbitrary preview/reference combinations and a
+complete native workspace bound. These limitations do not become capability
+claims merely because a source header can describe them.
+
+Executed public-output gates: no-default-features plus strict workspace lint
+passed (`run-heavy: done rc=0 73s | peak-RSS 0.86GiB | min-avail 12812MiB | peak-load 0.94`).
+All-feature output passed (`rc=0 46s | peak-RSS 1.46GiB | min-avail 12151MiB | peak-load 0.86`).
+Both artifact sets pass the independent sample/composition gate and single-bit
+CMYK negative control. Existing coalescing, discovery/stop/profile and all eleven
+visible-seek regressions passed (`rc=0 212s | peak-RSS 0.38GiB | min-avail 13213MiB | peak-load 2.35`).
+Warning-free rustdoc and regenerated API snapshots also pass. These are
+build/test process observations, not throughput or decoder memory guarantees.

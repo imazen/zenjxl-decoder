@@ -51,10 +51,11 @@ header-budget-check filter="frame_header_budget_":
     cargo test --locked -p zenjxl-decoder --no-default-features --lib "{{filter}}"
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-# Test-only native local-plane tap; does not enable the public raw-layer request.
+# Native local-plane probe and qualified public raw-layer output.
 raw-layer-sync export:
     just header-budget-sync "{{export}}"
     cp zenjxl-decoder/src/api/inner/mod.rs "{{export}}/zenjxl-decoder/src/api/inner/"
+    cp zenjxl-decoder/src/api/data_types.rs "{{export}}/zenjxl-decoder/src/api/"
     cp zenjxl-decoder/src/frame/mod.rs zenjxl-decoder/src/frame/decode.rs zenjxl-decoder/src/frame/render.rs "{{export}}/zenjxl-decoder/src/frame/"
     cp zenjxl-decoder/src/tests/mod.rs zenjxl-decoder/src/tests/raw_layers.rs "{{export}}/zenjxl-decoder/src/tests/"
 
@@ -62,6 +63,23 @@ raw-layer-probe artifacts:
     mkdir -p "{{artifacts}}"
     JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --no-default-features --lib raw_layer_probe_ -- --nocapture --test-threads=1
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+raw-layer-output-check artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --no-default-features --lib raw_layer_output_ -- --nocapture --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+raw-layer-output-all artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --all-features --lib raw_layer_output_ -- --nocapture --test-threads=1
+
+raw-layer-regressions:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib coalescing_
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib frame_header_budget_
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib stop_
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib basic_info_profile_guard
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib test_scanned_frames_identical_for_decode_and_scan
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib test_start_new_frame_
 
 raw-layer-probe-all artifacts:
     mkdir -p "{{artifacts}}"

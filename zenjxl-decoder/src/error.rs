@@ -336,10 +336,15 @@ pub enum Error {
         "start_new_frame called before the image header was parsed: seeking needs the image info first"
     )]
     SeekBeforeImageInfo,
-    /// Raw frame rectangles, blend information and uncoalesced enumeration are
-    /// not implemented. The requested view must not become composited output.
-    #[error("Uncoalesced JPEG XL output is not implemented")]
+    /// Operation settings conflict with the supported local-layer mode. The
+    /// requested view must not become composited output or ignore a transform.
+    #[error(
+        "Uncoalesced JPEG XL output requires stored orientation, skipped previews and no display transforms"
+    )]
     UncoalescedOutputUnsupported,
+    /// The requested raw layer representation is not yet qualified.
+    #[error("Uncoalesced JPEG XL output requires {0}")]
+    UncoalescedOutputRequirement(&'static str),
 }
 
 /// A coarse, best-effort classification of an [`Error`](enum@crate::api::Error), for operational
@@ -430,7 +435,8 @@ impl Error {
             // Valid input using a feature this decoder / configuration refuses.
             Error::ProgressiveRejected
             | Error::InvalidRenderingIntent
-            | Error::UncoalescedOutputUnsupported => ErrorClass::Unsupported,
+            | Error::UncoalescedOutputUnsupported
+            | Error::UncoalescedOutputRequirement(_) => ErrorClass::Unsupported,
 
             // Internal invariant violations — most likely a decoder bug. Includes
             // failures while *synthesising* an output ICC profile.
