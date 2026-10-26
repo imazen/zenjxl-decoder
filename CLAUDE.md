@@ -1,5 +1,15 @@
 # Decoder investigation notes
 
+## Known Bugs: CMS callback contracts — 2026-10-26
+
+Real decoder regressions reproduce RGB/grayscale callback errors becoming panics,
+CMYK callback errors becoming successful mathematical fallback pixels, reversed
+CMYK callback polarity relative to the public trait, and an empty transformer
+set silently disabling the requested conversion. The dedicated CMYK stage also
+hardcodes its destination profile and is feature-gated despite accepting a custom
+CMS. `src/tests/cms_contract.rs` exercises the callbacks through native decoding.
+The correction and qualification are in progress on PR 68.
+
 ## Known Bugs: ignored uncoalesced requirement — 2026-10-26
 
 Issue 57 remains open for the full layer contract. The ignored-request regression

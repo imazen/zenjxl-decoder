@@ -3,6 +3,16 @@
 source-checks:
     ./ci/pull_request_checks.sh
 
+# Real callback boundary, including custom CMS without the bundled CMS feature.
+cms-contract-sync export:
+    test ! -e "{{export}}/.git"
+    test ! -e "{{export}}/.jj"
+    cp zenjxl-decoder/src/tests/mod.rs zenjxl-decoder/src/tests/cms_contract.rs "{{export}}/zenjxl-decoder/src/tests/"
+    cp justfile "{{export}}/justfile"
+
+cms-contract-check features="cms":
+    cargo test --locked -p zenjxl-decoder --no-default-features --features "{{features}}" --lib cms_contract_ -- --nocapture --test-threads=1
+
 # Standalone interpretation qualification; no encoder/oracle in library builds.
 # Export once with git archive, then synchronize only this task's source files.
 interpretation-sync export:

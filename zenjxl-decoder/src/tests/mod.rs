@@ -9,6 +9,7 @@
 //! Tests that fail indicate implementation bugs - DO NOT WEAKEN TOLERANCES.
 
 pub mod basic_info_profile_guard;
+mod cms_contract;
 pub mod codec_corpus;
 #[cfg(feature = "threads")]
 pub mod concurrency;
