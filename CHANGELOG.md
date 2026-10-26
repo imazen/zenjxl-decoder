@@ -8,6 +8,13 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Preserve CMS callback failures as traced errors instead of panicking or
+  substituting CMYK pixels. Validate transformer counts and destination channels;
+  honor custom CMYK callbacks without the bundled CMS feature. Callbacks receive
+  documented native ink polarity and the requested destination; moxcms adapts
+  ICC polarity internally. Existing color goldens remain unchanged. See
+  [issue 72](https://github.com/imazen/zenjxl-decoder/issues/72).
+
 - Honor `coalescing(false)` for regular local F32 layers in stored orientation,
   preserving off-canvas samples and internal composed references. Unqualified
   transforms/representations refuse explicitly; progressive raw flushing and

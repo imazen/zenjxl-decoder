@@ -284,3 +284,34 @@ CMYK negative control. Existing coalescing, discovery/stop/profile and all eleve
 visible-seek regressions passed (`rc=0 212s | peak-RSS 0.38GiB | min-avail 13213MiB | peak-load 2.35`).
 Warning-free rustdoc and regenerated API snapshots also pass. These are
 build/test process observations, not throughput or decoder memory guarantees.
+
+## Fallible CMS callbacks
+
+A supplied `JxlCms` is honored independently of the `cms` feature, which enables
+our moxcms adapter. The same internal render stage handles RGB, grayscale and
+CMYK. Initialization must return the requested number of transforms and the
+output profile's channel count. A malformed response returns an error before
+any transform runs. A callback error keeps its original `whereat` context and
+ends decoding; it never requests a mathematical fallback.
+
+The callback receives native JXL CMYK values: zero is full ink, one is no ink.
+The destination passed to the callback is the caller's requested profile. The
+moxcms adapter performs its own conversion to ICC ink polarity in a fallibly
+allocated input scratch buffer. Source/native sample carriage does not invert
+or relabel values. CMYK conversion remains after composition where reference
+frames require it.
+
+`src/tests/cms_contract.rs` exercises real RGB, grayscale and layered CMYK files
+through both renderers, with padded output rows. It covers initializer refusal,
+invalid counts/channels, first and later chunk refusal, exact error context,
+custom CMS without the bundled backend, native polarity, requested destination,
+and parallel failure. Existing lcms2 color goldens, CMYK display checks,
+parallel ICC parity and stage equivalence retain their expectations.
+
+Caller-provided output buffers can contain partial pixels after a decode error.
+Those buffers are not a completed result and must not be published as one. This
+qualification does not catch arbitrary callback panics, bound callback workspace
+or execution time, validate every ICC profile, or qualify resuming the low-level
+mutable decoder after failure. The legacy mathematical path when no applicable
+CMS is configured still exists; strict consumers must require a qualified
+conversion route. Receipts: [CMS contract](../benchmarks/cms_contract_2026-10-26.json).

@@ -8,7 +8,12 @@ CMYK callback polarity relative to the public trait, and an empty transformer
 set silently disabling the requested conversion. The dedicated CMYK stage also
 hardcodes its destination profile and is feature-gated despite accepting a custom
 CMS. `src/tests/cms_contract.rs` exercises the callbacks through native decoding.
-The correction and qualification are in progress on PR 68.
+Issue 72 tracks the correction on PR 68: one fallible stage now propagates the
+original error, validates initializer responses and honors custom CMYK callbacks
+without the bundled feature. Native polarity reaches callbacks unchanged; only
+moxcms adapts ICC ink polarity. The requested destination is retained. Existing
+color goldens and stage/parallel equivalence pass unchanged. See the CMS section
+of `docs/source-interpretation.md` for remaining limits and qualification.
 
 ## Known Bugs: ignored uncoalesced requirement — 2026-10-26
 

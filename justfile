@@ -7,11 +7,40 @@ source-checks:
 cms-contract-sync export:
     test ! -e "{{export}}/.git"
     test ! -e "{{export}}/.jj"
-    cp zenjxl-decoder/src/tests/mod.rs zenjxl-decoder/src/tests/cms_contract.rs "{{export}}/zenjxl-decoder/src/tests/"
+    cp zenjxl-decoder/src/tests/mod.rs zenjxl-decoder/src/tests/cms_contract.rs zenjxl-decoder/src/tests/hdr.rs "{{export}}/zenjxl-decoder/src/tests/"
+    cp zenjxl-decoder/src/api/moxcms_wrapper.rs zenjxl-decoder/src/api/color.rs "{{export}}/zenjxl-decoder/src/api/"
+    cp zenjxl-decoder/src/frame/render.rs zenjxl-decoder/src/frame/lf_preview.rs "{{export}}/zenjxl-decoder/src/frame/"
+    cp zenjxl-decoder/src/render/mod.rs zenjxl-decoder/src/render/internal.rs "{{export}}/zenjxl-decoder/src/render/"
+    cp zenjxl-decoder/src/render/stages/*.rs "{{export}}/zenjxl-decoder/src/render/stages/"
+    cp zenjxl-decoder/src/render/simple_pipeline/*.rs "{{export}}/zenjxl-decoder/src/render/simple_pipeline/"
+    cp zenjxl-decoder/src/render/low_memory_pipeline/*.rs "{{export}}/zenjxl-decoder/src/render/low_memory_pipeline/"
+    mkdir -p "{{export}}/perf/raw-layer-validation"
+    cp perf/raw-layer-validation/oracle.c perf/raw-layer-validation/compare.py perf/raw-layer-validation/negative.py "{{export}}/perf/raw-layer-validation/"
     cp justfile "{{export}}/justfile"
 
 cms-contract-check features="cms":
     cargo test --locked -p zenjxl-decoder --no-default-features --features "{{features}}" --lib cms_contract_ -- --nocapture --test-threads=1
+
+# Custom callbacks, existing backend goldens, stage equivalence and parallel CMS.
+cms-contract-qualification:
+    just cms-contract-check ""
+    cargo test --locked -p zenjxl-decoder --all-features --lib cms -- --nocapture --test-threads=1
+    cargo test --locked -p zenjxl-decoder --all-features --lib render:: -- --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+
+cms-contract-final:
+    just cms-contract-check ""
+    cargo test --locked -p zenjxl-decoder --all-features --lib cms_contract_ -- --nocapture --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+cms-layer-regression artifacts:
+    just raw-layer-output-all "{{artifacts}}"
+    just cms-layer-oracle-check "{{artifacts}}" "{{artifacts}}-oracle"
+
+cms-layer-oracle-check captured output:
+    just raw-layer-oracle "{{captured}}" "{{output}}"
+    just stop-reason-docs
 
 # Standalone interpretation qualification; no encoder/oracle in library builds.
 # Export once with git archive, then synchronize only this task's source files.
