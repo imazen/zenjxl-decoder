@@ -188,3 +188,10 @@ These fixtures exercise replace, add and alpha blending, but do not establish
 all modes or independent extra-channel blend combinations. Public raw-layer
 publication, selection and representation conversion remain open. No binary
 fixture or sample dump is committed.
+
+The all-feature configuration also passes the same native and independent gates,
+including threaded and SIMD rendering: `just raw-layer-probe-all <artifacts>`,
+then the same oracle command. Native gate:
+`run-heavy: done rc=0 61s | peak-RSS 1.55GiB | min-avail 12162MiB | peak-load 1.16`.
+These observations cover the test process, not a layer workspace guarantee or a
+throughput comparison. The oracle receipt includes both configurations.

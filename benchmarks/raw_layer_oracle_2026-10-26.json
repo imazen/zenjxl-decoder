@@ -28,6 +28,22 @@
         "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
         "run-heavy: done rc=0 7s | peak-RSS 0.09GiB | min-avail 13550MiB | peak-load 0.26"
       ]
+    },
+    {
+      "log": "zenjxl-raw-layer-probe-all-2026-10-26.log",
+      "sha256": "3618abd26242ed0e97c55d3aac63ee4db156dc83dd0cb021575602e2a61c7276",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1025 filtered out; finished in 38.94s",
+        "run-heavy: done rc=0 61s | peak-RSS 1.55GiB | min-avail 12162MiB | peak-load 1.16"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-oracle-all-2026-10-26.log",
+      "sha256": "51f967d48aa5b93a5aaf02fca8d1f3be1d9d6f2a013b431601ea875271e63c34",
+      "results": [
+        "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
+        "run-heavy: done rc=0 7s | peak-RSS 0.09GiB | min-avail 13554MiB | peak-load 0.40"
+      ]
     }
   ],
   "fixtures": [
@@ -60,5 +76,6 @@
     "Not all blend modes or independently differing extra-channel blends are covered.",
     "No preview, all-profile/conversion, total-memory or latency guarantee."
   ],
-  "failed_attempt": "Initial oracle run required NumPy absent in the selected Python. Replaced that dependency with Python standard-library array processing; no sample expectation was relaxed."
+  "failed_attempt": "Initial oracle run required NumPy absent in the selected Python. Replaced that dependency with Python standard-library array processing; no sample expectation was relaxed.",
+  "additional_configuration": "All crate features enabled, including threaded and SIMD native rendering, passes the same internal exactness and independent sample/metadata gates."
 }

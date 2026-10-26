@@ -63,6 +63,10 @@ raw-layer-probe artifacts:
     JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --no-default-features --lib raw_layer_probe_ -- --nocapture --test-threads=1
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+raw-layer-probe-all artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --all-features --lib raw_layer_probe_ -- --nocapture --test-threads=1
+
 raw-layer-oracle captured output python="python3":
     test ! -e "{{output}}"
     mkdir -p "{{output}}"
