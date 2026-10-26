@@ -43,7 +43,7 @@ impl RenderPipelineInPlaceStage for SpotColorStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let [row_r, row_g, row_b, row_s] = row else {
             panic!(
                 "incorrect number of channels; expected 4, found {}",
@@ -64,6 +64,7 @@ impl RenderPipelineInPlaceStage for SpotColorStage {
             row_g[idx] = mix * self.spot_color[1] + (1.0 - mix) * row_g[idx];
             row_b[idx] = mix * self.spot_color[2] + (1.0 - mix) * row_b[idx];
         }
+        Ok(())
     }
 }
 

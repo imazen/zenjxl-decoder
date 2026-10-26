@@ -37,7 +37,7 @@ impl RenderPipelineInPlaceStage for PatchesStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         state: Option<&mut (dyn Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let state: &mut PatchesLocalState = state.unwrap().downcast_mut().unwrap();
         self.patches.add_one_row(
             row,
@@ -48,6 +48,7 @@ impl RenderPipelineInPlaceStage for PatchesStage {
             &mut state.patches_for_row,
             &mut state.blending_scratch,
         );
+        Ok(())
     }
 
     fn init_local_state(

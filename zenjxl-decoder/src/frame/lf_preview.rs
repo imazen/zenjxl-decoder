@@ -191,8 +191,8 @@ impl Frame {
                     &mut y.get_row_mut(uy)[off..],
                     &mut b.get_row_mut(uy)[off..],
                 ];
-                xyb_stage.process_row_chunk((0, 0), ulen, &mut rows, None);
-                from_linear_stage.process_row_chunk((0, 0), ulen, &mut rows, None);
+                xyb_stage.process_row_chunk((0, 0), ulen, &mut rows, None)?;
+                from_linear_stage.process_row_chunk((0, 0), ulen, &mut rows, None)?;
 
                 macro_rules! convert {
                     ($s: expr, $t: ty) => {

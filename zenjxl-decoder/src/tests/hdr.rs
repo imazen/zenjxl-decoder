@@ -624,7 +624,7 @@ fn run_tone_map_pixel(
     let mut gv = [g];
     let mut bv = [b];
     let mut rows: Vec<&mut [f32]> = vec![&mut rv, &mut gv, &mut bv];
-    stage.process_row_chunk((0, 0), 1, &mut rows, None);
+    stage.process_row_chunk((0, 0), 1, &mut rows, None).unwrap();
     [rv[0], gv[0], bv[0]]
 }
 
