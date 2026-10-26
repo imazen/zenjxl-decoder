@@ -18,7 +18,8 @@ static uint32_t bits(float f) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) return 2;
+  if (argc != 2 && argc != 3) return 2;
+  int full = argc == 3 && !strcmp(argv[2], "full");
   FILE *file = fopen(argv[1], "rb");
   if (!file || fseek(file, 0, SEEK_END)) return 3;
   long size = ftell(file);
@@ -28,18 +29,24 @@ int main(int argc, char **argv) {
   fclose(file);
   JxlDecoder *decoder = JxlDecoderCreate(NULL);
   if (!decoder) return 6;
+  unsigned char *pixels[17] = {0};
+  size_t sizes[17] = {0};
+  JxlBasicInfo basic = {0};
+  unsigned decoded = 0;
   int rc = 7;
   if (JxlDecoderSetKeepOrientation(decoder, JXL_TRUE) != JXL_DEC_SUCCESS ||
-      JxlDecoderSubscribeEvents(decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FRAME) != JXL_DEC_SUCCESS ||
+      JxlDecoderSubscribeEvents(decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FRAME |
+                                (full ? JXL_DEC_FULL_IMAGE : 0)) != JXL_DEC_SUCCESS ||
       JxlDecoderSetInput(decoder, data, (size_t)size) != JXL_DEC_SUCCESS) goto end;
   JxlDecoderCloseInput(decoder);
   printf("version %" PRIu32 "\n", JxlDecoderVersion());
   for (unsigned events = 0; events < 4096; ++events) {
     JxlDecoderStatus status = JxlDecoderProcessInput(decoder);
-    if (status == JXL_DEC_SUCCESS) { rc = 0; break; }
+    if (status == JXL_DEC_SUCCESS) { rc = full && !decoded ? 7 : 0; break; }
     if (status == JXL_DEC_BASIC_INFO) {
       JxlBasicInfo info = {0};
       if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS) break;
+      basic = info;
       printf("display %" PRIu32 " %" PRIu32 "\n", info.intrinsic_xsize, info.intrinsic_ysize);
       printf("tone %" PRIu32 " %" PRIu32 " %u %" PRIu32 "\n",
              bits(info.intensity_target), bits(info.min_nits),
@@ -59,10 +66,40 @@ int main(int argc, char **argv) {
       JxlFrameHeader frame = {0};
       if (JxlDecoderGetFrameHeader(decoder, &frame) != JXL_DEC_SUCCESS) break;
       printf("frame %" PRIu32 " %" PRIu32 "\n", frame.duration, frame.timecode);
+    } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER && full) {
+      if (basic.num_extra_channels > 16) goto end;
+      JxlPixelFormat format = {basic.num_color_channels, JXL_TYPE_FLOAT, JXL_NATIVE_ENDIAN, 0};
+      if (JxlDecoderImageOutBufferSize(decoder, &format, &sizes[0]) != JXL_DEC_SUCCESS ||
+          sizes[0] > 64 * 1024 * 1024) goto end;
+      free(pixels[0]);
+      pixels[0] = malloc(sizes[0]);
+      if (!pixels[0] || JxlDecoderSetImageOutBuffer(decoder, &format, pixels[0], sizes[0]) != JXL_DEC_SUCCESS) goto end;
+      size_t total = sizes[0];
+      format.num_channels = 1;
+      for (uint32_t i = 0; i < basic.num_extra_channels; i++) {
+        if (JxlDecoderExtraChannelBufferSize(decoder, &format, &sizes[i+1], i) != JXL_DEC_SUCCESS ||
+            sizes[i+1] > 64 * 1024 * 1024 || total + sizes[i+1] > 128 * 1024 * 1024) goto end;
+        total += sizes[i+1];
+        free(pixels[i+1]);
+        pixels[i+1] = malloc(sizes[i+1]);
+        if (!pixels[i+1] || JxlDecoderSetExtraChannelBuffer(decoder, &format, pixels[i+1], sizes[i+1], i) != JXL_DEC_SUCCESS) goto end;
+      }
+    } else if (status == JXL_DEC_FULL_IMAGE && full) {
+      printf("decoded %u\n", decoded++);
+      for (uint32_t p = 0; p <= basic.num_extra_channels; p++) {
+        printf("pixels %" PRIu32, p);
+        for (size_t i = 0; i < sizes[p]; i += 4) {
+          uint32_t sample;
+          memcpy(&sample, pixels[p] + i, sizeof(sample));
+          printf(" %" PRIu32, sample);
+        }
+        printf("\n");
+      }
     } else { fprintf(stderr, "unexpected libjxl status %d\n", status); break; }
   }
 end:
   JxlDecoderDestroy(decoder);
+  for (unsigned i = 0; i < 17; i++) free(pixels[i]);
   free(data);
   return rc;
 }

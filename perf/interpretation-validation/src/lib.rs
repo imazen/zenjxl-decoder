@@ -26,6 +26,10 @@ fn complete<T, U>(value: ProcessingResult<T, U>) -> T {
 }
 
 fn inspect(name: &str, encoded: &[u8]) -> String {
+    inspect_mode(name, encoded, false)
+}
+
+fn inspect_mode(name: &str, encoded: &[u8], full: bool) -> String {
     let root = PathBuf::from(
         std::env::var_os("JXL_INTERPRETATION_ARTIFACTS")
             .expect("persistent artifact directory required"),
@@ -44,6 +48,7 @@ fn inspect(name: &str, encoded: &[u8]) -> String {
         .args(["--kill-after=5s", "30s"])
         .arg(tool)
         .arg(&path)
+        .args(if full { vec!["full"] } else { Vec::new() })
         .output()
         .unwrap();
     assert!(
@@ -56,6 +61,86 @@ fn inspect(name: &str, encoded: &[u8]) -> String {
     text
 }
 
+#[test]
+fn native_subsampled_extra_channels_match_independent_pixels_on_odd_canvas() {
+    let (width, height) = (17usize, 13usize);
+    let color: Vec<u8> = (0..width * height * 3)
+        .map(|i| (i * 19 + 7) as u8)
+        .collect();
+    for shift in [1, 2, 3] {
+        let count = width.div_ceil(1 << shift) * height.div_ceil(1 << shift);
+        let values: Vec<u8> = (0..count).map(|i| (i * 37 + 11) as u8).collect();
+        for role in 0..7 {
+            let extra = match role {
+                0 => ExtraChannel::from_alpha_buf(&values, false),
+                1 => ExtraChannel::depth(&values),
+                2 => ExtraChannel::spot_color(&values, [0.25, 0.5, 0.75, 1.0]),
+                3 => ExtraChannel::selection_mask(&values),
+                4 => ExtraChannel::black(&values),
+                5 => ExtraChannel::cfa(&values, 2),
+                6 => ExtraChannel::thermal(&values),
+                _ => unreachable!(),
+            }
+            .with_dim_shift(shift);
+            let extras = [extra];
+            let encoded = LosslessConfig::new()
+                .with_effort(3)
+                .encode_request(
+                    width.try_into().unwrap(),
+                    height.try_into().unwrap(),
+                    PixelLayout::Rgb8,
+                )
+                .with_extra_channels(&extras)
+                .encode(&color)
+                .unwrap();
+            let independent = inspect_mode(&format!("shift-{shift}-role-{role}"), &encoded, true);
+            assert_eq!(
+                &rows(&independent, "extra ")[0][..5],
+                &[0, role, 8, 0, shift]
+            );
+            let (mut d, mut input) = decoder(&encoded);
+            assert_eq!(d.basic_info().extra_channels[0].dim_shift, shift);
+            let mut format = d.current_pixel_format().clone();
+            assert_eq!(format.color_type.samples_per_pixel(), 3);
+            format.color_data_format = Some(JxlDataFormat::U8 { bit_depth: 8 });
+            format.extra_channel_format = vec![Some(JxlDataFormat::U8 { bit_depth: 8 })];
+            d.set_pixel_format(format);
+            let frame = complete(d.process(&mut input).unwrap());
+            let mut rgb = vec![0xa5; width * height * 3];
+            let mut auxiliary = vec![0xa5; width * height];
+            let mut buffers = [
+                JxlOutputBuffer::new(&mut rgb, height, width * 3),
+                JxlOutputBuffer::new(&mut auxiliary, height, width),
+            ];
+            let _ = complete(frame.process(&mut input, &mut buffers).unwrap());
+            let planes = rows(&independent, "pixels ");
+            assert_eq!(planes.len(), 2);
+            assert_eq!(planes[0][0], 0);
+            assert_eq!(planes[1][0], 1);
+            // Spot color can contribute to composited color; black can alter
+            // its color interpretation. The independent reader checks those.
+            if role != 2 && role != 4 {
+                assert_eq!(rgb, color);
+            }
+            // libjxl's U8 stage adds ordered dithering; this decoder's optional
+            // U8 stage uses blue noise. Compare the independent float samples
+            // under the requested no-dither round-to-even conversion instead.
+            let quantized = |samples: &[u32]| {
+                samples
+                    .iter()
+                    .map(|&bits| {
+                        let sample = f32::from_bits(bits);
+                        assert!(sample.is_finite());
+                        (sample * 255.0).clamp(0.0, 255.0).round_ties_even() as u8
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(rgb, quantized(&planes[0][1..]));
+            assert_eq!(auxiliary, quantized(&planes[1][1..]));
+        }
+    }
+}
+
 fn rows(text: &str, prefix: &str) -> Vec<Vec<u32>> {
     text.lines()
         .filter_map(|l| l.strip_prefix(prefix))
@@ -66,9 +151,13 @@ fn rows(text: &str, prefix: &str) -> Vec<Vec<u32>> {
 fn decoder(bytes: &[u8]) -> (JxlDecoder<states::WithImageInfo>, &[u8]) {
     let mut input = bytes;
     let d = complete(
-        JxlDecoder::new(JxlDecoderOptions::default().with_adjust_orientation(false))
-            .process(&mut input)
-            .unwrap(),
+        JxlDecoder::new(
+            JxlDecoderOptions::default()
+                .with_adjust_orientation(false)
+                .with_dither_u8(false),
+        )
+        .process(&mut input)
+        .unwrap(),
     );
     (d, input)
 }

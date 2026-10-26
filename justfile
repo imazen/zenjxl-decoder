@@ -27,6 +27,9 @@ interpretation-core-check:
     cargo test --locked -p zenjxl-decoder --no-default-features --lib test_scanned_frames_identical_for_decode_and_scan
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+interpretation-header-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib headers::frame_header::
+
 interpretation-check artifacts:
     mkdir -p "{{artifacts}}-oracle"
     cc -std=c11 -Wall -Wextra -Werror perf/interpretation-validation/oracle.c -ljxl -o "{{artifacts}}-oracle/jxl-oracle"
