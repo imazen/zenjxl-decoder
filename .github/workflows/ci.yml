@@ -26,6 +26,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  interpretation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: interpretation
+          workspaces: perf/interpretation-validation
+      - name: Install independent metadata oracle
+        run: |
+          timeout 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+          timeout 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends libjxl-dev
+      - name: Native metadata and selected-frame qualification
+        run: |
+          mkdir -p "$HOME/tmp/jxl-interpretation"
+          export TMPDIR="$HOME/tmp"
+          cc -std=c11 -Wall -Wextra -Werror perf/interpretation-validation/oracle.c -ljxl -o "$HOME/tmp/jxl-interpretation/oracle"
+          export JXL_INTERPRETATION_ORACLE="$HOME/tmp/jxl-interpretation/oracle"
+          export JXL_INTERPRETATION_ARTIFACTS="$HOME/tmp/jxl-interpretation/generated"
+          timeout 8m cargo test --manifest-path perf/interpretation-validation/Cargo.toml --locked -- --nocapture --test-threads=1
+          timeout 3m cargo clippy --manifest-path perf/interpretation-validation/Cargo.toml --locked --all-targets -- -D warnings
+
   format:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-11-arm, macos-26-intel]
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-11-arm, macos-latest]
         features: [all, none]
         include:
           # SIMD-specific test runs on matching platforms
