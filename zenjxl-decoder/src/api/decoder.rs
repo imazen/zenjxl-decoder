@@ -585,11 +585,30 @@ pub(crate) mod tests {
 
     #[allow(clippy::type_complexity)]
     pub fn decode(
+        input: &[u8],
+        chunk_size: usize,
+        use_simple_pipeline: bool,
+        do_flush: bool,
+        callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+    ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
+        decode_with_layer_capture(
+            input,
+            chunk_size,
+            use_simple_pipeline,
+            do_flush,
+            callback,
+            false,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn decode_with_layer_capture(
         mut input: &[u8],
         chunk_size: usize,
         use_simple_pipeline: bool,
         do_flush: bool,
         callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+        capture_raw_layers: bool,
     ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
         let mut options = JxlDecoderOptions::default();
         // Correctness tests should not be constrained by memory limits.
@@ -653,6 +672,9 @@ pub(crate) mod tests {
         // Process until we have image info
         let mut decoder_with_image_info = advance_decoder!(initialized_decoder);
         decoder_with_image_info.set_use_simple_pipeline(use_simple_pipeline);
+        if capture_raw_layers {
+            decoder_with_image_info.inner.capture_raw_layers();
+        }
 
         // Get basic info
         let basic_info = decoder_with_image_info.basic_info().clone();

@@ -185,6 +185,8 @@ impl Frame {
         // rendering is done.
         let mut reference_frame_data = std::mem::take(&mut self.reference_frame_data);
         let mut lf_frame_data = std::mem::take(&mut self.lf_frame_data);
+        #[cfg(test)]
+        let mut raw_layer_data = std::mem::take(&mut self.raw_layer_data);
 
         if let Some(ref_images) = &mut reference_frame_data {
             buffers.extend(ref_images.iter_mut().map(|img| {
@@ -209,6 +211,19 @@ impl Frame {
                 ))
             }));
         };
+
+        #[cfg(test)]
+        if let Some(planes) = &mut raw_layer_data {
+            buffers.extend(planes.iter_mut().map(|plane| {
+                let rect = Rect {
+                    size: plane.size(),
+                    origin: (0, 0),
+                };
+                Some(JxlOutputBuffer::from_image_rect_mut(
+                    plane.get_rect_mut(rect).into_raw(),
+                ))
+            }));
+        }
 
         let frame_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
         let frame_start = crate::util::clock::Instant::now();
@@ -493,6 +508,10 @@ impl Frame {
 
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
+        #[cfg(test)]
+        {
+            self.raw_layer_data = raw_layer_data;
+        }
 
         if frame_timing {
             let total = frame_start.elapsed();
@@ -2093,6 +2112,28 @@ impl Frame {
                         pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                 }
+            }
+        }
+
+        // Probe the native local sample grid before blending and canvas extension.
+        // Saves do not modify the planes used to build subsequent references.
+        #[cfg(test)]
+        if decoder_state.capture_raw_layers && frame_header.frame_type == FrameType::RegularFrame {
+            let first_buffer = num_api_buffers
+                + if frame_header.can_be_referenced {
+                    num_channels
+                } else {
+                    0
+                };
+            for channel in 0..num_channels {
+                pipeline = pipeline.add_save_stage(
+                    &[channel],
+                    Orientation::Identity,
+                    first_buffer + channel,
+                    JxlColorType::Grayscale,
+                    JxlDataFormat::f32(),
+                    false,
+                );
             }
         }
 

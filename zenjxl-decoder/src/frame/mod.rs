@@ -120,6 +120,9 @@ pub struct DecoderState {
     pub render_spotcolors: bool,
     #[cfg(test)]
     pub use_simple_pipeline: bool,
+    /// Probe only: retain local planes before composition without changing references.
+    #[cfg(test)]
+    pub(crate) capture_raw_layers: bool,
     pub visible_frame_index: usize,
     pub nonvisible_frame_index: usize,
     pub high_precision: bool,
@@ -181,6 +184,8 @@ impl DecoderState {
             render_spotcolors: true,
             #[cfg(test)]
             use_simple_pipeline: false,
+            #[cfg(test)]
+            capture_raw_layers: false,
             visible_frame_index: 0,
             nonvisible_frame_index: 0,
             high_precision: false,
@@ -272,6 +277,8 @@ pub struct Frame {
     #[cfg(not(test))]
     render_pipeline: Option<Box<crate::render::LowMemoryRenderPipeline>>,
     reference_frame_data: Option<Vec<Image<f32>>>,
+    #[cfg(test)]
+    pub(crate) raw_layer_data: Option<Vec<Image<f32>>>,
     lf_frame_data: Option<[Image<f32>; 3]>,
     was_flushed_once: bool,
     /// Reusable buffers for VarDCT group decoding.

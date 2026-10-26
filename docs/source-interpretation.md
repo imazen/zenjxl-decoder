@@ -137,3 +137,28 @@ Log `zenjxl-header-budget-final-2026-10-26.log`, SHA-256
 `1055bbbf3459692842861c46e55637b9c4162bf79c0c42c9f6960762fee6141e`.
 These are test-process measurements, not a decoder resource guarantee.
 Tracking: [issue 71](https://github.com/imazen/zenjxl-decoder/issues/71).
+
+## Native local-plane probe
+
+A test-only output tap now retains F32 planes immediately before blending and
+canvas extension. It saves every local sample, including off-canvas pixels,
+while the existing pipeline continues producing composed references and display
+output. Allocation uses the decoder's existing memory tracker. The public
+`coalescing(false)` request still refuses: this is an implementation probe, not
+a completed layer API.
+
+`just raw-layer-probe <fresh-artifacts>` qualifies five RGB/alpha layers from
+`multiple_layers_noise_spline.jxl` and four CMYK/alpha layers from
+`conformance_test_images/cmyk_layers.jxl`. The simple and low-memory renderers,
+with complete and 16384-byte input delivery, return identical captured samples.
+Their composed output is bit-for-bit identical to the uncaptured path. NaN
+poisoning checks that every local sample is written. Optional export produces
+plane files and geometry for a separate independent-oracle check; it does not
+change the native test assertions.
+
+The [probe receipt](../benchmarks/raw_layer_probe_2026-10-26.json) records the
+strict lint gate and test-process resource observation:
+`run-heavy: done rc=0 90s | peak-RSS 1.13GiB | min-avail 12479MiB | peak-load 1.64`.
+Independent raw-sample comparison, public publication/selection and blend facts,
+preview/state restoration, output conversion and complete workspace bounds are
+not established by this gate.

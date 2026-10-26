@@ -30,6 +30,7 @@ pub mod modular_palette;
 pub mod oom_regression;
 pub mod orientation_preserve;
 pub mod parity;
+mod raw_layers;
 pub mod regression_known_bugs;
 pub mod reject_progressive;
 pub mod render_edges;

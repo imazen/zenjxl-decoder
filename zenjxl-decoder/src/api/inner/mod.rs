@@ -387,4 +387,13 @@ impl JxlDecoderInner {
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.codestream_parser.set_use_simple_pipeline(u);
     }
+
+    #[cfg(test)]
+    pub(crate) fn capture_raw_layers(&mut self) {
+        self.codestream_parser
+            .decoder_state
+            .as_mut()
+            .unwrap()
+            .capture_raw_layers = true;
+    }
 }

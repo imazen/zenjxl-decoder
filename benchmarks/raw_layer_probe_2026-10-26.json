@@ -1,0 +1,16 @@
+{
+  "base": "189f8585b1a28ac9fa7413c24a2ed3914126e77a",
+  "command": "just raw-layer-probe /mnt/v/output/zencodec/platform-regions-20261026-run/raw-layer-probe-1",
+  "log": "zenjxl-raw-layer-probe-1-2026-10-26.log",
+  "sha256": "93fc40df101f9c2f63b48a6d0a94c86efaaac5693bc1f92390258c02a7cc04d2",
+  "results": [
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 858 filtered out; finished in 74.78s",
+    "run-heavy: done rc=0 90s | peak-RSS 1.13GiB | min-avail 12479MiB | peak-load 1.64"
+  ],
+  "scope": "Test-only F32 local-plane capture before composition: five RGB/alpha and four CMYK/alpha regular layers, both renderers, complete and 16384-byte input delivery, exact raw-sample equivalence and unchanged composed output.",
+  "limits": [
+    "No public raw-layer support.",
+    "No independent decoder sample comparison in this gate.",
+    "No all-format, preview, transformed-output or total-workspace claim."
+  ]
+}
