@@ -8,6 +8,11 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Preserve deadline and future cooperative-stop reasons in `Error::Stopped`;
+  expose the exact reason through `Error::stop_reason`. Explicit cancellation
+  keeps `Error::Cancelled`, and both retain the coarse cancelled error class.
+  See [issue 70](https://github.com/imazen/zenjxl-decoder/issues/70).
+
 - Apply source extra-channel dimensional shifts when color remains full
   resolution, and validate the effective upsampling ceiling in that case.
   Native lossless fixtures with seven auxiliary roles and shifts 1/2/3 now

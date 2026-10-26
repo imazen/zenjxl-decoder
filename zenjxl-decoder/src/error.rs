@@ -318,6 +318,10 @@ pub enum Error {
     },
     #[error("Decoding cancelled")]
     Cancelled,
+    /// A cooperative stop other than explicit user cancellation. Preserve the
+    /// original reason so a deadline does not become indistinguishable from it.
+    #[error("Decoding stopped: {reason}")]
+    Stopped { reason: enough::StopReason },
     #[cfg(feature = "jpeg")]
     #[error("Invalid JBRD box: {0}")]
     InvalidJbrd(String),
@@ -333,9 +337,9 @@ pub enum Error {
     SeekBeforeImageInfo,
 }
 
-/// A coarse, best-effort classification of an [`Error`], for operational
+/// A coarse, best-effort classification of an [`Error`](enum@crate::api::Error), for operational
 /// decisions: mapping a decode failure to an HTTP status, choosing a log level,
-/// or deciding whether a retry could help. The exact [`Error`] variant remains
+/// or deciding whether a retry could help. The exact [`Error`](enum@crate::api::Error) variant remains
 /// available for diagnostics; [`Error::kind`] exists so callers don't have to
 /// match all ~130 variants.
 ///
@@ -355,7 +359,7 @@ pub enum ErrorClass {
     /// A memory allocation failed (HTTP ~500/507).
     OutOfMemory,
     /// The decode was cancelled or timed out via the cooperative `stop` handle
-    /// (HTTP ~499/408).
+    /// (HTTP ~499/408). Use [`Error::stop_reason`] for the exact reason.
     Cancelled,
     /// An I/O error occurred reading the input (HTTP ~500).
     Io,
@@ -375,6 +379,17 @@ pub enum ErrorClass {
 }
 
 impl Error {
+    /// Exact cooperative stop reason, independent of the coarse error class.
+    /// Explicit cancellation retains the existing `Error::Cancelled` variant;
+    /// deadlines and future reasons are carried by `Error::Stopped`.
+    pub const fn stop_reason(&self) -> Option<enough::StopReason> {
+        match self {
+            Self::Cancelled => Some(enough::StopReason::Cancelled),
+            Self::Stopped { reason } => Some(*reason),
+            _ => None,
+        }
+    }
+
     /// Classify this error into a coarse [`ErrorClass`] for operational
     /// decisions (HTTP status, log level, retry). Best-effort: see the variant
     /// itself for exact diagnostics.
@@ -390,7 +405,7 @@ impl Error {
             Error::OutOfMemory(..) | Error::ImageOutOfMemory(..) => ErrorClass::OutOfMemory,
 
             // Cooperative cancellation / timeout.
-            Error::Cancelled => ErrorClass::Cancelled,
+            Error::Cancelled | Error::Stopped { .. } => ErrorClass::Cancelled,
 
             // I/O reading the input.
             Error::IOError(..) => ErrorClass::Io,
@@ -438,7 +453,8 @@ impl Error {
 impl From<enough::StopReason> for Error {
     fn from(reason: enough::StopReason) -> Self {
         match reason {
-            enough::StopReason::Cancelled | enough::StopReason::TimedOut | _ => Error::Cancelled,
+            enough::StopReason::Cancelled => Error::Cancelled,
+            reason => Error::Stopped { reason },
         }
     }
 }
@@ -451,6 +467,20 @@ pub type Result<T, E = At<Error>> = std::result::Result<T, E>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_reason_survives_conversion_and_location() {
+        for reason in [enough::StopReason::Cancelled, enough::StopReason::TimedOut] {
+            let located = At::wrap(Error::from(reason));
+            assert_eq!(located.error().stop_reason(), Some(reason));
+            assert_eq!(located.error().kind(), ErrorClass::Cancelled);
+        }
+        assert!(matches!(
+            Error::from(enough::StopReason::Cancelled),
+            Error::Cancelled
+        ));
+        assert_eq!(Error::InvalidSignature.stop_reason(), None);
+    }
 
     #[test]
     fn error_kind_classification() {

@@ -1,5 +1,16 @@
 # Decoder investigation notes
 
+## Known Bugs: timeout reason loss — 2026-10-26
+
+Issue 70: converting `enough::StopReason::TimedOut` into the native error
+returned `Error::Cancelled`, losing the distinction from user cancellation.
+The selected-image consumer reproduced this through `decode_with`. `Stopped`
+now retains non-cancellation reasons and `Error::stop_reason()` recovers the
+original value; explicit cancellation keeps its existing unit variant and
+both retain `ErrorClass::Cancelled`. Native tests exercise both reasons before
+pixel output and preserve the pre-existing cancellation match. This remains
+under review on PR 68. It does not establish a native cancellation-latency bound.
+
 ## Known Bugs: subsampled extra channels — 2026-10-26
 
 Issue 69: valid lossless 17x13 images with subsampled extra channels failed with

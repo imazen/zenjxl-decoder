@@ -19,6 +19,21 @@ interpretation-sync export:
     cp perf/interpretation-validation/src/*.rs "{{export}}/perf/interpretation-validation/src/"
     cp justfile "{{export}}/justfile"
 
+stop-reason-sync export:
+    test ! -e "{{export}}/.git"
+    test ! -e "{{export}}/.jj"
+    cp zenjxl-decoder/src/error.rs "{{export}}/zenjxl-decoder/src/error.rs"
+    cp zenjxl-decoder/src/api/decoder.rs "{{export}}/zenjxl-decoder/src/api/decoder.rs"
+    cp justfile "{{export}}/justfile"
+
+stop-reason-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib stop_
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+stop-reason-docs:
+    RUSTDOCFLAGS="-D warnings" cargo doc --locked -p zenjxl-decoder --no-deps
+    just api-doc
+
 interpretation-resolve:
     cargo metadata --manifest-path perf/interpretation-validation/Cargo.toml --format-version 1 > /dev/null
 

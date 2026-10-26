@@ -3549,6 +3549,38 @@ pub(crate) mod tests {
         ));
     }
 
+    #[test]
+    fn test_native_stop_reasons_before_pixel_output() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Stop {
+            reason: enough::StopReason,
+            calls: Arc<AtomicUsize>,
+        }
+        impl enough::Stop for Stop {
+            fn check(&self) -> std::result::Result<(), enough::StopReason> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Err(self.reason)
+            }
+        }
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        for reason in [enough::StopReason::Cancelled, enough::StopReason::TimedOut] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let options = JxlDecoderOptions::default().with_stop(Arc::new(Stop {
+                reason,
+                calls: calls.clone(),
+            }));
+            let error = crate::decode_with(&data, options)
+                .err()
+                .expect("stopped native decode returned output");
+            assert!(calls.load(Ordering::SeqCst) > 0);
+            assert_eq!(error.error().stop_reason(), Some(reason));
+            assert_eq!(error.error().kind(), crate::error::ErrorClass::Cancelled);
+        }
+    }
+
     /// Regression for the preview-frame recovery option-propagation bug that
     /// was fixed upstream in libjxl/jxl-rs #743 (commit f1514f1).
     ///
