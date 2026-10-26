@@ -77,3 +77,23 @@ The [source-subsampling receipt](../benchmarks/source_subsampling_2026-10-26.jso
 records the 21 independent decodes, corrected header-test selection and native
 regression checks. Native comparison: run-heavy rc=0, 6 s, peak RSS 0.40 GiB,
 minimum available 13688 MiB, peak load 0.23 (test-process usage).
+
+## Layer placement is separate from output extent
+
+The native parser retains each regular frame's local size and signed origin.
+The regression `coalescing_source_layers_keep_local_extents` decodes the pinned
+`multiple_layers_noise_spline.jxl` with two input chunk sizes and observes all
+five regular frame headers through the existing internal test hook. Those
+headers match independent libjxl 0.11.1 discovery with coalescing disabled.
+Two layers extend beyond the 2048x1152 presentation canvas: the 1024x576 frames
+at (512,640) and (1860,950). Their stored extents remain intact.
+
+This is source-header qualification, not a raw-layer output API. The native
+consumer still receives one composited presentation, and requesting
+`coalescing=false` refuses before consuming input. A raw-output implementation
+must preserve the composed references needed by later frames while exposing
+uncomposited samples, geometry and blend instructions. A contained pixel-region
+type cannot substitute for signed layer placement.
+
+The [placement receipt](../benchmarks/layer_placement_2026-10-26.json) records
+`just coalescing-check`; it makes no latency or total-memory claim.

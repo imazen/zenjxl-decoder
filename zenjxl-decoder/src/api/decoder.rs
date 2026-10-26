@@ -3592,6 +3592,50 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn coalescing_source_layers_keep_local_extents() {
+        use crate::headers::frame_header::FrameType;
+        use std::{cell::RefCell, rc::Rc};
+
+        // Independently read with libjxl 0.11.1, coalescing disabled and
+        // orientation retained. Source headers describe local raster size and
+        // signed placement, not a contained crop of the composited canvas.
+        let expected = [
+            (0, 0, 2048, 1152),
+            (512, 164, 1024, 576),
+            (512, 640, 1024, 576),
+            (512, 164, 1024, 576),
+            (1860, 950, 1024, 576),
+        ];
+        let data = std::fs::read(crate::util::test::fixture_path(
+            "multiple_layers_noise_spline.jxl",
+        ))
+        .unwrap();
+        for chunk in [16_384, usize::MAX] {
+            let layers = Rc::new(RefCell::new(Vec::new()));
+            let capture = layers.clone();
+            let (_, visible) = decode(
+                &data,
+                chunk,
+                false,
+                false,
+                Some(Box::new(move |frame, _| {
+                    let header = frame.header();
+                    if header.frame_type == FrameType::RegularFrame {
+                        let (width, height) = header.size_upsampled();
+                        capture
+                            .borrow_mut()
+                            .push((header.x0, header.y0, width, height));
+                    }
+                    Ok(())
+                })),
+            )
+            .unwrap();
+            assert_eq!(*layers.borrow(), expected);
+            assert_eq!(visible.len(), 1, "raw headers are not raw output support");
+        }
+    }
+
+    #[test]
     fn test_native_stop_reasons_before_pixel_output() {
         use std::sync::{
             Arc,
