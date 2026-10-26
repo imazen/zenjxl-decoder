@@ -58,7 +58,7 @@ pub trait RenderPipelineInPlaceStage: Any + std::fmt::Display + Send + Sync {
         // one for each channel
         row: &mut [&mut [Self::Type]],
         state: Option<&mut (dyn Any + Send)>,
-    );
+    ) -> Result<()>;
 
     fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         Ok(None)

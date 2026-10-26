@@ -7,8 +7,6 @@ mod black;
 mod blending;
 mod chroma_upsample;
 mod cms;
-#[cfg(feature = "cms")]
-mod cms_cmyk;
 mod convert;
 pub(crate) mod dither;
 mod epf;
@@ -31,8 +29,6 @@ pub use black::*;
 pub use blending::*;
 pub use chroma_upsample::*;
 pub use cms::*;
-#[cfg(feature = "cms")]
-pub use cms_cmyk::*;
 pub use convert::*;
 pub use epf::*;
 pub use extend::*;

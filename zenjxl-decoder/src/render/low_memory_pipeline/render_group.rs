@@ -420,7 +420,7 @@ pub(crate) fn render(
                         },
                         &mut buffers,
                         ctx.local_states[i].as_deref_mut(),
-                    );
+                    )?;
                 }
                 Stage::Save(s) => {
                     // Find buffers for channels that will be saved.
@@ -567,7 +567,7 @@ pub(super) fn render_outside(
                         },
                         &mut buffers,
                         ctx.local_states[i].as_deref_mut(),
-                    );
+                    )?;
                 }
                 Stage::Save(s) => {
                     // Find buffers for channels that will be saved.

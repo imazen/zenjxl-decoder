@@ -27,11 +27,11 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<Image<f64>> for T {
         chunk_size: usize,
         buffers: &mut [&mut Image<f64>],
         mut state: Option<&mut (dyn Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         debug!("running inplace stage '{self}' in simple pipeline");
         let numc = buffers.len();
         if numc == 0 {
-            return;
+            return Ok(());
         }
         let size = buffers[0].size();
         for b in buffers.iter() {
@@ -53,7 +53,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<Image<f64>> for T {
                     }
                 }
                 let mut row: Vec<_> = buffer.iter_mut().map(|x| x as &mut [_]).collect();
-                self.process_row_chunk((x, y), xsize, &mut row, state.as_deref_mut());
+                self.process_row_chunk((x, y), xsize, &mut row, state.as_deref_mut())?;
                 for c in 0..numc {
                     let out_row = buffers[c].row_mut(y);
                     for ix in 0..xsize {
@@ -62,6 +62,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<Image<f64>> for T {
                 }
             }
         }
+        Ok(())
     }
 }
 
