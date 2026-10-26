@@ -238,6 +238,26 @@ impl Frame {
             None
         };
 
+        #[cfg(test)]
+        let raw_layer_data = if decoder_state.capture_raw_layers
+            && !scan_only
+            && frame_header.frame_type == FrameType::RegularFrame
+        {
+            Some(
+                (0..3 + image_metadata.extra_channel_info.len())
+                    .map(|_| {
+                        let mut plane = Image::new_tracked(frame_header.size_upsampled(), tracker)?;
+                        for y in 0..plane.size().1 {
+                            plane.row_mut(y).fill(f32::NAN);
+                        }
+                        Ok(plane)
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        } else {
+            None
+        };
+
         let lf_frame_data = if frame_header.lf_level != 0 {
             let upsampled = shrink(frame_header.size_upsampled());
             Some(
@@ -268,6 +288,8 @@ impl Frame {
             decoder_state,
             render_pipeline: None,
             reference_frame_data,
+            #[cfg(test)]
+            raw_layer_data,
             lf_frame_data,
             was_flushed_once: false,
             vardct_buffers: None,

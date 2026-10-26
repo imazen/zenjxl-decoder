@@ -92,7 +92,7 @@ impl RenderPipelineInPlaceStage for YcbcrToRgbStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         // pixels are stored in `Cb Y Cr` order to mimic XYB colorspace
         let [row_cb, row_y, row_cr] = row else {
             panic!(
@@ -107,6 +107,7 @@ impl RenderPipelineInPlaceStage for YcbcrToRgbStage {
         // Full-range BT.601 as defined by JFIF Clause 7:
         // https://www.itu.int/rec/T-REC-T.871-201105-I/en
         ycbcr_to_rgb_simd_dispatch(row_cb, row_y, row_cr, xsize);
+        Ok(())
     }
 }
 

@@ -288,6 +288,15 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.basic_info().unwrap()
     }
 
+    /// Inspect source precision and spot/CFA parameters without decoding pixels.
+    ///
+    /// `index` addresses [`JxlBasicInfo::extra_channels`]; `None` means the index
+    /// is out of range. The returned snapshot is independent of the decoder and
+    /// of the selected output format. No additional channel buffer is allocated.
+    pub fn extra_channel_details(&self, index: usize) -> Option<super::JxlExtraChannelDetails> {
+        self.inner.extra_channel_details(index)
+    }
+
     /// Retrieves the file's color profile.
     pub fn embedded_color_profile(&self) -> &JxlColorProfile {
         self.inner.embedded_color_profile().unwrap()
@@ -406,14 +415,25 @@ impl JxlDecoder<WithImageInfo> {
     ///
     /// // 2. Seek to visible frame n with a normal decoder that has parsed image info.
     /// let target = frames[n].seek_target.expect("seekable");
-    /// decoder.start_new_frame(target);
+    /// decoder.try_start_new_frame(target)?;
     /// let mut input = &file[target.decode_start_file_offset as usize..];
     /// // 3. process() -> WithFrameInfo for frame n; process(buffers) decodes it.
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the seek is unsupported, including uncoalesced output. Prefer
+    /// [`Self::try_start_new_frame`] to receive the native error.
     pub fn start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) {
-        self.inner
-            .start_new_frame(seek_target)
-            .expect("image info is available in the WithImageInfo state");
+        self.try_start_new_frame(seek_target)
+            .expect("visible-frame seek must be supported");
+    }
+
+    /// Fallible form of [`Self::start_new_frame`]. A raw-layer decoder refuses
+    /// visible-presentation targets before changing state; sequential decoding
+    /// can continue after that refusal. The existing infallible method remains
+    /// for source compatibility.
+    pub fn try_start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) -> Result<()> {
+        self.inner.start_new_frame(seek_target)
     }
 
     #[cfg(test)]
@@ -440,6 +460,19 @@ impl JxlDecoder<WithFrameInfo> {
 
     pub fn frame_header(&self) -> JxlFrameHeader {
         self.inner.frame_header().unwrap()
+    }
+
+    /// Local source extent and per-channel composition facts. Reference slots
+    /// belong to this decoding context; they are not portable image identities.
+    pub fn frame_layer_info(&self) -> crate::api::JxlLayerInfo {
+        self.inner.frame_layer_info().unwrap()
+    }
+
+    /// The selected frame's original timecode, separate from presentation time
+    /// and duration. `Some(0)` is a present zero timecode; `None` means absent.
+    /// The value is the encoded 32-bit timecode, without decimal reinterpretation.
+    pub fn frame_timecode(&self) -> Option<u32> {
+        self.inner.frame_timecode()
     }
 
     /// Number of passes we have full data for.
@@ -569,11 +602,30 @@ pub(crate) mod tests {
 
     #[allow(clippy::type_complexity)]
     pub fn decode(
+        input: &[u8],
+        chunk_size: usize,
+        use_simple_pipeline: bool,
+        do_flush: bool,
+        callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+    ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
+        decode_with_layer_capture(
+            input,
+            chunk_size,
+            use_simple_pipeline,
+            do_flush,
+            callback,
+            false,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn decode_with_layer_capture(
         mut input: &[u8],
         chunk_size: usize,
         use_simple_pipeline: bool,
         do_flush: bool,
         callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+        capture_raw_layers: bool,
     ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
         let mut options = JxlDecoderOptions::default();
         // Correctness tests should not be constrained by memory limits.
@@ -637,6 +689,9 @@ pub(crate) mod tests {
         // Process until we have image info
         let mut decoder_with_image_info = advance_decoder!(initialized_decoder);
         decoder_with_image_info.set_use_simple_pipeline(use_simple_pipeline);
+        if capture_raw_layers {
+            decoder_with_image_info.inner.capture_raw_layers();
+        }
 
         // Get basic info
         let basic_info = decoder_with_image_info.basic_info().clone();
@@ -3531,6 +3586,268 @@ pub(crate) mod tests {
             result,
             Err(e) if matches!(e.error(), crate::error::Error::Cancelled)
         ));
+    }
+
+    #[test]
+    fn coalescing_requirement_refuses_before_input_or_scan() {
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        for scan_only in [false, true] {
+            for bytes in [data.as_slice(), &[]] {
+                let mut input = bytes;
+                let decoder = JxlDecoder::new(
+                    JxlDecoderOptions::default()
+                        .with_coalescing(false)
+                        .with_scan_frames_only(scan_only),
+                );
+                let error = decoder
+                    .process(&mut input)
+                    .err()
+                    .expect("required uncoalesced output was silently ignored");
+                assert_eq!(error.error().kind(), crate::error::ErrorClass::Unsupported);
+                assert!(matches!(
+                    error.error(),
+                    crate::error::Error::UncoalescedOutputUnsupported
+                ));
+                assert_eq!(input.len(), bytes.len(), "refusal consumed caller input");
+            }
+        }
+        let error = crate::decode_with(&data, JxlDecoderOptions::default().with_coalescing(false))
+            .err()
+            .expect("one-shot decode substituted a composited image");
+        assert_eq!(error.error().kind(), crate::error::ErrorClass::Unsupported);
+    }
+
+    #[test]
+    fn coalescing_explicit_default_preserves_pixels() {
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        let normal = crate::decode(&data).unwrap();
+        let explicit =
+            crate::decode_with(&data, JxlDecoderOptions::default().with_coalescing(true)).unwrap();
+        assert_eq!(
+            (normal.width, normal.height, normal.channels),
+            (explicit.width, explicit.height, explicit.channels)
+        );
+        assert_eq!(normal.data, explicit.data);
+    }
+
+    #[test]
+    fn coalescing_source_layers_keep_local_extents() {
+        use crate::headers::frame_header::FrameType;
+        use std::{cell::RefCell, rc::Rc};
+
+        // Independently read with libjxl 0.11.1, coalescing disabled and
+        // orientation retained. Source headers describe local raster size and
+        // signed placement, not a contained crop of the composited canvas.
+        let expected = [
+            (0, 0, 2048, 1152),
+            (512, 164, 1024, 576),
+            (512, 640, 1024, 576),
+            (512, 164, 1024, 576),
+            (1860, 950, 1024, 576),
+        ];
+        let data = std::fs::read(crate::util::test::fixture_path(
+            "multiple_layers_noise_spline.jxl",
+        ))
+        .unwrap();
+        for chunk in [16_384, usize::MAX] {
+            let layers = Rc::new(RefCell::new(Vec::new()));
+            let capture = layers.clone();
+            let (_, visible) = decode(
+                &data,
+                chunk,
+                false,
+                false,
+                Some(Box::new(move |frame, _| {
+                    let header = frame.header();
+                    if header.frame_type == FrameType::RegularFrame {
+                        let (width, height) = header.size_upsampled();
+                        capture
+                            .borrow_mut()
+                            .push((header.x0, header.y0, width, height));
+                    }
+                    Ok(())
+                })),
+            )
+            .unwrap();
+            assert_eq!(*layers.borrow(), expected);
+            assert_eq!(visible.len(), 1, "raw headers are not raw output support");
+        }
+    }
+
+    fn drive_header_budget(
+        decoder: &mut JxlDecoderInner,
+        mut input: &[u8],
+        chunk: usize,
+    ) -> Result<()> {
+        let mut pending: usize = 0;
+        let max_calls = input.len().saturating_mul(2).saturating_add(256);
+        for _ in 0..max_calls {
+            if !decoder.has_more_frames() {
+                return Ok(());
+            }
+            pending = pending.saturating_add(chunk).min(input.len());
+            let mut offered = &input[..pending];
+            let result = decoder.process(&mut offered, None)?;
+            let consumed = pending - offered.len();
+            input = &input[consumed..];
+            pending -= consumed;
+            assert!(
+                !matches!(result, ProcessingResult::NeedsMoreInput { .. })
+                    || consumed > 0
+                    || pending < input.len(),
+                "header scan stalled on complete fixture input"
+            );
+        }
+        panic!("header scan exceeded the bounded test driver calls");
+    }
+
+    fn header_budget(limit: u64) -> JxlDecoderInner {
+        JxlDecoderInner::new(
+            JxlDecoderOptions::default()
+                .with_scan_frames_only(true)
+                .with_limits(crate::api::JxlDecoderLimits::default().with_max_frame_headers(limit)),
+        )
+    }
+
+    fn assert_header_budget(error: &crate::error::Error, limit: u64) {
+        assert_eq!(error.kind(), crate::error::ErrorClass::LimitExceeded);
+        assert!(
+            matches!(error, Error::LimitExceeded {
+            resource: "frame_headers", actual, limit: bound,
+        } if *actual == limit + 1 && *bound == limit),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn frame_header_budget_counts_hidden_frames_and_not_partial_retries() {
+        for (name, count) in [
+            ("multiple_layers_noise_spline.jxl", 5),
+            ("with_preview.jxl", 2),
+            ("grayscale_patches_var_dct.jxl", 2),
+        ] {
+            let data = crate::util::test::fixture_bytes(name);
+            for chunk in [1, 16384, usize::MAX] {
+                let mut accepted = header_budget(count);
+                drive_header_budget(&mut accepted, &data, chunk).unwrap();
+                assert_eq!(accepted.scanned_frames().len(), 1, "{name}");
+                // Exhaustion is not an extra header parse or a budget error.
+                drive_header_budget(&mut accepted, &[], chunk).unwrap();
+                for limit in [0, count - 1] {
+                    let mut refused = header_budget(limit);
+                    let error = drive_header_budget(&mut refused, &data, chunk).unwrap_err();
+                    assert_header_budget(error.error(), limit);
+                    assert!(
+                        refused.scanned_frames().is_empty(),
+                        "last visible frame escaped"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn frame_header_budget_survives_rewind_and_seek_but_reset_starts_an_operation() {
+        let data = crate::util::test::fixture_bytes("multiple_layers_noise_spline.jxl");
+        let mut decoder = header_budget(5);
+        drive_header_budget(&mut decoder, &data, 17).unwrap();
+        let target = decoder.scanned_frames()[0].seek_target.unwrap();
+        let offset = target.decode_start_file_offset as usize;
+        decoder.start_new_frame(target).unwrap();
+        let error = drive_header_budget(&mut decoder, &data[offset..], 17).unwrap_err();
+        assert_header_budget(error.error(), 5);
+        decoder.rewind();
+        let error = drive_header_budget(&mut decoder, &data, 17).unwrap_err();
+        assert_header_budget(error.error(), 5);
+        decoder.reset();
+        drive_header_budget(&mut decoder, &data, 17).unwrap();
+        assert_eq!(decoder.scanned_frames().len(), 1);
+    }
+
+    #[test]
+    fn frame_header_budget_counts_low_frequency_frames() {
+        use crate::headers::frame_header::FrameType;
+        use std::{cell::RefCell, rc::Rc};
+        let data = crate::util::test::fixture_bytes("conformance_test_images/progressive.jxl");
+        let counts = Rc::new(RefCell::new((0_u64, 0_u64)));
+        let capture = counts.clone();
+        let (_, visible) = decode(
+            &data,
+            17,
+            false,
+            false,
+            Some(Box::new(move |frame, _| {
+                let mut counts = capture.borrow_mut();
+                counts.0 += 1;
+                counts.1 += u64::from(frame.header().frame_type == FrameType::LFFrame);
+                Ok(())
+            })),
+        )
+        .unwrap();
+        let (all, lf) = *counts.borrow();
+        assert!(
+            lf > 0 && all > visible.len() as u64,
+            "fixture needs hidden LF work"
+        );
+        drive_header_budget(&mut header_budget(all), &data, 1).unwrap();
+        let error = drive_header_budget(&mut header_budget(all - 1), &data, 1).unwrap_err();
+        assert_header_budget(error.error(), all - 1);
+    }
+
+    #[test]
+    fn frame_header_budget_applies_to_pixel_decoding_without_changing_samples() {
+        let data = crate::util::test::fixture_bytes("multiple_layers_noise_spline.jxl");
+        let options = |limit| {
+            JxlDecoderOptions::default()
+                .with_limits(crate::api::JxlDecoderLimits::default().with_max_frame_headers(limit))
+        };
+        let error = crate::decode_with(&data, options(4))
+            .err()
+            .expect("fifth header escaped");
+        assert_header_budget(error.error(), 4);
+        let limited = crate::decode_with(&data, options(5)).unwrap();
+        let unlimited_headers = crate::decode(&data).unwrap();
+        assert_eq!(
+            (limited.width, limited.height, limited.channels),
+            (
+                unlimited_headers.width,
+                unlimited_headers.height,
+                unlimited_headers.channels
+            )
+        );
+        assert_eq!(limited.data, unlimited_headers.data);
+    }
+
+    #[test]
+    fn test_native_stop_reasons_before_pixel_output() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Stop {
+            reason: enough::StopReason,
+            calls: Arc<AtomicUsize>,
+        }
+        impl enough::Stop for Stop {
+            fn check(&self) -> std::result::Result<(), enough::StopReason> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Err(self.reason)
+            }
+        }
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        for reason in [enough::StopReason::Cancelled, enough::StopReason::TimedOut] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let options = JxlDecoderOptions::default().with_stop(Arc::new(Stop {
+                reason,
+                calls: calls.clone(),
+            }));
+            let error = crate::decode_with(&data, options)
+                .err()
+                .expect("stopped native decode returned output");
+            assert!(calls.load(Ordering::SeqCst) > 0);
+            assert_eq!(error.error().stop_reason(), Some(reason));
+            assert_eq!(error.error().kind(), crate::error::ErrorClass::Cancelled);
+        }
     }
 
     /// Regression for the preview-frame recovery option-propagation bug that

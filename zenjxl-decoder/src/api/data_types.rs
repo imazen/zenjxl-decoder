@@ -16,6 +16,10 @@ pub enum JxlColorType {
     /// Four interleaved channels: C, M, Y and K, where K is taken from the
     /// image's Black extra channel. Only valid for color images with a Black
     /// extra channel.
+    /// CMY plus black, using native reversed ink polarity: zero means full
+    /// ink and one means no ink for normalized floating-point output.
+    /// An embedded ICC profile uses conventional device values; its consumer
+    /// must account for this polarity before applying a transform.
     Cmyk,
 }
 
@@ -325,6 +329,22 @@ pub struct JxlExtraChannel {
     pub dim_shift: u32,
 }
 
+/// Source sample precision and rendering parameters for one extra channel.
+///
+/// These describe the encoded channel, not the requested output sample format.
+/// Obtain them with [`crate::api::JxlDecoder::extra_channel_details`] using the
+/// same index as [`crate::api::JxlBasicInfo::extra_channels`].
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct JxlExtraChannelDetails {
+    /// Original integer or floating-point precision, including exponent bits.
+    pub bit_depth: JxlBitDepth,
+    /// Spot-color RGBA parameters, present only for a spot-color channel.
+    pub spot_color: Option<[f32; 4]>,
+    /// CFA channel index, present only for a CFA channel.
+    pub cfa_channel: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JxlAnimation {
     pub tps_numerator: u32,
@@ -339,6 +359,70 @@ pub struct JxlFrameHeader {
     pub duration: Option<f64>,
     /// Frame size (width, height)
     pub size: (usize, usize),
+}
+
+/// Source operation for blending color or one extra channel with a reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JxlLayerBlendMode {
+    Replace,
+    Add,
+    Blend,
+    AlphaWeightedAdd,
+    Multiply,
+}
+
+/// Encoded blend facts, before any decoder composition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct JxlLayerBlend {
+    pub mode: JxlLayerBlendMode,
+    /// A native reference slot (0..=3), not a frame index or portable image ID.
+    pub source: u32,
+    /// Index in the source extra-channel list, used by alpha-based modes.
+    pub alpha_channel: u32,
+    pub clamp: bool,
+}
+
+impl JxlLayerBlend {
+    pub(crate) fn from_header(value: &crate::headers::frame_header::BlendingInfo) -> Self {
+        use crate::headers::frame_header::BlendingMode as Mode;
+        Self {
+            mode: match value.mode {
+                Mode::Replace => JxlLayerBlendMode::Replace,
+                Mode::Add => JxlLayerBlendMode::Add,
+                Mode::Blend => JxlLayerBlendMode::Blend,
+                Mode::AlphaWeightedAdd => JxlLayerBlendMode::AlphaWeightedAdd,
+                Mode::Mul => JxlLayerBlendMode::Multiply,
+            },
+            source: value.source,
+            alpha_channel: value.alpha_channel,
+            clamp: value.clamp,
+        }
+    }
+}
+
+/// Local geometry and composition instructions of the current source frame.
+/// These are source facts even when the requested pixel output is composited.
+/// In the qualified uncoalesced mode, pixels use these local stored dimensions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct JxlLayerInfo {
+    /// Signed placement on the stored presentation canvas; may lie outside it.
+    pub origin: (i32, i32),
+    /// Full local dimensions, including off-canvas samples.
+    pub size: (usize, usize),
+    pub color_blend: JxlLayerBlend,
+    /// In source extra-channel order, independently of requested output planes.
+    pub extra_channel_blends: Vec<JxlLayerBlend>,
+    /// Native slot saved by this frame, if later decoding can reference it.
+    pub saved_reference: Option<u32>,
+    /// A saved reference precedes color transformation, rather than holding the
+    /// composed canvas. Such reference storage is internal to native decoding.
+    pub saved_before_color_transform: bool,
+    /// Source ticks; interpret using the optional basic-info animation clock.
+    pub duration_ticks: u32,
+    pub is_last: bool,
 }
 
 #[cfg(test)]

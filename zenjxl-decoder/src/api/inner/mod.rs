@@ -108,6 +108,31 @@ impl JxlDecoderInner {
         self.codestream_parser.basic_info.as_ref()
     }
 
+    /// Extra-channel source details, once image information is available.
+    /// Returns `None` before image info or for an out-of-range channel index.
+    pub fn extra_channel_details(
+        &self,
+        index: usize,
+    ) -> Option<crate::api::JxlExtraChannelDetails> {
+        self.basic_info()?;
+        let info = self.codestream_parser.extra_channel_info(index)?;
+        let depth = info.bit_depth();
+        Some(crate::api::JxlExtraChannelDetails {
+            bit_depth: if depth.floating_point_sample() {
+                crate::api::JxlBitDepth::Float {
+                    bits_per_sample: depth.bits_per_sample(),
+                    exponent_bits_per_sample: depth.exponent_bits_per_sample(),
+                }
+            } else {
+                crate::api::JxlBitDepth::Int {
+                    bits_per_sample: depth.bits_per_sample(),
+                }
+            },
+            spot_color: info.spot_color,
+            cfa_channel: info.cfa_channel(),
+        })
+    }
+
     /// Retrieves the file's color profile, if available.
     pub fn embedded_color_profile(&self) -> Option<&JxlColorProfile> {
         self.codestream_parser.embedded_color_profile.as_ref()
@@ -151,15 +176,18 @@ impl JxlDecoderInner {
         // TODO(veluca): return an error if we are asking for both planar and
         // interleaved-in-color alpha.
         self.codestream_parser.pixel_format = Some(pixel_format);
-        self.codestream_parser.update_default_output_color_profile();
+        self.codestream_parser
+            .update_default_output_color_profile(self.options.coalescing);
     }
 
     pub fn frame_header(&self) -> Option<JxlFrameHeader> {
         let frame_header = self.codestream_parser.frame.as_ref()?.header();
-        // The render pipeline always adds ExtendToImageDimensionsStage which extends
-        // frames to the full image size. So the output size is always the image size,
-        // not the frame's upsampled size.
-        let size = self.codestream_parser.basic_info.as_ref()?.size;
+        // Composited output uses the canvas; raw output keeps its local extent.
+        let size = if self.options.coalescing {
+            self.codestream_parser.basic_info.as_ref()?.size
+        } else {
+            frame_header.size_upsampled()
+        };
         Some(JxlFrameHeader {
             name: frame_header.name.clone(),
             duration: self
@@ -169,6 +197,43 @@ impl JxlDecoderInner {
                 .map(|anim| frame_header.duration(anim)),
             size,
         })
+    }
+
+    /// Source layer facts for the current regular/presentation frame.
+    /// Internal LF and reference-only frames return `None`.
+    pub fn frame_layer_info(&self) -> Option<crate::api::JxlLayerInfo> {
+        let header = self.codestream_parser.frame.as_ref()?.header();
+        if matches!(
+            header.frame_type,
+            crate::headers::frame_header::FrameType::LFFrame
+                | crate::headers::frame_header::FrameType::ReferenceOnly
+        ) {
+            return None;
+        }
+        Some(crate::api::JxlLayerInfo {
+            origin: (header.x0, header.y0),
+            size: header.size_upsampled(),
+            color_blend: crate::api::JxlLayerBlend::from_header(&header.blending_info),
+            extra_channel_blends: header
+                .ec_blending_info
+                .iter()
+                .map(crate::api::JxlLayerBlend::from_header)
+                .collect(),
+            saved_reference: header.can_be_referenced.then_some(header.save_as_reference),
+            saved_before_color_transform: header.can_be_referenced && header.save_before_ct,
+            duration_ticks: header.duration,
+            is_last: header.is_last,
+        })
+    }
+
+    /// Current frame's source timecode, when the stream declares timecodes.
+    /// `None` before a frame header or when this frame has no timecode field.
+    pub fn frame_timecode(&self) -> Option<u32> {
+        self.codestream_parser
+            .frame
+            .as_ref()?
+            .header()
+            .timecode(self.codestream_parser.animation.as_ref())
     }
 
     /// Number of passes we have full data for.
@@ -202,6 +267,11 @@ impl JxlDecoderInner {
     /// Errors with [`Error::SeekBeforeImageInfo`] if the image header has
     /// not been parsed yet (or the decoder was `reset`/`rewind`-ed since).
     pub fn start_new_frame(&mut self, target: VisibleFrameSeekTarget) -> Result<()> {
+        if !self.options.coalescing {
+            return Err(at!(Error::UncoalescedOutputRequirement(
+                "sequential layer decoding; visible-frame seeks select presentations"
+            )));
+        }
         self.codestream_parser
             .start_new_frame(&self.options, &target)?;
         self.box_parser.reset_for_codestream_seek(
@@ -351,5 +421,14 @@ impl JxlDecoderInner {
     #[cfg(test)]
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.codestream_parser.set_use_simple_pipeline(u);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capture_raw_layers(&mut self) {
+        self.codestream_parser
+            .decoder_state
+            .as_mut()
+            .unwrap()
+            .capture_raw_layers = true;
     }
 }

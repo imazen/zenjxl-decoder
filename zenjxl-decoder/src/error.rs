@@ -307,7 +307,8 @@ pub enum Error {
     CmsError(String),
     /// A configurable security/resource limit was exceeded. `resource` is one of
     /// the stable identifiers `"pixels"`, `"memory_bytes"`, `"icc_size"`,
-    /// `"icc_amplification"`, `"extra_channels"`, or `"reference_frames"` —
+    /// `"icc_amplification"`, `"extra_channels"`, `"reference_frames"`, or
+    /// `"frame_headers"` —
     /// the budgets in `JxlDecoderLimits`. For coarse bucketing (e.g. to an HTTP
     /// status) use [`Error::kind`], which maps this to [`ErrorClass::LimitExceeded`].
     #[error("Security limit exceeded: {resource} is {actual}, limit is {limit}")]
@@ -318,6 +319,10 @@ pub enum Error {
     },
     #[error("Decoding cancelled")]
     Cancelled,
+    /// A cooperative stop other than explicit user cancellation. Preserve the
+    /// original reason so a deadline does not become indistinguishable from it.
+    #[error("Decoding stopped: {reason}")]
+    Stopped { reason: enough::StopReason },
     #[cfg(feature = "jpeg")]
     #[error("Invalid JBRD box: {0}")]
     InvalidJbrd(String),
@@ -331,11 +336,20 @@ pub enum Error {
         "start_new_frame called before the image header was parsed: seeking needs the image info first"
     )]
     SeekBeforeImageInfo,
+    /// Operation settings conflict with the supported local-layer mode. The
+    /// requested view must not become composited output or ignore a transform.
+    #[error(
+        "Uncoalesced JPEG XL output requires stored orientation, skipped previews and no display transforms"
+    )]
+    UncoalescedOutputUnsupported,
+    /// The requested raw layer representation is not yet qualified.
+    #[error("Uncoalesced JPEG XL output requires {0}")]
+    UncoalescedOutputRequirement(&'static str),
 }
 
-/// A coarse, best-effort classification of an [`Error`], for operational
+/// A coarse, best-effort classification of an [`Error`](enum@crate::api::Error), for operational
 /// decisions: mapping a decode failure to an HTTP status, choosing a log level,
-/// or deciding whether a retry could help. The exact [`Error`] variant remains
+/// or deciding whether a retry could help. The exact [`Error`](enum@crate::api::Error) variant remains
 /// available for diagnostics; [`Error::kind`] exists so callers don't have to
 /// match all ~130 variants.
 ///
@@ -355,7 +369,7 @@ pub enum ErrorClass {
     /// A memory allocation failed (HTTP ~500/507).
     OutOfMemory,
     /// The decode was cancelled or timed out via the cooperative `stop` handle
-    /// (HTTP ~499/408).
+    /// (HTTP ~499/408). Use [`Error::stop_reason`] for the exact reason.
     Cancelled,
     /// An I/O error occurred reading the input (HTTP ~500).
     Io,
@@ -375,6 +389,17 @@ pub enum ErrorClass {
 }
 
 impl Error {
+    /// Exact cooperative stop reason, independent of the coarse error class.
+    /// Explicit cancellation retains the existing `Error::Cancelled` variant;
+    /// deadlines and future reasons are carried by `Error::Stopped`.
+    pub const fn stop_reason(&self) -> Option<enough::StopReason> {
+        match self {
+            Self::Cancelled => Some(enough::StopReason::Cancelled),
+            Self::Stopped { reason } => Some(*reason),
+            _ => None,
+        }
+    }
+
     /// Classify this error into a coarse [`ErrorClass`] for operational
     /// decisions (HTTP status, log level, retry). Best-effort: see the variant
     /// itself for exact diagnostics.
@@ -390,7 +415,7 @@ impl Error {
             Error::OutOfMemory(..) | Error::ImageOutOfMemory(..) => ErrorClass::OutOfMemory,
 
             // Cooperative cancellation / timeout.
-            Error::Cancelled => ErrorClass::Cancelled,
+            Error::Cancelled | Error::Stopped { .. } => ErrorClass::Cancelled,
 
             // I/O reading the input.
             Error::IOError(..) => ErrorClass::Io,
@@ -408,7 +433,10 @@ impl Error {
             | Error::SeekBeforeImageInfo => ErrorClass::OutputConfiguration,
 
             // Valid input using a feature this decoder / configuration refuses.
-            Error::ProgressiveRejected | Error::InvalidRenderingIntent => ErrorClass::Unsupported,
+            Error::ProgressiveRejected
+            | Error::InvalidRenderingIntent
+            | Error::UncoalescedOutputUnsupported
+            | Error::UncoalescedOutputRequirement(_) => ErrorClass::Unsupported,
 
             // Internal invariant violations — most likely a decoder bug. Includes
             // failures while *synthesising* an output ICC profile.
@@ -438,7 +466,8 @@ impl Error {
 impl From<enough::StopReason> for Error {
     fn from(reason: enough::StopReason) -> Self {
         match reason {
-            enough::StopReason::Cancelled | enough::StopReason::TimedOut | _ => Error::Cancelled,
+            enough::StopReason::Cancelled => Error::Cancelled,
+            reason => Error::Stopped { reason },
         }
     }
 }
@@ -451,6 +480,20 @@ pub type Result<T, E = At<Error>> = std::result::Result<T, E>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_reason_survives_conversion_and_location() {
+        for reason in [enough::StopReason::Cancelled, enough::StopReason::TimedOut] {
+            let located = At::wrap(Error::from(reason));
+            assert_eq!(located.error().stop_reason(), Some(reason));
+            assert_eq!(located.error().kind(), ErrorClass::Cancelled);
+        }
+        assert!(matches!(
+            Error::from(enough::StopReason::Cancelled),
+            Error::Cancelled
+        ));
+        assert_eq!(Error::InvalidSignature.stop_reason(), None);
+    }
 
     #[test]
     fn error_kind_classification() {

@@ -106,7 +106,7 @@ impl SimpleRenderPipeline {
                         self.shared.chunk_size,
                         &mut output_buf,
                         state.as_deref_mut(),
-                    );
+                    )?;
                 }
                 Stage::Extend(e) => {
                     e.extend_simple(

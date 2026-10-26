@@ -119,6 +119,16 @@ pub struct JxlDecoderLimits {
     /// This provides defense-in-depth against memory exhaustion attacks.
     pub max_memory_bytes: Option<u64>,
 
+    /// Maximum completed frame-header parses for this decoder operation.
+    /// Counts preview, reference-only, LF and regular frames, including headers
+    /// reparsed after seeking or rewinding. A partial input retry is not another
+    /// completed header. Checked before starting the next header parse.
+    ///
+    /// `None` (the default) adds no header-count limit. This bounds neither bytes
+    /// nor CPU/memory inside one header; keep the other limits and stop token.
+    /// A full decoder reset begins a new operation and resets the count.
+    pub max_frame_headers: Option<u64>,
+
     /// Highest JPEG XL conformance level accepted: files that use splines,
     /// patches or modular channels beyond this level's bounds are rejected
     /// with [`Error::LimitExceeded`](crate::error::Error::LimitExceeded) (see
@@ -148,6 +158,7 @@ impl Default for JxlDecoderLimits {
             max_spline_points: Some(1 << 20), // 1M points
             max_reference_frames: Some(4),    // 4 reference frames
             max_memory_bytes: Some(max_memory),
+            max_frame_headers: None,
             max_codestream_level: JxlCodestreamLevel::Level5,
         }
     }
@@ -166,6 +177,7 @@ impl JxlDecoderLimits {
             max_spline_points: None,
             max_reference_frames: None,
             max_memory_bytes: None,
+            max_frame_headers: None,
             max_codestream_level: JxlCodestreamLevel::Level10,
         }
     }
@@ -184,6 +196,7 @@ impl JxlDecoderLimits {
             max_spline_points: Some(1 << 16), // 64K points
             max_reference_frames: Some(2),    // 2 reference frames
             max_memory_bytes: Some(1 << 30),  // 1 GB total memory
+            max_frame_headers: None,
             max_codestream_level: JxlCodestreamLevel::Level5,
         }
     }
@@ -244,6 +257,14 @@ impl JxlDecoderLimits {
         self
     }
 
+    /// Bound completed frame-header parses, including hidden frames and replays.
+    /// See [`Self::max_frame_headers`] for the operation boundary and exclusions.
+    #[must_use]
+    pub fn with_max_frame_headers(mut self, max: u64) -> Self {
+        self.max_frame_headers = Some(max);
+        self
+    }
+
     /// Set the highest conformance level accepted (see
     /// [`max_codestream_level`](Self::max_codestream_level)).
     #[must_use]
@@ -299,21 +320,21 @@ pub struct JxlDecoderOptions {
     /// Default: `true`. Set to `false` for plain round-to-nearest.
     pub dither_u8: bool,
     pub render_spot_colors: bool,
-    /// **Not implemented — this field is read nowhere in the decoder.**
+    /// Coalesce frames onto the full canvas. Default: `true`.
     ///
-    /// The decoder always coalesces: every frame is composited onto the canvas
-    /// and returned full-size, which is what `coalescing: true` means, so the
-    /// default is honest and setting it to `true` is a no-op. Setting it to
-    /// `false` — libjxl's `JXL_DEC_SET_COALESCING(false)`, which returns each
-    /// frame's raw uncomposited rectangle plus its crop origin and blend mode —
-    /// is silently ignored and you still get coalesced output.
+    /// Setting this to `false` selects regular local layers before composition.
+    /// The qualified mode requires stored orientation (`adjust_orientation =
+    /// false`), skipped previews, no CMS/tone mapping/premultiplication, and F32
+    /// pixel formats. Spot channels must remain unrendered, and CMYK must retain
+    /// its black channel. Configure the pixel format after image information is
+    /// available. Header-only scanning does not require F32 buffers.
     ///
-    /// Tracked in imazen/zenjxl-decoder#57. Either the option gets implemented
-    /// or it gets removed; until then it is documented rather than advertised,
-    /// because removing a public field is a breaking change and this crate
-    /// batches those (see the changelog's QUEUED BREAKING CHANGES).
-    ///
-    /// Default: `true`.
+    /// [`crate::api::JxlDecoder::frame_layer_info`] returns signed placement and
+    /// per-channel blend facts. The caller's buffers use the local frame size,
+    /// including off-canvas samples. Composed references remain internal for
+    /// subsequent decoding. Visible-frame seeks, progressive flushing and
+    /// other representations refuse; no flattened substitute is returned.
+    /// Further configurations remain tracked in issue 57.
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
     pub skip_preview: bool,
@@ -437,9 +458,8 @@ impl JxlDecoderOptions {
 
     /// Coalesce animation frames onto the canvas.
     ///
-    /// **Not implemented.** The decoder always coalesces; passing `false` has
-    /// no effect. See [`JxlDecoderOptions::coalescing`] and
-    /// imazen/zenjxl-decoder#57.
+    /// See [`JxlDecoderOptions::coalescing`] for the qualified F32 local-layer
+    /// mode and explicit refusals for other configurations.
     #[must_use]
     pub fn with_coalescing(mut self, v: bool) -> Self {
         self.coalescing = v;

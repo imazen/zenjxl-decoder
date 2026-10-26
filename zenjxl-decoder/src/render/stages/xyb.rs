@@ -243,7 +243,7 @@ impl RenderPipelineInPlaceStage for XybStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let [row_x, row_y, row_b] = row else {
             panic!(
                 "incorrect number of channels; expected 3, found {}",
@@ -259,6 +259,7 @@ impl RenderPipelineInPlaceStage for XybStage {
             row_y,
             row_b,
         );
+        Ok(())
     }
 }
 

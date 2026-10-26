@@ -520,6 +520,15 @@ impl FrameHeader {
             / (animation.tps_numerator as f64)
     }
 
+    pub(crate) fn timecode(&self, animation: Option<&Animation>) -> Option<u32> {
+        (animation.is_some_and(|a| a.have_timecodes)
+            && matches!(
+                self.frame_type,
+                FrameType::RegularFrame | FrameType::SkipProgressive
+            ))
+        .then_some(self.timecode)
+    }
+
     pub fn has_patches(&self) -> bool {
         self.flags & Flags::ENABLE_PATCHES != 0
     }
@@ -697,11 +706,11 @@ impl FrameHeader {
     }
 
     pub fn postprocess(&mut self, nonserialized: &FrameHeaderNonserialized) {
-        if self.upsampling > 1 {
-            for i in 0..nonserialized.extra_channel_info.len() {
-                let dim_shift = nonserialized.extra_channel_info[i].dim_shift();
-                self.ec_upsampling[i] <<= dim_shift;
-            }
+        // Source extra-channel subsampling also applies when the color plane
+        // has no upsampling. Modular plane dimensions use this effective factor.
+        for i in 0..nonserialized.extra_channel_info.len() {
+            let dim_shift = nonserialized.extra_channel_info[i].dim_shift();
+            self.ec_upsampling[i] <<= dim_shift;
         }
         if self.encoding != Encoding::VarDCT || !nonserialized.xyb_encoded {
             self.x_qm_scale = 2;
@@ -709,16 +718,15 @@ impl FrameHeader {
     }
 
     fn check(&self, nonserialized: &FrameHeaderNonserialized) -> Result<(), Error> {
-        if self.upsampling > 1
-            && let Some((dim_shift, effective_upsampling)) = nonserialized
-                .extra_channel_info
-                .iter()
-                .zip(&self.ec_upsampling)
-                .find_map(|(info, ec_upsampling)| {
-                    let effective_upsampling = ec_upsampling << info.dim_shift();
-                    (effective_upsampling < self.upsampling || effective_upsampling > 8)
-                        .then_some((info.dim_shift(), effective_upsampling))
-                })
+        if let Some((dim_shift, effective_upsampling)) = nonserialized
+            .extra_channel_info
+            .iter()
+            .zip(&self.ec_upsampling)
+            .find_map(|(info, ec_upsampling)| {
+                let effective_upsampling = ec_upsampling << info.dim_shift();
+                (effective_upsampling < self.upsampling || effective_upsampling > 8)
+                    .then_some((info.dim_shift(), effective_upsampling))
+            })
         {
             return Err(Error::InvalidEcUpsampling(
                 self.upsampling,
@@ -965,6 +973,29 @@ mod test_frame_header {
             matches!(err, Error::InvalidEcUpsampling(8, 3, 32)),
             "expected InvalidEcUpsampling(8, 3, 32), got {err:?}",
         );
+    }
+
+    #[test]
+    fn test_invalid_ec_upsampling_with_full_resolution_color() {
+        let (file_header, mut frame_header, _) =
+            read_headers_and_toc(&crate::util::test::fixture_bytes("extra_channels.jxl")).unwrap();
+        let mut nonserialized = file_header.frame_header_nonserialized();
+        frame_header.upsampling = 1;
+        for (shift, encoded_factor) in [(1, 8), (2, 4), (3, 2)] {
+            nonserialized.extra_channel_info[0] = ExtraChannelInfo::new(
+                false,
+                ExtraChannel::Alpha,
+                BitDepth::integer_samples(8),
+                shift,
+                String::new(),
+                false,
+                None,
+                None,
+            );
+            frame_header.ec_upsampling[0] = encoded_factor;
+            assert!(matches!(frame_header.check(&nonserialized),
+                Err(Error::InvalidEcUpsampling(1, actual_shift, 16)) if actual_shift==shift));
+        }
     }
 
     /// Positive companion to `test_invalid_ec_upsampling_after_dim_shift`:

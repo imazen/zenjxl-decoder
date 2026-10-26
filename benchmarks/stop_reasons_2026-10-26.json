@@ -1,0 +1,64 @@
+{
+  "base": "4365fe97a955bcd0b9c3f30ca33678e8b1e85478",
+  "issue": "https://github.com/imazen/zenjxl-decoder/issues/70",
+  "scope": "Retain exact stop reasons without changing explicit Error::Cancelled construction or matching. StopReason::TimedOut and future non-cancellation reasons use Error::Stopped. The coarse ErrorClass remains Cancelled.",
+  "cases": [
+    "Cancelled and TimedOut through conversion and whereat location",
+    "Cancelled and TimedOut through decode_with native polling, returning no pixel output",
+    "Pre-existing test_stop_cancellation and explicit Error::Cancelled match unchanged",
+    "Strict workspace all-target/all-feature lint",
+    "Warning-free native docs and public API snapshot"
+  ],
+  "initial_probe": "The first consumer probe parsed only a header and did not reach a native stop poll. The corrected decode_with probe reproduced TimedOut becoming Decoding cancelled.",
+  "docs_correction": "Strict rustdoc found two pre-existing ambiguous Error enum/derive links; qualify their enum targets without suppressing warnings.",
+  "sources": {
+    "zenjxl-decoder/src/error.rs": "a8b6d3d7e0c4f24170739476050ef08904b5d5b238a6b25a2a9e9056edb8e2b0",
+    "zenjxl-decoder/src/api/decoder.rs": "eeeacc024233ed34df6a998cd668281a9b1e155fe4f87df58cb605c5b3c64390"
+  },
+  "receipts": [
+    {
+      "log": "zencodec-native-timeout-before-2026-10-26.log",
+      "sha256": "3af99ef82fd8eda7a2804ed08bb595a120f438b19b2872ad9ba22929e3d32d07",
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.00s",
+        "run-heavy: done rc=101 1s | peak-RSS 0.54GiB | min-avail 13761MiB | peak-load 0.27"
+      ]
+    },
+    {
+      "log": "zencodec-native-timeout-before2-2026-10-26.log",
+      "sha256": "f5e4ad185ac9636e15fefa62b88799fed34912b8cfeb0a780cd9b8d6be9b837b",
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.05s",
+        "run-heavy: done rc=101 1s | peak-RSS 0.54GiB | min-avail 13732MiB | peak-load 0.40"
+      ]
+    },
+    {
+      "log": "zenjxl-stop-reason-check-2026-10-26.log",
+      "sha256": "c0c72383f9fb494f1af3a347947883a384aaa575777390ae377c3d7bdc8cc751",
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 847 filtered out; finished in 0.04s",
+        "run-heavy: done rc=0 11s | peak-RSS 0.97GiB | min-avail 11880MiB | peak-load 0.65"
+      ]
+    },
+    {
+      "log": "zenjxl-stop-reason-docs-2026-10-26.log",
+      "sha256": "5f0f93255c3f3eed53c107530636c3757bfeddf7b70619f7aa29cb3dae979e49",
+      "results": [
+        "run-heavy: done rc=101 2s | peak-RSS 0.31GiB | min-avail 12959MiB | peak-load 0.56"
+      ]
+    },
+    {
+      "log": "zenjxl-stop-reason-docs2-2026-10-26.log",
+      "sha256": "7b27ca4316b22291bf613a050aeb9c78aefa4904ab2d5649f5f32d7dce245ebb",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.37s",
+        "run-heavy: done rc=0 5s | peak-RSS 0.35GiB | min-avail 12513MiB | peak-load 0.55"
+      ]
+    }
+  ],
+  "limits": [
+    "No native cancellation latency bound measured",
+    "No new native pixel or memory-bound claim",
+    "Downstream selected-image integration runs after this revision is pinned"
+  ]
+}

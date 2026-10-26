@@ -1,0 +1,16 @@
+{
+  "base": "654e3c1cdd7e2601f536da91f69360b5337dc34f",
+  "command": "just coalescing-check",
+  "log": "zenjxl-layer-placement-2026-10-26.log",
+  "sha256": "c54a748d0f60bde06afa37c5e1dd6778ede31be84e004375c997246551f269e4",
+  "results": [
+    "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 851 filtered out; finished in 11.76s",
+    "run-heavy: done rc=0 18s | peak-RSS 0.80GiB | min-avail 12997MiB | peak-load 0.30"
+  ],
+  "scope": "Native decoding in two input chunk sizes retains five source regular-frame extents previously checked with libjxl 0.11.1; public output remains one composited presentation. Strict all-feature/all-target workspace lint passes.",
+  "limits": [
+    "No raw-layer sample output",
+    "Negative origins are representable in the native header but are not qualified by this fixture",
+    "No performance or total-memory claim"
+  ]
+}

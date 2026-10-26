@@ -49,7 +49,7 @@ impl RenderPipelineInPlaceStage for BlackChannelStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let [row_c, row_m, row_y, row_k] = row else {
             panic!(
                 "incorrect number of channels; expected 4, found {}",
@@ -72,6 +72,7 @@ impl RenderPipelineInPlaceStage for BlackChannelStage {
             row_m[idx] *= k;
             row_y[idx] *= k;
         }
+        Ok(())
     }
 }
 

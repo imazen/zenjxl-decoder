@@ -9,6 +9,7 @@
 //! Tests that fail indicate implementation bugs - DO NOT WEAKEN TOLERANCES.
 
 pub mod basic_info_profile_guard;
+mod cms_contract;
 pub mod codec_corpus;
 #[cfg(feature = "threads")]
 pub mod concurrency;
@@ -30,6 +31,7 @@ pub mod modular_palette;
 pub mod oom_regression;
 pub mod orientation_preserve;
 pub mod parity;
+mod raw_layers;
 pub mod regression_known_bugs;
 pub mod reject_progressive;
 pub mod render_edges;

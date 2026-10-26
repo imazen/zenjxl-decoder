@@ -122,7 +122,7 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let num_ec = self.extra_channels.len();
         let fg_y0 = self.frame_origin.1 + position.1 as isize;
         let mut fg_x0 = self.frame_origin.0 + position.0 as isize;
@@ -131,7 +131,7 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         let mut bg_x1: isize = xsize as isize;
 
         if fg_x1 <= 0 || fg_x0 >= self.image_size.0 || fg_y0 < 0 || fg_y0 >= self.image_size.1 {
-            return;
+            return Ok(());
         }
 
         if fg_x0 < 0 {
@@ -192,6 +192,7 @@ impl RenderPipelineInPlaceStage for BlendingStage {
             &self.extra_channels,
             tmp,
         );
+        Ok(())
     }
 }
 

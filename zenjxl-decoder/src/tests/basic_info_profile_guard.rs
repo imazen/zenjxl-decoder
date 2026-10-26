@@ -41,6 +41,7 @@ fn basic_info_hidden_until_embedded_profile_cmyk() {
         // Invariant: basic_info() is observable only once the embedded
         // color profile has been parsed.
         if decoder.embedded_color_profile().is_none() {
+            assert!(decoder.extra_channel_details(0).is_none());
             assert!(
                 decoder.basic_info().is_none(),
                 "basic_info() leaked before embedded color profile parsed"
@@ -53,6 +54,16 @@ fn basic_info_hidden_until_embedded_profile_cmyk() {
                 "basic_info() became Some without embedded color profile"
             );
             saw_some = true;
+            let extras = decoder.basic_info().unwrap().extra_channels.len();
+            assert!(extras > 0, "fixture must exercise real extra channels");
+            for index in 0..extras {
+                let details = decoder.extra_channel_details(index).unwrap();
+                assert_eq!(
+                    details.bit_depth.bits_per_sample(),
+                    decoder.basic_info().unwrap().extra_channels[index].bits_per_sample
+                );
+            }
+            assert!(decoder.extra_channel_details(extras).is_none());
             break;
         }
     }
@@ -61,6 +72,9 @@ fn basic_info_hidden_until_embedded_profile_cmyk() {
         saw_some,
         "failed to reach image-info state while parsing cmyk_layers.jxl"
     );
+    decoder.reset();
+    assert!(decoder.extra_channel_details(0).is_none());
+    assert!(decoder.frame_timecode().is_none());
 }
 
 /// Negative regression test: `basic.jxl` has no embedded ICC profile — the

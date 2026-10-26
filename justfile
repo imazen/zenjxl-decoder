@@ -1,5 +1,153 @@
 # zenjxl-decoder dev commands
 
+source-checks:
+    ./ci/pull_request_checks.sh
+
+# Real callback boundary, including custom CMS without the bundled CMS feature.
+cms-contract-sync export:
+    test ! -e "{{export}}/.git"
+    test ! -e "{{export}}/.jj"
+    cp zenjxl-decoder/src/tests/mod.rs zenjxl-decoder/src/tests/cms_contract.rs zenjxl-decoder/src/tests/hdr.rs "{{export}}/zenjxl-decoder/src/tests/"
+    cp zenjxl-decoder/src/api/moxcms_wrapper.rs zenjxl-decoder/src/api/color.rs "{{export}}/zenjxl-decoder/src/api/"
+    cp zenjxl-decoder/src/frame/render.rs zenjxl-decoder/src/frame/lf_preview.rs "{{export}}/zenjxl-decoder/src/frame/"
+    cp zenjxl-decoder/src/render/mod.rs zenjxl-decoder/src/render/internal.rs "{{export}}/zenjxl-decoder/src/render/"
+    cp zenjxl-decoder/src/render/stages/*.rs "{{export}}/zenjxl-decoder/src/render/stages/"
+    cp zenjxl-decoder/src/render/simple_pipeline/*.rs "{{export}}/zenjxl-decoder/src/render/simple_pipeline/"
+    cp zenjxl-decoder/src/render/low_memory_pipeline/*.rs "{{export}}/zenjxl-decoder/src/render/low_memory_pipeline/"
+    mkdir -p "{{export}}/perf/raw-layer-validation"
+    cp perf/raw-layer-validation/oracle.c perf/raw-layer-validation/compare.py perf/raw-layer-validation/negative.py "{{export}}/perf/raw-layer-validation/"
+    cp justfile "{{export}}/justfile"
+
+cms-contract-check features="cms":
+    cargo test --locked -p zenjxl-decoder --no-default-features --features "{{features}}" --lib cms_contract_ -- --nocapture --test-threads=1
+
+# Custom callbacks, existing backend goldens, stage equivalence and parallel CMS.
+cms-contract-qualification:
+    just cms-contract-check ""
+    cargo test --locked -p zenjxl-decoder --all-features --lib cms -- --nocapture --test-threads=1
+    cargo test --locked -p zenjxl-decoder --all-features --lib render:: -- --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+
+cms-contract-final:
+    just cms-contract-check ""
+    cargo test --locked -p zenjxl-decoder --all-features --lib cms_contract_ -- --nocapture --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+cms-layer-regression artifacts:
+    just raw-layer-output-all "{{artifacts}}"
+    just cms-layer-oracle-check "{{artifacts}}" "{{artifacts}}-oracle"
+
+cms-layer-oracle-check captured output:
+    just raw-layer-oracle "{{captured}}" "{{output}}"
+    just stop-reason-docs
+
+# Standalone interpretation qualification; no encoder/oracle in library builds.
+# Export once with git archive, then synchronize only this task's source files.
+interpretation-sync export:
+    test ! -e "{{export}}/.git"
+    test ! -e "{{export}}/.jj"
+    test -f "{{export}}/zenjxl-decoder/Cargo.toml"
+    cp zenjxl-decoder/src/api/data_types.rs zenjxl-decoder/src/api/decoder.rs "{{export}}/zenjxl-decoder/src/api/"
+    cp zenjxl-decoder/src/api/inner/mod.rs "{{export}}/zenjxl-decoder/src/api/inner/"
+    cp zenjxl-decoder/src/api/inner/codestream_parser/mod.rs "{{export}}/zenjxl-decoder/src/api/inner/codestream_parser/"
+    cp zenjxl-decoder/src/headers/extra_channels.rs zenjxl-decoder/src/headers/frame_header.rs "{{export}}/zenjxl-decoder/src/headers/"
+    cp zenjxl-decoder/src/tests/basic_info_profile_guard.rs "{{export}}/zenjxl-decoder/src/tests/"
+    mkdir -p "{{export}}/perf/interpretation-validation/src"
+    cp perf/interpretation-validation/Cargo.toml perf/interpretation-validation/oracle.c "{{export}}/perf/interpretation-validation/"
+    cp perf/interpretation-validation/src/*.rs "{{export}}/perf/interpretation-validation/src/"
+    cp justfile "{{export}}/justfile"
+
+stop-reason-sync export:
+    test ! -e "{{export}}/.git"
+    test ! -e "{{export}}/.jj"
+    cp zenjxl-decoder/src/error.rs "{{export}}/zenjxl-decoder/src/error.rs"
+    cp zenjxl-decoder/src/api/decoder.rs "{{export}}/zenjxl-decoder/src/api/decoder.rs"
+    cp justfile "{{export}}/justfile"
+
+stop-reason-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib stop_
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+stop-reason-docs:
+    RUSTDOCFLAGS="-D warnings" cargo doc --locked -p zenjxl-decoder --no-deps
+    just api-doc
+
+coalescing-sync export:
+    just stop-reason-sync "{{export}}"
+    cp zenjxl-decoder/src/api/options.rs "{{export}}/zenjxl-decoder/src/api/options.rs"
+    cp zenjxl-decoder/src/api/inner/process.rs "{{export}}/zenjxl-decoder/src/api/inner/process.rs"
+
+coalescing-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib coalescing_
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+header-budget-sync export:
+    just coalescing-sync "{{export}}"
+    cp zenjxl-decoder/src/api/inner/codestream_parser/mod.rs zenjxl-decoder/src/api/inner/codestream_parser/non_section.rs "{{export}}/zenjxl-decoder/src/api/inner/codestream_parser/"
+
+header-budget-check filter="frame_header_budget_":
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib "{{filter}}"
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+# Native local-plane probe and qualified public raw-layer output.
+raw-layer-sync export:
+    just header-budget-sync "{{export}}"
+    cp zenjxl-decoder/src/api/inner/mod.rs "{{export}}/zenjxl-decoder/src/api/inner/"
+    cp zenjxl-decoder/src/api/data_types.rs "{{export}}/zenjxl-decoder/src/api/"
+    cp zenjxl-decoder/src/frame/mod.rs zenjxl-decoder/src/frame/decode.rs zenjxl-decoder/src/frame/render.rs "{{export}}/zenjxl-decoder/src/frame/"
+    cp zenjxl-decoder/src/tests/mod.rs zenjxl-decoder/src/tests/raw_layers.rs "{{export}}/zenjxl-decoder/src/tests/"
+
+raw-layer-probe artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --no-default-features --lib raw_layer_probe_ -- --nocapture --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+raw-layer-output-check artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --no-default-features --lib raw_layer_output_ -- --nocapture --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+raw-layer-output-all artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --all-features --lib raw_layer_output_ -- --nocapture --test-threads=1
+
+raw-layer-regressions:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib coalescing_
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib frame_header_budget_
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib stop_
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib basic_info_profile_guard
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib test_scanned_frames_identical_for_decode_and_scan
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib test_start_new_frame_
+
+raw-layer-probe-all artifacts:
+    mkdir -p "{{artifacts}}"
+    JXL_RAW_LAYER_ARTIFACTS="{{artifacts}}" cargo test --locked -p zenjxl-decoder --all-features --lib raw_layer_probe_ -- --nocapture --test-threads=1
+
+raw-layer-oracle captured output python="python3":
+    test ! -e "{{output}}"
+    mkdir -p "{{output}}"
+    cc -std=c11 -Wall -Wextra -Werror perf/raw-layer-validation/oracle.c -ljxl -o "{{output}}/oracle"
+    "{{python}}" perf/raw-layer-validation/compare.py "{{captured}}" zenjxl-decoder/resources/test "{{output}}/oracle" "{{output}}"
+    "{{python}}" perf/raw-layer-validation/negative.py "{{captured}}" zenjxl-decoder/resources/test "{{output}}/oracle" "{{output}}/negative"
+
+interpretation-resolve:
+    cargo metadata --manifest-path perf/interpretation-validation/Cargo.toml --format-version 1 > /dev/null
+
+interpretation-core-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib basic_info_profile_guard
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib test_scanned_frames_identical_for_decode_and_scan
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+interpretation-header-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib headers::frame_header::
+
+interpretation-check artifacts:
+    mkdir -p "{{artifacts}}-oracle"
+    cc -std=c11 -Wall -Wextra -Werror perf/interpretation-validation/oracle.c -ljxl -o "{{artifacts}}-oracle/jxl-oracle"
+    JXL_INTERPRETATION_ARTIFACTS="{{artifacts}}" JXL_INTERPRETATION_ORACLE="{{artifacts}}-oracle/jxl-oracle" cargo test --manifest-path perf/interpretation-validation/Cargo.toml --locked -- --nocapture --test-threads=1
+    cargo clippy --manifest-path perf/interpretation-validation/Cargo.toml --locked --all-targets -- -D warnings
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test` or any CI job.

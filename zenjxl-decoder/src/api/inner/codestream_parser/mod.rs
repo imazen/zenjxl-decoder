@@ -131,6 +131,9 @@ pub(super) struct CodestreamParser {
     // These fields are populated when starting to decode a frame, and cleared once
     // the frame is done.
     frame_header: Option<FrameHeader>,
+    /// Completed header parses in this operation, including hidden frames and
+    /// replays. Rewind/seek preserve the charge; full reset starts a new one.
+    parsed_frame_headers: u64,
     toc_parser: Option<IncrementalTocReader>,
     pub(super) frame: Option<Frame>,
 
@@ -224,6 +227,16 @@ pub(super) struct CodestreamParser {
 }
 
 impl CodestreamParser {
+    pub(super) fn extra_channel_info(
+        &self,
+        index: usize,
+    ) -> Option<&crate::headers::extra_channels::ExtraChannelInfo> {
+        self.image_file_header
+            .as_ref()?
+            .image_metadata
+            .extra_channel_info
+            .get(index)
+    }
     /// Once the last frame has finished decoding, computes the number of
     /// input bytes the file actually used: everything pulled from the input so
     /// far minus what still sits unconsumed in internal buffers (box buffer,
@@ -269,6 +282,7 @@ impl CodestreamParser {
             is_gray: false,
             output_color_profile_set_by_user: false,
             frame_header: None,
+            parsed_frame_headers: 0,
             toc_parser: None,
             frame: None,
             first_vardct_quantizer: None,
@@ -313,7 +327,11 @@ impl CodestreamParser {
 
     fn has_visible_frame(&self) -> bool {
         if let Some(frame) = &self.frame {
-            frame.header().is_visible()
+            if frame.decoder_state.coalescing {
+                frame.header().is_visible()
+            } else {
+                frame.header().frame_type == crate::headers::frame_header::FrameType::RegularFrame
+            }
         } else {
             false
         }
@@ -335,7 +353,9 @@ impl CodestreamParser {
     /// Rewinds for animation loop replay, keeping pixel_format setting.
     pub(super) fn rewind(&mut self) -> Option<JxlPixelFormat> {
         let pixel_format = self.pixel_format.take();
+        let parsed_frame_headers = self.parsed_frame_headers;
         *self = Self::new();
+        self.parsed_frame_headers = parsed_frame_headers;
         self.pixel_format = pixel_format.clone();
         pixel_format
     }
@@ -1022,7 +1042,7 @@ impl CodestreamParser {
         }
     }
 
-    pub(super) fn update_default_output_color_profile(&mut self) {
+    pub(super) fn update_default_output_color_profile(&mut self, coalescing: bool) {
         // Only set default output_color_profile if not already configured by user
         if self.output_color_profile_set_by_user {
             return;
@@ -1030,6 +1050,27 @@ impl CodestreamParser {
 
         let embedded_color_profile = self.embedded_color_profile.as_ref().unwrap();
         let pixel_format = self.pixel_format.as_ref().unwrap();
+
+        // Raw CMYK components retain their interpretation before any layer
+        // header or samples are published. The black component may be packed
+        // or requested separately; composited RGB retains its existing default.
+        let preserves_black = pixel_format.color_type == crate::api::JxlColorType::Cmyk
+            || self.basic_info.as_ref().is_some_and(|info| {
+                info.extra_channels
+                    .iter()
+                    .enumerate()
+                    .any(|(index, extra)| {
+                        extra.ec_type == crate::headers::extra_channels::ExtraChannel::Black
+                            && pixel_format
+                                .extra_channel_format
+                                .get(index)
+                                .is_some_and(Option::is_some)
+                    })
+            });
+        if !coalescing && embedded_color_profile.is_cmyk() && preserves_black {
+            self.output_color_profile = Some(embedded_color_profile.clone());
+            return;
+        }
 
         // Determine default output color profile following libjxl logic:
         // - For XYB: use embedded if can_output_to(), else:

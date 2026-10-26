@@ -1,5 +1,54 @@
 # Decoder investigation notes
 
+## Known Bugs: CMS callback contracts — 2026-10-26
+
+Real decoder regressions reproduce RGB/grayscale callback errors becoming panics,
+CMYK callback errors becoming successful mathematical fallback pixels, reversed
+CMYK callback polarity relative to the public trait, and an empty transformer
+set silently disabling the requested conversion. The dedicated CMYK stage also
+hardcodes its destination profile and is feature-gated despite accepting a custom
+CMS. `src/tests/cms_contract.rs` exercises the callbacks through native decoding.
+Issue 72 tracks the correction on PR 68: one fallible stage now propagates the
+original error, validates initializer responses and honors custom CMYK callbacks
+without the bundled feature. Native polarity reaches callbacks unchanged; only
+moxcms adapts ICC ink polarity. The requested destination is retained. Existing
+color goldens and stage/parallel equivalence pass unchanged. See the CMS section
+of `docs/source-interpretation.md` for remaining limits and qualification.
+
+## Known Bugs: ignored uncoalesced requirement — 2026-10-26
+
+Issue 57 remains open for the full layer contract. The ignored-request regression
+first added an explicit refusal. The qualified F32 path now emits regular local
+layers in stored orientation, with placement and per-channel blend facts, while
+preserving composed references internally. Other representations and display
+transforms refuse. Progressive flush and visible-presentation seeking refuse
+without changing output/state; the additive `try_start_new_frame` surfaces the
+error instead of the legacy infallible method's panic. Source CMYK interpretation
+is available immediately after format configuration. Qualification and remaining
+limits: `docs/source-interpretation.md`, raw-output receipt under `benchmarks/`.
+
+## Known Bugs: timeout reason loss — 2026-10-26
+
+Issue 70: converting `enough::StopReason::TimedOut` into the native error
+returned `Error::Cancelled`, losing the distinction from user cancellation.
+The selected-image consumer reproduced this through `decode_with`. `Stopped`
+now retains non-cancellation reasons and `Error::stop_reason()` recovers the
+original value; explicit cancellation keeps its existing unit variant and
+both retain `ErrorClass::Cancelled`. Native tests exercise both reasons before
+pixel output and preserve the pre-existing cancellation match. This remains
+under review on PR 68. It does not establish a native cancellation-latency bound.
+
+## Known Bugs: subsampled extra channels — 2026-10-26
+
+Issue 69: valid lossless 17x13 images with subsampled extra channels failed with
+`SectionTooShort` when color upsampling was 1. `FrameHeader::postprocess` applied
+the source dimensional shift only when color also required upsampling. The correction in `6f6a457e` always forms the effective extra-channel factor and validates its
+8x ceiling before rendering. The standalone native-encoder/libjxl test covers
+all seven named roles at shifts 1/2/3 with exact no-dither u8 samples. libjxl's
+float output is quantized by an explicit matching rule, because its own u8 path
+uses a different dither. The 12 header checks, profile/reset and scan/decode regressions, and strict
+workspace lint pass. The fix remains under review on PR 68.
+
 ## Resolved 2026-10-22: short out-of-order `jxlp` splice stalled the box parser
 
 [RESOLVED] `SmallBuffer::inject_bytes_front` (`src/api/inner/process.rs`)

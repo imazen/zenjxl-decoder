@@ -51,7 +51,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
         }: ExtraInfo,
         buffers: &mut [&mut RowBuffer],
         state: Option<&mut (dyn Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let x0 = RowBuffer::x0_offset::<T::Type>();
         let xpre = if start_of_row { 0 } else { out_extra_x };
         let xstart = x0 - xpre;
@@ -66,7 +66,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
             xend - xstart,
             &mut rows[..],
             state,
-        );
+        )
     }
 }
 

@@ -90,12 +90,12 @@ impl RenderPipelineInPlaceStage for UnpremultiplyAlphaStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         // The row slice contains only the channels we said we use.
         // The last channel is alpha (since alpha_channel > color channels).
         let num_channels = row.len();
         if num_channels < 2 {
-            return;
+            return Ok(());
         }
 
         // Alpha is the last channel in the row slice
@@ -103,6 +103,7 @@ impl RenderPipelineInPlaceStage for UnpremultiplyAlphaStage {
         let alpha_row = &alpha_row[0][..];
 
         unpremultiply_rows_simd_dispatch(color_rows, alpha_row, xsize);
+        Ok(())
     }
 }
 

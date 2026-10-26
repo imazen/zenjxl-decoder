@@ -6,11 +6,50 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve CMS callback failures as traced errors instead of panicking or
+  substituting CMYK pixels. Validate transformer counts and destination channels;
+  honor custom CMYK callbacks without the bundled CMS feature. Callbacks receive
+  documented native ink polarity and the requested destination; moxcms adapts
+  ICC polarity internally. Existing color goldens remain unchanged. See
+  [issue 72](https://github.com/imazen/zenjxl-decoder/issues/72).
+
+- Honor `coalescing(false)` for regular local F32 layers in stored orientation,
+  preserving off-canvas samples and internal composed references. Unqualified
+  transforms/representations refuse explicitly; progressive raw flushing and
+  visible-frame seeks refuse without changing buffers or decoder state. This
+  request previously silently returned composited output. Further modes remain
+  tracked in issue 57; see [qualification](docs/source-interpretation.md).
+
+- Preserve deadline and future cooperative-stop reasons in `Error::Stopped`;
+  expose the exact reason through `Error::stop_reason`. Explicit cancellation
+  keeps `Error::Cancelled`, and both retain the coarse cancelled error class.
+  See [issue 70](https://github.com/imazen/zenjxl-decoder/issues/70).
+
+- Apply source extra-channel dimensional shifts when color remains full
+  resolution, and validate the effective upsampling ceiling in that case.
+  Native lossless fixtures with seven auxiliary roles and shifts 1/2/3 now
+  match independent libjxl samples under the same no-dither quantization.
+  See [issue 69](https://github.com/imazen/zenjxl-decoder/issues/69).
+
 ### Dependency compatibility
 
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions. Formatting, strict library lint and library tests pass (`4a576da1`).
 
 ### Added
+- Add `frame_layer_info()` with signed local geometry and per-channel blend,
+  reference-save and timing facts. Expose `try_start_new_frame` for fallible
+  visible-presentation seeking without breaking the existing convenience method.
+- Add an opt-in `max_frame_headers` allowance covering hidden frames and
+  replayed headers as well as visible presentations. Preserve charges through
+  seek/rewind; reset starts a new operation. Refusal retains the existing typed
+  `LimitExceeded` cause with `frame_headers`, requested count and bound.
+- Add source-interpretation accessors for extra-channel integer/float precision,
+  spot RGBA/CFA parameters and selected-frame timecodes. Preserve existing public
+  struct fields and distinguish a present zero timecode from absence. The
+  standalone native-encoder/libjxl qualification covers seven named extra roles;
+  see [source interpretation](docs/source-interpretation.md).
 - **An ICC stream can no longer claim a profile far larger than it could decode to.** The profile buffer is allocated at its declared size before decoding, so a 224-byte file could make `process` allocate 190 MB (found by fuzzing the zenjxl inventory scan with a 64 MB malloc limit). The preamble now rejects a declared size above 1024x the length of the decoded ICC command/data stream (+128 for the header), the ratio the decode-time amplification check already enforces. Test `preamble_rejects_absurd_declared_output_size`.
 - **`JxlDecoder::codestream_length()`**: after the last frame, how many codestream bytes the image used, counted over the `jxlc`/`jxlp` payloads (index words excluded). After `start_new_frame` it counts from the seek point, as `file_length()` does. Unlike `file_length()` it does not move with box headers the parser entered after the last frame (for `jxlp` containers `file_length()` can include the next box's header) or with junk after the codestream inside a codestream box. Test `test_codestream_length_ignores_container_framing`.
 - **`scan_frames_only` allocates no per-frame pixel buffers.** The header-only scan frames every frame (header + TOC) without building image-sized state: reference-frame, LF and metadata planes are zero-sized placeholders. A multi-frame file scans under a memory limit far below one frame (`test_scan_needs_no_frame_memory`); before, a 7168x7168 header cost 196 MiB. `file_length()` after a scan is unchanged. Also exports `api::FrameIndexBox` and `FrameIndexEntry` (the types `frame_index()` already returns), both `#[non_exhaustive]` so fields can be added later. Used by zenjxl's structural inventory.
@@ -127,11 +166,6 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next 0.x minor release.
      Add items here as you discover them. Do NOT ship these piecemeal. -->
-- `JxlDecoderOptions::coalescing` and `with_coalescing()` — accepted but read
-  nowhere; either implement the `false` case (return each frame's uncomposited
-  rectangle with its crop origin and blend mode, as libjxl's
-  `JXL_DEC_SET_COALESCING(false)` does) or remove both. Documented as
-  unimplemented in the meantime (#57).
 - Consider upstream jxl-rs `d7ecec1`'s `set_pixel_format(..) -> Result`,
   which rejects format changes after the first frame header. Not needed for
   safety here: format changes between frames decode correctly

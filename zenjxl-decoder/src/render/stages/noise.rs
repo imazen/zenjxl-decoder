@@ -149,7 +149,7 @@ impl RenderPipelineInPlaceStage for AddNoiseStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let norm_const = 0.22;
         let ytox = self.color_correlation.y_to_x_lf();
         let ytob = self.color_correlation.y_to_b_lf();
@@ -177,6 +177,7 @@ impl RenderPipelineInPlaceStage for AddNoiseStage {
             row[1][x] += rg_noise;
             row[2][x] += ytob * rg_noise;
         }
+        Ok(())
     }
 }
 

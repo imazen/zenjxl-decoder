@@ -6,28 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 680 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 114 lines (126 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 741 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 113 lines (125 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)        52
-#   pub consts/statics                          3
+#   pub types (struct/enum/trait/alias)        58
+#   pub consts/statics                          4
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          197
-#   struct fields                             129
-#   enum variants                             221
+#   inherent methods                          214
+#   struct fields                             152
+#   enum variants                             229
 #   re-exports                                  3
-#   trait roster entries (type × trait)       158
-#   auto-trait-complete types                  36
+#   trait roster entries (type × trait)       182
+#   auto-trait-complete types                  42
 #   auto-trait exceptions                      10
 #
 # per-module pub lines:
-#   (root)                            8
-#   api                             611
+#   (root)                            9
+#   api                             665
 
-## items (615 lines)
+## items (670 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -192,6 +192,8 @@ pub api::Error::SplinesDistanceTooLarge(u64, u64)
 pub api::Error::SplinesPointOutOfRange(api::Point, i32, core::ops::range::Range<i32>)
 pub api::Error::SplinesTooMany(u32, u32)
 pub api::Error::SplinesTooManyControlPoints(u32, u32)
+pub api::Error::Stopped
+pub api::Error::Stopped::reason: enough::reason::StopReason
 pub api::Error::TooManyBlockContexts
 pub api::Error::TooManyExtraChannels(usize)
 pub api::Error::TooManySqueezes
@@ -201,10 +203,13 @@ pub api::Error::TreeMultiplierTooLarge(u32, u32)
 pub api::Error::TreeSplitOnEmptyRange(u8, i32, i32, i32)
 pub api::Error::TreeTooLarge(usize, usize)
 pub api::Error::TreeTooTall(usize, usize)
+pub api::Error::UncoalescedOutputRequirement(&'static str)
+pub api::Error::UncoalescedOutputUnsupported
 pub api::Error::UnexpectedCodestreamBoxEnd
 pub api::Error::UnexpectedLz77Repeat
 pub api::Error::WrongBufferCount(usize, usize)
 pub fn api::Error::kind(&self) -> api::ErrorClass
+pub const fn api::Error::stop_reason(&self) -> core::option::Option<enough::reason::StopReason>
 #[non_exhaustive] pub enum api::ErrorClass
 pub api::ErrorClass::Cancelled
 pub api::ErrorClass::Internal
@@ -296,6 +301,12 @@ pub api::JxlDataFormat::U8
 pub api::JxlDataFormat::U8::bit_depth: u8
 pub fn api::JxlDataFormat::bytes_per_sample(&self) -> usize
 pub fn api::JxlDataFormat::f32() -> Self
+#[non_exhaustive] pub enum api::JxlLayerBlendMode
+pub api::JxlLayerBlendMode::Add
+pub api::JxlLayerBlendMode::AlphaWeightedAdd
+pub api::JxlLayerBlendMode::Blend
+pub api::JxlLayerBlendMode::Multiply
+pub api::JxlLayerBlendMode::Replace
 pub enum api::JxlPrimaries
 pub api::JxlPrimaries::BT2100
 pub api::JxlPrimaries::Chromaticities
@@ -352,6 +363,18 @@ pub api::RenderingIntent::Absolute
 pub api::RenderingIntent::Perceptual = 0
 pub api::RenderingIntent::Relative
 pub api::RenderingIntent::Saturation
+#[non_exhaustive] pub struct api::FrameIndexBox
+pub api::FrameIndexBox::entries: alloc::vec::Vec<api::FrameIndexEntry>
+pub api::FrameIndexBox::tden: core::num::nonzero::NonZero<u32>
+pub api::FrameIndexBox::tnum: u32
+pub fn api::FrameIndexBox::entry_for_offset(&self, u64) -> core::option::Option<&api::FrameIndexEntry>
+pub fn api::FrameIndexBox::num_frames(&self) -> usize
+pub fn api::FrameIndexBox::parse(&[u8]) -> api::Result<Self>
+pub fn api::FrameIndexBox::tick_duration_secs(&self) -> f64
+#[non_exhaustive] pub struct api::FrameIndexEntry
+pub api::FrameIndexEntry::codestream_offset: u64
+pub api::FrameIndexEntry::duration_ticks: u64
+pub api::FrameIndexEntry::frame_count: u64
 pub struct api::GainMapBundle
 pub api::GainMapBundle::alt_icc_compressed: core::option::Option<alloc::vec::Vec<u8>>
 pub api::GainMapBundle::color_encoding: core::option::Option<alloc::vec::Vec<u8>>
@@ -364,6 +387,7 @@ pub fn api::Image<T>::all_rows_mut(&mut self) -> alloc::vec::Vec<&mut [T]>
 pub fn api::Image<T>::allocation_size((usize, usize)) -> u64
 pub fn api::Image<T>::distinct_full_rows_mut<I: image::internal::DistinctRowsIndexes>(&mut self, I) -> <I as image::internal::DistinctRowsIndexes>::CastOutput
 pub fn api::Image<T>::fill(&mut self, T)
+pub fn api::Image<T>::fits_padded(&api::OwnedRawImage, (usize, usize), (usize, usize), (usize, usize)) -> bool
 pub fn api::Image<T>::from_raw(api::OwnedRawImage) -> Self
 pub fn api::Image<T>::get_rect(&self, api::Rect) -> api::ImageRect<'_, T>
 pub fn api::Image<T>::get_rect_including_padding(&mut self, api::Rect) -> api::ImageRect<'_, T>
@@ -418,12 +442,16 @@ pub fn api::JxlDecoder<api::states::Initialized>::new(api::JxlDecoderOptions) ->
 pub fn api::JxlDecoder<api::states::Initialized>::process(self, &mut impl api::JxlBitstreamInput) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithImageInfo>, Self>>
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<bool>
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::frame_header(&self) -> api::JxlFrameHeader
+pub fn api::JxlDecoder<api::states::WithFrameInfo>::frame_layer_info(&self) -> api::JxlLayerInfo
+pub fn api::JxlDecoder<api::states::WithFrameInfo>::frame_timecode(&self) -> core::option::Option<u32>
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::num_completed_passes(&self) -> usize
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::process<In: api::JxlBitstreamInput>(self, &mut In, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithImageInfo>, Self>>
 pub fn api::JxlDecoder<api::states::WithFrameInfo>::skip_frame(self, &mut impl api::JxlBitstreamInput) -> api::Result<api::ProcessingResult<api::JxlDecoder<api::states::WithImageInfo>, Self>>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::basic_info(&self) -> &api::JxlBasicInfo
+pub fn api::JxlDecoder<api::states::WithImageInfo>::codestream_length(&self) -> core::option::Option<u64>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::current_pixel_format(&self) -> &api::JxlPixelFormat
 pub fn api::JxlDecoder<api::states::WithImageInfo>::embedded_color_profile(&self) -> &api::JxlColorProfile
+pub fn api::JxlDecoder<api::states::WithImageInfo>::extra_channel_details(&self, usize) -> core::option::Option<api::JxlExtraChannelDetails>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::file_length(&self) -> core::option::Option<u64>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::flush_pixels(&mut self, &mut [api::JxlOutputBuffer<'_>]) -> api::Result<bool>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::has_more_frames(&self) -> bool
@@ -432,9 +460,10 @@ pub fn api::JxlDecoder<api::states::WithImageInfo>::process(self, &mut impl api:
 pub fn api::JxlDecoder<api::states::WithImageInfo>::set_output_color_profile(&mut self, api::JxlColorProfile) -> api::Result<()>
 pub fn api::JxlDecoder<api::states::WithImageInfo>::set_pixel_format(&mut self, api::JxlPixelFormat)
 pub fn api::JxlDecoder<api::states::WithImageInfo>::start_new_frame(&mut self, api::VisibleFrameSeekTarget)
+pub fn api::JxlDecoder<api::states::WithImageInfo>::try_start_new_frame(&mut self, api::VisibleFrameSeekTarget) -> api::Result<()>
 pub fn api::JxlDecoder<S>::codestream_ended(&self) -> bool
 pub fn api::JxlDecoder<S>::exif(&self) -> core::option::Option<&[u8]>
-pub fn api::JxlDecoder<S>::frame_index(&self) -> core::option::Option<&container::frame_index::FrameIndexBox>
+pub fn api::JxlDecoder<S>::frame_index(&self) -> core::option::Option<&api::FrameIndexBox>
 pub fn api::JxlDecoder<S>::gain_map(&self) -> core::option::Option<&api::GainMapBundle>
 pub fn api::JxlDecoder<S>::rewind(self) -> api::JxlDecoder<api::states::Initialized>
 pub fn api::JxlDecoder<S>::scanned_frames(&self) -> &[api::VisibleFrameInfo]
@@ -445,12 +474,16 @@ pub fn api::JxlDecoder<S>::vardct_quantizer(&self) -> core::option::Option<api::
 pub fn api::JxlDecoder<S>::xmp(&self) -> core::option::Option<&[u8]>
 pub struct api::JxlDecoderInner
 pub fn api::JxlDecoderInner::basic_info(&self) -> core::option::Option<&api::JxlBasicInfo>
+pub fn api::JxlDecoderInner::codestream_length(&self) -> core::option::Option<u64>
 pub fn api::JxlDecoderInner::current_pixel_format(&self) -> core::option::Option<&api::JxlPixelFormat>
 pub fn api::JxlDecoderInner::embedded_color_profile(&self) -> core::option::Option<&api::JxlColorProfile>
 pub fn api::JxlDecoderInner::exif(&self) -> core::option::Option<&[u8]>
+pub fn api::JxlDecoderInner::extra_channel_details(&self, usize) -> core::option::Option<api::JxlExtraChannelDetails>
 pub fn api::JxlDecoderInner::file_length(&self) -> core::option::Option<u64>
 pub fn api::JxlDecoderInner::frame_header(&self) -> core::option::Option<api::JxlFrameHeader>
-pub fn api::JxlDecoderInner::frame_index(&self) -> core::option::Option<&container::frame_index::FrameIndexBox>
+pub fn api::JxlDecoderInner::frame_index(&self) -> core::option::Option<&api::FrameIndexBox>
+pub fn api::JxlDecoderInner::frame_layer_info(&self) -> core::option::Option<api::JxlLayerInfo>
+pub fn api::JxlDecoderInner::frame_timecode(&self) -> core::option::Option<u32>
 pub fn api::JxlDecoderInner::gain_map(&self) -> core::option::Option<&api::GainMapBundle>
 pub fn api::JxlDecoderInner::has_more_frames(&self) -> bool
 pub fn api::JxlDecoderInner::new(api::JxlDecoderOptions) -> Self
@@ -472,6 +505,7 @@ pub fn api::JxlDecoderInner::process(&mut self, &mut dyn api::JxlBitstreamInput,
 #[non_exhaustive] pub struct api::JxlDecoderLimits
 pub api::JxlDecoderLimits::max_codestream_level: api::JxlCodestreamLevel
 pub api::JxlDecoderLimits::max_extra_channels: core::option::Option<usize>
+pub api::JxlDecoderLimits::max_frame_headers: core::option::Option<u64>
 pub api::JxlDecoderLimits::max_icc_size: core::option::Option<usize>
 pub api::JxlDecoderLimits::max_memory_bytes: core::option::Option<u64>
 pub api::JxlDecoderLimits::max_patches: core::option::Option<usize>
@@ -483,6 +517,7 @@ pub fn api::JxlDecoderLimits::restrictive() -> Self
 pub fn api::JxlDecoderLimits::unlimited() -> Self
 pub fn api::JxlDecoderLimits::with_max_codestream_level(self, api::JxlCodestreamLevel) -> Self
 pub fn api::JxlDecoderLimits::with_max_extra_channels(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_frame_headers(self, u64) -> Self
 pub fn api::JxlDecoderLimits::with_max_icc_size(self, usize) -> Self
 pub fn api::JxlDecoderLimits::with_max_memory_bytes(self, u64) -> Self
 pub fn api::JxlDecoderLimits::with_max_patches(self, usize) -> Self
@@ -505,7 +540,7 @@ pub api::JxlDecoderOptions::reject_progressive: bool
 pub api::JxlDecoderOptions::render_spot_colors: bool
 pub api::JxlDecoderOptions::scan_frames_only: bool
 pub api::JxlDecoderOptions::skip_preview: bool
-pub api::JxlDecoderOptions::stop: alloc::sync::Arc<dyn enough::Stop>
+pub api::JxlDecoderOptions::stop: alloc::rcs::arc::Arc<dyn enough::Stop>
 pub fn api::JxlDecoderOptions::with_adjust_orientation(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_cms(self, alloc::boxed::Box<dyn api::JxlCms>) -> Self
 pub fn api::JxlDecoderOptions::with_coalescing(self, bool) -> Self
@@ -520,13 +555,17 @@ pub fn api::JxlDecoderOptions::with_reject_progressive(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_render_spot_colors(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_scan_frames_only(self, bool) -> Self
 pub fn api::JxlDecoderOptions::with_skip_preview(self, bool) -> Self
-pub fn api::JxlDecoderOptions::with_stop(self, alloc::sync::Arc<dyn enough::Stop>) -> Self
+pub fn api::JxlDecoderOptions::with_stop(self, alloc::rcs::arc::Arc<dyn enough::Stop>) -> Self
 pub struct api::JxlExtraChannel
 pub api::JxlExtraChannel::alpha_associated: bool
 pub api::JxlExtraChannel::bits_per_sample: u32
 pub api::JxlExtraChannel::dim_shift: u32
 pub api::JxlExtraChannel::ec_type: api::ExtraChannel
 pub api::JxlExtraChannel::name: alloc::string::String
+#[non_exhaustive] pub struct api::JxlExtraChannelDetails
+pub api::JxlExtraChannelDetails::bit_depth: api::JxlBitDepth
+pub api::JxlExtraChannelDetails::cfa_channel: core::option::Option<u32>
+pub api::JxlExtraChannelDetails::spot_color: core::option::Option<[f32; 4]>
 pub struct api::JxlFrameHeader
 pub api::JxlFrameHeader::duration: core::option::Option<f64>
 pub api::JxlFrameHeader::name: alloc::string::String
@@ -546,6 +585,20 @@ pub api::JxlImage::xmp: core::option::Option<alloc::vec::Vec<u8>>
 #[non_exhaustive] pub struct api::JxlImageInfo
 pub api::JxlImageInfo::embedded_profile: api::JxlColorProfile
 pub api::JxlImageInfo::info: api::JxlBasicInfo
+#[non_exhaustive] pub struct api::JxlLayerBlend
+pub api::JxlLayerBlend::alpha_channel: u32
+pub api::JxlLayerBlend::clamp: bool
+pub api::JxlLayerBlend::mode: api::JxlLayerBlendMode
+pub api::JxlLayerBlend::source: u32
+#[non_exhaustive] pub struct api::JxlLayerInfo
+pub api::JxlLayerInfo::color_blend: api::JxlLayerBlend
+pub api::JxlLayerInfo::duration_ticks: u32
+pub api::JxlLayerInfo::extra_channel_blends: alloc::vec::Vec<api::JxlLayerBlend>
+pub api::JxlLayerInfo::is_last: bool
+pub api::JxlLayerInfo::origin: (i32, i32)
+pub api::JxlLayerInfo::saved_before_color_transform: bool
+pub api::JxlLayerInfo::saved_reference: core::option::Option<u32>
+pub api::JxlLayerInfo::size: (usize, usize)
 pub struct api::JxlOutputBuffer<'a>
 pub fn api::JxlOutputBuffer<'a>::byte_size(&self) -> (usize, usize)
 pub fn api::JxlOutputBuffer<'a>::from_image_rect_mut(api::RawImageRectMut<'a>) -> Self
@@ -575,12 +628,14 @@ pub fn api::OwnedRawImage::get_rect(&self, api::Rect) -> api::RawImageRect<'_>
 pub fn api::OwnedRawImage::get_rect_including_padding(&self, api::Rect) -> api::RawImageRect<'_>
 pub fn api::OwnedRawImage::get_rect_including_padding_mut(&mut self, api::Rect) -> api::RawImageRectMut<'_>
 pub fn api::OwnedRawImage::get_rect_mut(&mut self, api::Rect) -> api::RawImageRectMut<'_>
+pub fn api::OwnedRawImage::has_zeroed_padding_geometry(&self, (usize, usize), (usize, usize), (usize, usize)) -> bool
 pub fn api::OwnedRawImage::new((usize, usize)) -> api::Result<Self>
 pub fn api::OwnedRawImage::new_uninit((usize, usize)) -> api::Result<Self>
 pub fn api::OwnedRawImage::new_zeroed_with_padding((usize, usize), (usize, usize), (usize, usize)) -> api::Result<Self>
 pub fn api::OwnedRawImage::row(&self, usize) -> &[u8]
 pub fn api::OwnedRawImage::row_mut(&mut self, usize) -> &mut [u8]
 pub fn api::OwnedRawImage::try_clone(&self) -> api::Result<api::OwnedRawImage>
+pub fn api::OwnedRawImage::zero_fill(&mut self)
 pub struct api::Point
 pub api::Point::x: f32
 pub api::Point::y: f32
@@ -645,7 +700,7 @@ pub fn decode_with(&[u8], api::JxlDecoderOptions) -> api::Result<api::JxlImage, 
 pub fn read_header(&[u8]) -> api::Result<api::JxlImageInfo> [also: api]
 pub fn read_header_with(&[u8], api::JxlDecoderLimits) -> api::Result<api::JxlImageInfo> [also: api]
 
-## trait impls (54 types)
+## trait impls (60 types)
 
 &[u8]: api::JxlBitstreamInput
 alloc::io::buffered::bufreader::BufReader<R>: api::JxlBitstreamInput
@@ -654,6 +709,8 @@ api::Endianness: Clone, Copy, Debug, Eq, PartialEq
 api::Error: Debug, Display, Error, From<alloc::collections::TryReserveError>, From<core::io::error::Error>, From<enough::reason::StopReason>
 api::ErrorClass: Clone, Copy, Debug, Eq, Hash, PartialEq
 api::ExtraChannel: Clone, Copy, Debug, Eq, PartialEq, num_traits::cast::FromPrimitive
+api::FrameIndexBox: Clone, Debug, Eq, PartialEq
+api::FrameIndexEntry: Clone, Debug, Eq, PartialEq
 api::GainMapBundle: Clone, Debug, Eq, PartialEq
 api::Image<T>: Debug
 api::ImageRect<'_, T>: Debug
@@ -670,7 +727,11 @@ api::JxlDataFormat: Clone, Copy, Debug, Eq, PartialEq
 api::JxlDecoderLimits: Clone, Debug, Default
 api::JxlDecoderOptions: Default
 api::JxlExtraChannel: Clone, Debug, Eq, PartialEq
+api::JxlExtraChannelDetails: Clone, Debug, PartialEq
 api::JxlFrameHeader: Clone, Debug
+api::JxlLayerBlend: Clone, Debug, Eq, PartialEq
+api::JxlLayerBlendMode: Clone, Copy, Debug, Eq, PartialEq
+api::JxlLayerInfo: Clone, Debug, Eq, PartialEq
 api::JxlOutputBuffer<'_>: Debug
 api::JxlPixelFormat: Clone, Debug, Eq, PartialEq
 api::JxlPrimaries: Clone, Debug, Display, PartialEq
@@ -704,12 +765,12 @@ u8: api::ImageDataType
 
 ## auto traits
 
-36 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+42 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 api::Error: !RefUnwindSafe !UnwindSafe
-api::Image<T>: !RefUnwindSafe !Unpin !UnwindSafe
-api::ImageRect<'a, T>: !RefUnwindSafe !Unpin !UnwindSafe
-api::ImageRectMut<'a, T>: !RefUnwindSafe !Unpin !UnwindSafe
-api::JxlDecoder<State>: !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+api::Image<T>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+api::ImageRect<'a, T>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+api::ImageRectMut<'a, T>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+api::JxlDecoder<State>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
 api::JxlDecoderInner: !Freeze !RefUnwindSafe !Send !Sync !UnwindSafe
 api::JxlDecoderOptions: !RefUnwindSafe !Send !Sync !UnwindSafe
 api::JxlOutputBuffer<'a>: !UnwindSafe

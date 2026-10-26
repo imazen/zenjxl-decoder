@@ -1,0 +1,81 @@
+{
+  "base": "94aacc75876dfc6caab0a74845e434d48995eb8c",
+  "origin": "Oracle adapted from zencodec ea6544561097d65d3d6c1585391c797d3569ee31 perf/spatial-validation/jxl_oracle.c.",
+  "commands": [
+    "just raw-layer-probe <fresh-native-artifacts>",
+    "just raw-layer-oracle <native-artifacts> <fresh-oracle-artifacts>"
+  ],
+  "receipts": [
+    {
+      "log": "zenjxl-raw-layer-oracle-1-2026-10-26.log",
+      "sha256": "a344c8b20cf09de8830c852527c265a6721f123b7e25024cc78abb6e885b20af",
+      "results": [
+        "run-heavy: done rc=1 0s | peak-RSS 0.02GiB | min-avail 13694MiB | peak-load 0.19"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-probe-2-2026-10-26.log",
+      "sha256": "77ddfcc7346533af1893a3804ee0039f509b0901087a1b3af5cff3aee7c36680",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 858 filtered out; finished in 74.08s",
+        "run-heavy: done rc=0 80s | peak-RSS 0.83GiB | min-avail 12956MiB | peak-load 0.86"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-oracle-final-2026-10-26.log",
+      "sha256": "07dd0d257f574fbd3cba671fa83a6b8ce1ef4ebce9e68f6b3ec318b2c9b94969",
+      "results": [
+        "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
+        "run-heavy: done rc=0 7s | peak-RSS 0.09GiB | min-avail 13550MiB | peak-load 0.26"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-probe-all-2026-10-26.log",
+      "sha256": "3618abd26242ed0e97c55d3aac63ee4db156dc83dd0cb021575602e2a61c7276",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1025 filtered out; finished in 38.94s",
+        "run-heavy: done rc=0 61s | peak-RSS 1.55GiB | min-avail 12162MiB | peak-load 1.16"
+      ]
+    },
+    {
+      "log": "zenjxl-raw-layer-oracle-all-2026-10-26.log",
+      "sha256": "51f967d48aa5b93a5aaf02fca8d1f3be1d9d6f2a013b431601ea875271e63c34",
+      "results": [
+        "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
+        "run-heavy: done rc=0 7s | peak-RSS 0.09GiB | min-avail 13554MiB | peak-load 0.40"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture": "multiple_layers_noise_spline.jxl",
+      "sha256": "1912b0df8917c26f6f9a7a0fc07e5dda8b712b101be0194264e19fabd169ddbf",
+      "libjxl": 11001,
+      "layers": 5,
+      "samples": 18874368,
+      "different_float_bits": 5485741,
+      "max_absolute_error": 0.00036650896072387695,
+      "over_threshold": 0
+    },
+    {
+      "fixture": "conformance_test_images/cmyk_layers.jxl",
+      "sha256": "d732c8836bf1abeadf310d2e07387a32813ed4690d32650c1c25e541b80eed4a",
+      "libjxl": 11001,
+      "layers": 4,
+      "samples": 1587120,
+      "different_float_bits": 0,
+      "max_absolute_error": 0.0,
+      "over_threshold": 0
+    }
+  ],
+  "report": "/mnt/v/output/zencodec/platform-regions-20261026-run/raw-layer-oracle-final/comparison.json",
+  "report_sha256": "3d54c2c32eb15ff303496d3054ffa30fee3e01e927021825de81aaaad44c32fe",
+  "scope": "Raw local F32 sample capture plus exact signed extent, color/extra-channel blend, reference slot and timing comparison against libjxl. CMYK and alpha samples are bit-exact; lossy RGB uses the unchanged existing native conformance threshold 1/256. A one-bit CMYK mutation is refused.",
+  "limits": [
+    "Public raw-layer requests still refuse.",
+    "Not all blend modes or independently differing extra-channel blends are covered.",
+    "No preview, all-profile/conversion, total-memory or latency guarantee."
+  ],
+  "failed_attempt": "Initial oracle run required NumPy absent in the selected Python. Replaced that dependency with Python standard-library array processing; no sample expectation was relaxed.",
+  "additional_configuration": "All crate features enabled, including threaded and SIMD native rendering, passes the same internal exactness and independent sample/metadata gates."
+}

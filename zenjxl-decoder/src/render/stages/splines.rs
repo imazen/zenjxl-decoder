@@ -50,8 +50,9 @@ impl RenderPipelineInPlaceStage for SplinesStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         self.splines.draw_segments(row, position, xsize);
+        Ok(())
     }
 }
 

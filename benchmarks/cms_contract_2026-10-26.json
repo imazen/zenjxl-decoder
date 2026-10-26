@@ -1,0 +1,101 @@
+{
+  "baseline": "0f402c6ad1df35f8326e0bb9ec7c1b2073e449d7",
+  "reproducer": "0af9e6cf",
+  "scope": "Native callback correctness, error trace preservation, existing color goldens and render equivalence; no speed or total workspace bound claim.",
+  "receipts": [
+    {
+      "log": "zenjxl-cms-contract-before-2026-10-26.log",
+      "sha256": "2412db0c799d406749f517dce205d8b3883ee3875206eddfe6885f576131a83a",
+      "results": [
+        "test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 868 filtered out; finished in 4.70s",
+        "run-heavy: done rc=101 14s | peak-RSS 0.96GiB | min-avail 12710MiB | peak-load 0.48"
+      ],
+      "notes": null
+    },
+    {
+      "log": "zenjxl-cms-contract-after-1-2026-10-26.log",
+      "sha256": "3e976cd5bcd047007a7f56a9192fdd6af851aae00342020028abb2eef82b02be",
+      "results": [
+        "run-heavy: done rc=101 2s | peak-RSS 0.62GiB | min-avail 13601MiB | peak-load 0.29"
+      ],
+      "notes": null
+    },
+    {
+      "log": "zenjxl-cms-contract-after-2-2026-10-26.log",
+      "sha256": "6ddefa92f2edfeaccd695c0a1b85a8a2ec2c936b7cb1baecefe2de6ea45dbd26",
+      "results": [
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 868 filtered out; finished in 6.79s",
+        "run-heavy: done rc=0 11s | peak-RSS 0.92GiB | min-avail 12761MiB | peak-load 0.52"
+      ],
+      "notes": null
+    },
+    {
+      "log": "zenjxl-cms-qualification-1-2026-10-26.log",
+      "sha256": "57c537b97aff4306fb450655718a4126531938de5f277474e1d9a0d464f0d033",
+      "results": [
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 863 filtered out; finished in 6.88s",
+        "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1017 filtered out; finished in 8.65s",
+        "test result: ok. 110 passed; 0 failed; 0 ignored; 0 measured; 925 filtered out; finished in 13.81s",
+        "run-heavy: done rc=101 53s | peak-RSS 1.52GiB | min-avail 12188MiB | peak-load 0.79"
+      ],
+      "notes": "The first combined qualification passed backend and renderer tests, then failed a new test-helper lint. The final check fixes that lint without weakening assertions."
+    },
+    {
+      "log": "zenjxl-cms-final-1-2026-10-26.log",
+      "sha256": "0fda61b2326ca2ceaae00b600f2d76812431106a1f2d03132bff0a3b37b717be",
+      "results": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 863 filtered out; finished in 8.71s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1030 filtered out; finished in 6.58s",
+        "run-heavy: done rc=0 31s | peak-RSS 1.12GiB | min-avail 12594MiB | peak-load 0.66"
+      ],
+      "notes": null
+    },
+    {
+      "log": "zenjxl-cms-final-2-2026-10-26.log",
+      "sha256": "323bcb79b44ec05123311703b96a1bd5a57c58c853ff49aa9b2672f0fb32511d",
+      "results": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 863 filtered out; finished in 8.84s",
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1030 filtered out; finished in 6.76s",
+        "run-heavy: done rc=0 26s | peak-RSS 1.12GiB | min-avail 12463MiB | peak-load 0.57"
+      ],
+      "notes": null
+    },
+    {
+      "log": "zenjxl-cms-raw-regression-2026-10-26.log",
+      "sha256": "60e321fde4e9879518f65c2001c9d56997a245386a3d7e36bfb23f4c6ba85dad",
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1034 filtered out; finished in 35.31s",
+        "run-heavy: done rc=1 35s | peak-RSS 0.52GiB | min-avail 13037MiB | peak-load 0.70"
+      ],
+      "notes": "All four raw-output regressions passed; the oracle step initially lacked exported helper sources. Added to sync recipe, then only oracle/docs were rerun."
+    },
+    {
+      "log": "zenjxl-cms-raw-oracle-2026-10-26.log",
+      "sha256": "d6d4c1834c7c385b19ef22425eb2792f4f7d520a1138f6d60aa019ae4d426f83",
+      "results": [
+        "Independent gate rejected exactly one changed CMYK mantissa bit; original artifacts unchanged.",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.40s",
+        "run-heavy: done rc=0 12s | peak-RSS 0.35GiB | min-avail 13447MiB | peak-load 0.66"
+      ],
+      "notes": null
+    }
+  ],
+  "remaining": [
+    "arbitrary callback panic containment",
+    "callback workspace/time limits",
+    "every ICC/profile combination",
+    "low-level mutable decoder recovery after error",
+    "strict admission of the legacy no-CMS mathematical path"
+  ],
+  "fixtures": {
+    "3x3_srgb_lossless.jxl": "5267a5d6c4352d39705cec58b621d12be4cf1837aa83a38549156c878b928451",
+    "gray_alpha_lossless.jxl": "c4826df88a5f600989cf79d333ba19ed300c33d34d3438e4c0ecc871605389d1",
+    "conformance_test_images/cmyk_layers.jxl": "d732c8836bf1abeadf310d2e07387a32813ed4690d32650c1c25e541b80eed4a"
+  },
+  "raw_oracle": {
+    "comparison.json": {
+      "path": "/mnt/v/output/zencodec/platform-regions-20261026-run/cms-raw-regression-oracle-2/comparison.json",
+      "sha256": "772986badc7752f35a9dcd023328acfabd453cace5cd3a44f2bc69340578af46"
+    }
+  }
+}

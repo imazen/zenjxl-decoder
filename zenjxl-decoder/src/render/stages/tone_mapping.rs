@@ -316,7 +316,7 @@ impl RenderPipelineInPlaceStage for ToneMappingStage {
         xsize: usize,
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let [row_r, row_g, row_b] = row else {
             panic!(
                 "incorrect number of channels; expected 3, found {}",
@@ -339,6 +339,7 @@ impl RenderPipelineInPlaceStage for ToneMappingStage {
 
             gamut_map(r, g, b, &luminances);
         }
+        Ok(())
     }
 }
 

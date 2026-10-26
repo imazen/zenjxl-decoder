@@ -46,6 +46,7 @@ pub(super) fn apply_decoder_options(
     embedded_color_profile: &Option<JxlColorProfile>,
 ) {
     state.render_spotcolors = decode_options.render_spot_colors;
+    state.coalescing = decode_options.coalescing;
     state.high_precision = decode_options.high_precision;
     state.premultiply_output = decode_options.premultiply_output;
     state.dither_u8 = decode_options.dither_u8;
@@ -286,7 +287,7 @@ impl CodestreamParser {
                     return Err(at!(Error::NonXybOutputNoCMS));
                 }
             } else {
-                self.update_default_output_color_profile();
+                self.update_default_output_color_profile(decode_options.coalescing);
             }
 
             let mut br = BitReader::new(&self.non_section_buf);
@@ -312,6 +313,19 @@ impl CodestreamParser {
         let decoder_state = self.decoder_state.as_mut().unwrap();
 
         if self.frame_header.is_none() {
+            let next_header = self
+                .parsed_frame_headers
+                .checked_add(1)
+                .ok_or_else(|| at!(Error::ArithmeticOverflow))?;
+            if let Some(limit) = decode_options.limits.max_frame_headers
+                && next_header > limit
+            {
+                return Err(at!(Error::LimitExceeded {
+                    resource: "frame_headers",
+                    actual: next_header,
+                    limit,
+                }));
+            }
             // We don't have a frame header yet. Try parsing that.
             let mut br = BitReader::new(&self.non_section_buf);
             br.skip_bits(self.non_section_bit_offset as usize)?;
@@ -327,7 +341,21 @@ impl CodestreamParser {
             };
 
             let mut frame_header = FrameHeader::read_unconditional(&(), &mut br, &nonserialized)?;
+            // Do not recharge an incomplete-input retry. A successfully parsed
+            // header remains charged even if later validation or allocation fails.
+            self.parsed_frame_headers = next_header;
             frame_header.postprocess(&nonserialized);
+            if !decode_options.coalescing {
+                // Helper/reference frames remain internal. Only the regular
+                // layer representation is qualified for public raw output.
+                if frame_header.frame_type
+                    == crate::headers::frame_header::FrameType::SkipProgressive
+                {
+                    return Err(at!(Error::UncoalescedOutputRequirement(
+                        "regular frame layers"
+                    )));
+                }
+            }
             // The frame is rendered at its upsampled size (up to 8x per axis),
             // so that is what the pixel limit must bound. Upstream jxl-rs c07c7d5.
             check_size_limit(

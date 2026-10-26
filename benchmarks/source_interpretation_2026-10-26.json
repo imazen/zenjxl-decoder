@@ -1,0 +1,48 @@
+{
+  "implementation": "0ee7631204e0690840d13188341492316a8983fe",
+  "harness": "9661a3425a36b5df0a16fc58938a4f18ae4dff09",
+  "encoder": "0255e5a9f61b7270cb3ed3f7b85fec2283deec55",
+  "libjxl_version_output": 11001,
+  "commands": [
+    "run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 8m just interpretation-check <fresh-artifacts>",
+    "run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 8m just interpretation-core-check",
+    "run-heavy --mem 12G --jobs 4 -- timeout --kill-after=15s 10m just api-doc"
+  ],
+  "scope": "Source-fact exposure and independent encoded metadata inspection; exact u8 auxiliary samples. Float alpha checks headers, not float pixel parity. Process usage is not a native workspace bound.",
+  "receipts": [
+    {
+      "log": "zenjxl-interpretation-baseline-2026-10-26.log",
+      "sha256": "60140020ab4f286893c64b41d2086cc9fe7378dcac885092eec5ca7f352d7734",
+      "result": [
+        "run-heavy: done rc=0 5s | peak-RSS 0.45GiB | min-avail 13391MiB | peak-load 0.25"
+      ]
+    },
+    {
+      "log": "zenjxl-interpretation-native2-2026-10-26.log",
+      "sha256": "35d21173634c7cdafb10dd1e407558555a9a8859f79ff78444d16dcc593a90fe",
+      "result": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "run-heavy: done rc=0 6s | peak-RSS 0.56GiB | min-avail 13356MiB | peak-load 0.81"
+      ]
+    },
+    {
+      "log": "zenjxl-interpretation-core-2026-10-26.log",
+      "sha256": "e77eb4d4ac84413970af250cdc2961d6cca9474aecc53a63b13293a6c454f027",
+      "result": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 846 filtered out; finished in 0.13s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 847 filtered out; finished in 17.39s",
+        "run-heavy: done rc=0 47s | peak-RSS 0.99GiB | min-avail 12858MiB | peak-load 1.40"
+      ]
+    },
+    {
+      "log": "zenjxl-interpretation-apidoc-2026-10-26.log",
+      "sha256": "b4a888c94818abb5a97023259c968b4f85cff30d0f30415b0c832d08fc280aa1",
+      "result": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.16s",
+        "run-heavy: done rc=0 16s | peak-RSS 0.35GiB | min-avail 13050MiB | peak-load 0.98"
+      ]
+    }
+  ],
+  "artifacts": "/mnt/v/output/zencodec/platform-regions-20261026-run/native-metadata2/"
+}

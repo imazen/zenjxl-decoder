@@ -185,6 +185,8 @@ impl Frame {
         // rendering is done.
         let mut reference_frame_data = std::mem::take(&mut self.reference_frame_data);
         let mut lf_frame_data = std::mem::take(&mut self.lf_frame_data);
+        #[cfg(test)]
+        let mut raw_layer_data = std::mem::take(&mut self.raw_layer_data);
 
         if let Some(ref_images) = &mut reference_frame_data {
             buffers.extend(ref_images.iter_mut().map(|img| {
@@ -209,6 +211,19 @@ impl Frame {
                 ))
             }));
         };
+
+        #[cfg(test)]
+        if let Some(planes) = &mut raw_layer_data {
+            buffers.extend(planes.iter_mut().map(|plane| {
+                let rect = Rect {
+                    size: plane.size(),
+                    origin: (0, 0),
+                };
+                Some(JxlOutputBuffer::from_image_rect_mut(
+                    plane.get_rect_mut(rect).into_raw(),
+                ))
+            }));
+        }
 
         let frame_timing = std::env::var("JXL_PHASE_TIMING").is_ok();
         let frame_start = crate::util::clock::Instant::now();
@@ -493,6 +508,10 @@ impl Frame {
 
         self.reference_frame_data = reference_frame_data;
         self.lf_frame_data = lf_frame_data;
+        #[cfg(test)]
+        {
+            self.raw_layer_data = raw_layer_data;
+        }
 
         if frame_timing {
             let total = frame_start.elapsed();
@@ -1512,64 +1531,47 @@ impl Frame {
         Ok(any_rendered)
     }
 
-    /// Helper function to detect CMYK ICC profile from bytes.
-    /// Returns true if the ICC profile has CMYK color space signature.
-    #[cfg(feature = "cms")]
-    fn is_cmyk_icc_profile(icc_data: &[u8]) -> bool {
-        if icc_data.len() < 20 {
-            return false;
-        }
-        // ICC color space signature is at bytes 16-19
-        &icc_data[16..20] == b"CMYK"
-    }
-
-    /// Try to create a CMS-based CMYK->RGB conversion stage.
-    /// Returns Some(stage) if successful, None if we should fall back to simple K multiplication.
-    #[cfg(feature = "cms")]
+    /// A custom CMS uses the same validated stage for CMYK and RGB. When no
+    /// applicable CMS is configured, the legacy mathematical path remains.
     fn try_create_cms_cmyk_stage(
         decoder_state: &DecoderState,
         cms: Option<&dyn JxlCms>,
         black_channel_offset: usize,
-    ) -> Result<Option<CmsCmykToRgbStage>> {
-        // Check if we have a CMS and a CMYK ICC profile
-        let (cms, icc_data) = match (cms, &decoder_state.embedded_color_profile) {
-            (Some(cms), Some(JxlColorProfile::Icc(icc_data))) => (cms, icc_data),
-            _ => return Ok(None),
+        output_profile: &JxlColorProfile,
+        max_pixels: usize,
+    ) -> Result<Option<CmsStage>> {
+        let Some(cms) = cms else { return Ok(None) };
+        let Some(input_profile) = &decoder_state.embedded_color_profile else {
+            return Ok(None);
         };
-
-        // Check if the ICC profile is CMYK
-        if !Self::is_cmyk_icc_profile(icc_data) {
+        if !input_profile.is_cmyk() {
             return Ok(None);
         }
-
-        // Create CMYK -> sRGB transform
-        let cmyk_profile = JxlColorProfile::Icc(icc_data.clone());
-        let srgb_profile = JxlColorProfile::Simple(JxlColorEncoding::srgb(false));
-
-        // Initialize a single transformer for CMYK -> sRGB
-        let (output_channels, mut transformers) = cms.initialize_transforms(
-            1,   // We only need 1 transformer
-            256, // pixels per transform (row chunk size is typically small)
-            cmyk_profile,
-            srgb_profile,
+        if output_profile.channels() != 3 {
+            return Err(at!(Error::CmsError(
+                "CMYK display conversion requires an RGB destination".into()
+            )));
+        }
+        #[cfg(feature = "threads")]
+        let count = if decoder_state.parallel {
+            rayon::current_num_threads() + 2
+        } else {
+            1
+        };
+        #[cfg(not(feature = "threads"))]
+        let count = 1;
+        Ok(Some(CmsStage::initialize(
+            cms,
+            count,
+            max_pixels,
+            (input_profile.clone(), output_profile.clone()),
             decoder_state
                 .file_header
                 .image_metadata
                 .tone_mapping
                 .intensity_target,
-        )?;
-
-        // Verify we got an RGB output (3 channels)
-        if output_channels != 3 || transformers.is_empty() {
-            return Ok(None);
-        }
-
-        // Take the transformer and create the CMS stage
-        let transformer = transformers.remove(0);
-        Ok(Some(CmsCmykToRgbStage::new(
-            black_channel_offset,
-            transformer,
-        )))
+            Some(3 + black_channel_offset),
+        )?))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1948,8 +1950,7 @@ impl Frame {
             src_channels == dst_channels || (src_channels == 4 && dst_channels == 3);
 
         // CMYK (a 4-channel CMS input that carries a Black extra channel) is
-        // converted by the dedicated CmsCmykToRgbStage, which inverts the K
-        // channel and — for layered images — defers the conversion until after
+        // converted by a CMS stage scheduled — for layered images — after
         // blending in CMYK space. Running the general CmsStage here as well would
         // double-convert and destroy the color (the first pass consumes K and
         // outputs ~black, the second pass mangles that). (#37)
@@ -1975,22 +1976,7 @@ impl Frame {
             };
             #[cfg(not(feature = "threads"))]
             let num_transforms = 1;
-            let (out_channels, transformers) = cms.initialize_transforms(
-                num_transforms,
-                max_pixels,
-                cms_input,
-                output_profile.clone(),
-                output_color_info.intensity_target,
-            )?;
-            // CMS cannot add channels - reject transforms that would
-            if out_channels > in_channels {
-                return Err(at!(Error::CmsChannelCountIncrease {
-                    in_channels,
-                    out_channels,
-                }));
-            }
-            // Only pass black_channel to CmsStage if CMS is actually processing CMYK input.
-            // For XYB images, even if original was CMYK, CMS input is linear RGB.
+            // XYB's CMS input is RGB even when its source profile was CMYK.
             let cms_black_channel = if in_channels == 4 {
                 black_channel
             } else {
@@ -1999,19 +1985,18 @@ impl Frame {
             Self::check_cms_consumed_black_channel(
                 cms_black_channel,
                 in_channels,
-                out_channels,
+                output_profile.channels(),
                 pixel_format,
             )?;
-            if !transformers.is_empty() {
-                pipeline = pipeline.add_inplace_stage(CmsStage::new(
-                    transformers,
-                    in_channels,
-                    out_channels,
-                    cms_black_channel,
-                    max_pixels,
-                ));
-                cms_used = true;
-            }
+            pipeline = pipeline.add_inplace_stage(CmsStage::initialize(
+                cms,
+                num_transforms,
+                max_pixels,
+                (cms_input, output_profile.clone()),
+                output_color_info.intensity_target,
+                cms_black_channel,
+            )?);
+            cms_used = true;
         }
 
         // For CMYK images, we need to handle blending in CMYK color space.
@@ -2079,21 +2064,49 @@ impl Frame {
                     // Try to use CMS-based CMYK conversion if we have:
                     // 1. A CMS implementation available
                     // 2. An embedded CMYK ICC profile
-                    #[cfg(feature = "cms")]
-                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
-                    {
+                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(
+                        decoder_state,
+                        cms,
+                        i,
+                        output_profile,
+                        frame_header
+                            .size_upsampled()
+                            .0
+                            .max(decoder_state.file_header.size.xsize() as usize),
+                    )? {
                         pipeline = pipeline.add_inplace_stage(cms_stage);
                     } else {
                         // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
                         pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
-                    #[cfg(not(feature = "cms"))]
-                    {
-                        let _ = cms; // suppress unused warning when cms feature is off
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
-                    }
                 }
             }
+        }
+
+        // Probe the native local sample grid before blending and canvas extension.
+        // Saves do not modify the planes used to build subsequent references.
+        #[cfg(test)]
+        if decoder_state.capture_raw_layers && frame_header.frame_type == FrameType::RegularFrame {
+            let first_buffer = num_api_buffers
+                + if frame_header.can_be_referenced {
+                    num_channels
+                } else {
+                    0
+                };
+            for channel in 0..num_channels {
+                pipeline = pipeline.add_save_stage(
+                    &[channel],
+                    Orientation::Identity,
+                    first_buffer + channel,
+                    JxlColorType::Grayscale,
+                    JxlDataFormat::f32(),
+                    false,
+                );
+            }
+        }
+
+        if !decoder_state.coalescing && frame_header.frame_type == FrameType::RegularFrame {
+            pipeline = Self::add_local_f32_output(pipeline, decoder_state, pixel_format)?;
         }
 
         if frame_header.needs_blending() {
@@ -2137,16 +2150,18 @@ impl Frame {
                 .enumerate()
             {
                 if info.ec_type == ExtraChannel::Black && !raw_cmyk_requested {
-                    #[cfg(feature = "cms")]
-                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
-                    {
+                    if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(
+                        decoder_state,
+                        cms,
+                        i,
+                        output_profile,
+                        frame_header
+                            .size_upsampled()
+                            .0
+                            .max(decoder_state.file_header.size.xsize() as usize),
+                    )? {
                         pipeline = pipeline.add_inplace_stage(cms_stage);
                     } else {
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
-                    }
-                    #[cfg(not(feature = "cms"))]
-                    {
-                        let _ = cms;
                         pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                 }
@@ -2185,7 +2200,7 @@ impl Frame {
             }
         }
 
-        if frame_header.is_visible() {
+        if frame_header.is_visible() && decoder_state.coalescing {
             let color_space = decoder_state
                 .file_header
                 .image_metadata
@@ -2357,6 +2372,75 @@ impl Frame {
             }
         }
         pipeline.build()
+    }
+
+    /// A non-mutating output branch before composition. The supported sample
+    /// representation needs no conversion, so subsequent reference saves see
+    /// exactly the same float planes. Guards run before section allocation.
+    fn add_local_f32_output<T: RenderPipeline>(
+        mut pipeline: RenderPipelineBuilder<T>,
+        state: &DecoderState,
+        format: &JxlPixelFormat,
+    ) -> Result<RenderPipelineBuilder<T>> {
+        let metadata = &state.file_header.image_metadata;
+        if format.color_type.is_grayscale()
+            && metadata.color_encoding.color_space != ColorSpace::Gray
+        {
+            return Err(at!(Error::NotGrayscale));
+        }
+        let alpha = format
+            .color_type
+            .has_alpha()
+            .then(|| {
+                metadata
+                    .extra_channel_info
+                    .iter()
+                    .position(|e| e.ec_type == ExtraChannel::Alpha)
+            })
+            .flatten()
+            .map(|i| i + 3);
+        let mut channels = if format.color_type.is_grayscale() {
+            vec![0]
+        } else {
+            vec![0, 1, 2]
+        };
+        if let Some(alpha) = alpha {
+            channels.push(alpha);
+        }
+        if format.color_type == JxlColorType::Cmyk {
+            let black = metadata
+                .extra_channel_info
+                .iter()
+                .position(|e| e.ec_type == ExtraChannel::Black)
+                .ok_or_else(|| at!(Error::NotCmyk))?;
+            channels.push(black + 3);
+        }
+        let mut index = 0;
+        if let Some(df) = format.color_data_format {
+            pipeline = pipeline.add_save_stage(
+                &channels,
+                Orientation::Identity,
+                index,
+                format.color_type,
+                df,
+                format.color_type.has_alpha() && alpha.is_none(),
+            );
+            index += 1;
+        }
+        for (channel, df) in format.extra_channel_format.iter().enumerate() {
+            if let Some(df) = df {
+                pipeline = pipeline.add_save_stage(
+                    &[channel + 3],
+                    Orientation::Identity,
+                    index,
+                    JxlColorType::Grayscale,
+                    *df,
+                    false,
+                );
+                index += 1;
+            }
+        }
+        Ok(pipeline)
     }
 
     pub fn prepare_render_pipeline(
