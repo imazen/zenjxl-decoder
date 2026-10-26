@@ -13,7 +13,7 @@
 #   pub types (struct/enum/trait/alias)         1
 #   pub consts/statics                          6
 #   free functions                             43
-#   inherent methods                           18
+#   inherent methods                           14
 #   enum variants                              27
 #   trait roster entries (type × trait)        19
 #   auto-trait-complete types                   1
@@ -21,9 +21,9 @@
 # per-module pub lines:
 #   (root)                            1
 #   __bench_kernels                  83
-#   api                              14
+#   api                              10
 
-## items (98 lines)
+## items (94 lines)
 
 pub const __bench_kernels::transform_map::HfTransformType::CARDINALITY: usize
 pub const __bench_kernels::transform_map::HfTransformType::INVALID_TRANSFORM: u8
@@ -72,22 +72,18 @@ pub fn __bench_kernels::reinterpreting_dct2d_8_16<D: zenjxl_decoder_simd::SimdDe
 pub fn __bench_kernels::reinterpreting_dct2d_8_4<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
 pub fn __bench_kernels::reinterpreting_dct2d_8_8<D: zenjxl_decoder_simd::SimdDescriptor>(D, &mut [f32], &mut [f32])
 pub fn __bench_kernels::transform::transform_to_pixels_impl<D: zenjxl_decoder_simd::SimdDescriptor>(D, __bench_kernels::transform_map::HfTransformType, &mut [f32], &mut [f32])
-pub fn __bench_kernels::transform_map::HfTransformType::clone(&self) -> __bench_kernels::transform_map::HfTransformType
-pub fn __bench_kernels::transform_map::HfTransformType::eq(&self, &__bench_kernels::transform_map::HfTransformType) -> bool
+pub fn __bench_kernels::transform_map::HfTransformType::clone(&self) -> Self
+pub fn __bench_kernels::transform_map::HfTransformType::eq(&self, &Self) -> bool
 pub fn __bench_kernels::transform_map::HfTransformType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn __bench_kernels::transform_map::HfTransformType::from_usize(usize) -> core::option::Option<__bench_kernels::transform_map::HfTransformType>
 pub fn __bench_kernels::transform_map::block_shape_id(__bench_kernels::transform_map::HfTransformType) -> u32
 pub fn __bench_kernels::transform_map::covered_blocks_x(__bench_kernels::transform_map::HfTransformType) -> u32
 pub fn __bench_kernels::transform_map::covered_blocks_y(__bench_kernels::transform_map::HfTransformType) -> u32
-pub fn api::DataTypeTag::assert_fields_are_eq(&self)
-pub fn api::Endianness::assert_fields_are_eq(&self)
-pub fn api::ErrorClass::assert_fields_are_eq(&self)
-pub fn api::ExtraChannel::assert_fields_are_eq(&self)
+pub fn api::FrameIndexBox::assert_fields_are_eq(&self)
+pub fn api::FrameIndexEntry::assert_fields_are_eq(&self)
 pub fn api::GainMapBundle::assert_fields_are_eq(&self)
 pub fn api::JxlAnimation::assert_fields_are_eq(&self)
 pub fn api::JxlBitDepth::assert_fields_are_eq(&self)
-pub fn api::JxlCodestreamLevel::assert_fields_are_eq(&self)
-pub fn api::JxlColorType::assert_fields_are_eq(&self)
 pub fn api::JxlDataFormat::assert_fields_are_eq(&self)
 pub fn api::JxlExtraChannel::assert_fields_are_eq(&self)
 pub fn api::JxlPixelFormat::assert_fields_are_eq(&self)
