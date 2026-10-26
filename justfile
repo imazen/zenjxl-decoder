@@ -1,5 +1,35 @@
 # zenjxl-decoder dev commands
 
+# Standalone interpretation qualification; no encoder/oracle in library builds.
+# Export once with git archive, then synchronize only this task's source files.
+interpretation-sync export:
+    test ! -e "{{export}}/.git"
+    test ! -e "{{export}}/.jj"
+    test -f "{{export}}/zenjxl-decoder/Cargo.toml"
+    cp zenjxl-decoder/src/api/data_types.rs zenjxl-decoder/src/api/decoder.rs "{{export}}/zenjxl-decoder/src/api/"
+    cp zenjxl-decoder/src/api/inner/mod.rs "{{export}}/zenjxl-decoder/src/api/inner/"
+    cp zenjxl-decoder/src/api/inner/codestream_parser/mod.rs "{{export}}/zenjxl-decoder/src/api/inner/codestream_parser/"
+    cp zenjxl-decoder/src/headers/extra_channels.rs zenjxl-decoder/src/headers/frame_header.rs "{{export}}/zenjxl-decoder/src/headers/"
+    cp zenjxl-decoder/src/tests/basic_info_profile_guard.rs "{{export}}/zenjxl-decoder/src/tests/"
+    mkdir -p "{{export}}/perf/interpretation-validation/src"
+    cp perf/interpretation-validation/Cargo.toml perf/interpretation-validation/oracle.c "{{export}}/perf/interpretation-validation/"
+    cp perf/interpretation-validation/src/*.rs "{{export}}/perf/interpretation-validation/src/"
+    cp justfile "{{export}}/justfile"
+
+interpretation-resolve:
+    cargo metadata --manifest-path perf/interpretation-validation/Cargo.toml --format-version 1 > /dev/null
+
+interpretation-core-check:
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib basic_info_profile_guard
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib test_scanned_frames_identical_for_decode_and_scan
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+interpretation-check artifacts:
+    mkdir -p "{{artifacts}}-oracle"
+    cc -std=c11 -Wall -Wextra -Werror perf/interpretation-validation/oracle.c -ljxl -o "{{artifacts}}-oracle/jxl-oracle"
+    JXL_INTERPRETATION_ARTIFACTS="{{artifacts}}" JXL_INTERPRETATION_ORACLE="{{artifacts}}-oracle/jxl-oracle" cargo test --manifest-path perf/interpretation-validation/Cargo.toml --locked -- --nocapture --test-threads=1
+    cargo clippy --manifest-path perf/interpretation-validation/Cargo.toml --locked --all-targets -- -D warnings
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test` or any CI job.
