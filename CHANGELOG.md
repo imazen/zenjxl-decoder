@@ -28,6 +28,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions. Formatting, strict library lint and library tests pass (`4a576da1`).
 
 ### Added
+- Add an opt-in `max_frame_headers` allowance covering hidden frames and
+  replayed headers as well as visible presentations. Preserve charges through
+  seek/rewind; reset starts a new operation. Refusal retains the existing typed
+  `LimitExceeded` cause with `frame_headers`, requested count and bound.
 - Add source-interpretation accessors for extra-channel integer/float precision,
   spot RGBA/CFA parameters and selected-frame timecodes. Preserve existing public
   struct fields and distinguish a present zero timecode from absence. The

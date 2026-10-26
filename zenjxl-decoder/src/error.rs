@@ -307,7 +307,8 @@ pub enum Error {
     CmsError(String),
     /// A configurable security/resource limit was exceeded. `resource` is one of
     /// the stable identifiers `"pixels"`, `"memory_bytes"`, `"icc_size"`,
-    /// `"icc_amplification"`, `"extra_channels"`, or `"reference_frames"` —
+    /// `"icc_amplification"`, `"extra_channels"`, `"reference_frames"`, or
+    /// `"frame_headers"` —
     /// the budgets in `JxlDecoderLimits`. For coarse bucketing (e.g. to an HTTP
     /// status) use [`Error::kind`], which maps this to [`ErrorClass::LimitExceeded`].
     #[error("Security limit exceeded: {resource} is {actual}, limit is {limit}")]

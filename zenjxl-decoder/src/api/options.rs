@@ -119,6 +119,16 @@ pub struct JxlDecoderLimits {
     /// This provides defense-in-depth against memory exhaustion attacks.
     pub max_memory_bytes: Option<u64>,
 
+    /// Maximum completed frame-header parses for this decoder operation.
+    /// Counts preview, reference-only, LF and regular frames, including headers
+    /// reparsed after seeking or rewinding. A partial input retry is not another
+    /// completed header. Checked before starting the next header parse.
+    ///
+    /// `None` (the default) adds no header-count limit. This bounds neither bytes
+    /// nor CPU/memory inside one header; keep the other limits and stop token.
+    /// A full decoder reset begins a new operation and resets the count.
+    pub max_frame_headers: Option<u64>,
+
     /// Highest JPEG XL conformance level accepted: files that use splines,
     /// patches or modular channels beyond this level's bounds are rejected
     /// with [`Error::LimitExceeded`](crate::error::Error::LimitExceeded) (see
@@ -148,6 +158,7 @@ impl Default for JxlDecoderLimits {
             max_spline_points: Some(1 << 20), // 1M points
             max_reference_frames: Some(4),    // 4 reference frames
             max_memory_bytes: Some(max_memory),
+            max_frame_headers: None,
             max_codestream_level: JxlCodestreamLevel::Level5,
         }
     }
@@ -166,6 +177,7 @@ impl JxlDecoderLimits {
             max_spline_points: None,
             max_reference_frames: None,
             max_memory_bytes: None,
+            max_frame_headers: None,
             max_codestream_level: JxlCodestreamLevel::Level10,
         }
     }
@@ -184,6 +196,7 @@ impl JxlDecoderLimits {
             max_spline_points: Some(1 << 16), // 64K points
             max_reference_frames: Some(2),    // 2 reference frames
             max_memory_bytes: Some(1 << 30),  // 1 GB total memory
+            max_frame_headers: None,
             max_codestream_level: JxlCodestreamLevel::Level5,
         }
     }
@@ -241,6 +254,14 @@ impl JxlDecoderLimits {
     #[must_use]
     pub fn with_max_memory_bytes(mut self, max: u64) -> Self {
         self.max_memory_bytes = Some(max);
+        self
+    }
+
+    /// Bound completed frame-header parses, including hidden frames and replays.
+    /// See [`Self::max_frame_headers`] for the operation boundary and exclusions.
+    #[must_use]
+    pub fn with_max_frame_headers(mut self, max: u64) -> Self {
+        self.max_frame_headers = Some(max);
         self
     }
 

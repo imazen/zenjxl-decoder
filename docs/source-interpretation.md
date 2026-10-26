@@ -97,3 +97,43 @@ type cannot substitute for signed layer placement.
 
 The [placement receipt](../benchmarks/layer_placement_2026-10-26.json) records
 `just coalescing-check`; it makes no latency or total-memory claim.
+
+## Native discovery has its own header allowance
+
+A visible-frame count does not bound native discovery: one presentation in the
+layer fixture requires five regular frame headers, and previews, LF frames and
+reference dictionaries can add hidden work. `JxlDecoderLimits::max_frame_headers`
+is an opt-in bound on completed header parses. Configure it before decoding:
+
+```rust
+let limits = JxlDecoderLimits::default().with_max_frame_headers(5);
+let options = JxlDecoderOptions::default().with_limits(limits);
+```
+
+The decoder checks before the next frame-header parse. Completed headers remain
+charged if later validation fails. Partial input retries do not charge again;
+seek and rewind preserve the count and charge reparsed headers. A full reset
+starts a new operation. Exhausted input is not another frame. The error uses the
+existing `LimitExceeded` variant with `resource: "frame_headers"`, `actual`
+(the requested next count), and `limit`; no capability query is required.
+
+This is a per-decoder allowance. Separate decoder instances do not share it.
+It bounds neither bytes nor time/memory within one header, and it does not bound
+metadata boxes outside the frame stream. Existing pixel, memory, profile and
+stop controls remain necessary. Defaults preserve the existing unrestricted
+header count; a caller requiring a bound must supply it.
+
+`just header-budget-check` checks hidden regular, preview, reference-only and
+LF frames, one-byte/large input delivery, EOF, seek, rewind, reset and native
+pixel equality under an admitted count. The LF control confirms actual LF frame
+types through the existing internal decode callback. The earlier candidate
+fixture `multiple_lf_420.jxl` did not exercise LF frames in that callback;
+the qualified fixture is `conformance_test_images/progressive.jxl`.
+
+Final native gate and warning-free docs/API snapshot: all four header-budget
+controls and strict all-feature/all-target workspace Clippy pass.
+`run-heavy: done rc=0 40s | peak-RSS 0.39GiB | min-avail 13168MiB | peak-load 0.84`.
+Log `zenjxl-header-budget-final-2026-10-26.log`, SHA-256
+`1055bbbf3459692842861c46e55637b9c4162bf79c0c42c9f6960762fee6141e`.
+These are test-process measurements, not a decoder resource guarantee.
+Tracking: [issue 71](https://github.com/imazen/zenjxl-decoder/issues/71).

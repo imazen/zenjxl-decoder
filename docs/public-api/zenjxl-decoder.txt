@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 712 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 110 lines (122 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 714 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 110 lines (122 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,8 +15,8 @@
 #   pub consts/statics                          4
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          210
-#   struct fields                             139
+#   inherent methods                          211
+#   struct fields                             140
 #   enum variants                             223
 #   re-exports                                  3
 #   trait roster entries (type × trait)       169
@@ -25,9 +25,9 @@
 #
 # per-module pub lines:
 #   (root)                            9
-#   api                             639
+#   api                             641
 
-## items (644 lines)
+## items (646 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -495,6 +495,7 @@ pub fn api::JxlDecoderInner::process(&mut self, &mut dyn api::JxlBitstreamInput,
 #[non_exhaustive] pub struct api::JxlDecoderLimits
 pub api::JxlDecoderLimits::max_codestream_level: api::JxlCodestreamLevel
 pub api::JxlDecoderLimits::max_extra_channels: core::option::Option<usize>
+pub api::JxlDecoderLimits::max_frame_headers: core::option::Option<u64>
 pub api::JxlDecoderLimits::max_icc_size: core::option::Option<usize>
 pub api::JxlDecoderLimits::max_memory_bytes: core::option::Option<u64>
 pub api::JxlDecoderLimits::max_patches: core::option::Option<usize>
@@ -506,6 +507,7 @@ pub fn api::JxlDecoderLimits::restrictive() -> Self
 pub fn api::JxlDecoderLimits::unlimited() -> Self
 pub fn api::JxlDecoderLimits::with_max_codestream_level(self, api::JxlCodestreamLevel) -> Self
 pub fn api::JxlDecoderLimits::with_max_extra_channels(self, usize) -> Self
+pub fn api::JxlDecoderLimits::with_max_frame_headers(self, u64) -> Self
 pub fn api::JxlDecoderLimits::with_max_icc_size(self, usize) -> Self
 pub fn api::JxlDecoderLimits::with_max_memory_bytes(self, u64) -> Self
 pub fn api::JxlDecoderLimits::with_max_patches(self, usize) -> Self

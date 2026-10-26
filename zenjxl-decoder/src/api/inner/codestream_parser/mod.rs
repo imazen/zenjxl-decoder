@@ -131,6 +131,9 @@ pub(super) struct CodestreamParser {
     // These fields are populated when starting to decode a frame, and cleared once
     // the frame is done.
     frame_header: Option<FrameHeader>,
+    /// Completed header parses in this operation, including hidden frames and
+    /// replays. Rewind/seek preserve the charge; full reset starts a new one.
+    parsed_frame_headers: u64,
     toc_parser: Option<IncrementalTocReader>,
     pub(super) frame: Option<Frame>,
 
@@ -279,6 +282,7 @@ impl CodestreamParser {
             is_gray: false,
             output_color_profile_set_by_user: false,
             frame_header: None,
+            parsed_frame_headers: 0,
             toc_parser: None,
             frame: None,
             first_vardct_quantizer: None,
@@ -345,7 +349,9 @@ impl CodestreamParser {
     /// Rewinds for animation loop replay, keeping pixel_format setting.
     pub(super) fn rewind(&mut self) -> Option<JxlPixelFormat> {
         let pixel_format = self.pixel_format.take();
+        let parsed_frame_headers = self.parsed_frame_headers;
         *self = Self::new();
+        self.parsed_frame_headers = parsed_frame_headers;
         self.pixel_format = pixel_format.clone();
         pixel_format
     }

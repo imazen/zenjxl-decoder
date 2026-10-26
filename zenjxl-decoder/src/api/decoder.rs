@@ -3635,6 +3635,150 @@ pub(crate) mod tests {
         }
     }
 
+    fn drive_header_budget(
+        decoder: &mut JxlDecoderInner,
+        mut input: &[u8],
+        chunk: usize,
+    ) -> Result<()> {
+        let mut pending: usize = 0;
+        let max_calls = input.len().saturating_mul(2).saturating_add(256);
+        for _ in 0..max_calls {
+            if !decoder.has_more_frames() {
+                return Ok(());
+            }
+            pending = pending.saturating_add(chunk).min(input.len());
+            let mut offered = &input[..pending];
+            let result = decoder.process(&mut offered, None)?;
+            let consumed = pending - offered.len();
+            input = &input[consumed..];
+            pending -= consumed;
+            assert!(
+                !matches!(result, ProcessingResult::NeedsMoreInput { .. })
+                    || consumed > 0
+                    || pending < input.len(),
+                "header scan stalled on complete fixture input"
+            );
+        }
+        panic!("header scan exceeded the bounded test driver calls");
+    }
+
+    fn header_budget(limit: u64) -> JxlDecoderInner {
+        JxlDecoderInner::new(
+            JxlDecoderOptions::default()
+                .with_scan_frames_only(true)
+                .with_limits(crate::api::JxlDecoderLimits::default().with_max_frame_headers(limit)),
+        )
+    }
+
+    fn assert_header_budget(error: &crate::error::Error, limit: u64) {
+        assert_eq!(error.kind(), crate::error::ErrorClass::LimitExceeded);
+        assert!(
+            matches!(error, Error::LimitExceeded {
+            resource: "frame_headers", actual, limit: bound,
+        } if *actual == limit + 1 && *bound == limit),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn frame_header_budget_counts_hidden_frames_and_not_partial_retries() {
+        for (name, count) in [
+            ("multiple_layers_noise_spline.jxl", 5),
+            ("with_preview.jxl", 2),
+            ("grayscale_patches_var_dct.jxl", 2),
+        ] {
+            let data = crate::util::test::fixture_bytes(name);
+            for chunk in [1, 16384, usize::MAX] {
+                let mut accepted = header_budget(count);
+                drive_header_budget(&mut accepted, &data, chunk).unwrap();
+                assert_eq!(accepted.scanned_frames().len(), 1, "{name}");
+                // Exhaustion is not an extra header parse or a budget error.
+                drive_header_budget(&mut accepted, &[], chunk).unwrap();
+                for limit in [0, count - 1] {
+                    let mut refused = header_budget(limit);
+                    let error = drive_header_budget(&mut refused, &data, chunk).unwrap_err();
+                    assert_header_budget(error.error(), limit);
+                    assert!(
+                        refused.scanned_frames().is_empty(),
+                        "last visible frame escaped"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn frame_header_budget_survives_rewind_and_seek_but_reset_starts_an_operation() {
+        let data = crate::util::test::fixture_bytes("multiple_layers_noise_spline.jxl");
+        let mut decoder = header_budget(5);
+        drive_header_budget(&mut decoder, &data, 17).unwrap();
+        let target = decoder.scanned_frames()[0].seek_target.unwrap();
+        let offset = target.decode_start_file_offset as usize;
+        decoder.start_new_frame(target).unwrap();
+        let error = drive_header_budget(&mut decoder, &data[offset..], 17).unwrap_err();
+        assert_header_budget(error.error(), 5);
+        decoder.rewind();
+        let error = drive_header_budget(&mut decoder, &data, 17).unwrap_err();
+        assert_header_budget(error.error(), 5);
+        decoder.reset();
+        drive_header_budget(&mut decoder, &data, 17).unwrap();
+        assert_eq!(decoder.scanned_frames().len(), 1);
+    }
+
+    #[test]
+    fn frame_header_budget_counts_low_frequency_frames() {
+        use crate::headers::frame_header::FrameType;
+        use std::{cell::RefCell, rc::Rc};
+        let data = crate::util::test::fixture_bytes("conformance_test_images/progressive.jxl");
+        let counts = Rc::new(RefCell::new((0_u64, 0_u64)));
+        let capture = counts.clone();
+        let (_, visible) = decode(
+            &data,
+            17,
+            false,
+            false,
+            Some(Box::new(move |frame, _| {
+                let mut counts = capture.borrow_mut();
+                counts.0 += 1;
+                counts.1 += u64::from(frame.header().frame_type == FrameType::LFFrame);
+                Ok(())
+            })),
+        )
+        .unwrap();
+        let (all, lf) = *counts.borrow();
+        assert!(
+            lf > 0 && all > visible.len() as u64,
+            "fixture needs hidden LF work"
+        );
+        drive_header_budget(&mut header_budget(all), &data, 1).unwrap();
+        let error = drive_header_budget(&mut header_budget(all - 1), &data, 1).unwrap_err();
+        assert_header_budget(error.error(), all - 1);
+    }
+
+    #[test]
+    fn frame_header_budget_applies_to_pixel_decoding_without_changing_samples() {
+        let data = crate::util::test::fixture_bytes("multiple_layers_noise_spline.jxl");
+        let options = |limit| {
+            JxlDecoderOptions::default()
+                .with_limits(crate::api::JxlDecoderLimits::default().with_max_frame_headers(limit))
+        };
+        let error = crate::decode_with(&data, options(4))
+            .err()
+            .expect("fifth header escaped");
+        assert_header_budget(error.error(), 4);
+        let limited = crate::decode_with(&data, options(5)).unwrap();
+        let unlimited_headers = crate::decode(&data).unwrap();
+        assert_eq!(
+            (limited.width, limited.height, limited.channels),
+            (
+                unlimited_headers.width,
+                unlimited_headers.height,
+                unlimited_headers.channels
+            )
+        );
+        assert_eq!(limited.data, unlimited_headers.data);
+    }
+
     #[test]
     fn test_native_stop_reasons_before_pixel_output() {
         use std::sync::{

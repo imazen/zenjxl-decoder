@@ -43,6 +43,14 @@ coalescing-check:
     cargo test --locked -p zenjxl-decoder --no-default-features --lib coalescing_
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+header-budget-sync export:
+    just coalescing-sync "{{export}}"
+    cp zenjxl-decoder/src/api/inner/codestream_parser/mod.rs zenjxl-decoder/src/api/inner/codestream_parser/non_section.rs "{{export}}/zenjxl-decoder/src/api/inner/codestream_parser/"
+
+header-budget-check filter="frame_header_budget_":
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib "{{filter}}"
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
 interpretation-resolve:
     cargo metadata --manifest-path perf/interpretation-validation/Cargo.toml --format-version 1 > /dev/null
 
