@@ -1,5 +1,8 @@
 # zenjxl-decoder dev commands
 
+source-checks:
+    ./ci/pull_request_checks.sh
+
 # Standalone interpretation qualification; no encoder/oracle in library builds.
 # Export once with git archive, then synchronize only this task's source files.
 interpretation-sync export:
