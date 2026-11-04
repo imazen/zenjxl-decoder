@@ -152,3 +152,7 @@ feature-corpus-references output:
 # Keep debug overflow checks enabled for cropped/padded rows crossing zero.
 downstream-negative-canvas-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- wrapped_canvas serial_parallel_parity_palette_across_thread_counts --test-threads=1
+
+# Caller wraps this full-decode diagnostic with heavy.lock and run-heavy.
+downstream-tier-check:
+    cargo test --locked -p zenjxl-decoder --all-features --test cross_tier_determinism -- decode_is_identical_on_every_dispatch_tier --test-threads=1

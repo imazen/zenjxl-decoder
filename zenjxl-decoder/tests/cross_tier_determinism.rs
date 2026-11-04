@@ -153,6 +153,7 @@ const EXACT_FIXTURES: &[&str] = &[
 /// reached `round_store_u8` with a signed, unbounded value. Measured on
 /// `3x3_srgb_lossy.jxl`, samples from -44.6 to +262.3 arrive at that store.
 const FLOAT_FIXTURES: &[&str] = &[
+    "crop2x_small.jxl",
     "3x3_srgb_lossy.jxl",
     "3x3a_srgb_lossy.jxl",
     "8x8_noise.jxl",
@@ -366,6 +367,24 @@ fn decode_is_identical_on_every_dispatch_tier() {
     let report = for_each_token_permutation(CompileTimePolicy::WarnStderr, |perm| {
         labels.push(perm.label.clone());
         let got = decode_grid(&inputs);
+        if let Some(directory) = std::env::var_os("ZENJXL_TIER_OUTPUT_DIR") {
+            let directory = PathBuf::from(directory).join(format!("tier-{}", labels.len() - 1));
+            std::fs::create_dir(&directory).expect("fresh tier output directory");
+            std::fs::write(directory.join("label.txt"), &perm.label).unwrap();
+            for (index, (key, _, result)) in got.iter().enumerate() {
+                if let Ok(image) = result {
+                    std::fs::write(directory.join(format!("{index}.rgba8")), &image.data).unwrap();
+                    std::fs::write(
+                        directory.join(format!("{index}.txt")),
+                        format!(
+                            "{key}\n{} {} {}\n",
+                            image.width, image.height, image.channels
+                        ),
+                    )
+                    .unwrap();
+                }
+            }
+        }
 
         let Some((base_label, base)) = &baseline else {
             baseline = Some((perm.label.clone(), got));
@@ -428,6 +447,7 @@ fn decode_is_identical_on_every_dispatch_tier() {
                 perm.label,
             );
 
+            report_uncaptured(&context);
             match strictness {
                 Strictness::Exact => panic!(
                     "{context}\n  This fixture's decode carries no float quantization \
