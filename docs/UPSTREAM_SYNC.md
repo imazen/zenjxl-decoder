@@ -12,6 +12,14 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Incremental ICC reads now check deferred SymbolReader errors before
+  appending a symbol (upstream `7f539c8`, reviewed `38d85e55`). The procedural
+  regression reproduces the old successful append of a corrupt zero and
+  requires immediate `UnexpectedLz77Repeat` instead. The fixture regression
+  requires this error for all 251 chunk sizes; it does not accept completion,
+  exhaustion or a stalled reader. Both regressions were executed in the audit.
+  This remains independent of main's earlier ICC read-ahead repair.
+
 - Spline dequantization now uses the base/HF zero-adjustment factors rather
   than LF correlation adjustments (upstream `cc83182`, reviewed `2ac8e77d`).
   The procedural LF-invariance regression was compiled and run in the audit:

@@ -244,6 +244,9 @@ impl IncrementalIccReader {
             self.reader.restore(checkpoint);
             return Err(at!(err));
         }
+        // The SymbolReader defers its own error state (LZ77 repeat, hybrid-uint
+        // overflow); the BitReader check above does not see it. Upstream 7f539c8.
+        self.reader.check_for_error()?;
         if sym >= 256 {
             warn!(sym, "Invalid symbol in ICC stream");
             return Err(at!(Error::InvalidIccStream));
@@ -315,5 +318,79 @@ mod preamble_tests {
         // Plausible profiles (expansion well under 1024x) still pass.
         assert!(super::check_preamble(3_000, 10, 4, 600).is_ok());
         assert!(super::check_preamble(200_000, 10, 4, 400).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod incremental_error_tests {
+    use super::*;
+    #[test]
+    fn read_one_rejects_before_appending_corrupt_symbol() {
+        let histograms = Histograms::lz77_byte_histogram();
+        let bytes = [240u8.reverse_bits(), 0, 0, 0, 0, 0, 0, 0];
+        let mut br = BitReader::new(&bytes);
+        let reader = SymbolReader::new(&histograms, &mut br, None).unwrap();
+        let mut icc = IncrementalIccReader {
+            histograms,
+            reader,
+            out_buf: vec![],
+            len: 2,
+            prev_bytes: [0, 0],
+            total_bits_consumed: 0,
+            last_br_bits_read: 0,
+        };
+        let result = icc.read_one(&mut br);
+        assert!(
+            br.check_for_error().is_ok(),
+            "only the entropy reader should report the error"
+        );
+        assert!(
+            matches!(
+                result.as_ref().map_err(|e| e.error()),
+                Err(Error::UnexpectedLz77Repeat)
+            ),
+            "read_one result={result:?}; appended bytes={:?}",
+            icc.out_buf
+        );
+        assert!(icc.out_buf.is_empty());
+    }
+    #[test]
+    fn malformed_icc_rejected_at_every_chunk_size() {
+        use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+        let data = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/testdata/icc_lz77_restore_empty_rewind.jxl"),
+        )
+        .unwrap();
+        let mut outcomes = std::collections::BTreeMap::new();
+        for size in 1..=data.len() {
+            let mut decoder = JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default());
+            let mut remaining = data.as_slice();
+            let mut offered = 0;
+            let mut stalled = 0;
+            let outcome = loop {
+                offered = (offered + size).min(remaining.len());
+                let mut chunk = &remaining[..offered];
+                let result = decoder.process(&mut chunk);
+                let consumed = offered - chunk.len();
+                remaining = &remaining[consumed..];
+                offered = chunk.len();
+                match result {
+                    Err(e) => break format!("{:?}", e.error()),
+                    Ok(ProcessingResult::Complete { .. }) => break "ACCEPTED".into(),
+                    Ok(ProcessingResult::NeedsMoreInput { fallback, .. }) => {
+                        decoder = fallback;
+                        stalled = if consumed == 0 { stalled + 1 } else { 0 };
+                        if stalled >= 64 {
+                            break "STALLED".into();
+                        }
+                    }
+                }
+            };
+            *outcomes.entry(outcome).or_insert(0usize) += 1;
+        }
+        eprintln!("ICC chunk outcomes: {outcomes:?}");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes.get("UnexpectedLz77Repeat"), Some(&data.len()));
     }
 }

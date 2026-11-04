@@ -645,6 +645,14 @@ impl SymbolReader {
         }
     }
 
+    /// Surfaces any deferred reader error (`UnexpectedLz77Repeat`,
+    /// `ArithmeticOverflow`, hybrid-uint `nbits` overflow) mid-stream.
+    /// Upstream jxl-rs 7f539c8: the incremental ICC reader must see these
+    /// before it consumes a corrupt symbol.
+    pub fn check_for_error(&self) -> Result<()> {
+        self.errors.check_for_error()
+    }
+
     pub fn checkpoint<const N: usize>(&self) -> Checkpoint<N> {
         let state = match &self.state {
             SymbolReaderState::None => StateCheckpoint::None,
@@ -1065,5 +1073,19 @@ mod test {
 
             Ok(())
         });
+    }
+}
+
+#[cfg(test)]
+impl Histograms {
+    pub(crate) fn lz77_byte_histogram() -> Self {
+        let mut histograms = Self::reverse_octet(41);
+        histograms.lz77_params = Lz77Params {
+            enabled: true,
+            min_symbol: Some(240),
+            min_length: Some(3),
+        };
+        histograms.lz77_length_uint = Some(HybridUint::new(8, 0, 0));
+        histograms
     }
 }
