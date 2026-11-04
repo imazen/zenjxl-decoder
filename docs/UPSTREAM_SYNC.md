@@ -12,6 +12,12 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Additional custom-CMS review: compile the CMYK stage independently of optional
+  MoxCMS, preserve the public reflectance contract through the stage, and let
+  each backend normalize ink. LCMS uses percentage ink, BPC and high-resolution
+  precalculation as in libjxl v0.12. The complete CMYK fixture matches the
+  independent RGBA reference exactly in default and no-default CLI builds.
+
 - Follow-up crop-coordinate repair wraps vector chunk offsets and bounds dither
   channel-phase arithmetic to its 32-pixel period. Negative canvas coordinates
   no longer overflow in debug builds. The existing palette concurrency test

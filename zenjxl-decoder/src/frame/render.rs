@@ -1514,7 +1514,6 @@ impl Frame {
 
     /// Helper function to detect CMYK ICC profile from bytes.
     /// Returns true if the ICC profile has CMYK color space signature.
-    #[cfg(feature = "cms")]
     fn is_cmyk_icc_profile(icc_data: &[u8]) -> bool {
         if icc_data.len() < 20 {
             return false;
@@ -1525,7 +1524,6 @@ impl Frame {
 
     /// Try to create a CMS-based CMYK->RGB conversion stage.
     /// Returns Some(stage) if successful, None if we should fall back to simple K multiplication.
-    #[cfg(feature = "cms")]
     fn try_create_cms_cmyk_stage(
         decoder_state: &DecoderState,
         cms: Option<&dyn JxlCms>,
@@ -2085,17 +2083,11 @@ impl Frame {
                     // Try to use CMS-based CMYK conversion if we have:
                     // 1. A CMS implementation available
                     // 2. An embedded CMYK ICC profile
-                    #[cfg(feature = "cms")]
                     if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
                     {
                         pipeline = pipeline.add_inplace_stage(cms_stage);
                     } else {
                         // Fall back to simple K multiplication: R = C * K, G = M * K, B = Y * K
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
-                    }
-                    #[cfg(not(feature = "cms"))]
-                    {
-                        let _ = cms; // suppress unused warning when cms feature is off
                         pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                 }
@@ -2143,16 +2135,10 @@ impl Frame {
                 .enumerate()
             {
                 if info.ec_type == ExtraChannel::Black && !raw_cmyk_requested {
-                    #[cfg(feature = "cms")]
                     if let Some(cms_stage) = Self::try_create_cms_cmyk_stage(decoder_state, cms, i)?
                     {
                         pipeline = pipeline.add_inplace_stage(cms_stage);
                     } else {
-                        pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
-                    }
-                    #[cfg(not(feature = "cms"))]
-                    {
-                        let _ = cms;
                         pipeline = pipeline.add_inplace_stage(BlackChannelStage::new(i));
                     }
                 }

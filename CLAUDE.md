@@ -1,6 +1,23 @@
 # Decoder investigation notes
 
 
+## Resolved: custom CMYK CMS conversion — 2026-11-04
+
+A caller-supplied CMYK CMS was bypassed unless the optional MoxCMS feature
+was compiled. The dedicated stage now compiles independently of that backend
+and passes the public transform contract's reflectance convention (1 = no
+ink); each backend performs its own ICC normalization. The LCMS backend now
+converts to percentage ink and enables black-point compensation and high
+resolution precalculation, matching libjxl v0.12's transform configuration.
+
+The existing LCMS implementation with CMYK CMS enabled differed from djxl
+in 94,239 of 1,048,576 RGBA bytes, maximum difference 252. The corrected
+implementation matches every byte. A strict whole-image hash regression
+passes both the default CLI and no-default-feature CLI builds, without
+requiring MoxCMS. The existing MoxCMS color assertions retain their expected
+values and tolerance; their direct inputs now use documented reflectance.
+A custom-transformer stage test checks the same contract explicitly.
+
 ## Known Bugs: remaining display parity — 2026-11-04
 
 The same djxl v0.12 runtime produces a host-dependent green byte at

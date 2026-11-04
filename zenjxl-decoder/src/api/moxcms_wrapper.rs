@@ -32,6 +32,7 @@ struct MoxCmsTransformer {
     transform: Arc<dyn moxcms::TransformExecutor<f32> + Send + Sync>,
     input_channels: usize,
     output_channels: usize,
+    input_buffer: Vec<f32>,
     /// moxcms produced linear light; apply the sRGB curve here (see
     /// `initialize_transforms`).
     encode_srgb: bool,
@@ -63,6 +64,19 @@ fn bpc_and_encode_srgb_in_place(samples: &mut [f32], black_point_y: f32) {
 
 impl JxlCmsTransformer for MoxCmsTransformer {
     fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
+        let input = if self.input_channels == 4 {
+            self.input_buffer.clear();
+            self.input_buffer
+                .try_reserve(input.len())
+                .map_err(|error| {
+                    Error::CmsError(format!("Cannot allocate CMYK transform input: {error}"))
+                })?;
+            self.input_buffer
+                .extend(input.iter().map(|value| 1.0 - value));
+            self.input_buffer.as_slice()
+        } else {
+            input
+        };
         self.transform
             .transform(input, output)
             .map_err(|e| at!(Error::CmsError(format!("moxcms transform error: {:?}", e))))?;
@@ -81,7 +95,12 @@ impl JxlCmsTransformer for MoxCmsTransformer {
 
         // moxcms doesn't support in-place transforms, so we need a temporary buffer.
         // For efficiency, we could pool these buffers, but for now just allocate.
-        let input_copy = inout.to_vec();
+        let mut input_copy = inout.to_vec();
+        if self.input_channels == 4 {
+            for value in &mut input_copy {
+                *value = 1.0 - *value;
+            }
+        }
         self.transform
             .transform(&input_copy, inout)
             .map_err(|e| at!(Error::CmsError(format!("moxcms transform error: {:?}", e))))?;
@@ -318,6 +337,7 @@ impl JxlCms for MoxCms {
                 transform,
                 input_channels,
                 output_channels,
+                input_buffer: Vec::new(),
                 encode_srgb,
                 black_point_y,
             }));
@@ -387,10 +407,8 @@ mod tests {
             ([1.0, 1.0, 1.0, 1.0], [Some(1.0), Some(1.0), Some(1.0)]),
         ];
         for (jxl, want) in cases {
-            // The pipeline hands the CMS ICC-convention ink (0 = no ink).
-            let ink = jxl.map(|v| 1.0 - v);
             let mut got = [0.0f32; 3];
-            transforms[0].do_transform(&ink, &mut got)?;
+            transforms[0].do_transform(&jxl, &mut got)?;
             for (c, want) in want.iter().enumerate() {
                 let Some(want) = *want else { continue };
                 // Under a third of an 8-bit code.

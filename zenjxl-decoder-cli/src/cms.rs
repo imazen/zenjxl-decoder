@@ -65,7 +65,7 @@ impl JxlCms for Lcms2Cms {
                     &output_profile,
                     output_format,
                     Intent::RelativeColorimetric,
-                    Flags::NO_CACHE,
+                    Flags::NO_CACHE | Flags::BLACKPOINT_COMPENSATION | Flags::HIGHRES_PRECALC,
                 )
                 .map_err(|e| Error::CmsError(format!("lcms2 failed to create transform: {e}")))?;
 
@@ -73,6 +73,7 @@ impl JxlCms for Lcms2Cms {
                 transform,
                 input_channels,
                 output_channels,
+                cmyk_input: Vec::new(),
             }));
         }
 
@@ -95,6 +96,7 @@ struct Lcms2Transformer {
     transform: Transform<u8, u8, ThreadContext, DisallowCache>,
     input_channels: usize,
     output_channels: usize,
+    cmyk_input: Vec<f32>,
 }
 
 impl JxlCmsTransformer for Lcms2Transformer {
@@ -111,6 +113,19 @@ impl JxlCmsTransformer for Lcms2Transformer {
             .into());
         }
 
+        // JxlCmsTransformer supplies reflectance (1 = no ink).
+        // LCMS CMYK_FLT instead represents ink as percentages (0..100).
+        let input = if self.input_channels == 4 {
+            self.cmyk_input.clear();
+            self.cmyk_input.try_reserve(input.len()).map_err(|error| {
+                Error::CmsError(format!("Cannot allocate CMYK transform input: {error}"))
+            })?;
+            self.cmyk_input
+                .extend(input.iter().map(|value| 100.0 - 100.0 * value));
+            self.cmyk_input.as_slice()
+        } else {
+            input
+        };
         // Convert f32 slices to byte slices using bytemuck for safe casting
         let input_bytes: &[u8] = bytemuck::cast_slice(input);
         let output_bytes: &mut [u8] = bytemuck::cast_slice_mut(output);
@@ -160,6 +175,21 @@ mod tests {
             transfer_function: JxlTransferFunction::Linear,
             rendering_intent: RenderingIntent::Relative,
         })
+    }
+
+    #[test]
+    fn cmyk_fixture_matches_djxl_bytes() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl");
+        let input = std::fs::read(path).expect("CMYK regression fixture");
+        let options = jxl::api::JxlDecoderOptions::default().with_cms(Box::new(Lcms2Cms));
+        let image = jxl::api::decode_with(&input, options).unwrap();
+        assert_eq!((image.width, image.height, image.channels), (512, 512, 4));
+        // Every byte of djxl v0.12's LCMS reference, not a sampled/tolerant gate.
+        let hash = image.data.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+        assert_eq!(hash, 0xd931c4898c628de9);
     }
 
     #[test]

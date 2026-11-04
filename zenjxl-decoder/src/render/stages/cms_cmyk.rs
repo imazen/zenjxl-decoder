@@ -5,7 +5,7 @@
 
 //! CMS-based CMYK to RGB conversion stage.
 //!
-//! This stage uses a Color Management System (moxcms) to convert CMYK data
+//! This stage uses a caller-provided Color Management System to convert CMYK data
 //! to RGB using an embedded ICC profile. This is needed for proper CMYK
 //! color reproduction, as simple mathematical conversion (R=C*K) does not
 //! account for ink characteristics, dot gain, and color gamut mapping that
@@ -21,7 +21,7 @@ use crate::render::RenderPipelineInPlaceStage;
 /// This stage:
 /// 1. Reads CMY from channels 0, 1, 2 and K from the specified extra channel
 /// 2. Packs them into CMYK format (4 channels)
-/// 3. Transforms through the ICC profile using moxcms
+/// 3. Transforms through the ICC profile using the supplied CMS
 /// 4. Outputs RGB to channels 0, 1, 2
 pub struct CmsCmykToRgbStage {
     /// Black channel index (offset from 3)
@@ -81,15 +81,14 @@ impl RenderPipelineInPlaceStage for CmsCmykToRgbStage {
         let mut cmyk_input = vec![0.0f32; xsize * 4];
         let mut rgb_output = vec![0.0f32; xsize * 3];
 
-        // The decoded CMYK channels are in JXL's reflectance convention
-        // (1.0 = no ink / full reflectance, 0.0 = full ink). moxcms expects
-        // standard ICC device values (0.0 = no ink, 1.0 = full ink) and does not
-        // auto-invert (unlike skcms in libjxl), so invert all four channels. (#37)
+        // JxlCmsTransformer takes JPEG XL reflectance values: 1 = no ink.
+        // Backend-specific ICC inversion and percentage conversion belong in
+        // the backend, so custom implementations see the documented contract.
         for idx in 0..xsize {
-            cmyk_input[idx * 4] = 1.0 - row_c[idx];
-            cmyk_input[idx * 4 + 1] = 1.0 - row_m[idx];
-            cmyk_input[idx * 4 + 2] = 1.0 - row_y[idx];
-            cmyk_input[idx * 4 + 3] = 1.0 - row_k[idx];
+            cmyk_input[idx * 4] = row_c[idx];
+            cmyk_input[idx * 4 + 1] = row_m[idx];
+            cmyk_input[idx * 4 + 2] = row_y[idx];
+            cmyk_input[idx * 4 + 3] = row_k[idx];
         }
 
         // Transform CMYK → RGB through ICC profile
@@ -114,5 +113,33 @@ impl RenderPipelineInPlaceStage for CmsCmykToRgbStage {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ReflectanceCms;
+    impl JxlCmsTransformer for ReflectanceCms {
+        fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> crate::error::Result<()> {
+            assert_eq!(input, [1.0, 0.5, 0.25, 0.75]);
+            output.copy_from_slice(&[0.3, 0.4, 0.5]);
+            Ok(())
+        }
+        fn do_transform_inplace(&mut self, _: &mut [f32]) -> crate::error::Result<()> {
+            panic!("CMYK to RGB requires separate buffers")
+        }
+    }
+
+    #[test]
+    fn custom_cms_receives_documented_reflectance() {
+        let stage = CmsCmykToRgbStage::new(0, Box::new(ReflectanceCms));
+        let mut c = [1.0];
+        let mut m = [0.5];
+        let mut y = [0.25];
+        let mut k = [0.75];
+        stage.process_row_chunk((0, 0), 1, &mut [&mut c, &mut m, &mut y, &mut k], None);
+        assert_eq!([c[0], m[0], y[0], k[0]], [0.3, 0.4, 0.5, 0.75]);
     }
 }
