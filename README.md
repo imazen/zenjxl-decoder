@@ -2,7 +2,7 @@
 
 A pure-Rust **JPEG XL decoder** (ISO/IEC 18181), built for decoding untrusted bytes in a server. `#![forbid(unsafe_code)]` by default, with multi-architecture SIMD (SSE4.2/AVX2/AVX-512/NEON/WASM128) dispatched at runtime through the safe [`archmage`](https://crates.io/crates/archmage) layer.
 
-`zenjxl-decoder` is a fork of the upstream [`libjxl/jxl-rs`](https://github.com/libjxl/jxl-rs) reference decoder, which in turn tracks the C++ [`libjxl`](https://github.com/libjxl/libjxl) implementation. Upstream remains the source of truth for codec behaviour; this fork adds what a production service needs on top — enforced resource limits, cooperative cancellation, parallel decode, fallible allocation, and a handful of bug fixes that have been contributed back upstream. Maintained by [Lilith River](https://github.com/lilith) at [Imazen](https://github.com/imazen).
+`zenjxl-decoder` is a fork of the upstream [`libjxl/jxl-rs`](https://github.com/libjxl/jxl-rs) reference decoder, which in turn tracks the C++ [`libjxl`](https://github.com/libjxl/libjxl) implementation. Upstream remains the source of truth for codec behaviour. This fork extends that foundation with enforced resource limits, cooperative cancellation, parallel decode, fallible allocation, and bug fixes contributed back upstream. Maintained by [Lilith River](https://github.com/lilith) at [Imazen](https://github.com/imazen).
 
 The Rust lib name is `zenjxl_decoder`, so you `use zenjxl_decoder::...` in code. Found a conformant JXL file that decodes incorrectly (or not at all)? [Open an issue](https://github.com/imazen/zenjxl-decoder/issues/new).
 
