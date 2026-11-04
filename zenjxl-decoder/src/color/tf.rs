@@ -8,10 +8,10 @@ use crate::util::eval_rational_poly;
 use crate::util::eval_rational_poly_simd;
 use jxl_simd::{F32SimdVec, SimdDescriptor, SimdMask};
 
-/// Converts the linear samples with the sRGB transfer curve (SIMD version).
-// Max error ~5e-7
+/// Nonnegative sRGB magnitude shared by separate and fused output stages.
+/// The threshold itself belongs to the linear branch, as in libjxl v0.12.
 #[inline(always)]
-pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
+pub(crate) fn linear_to_srgb_positive<D: SimdDescriptor>(d: D, a: D::F32Vec) -> D::F32Vec {
     #[allow(clippy::excessive_precision)]
     const P: [f32; 5] = [
         -5.135152395e-4,
@@ -30,20 +30,20 @@ pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
         2.424867759e-2,
     ];
 
+    a.gt(D::F32Vec::splat(d, 0.0031308)).if_then_else_f32(
+        eval_rational_poly_simd(d, a.sqrt(), P, Q),
+        a * D::F32Vec::splat(d, 12.92),
+    )
+}
+
+/// Converts the linear samples with the sRGB transfer curve (SIMD version).
+// Max error ~5e-7
+#[inline(always)]
+pub fn linear_to_srgb_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
     for vec in samples.chunks_exact_mut(D::F32Vec::LEN) {
         let x = D::F32Vec::load(d, vec);
-        // Sign-extended sRGB: apply full curve to abs(x), then restore sign.
-        // This matches libjxl's TF_SRGB::EncodedFromDisplay behavior for
-        // out-of-gamut negative values.
-        let a = x.abs();
-        D::F32Vec::splat(d, 0.0031308)
-            .gt(a)
-            .if_then_else_f32(
-                a * D::F32Vec::splat(d, 12.92),
-                eval_rational_poly_simd(d, a.sqrt(), P, Q),
-            )
-            .copysign(x)
-            .store(vec);
+        // Sign-extended sRGB: apply the curve to abs(x), then restore sign.
+        linear_to_srgb_positive(d, x.abs()).copysign(x).store(vec);
     }
 }
 
@@ -104,11 +104,10 @@ pub fn srgb_to_linear_simd<D: SimdDescriptor>(d: D, samples: &mut [f32]) {
         let x = D::F32Vec::load(d, vec);
         // Sign-extended sRGB inverse: apply to abs, then restore sign.
         let a = x.abs();
-        D::F32Vec::splat(d, 0.04045)
-            .gt(a)
+        a.gt(D::F32Vec::splat(d, 0.04045))
             .if_then_else_f32(
-                a / D::F32Vec::splat(d, 12.92),
                 eval_rational_poly_simd(d, a, P, Q),
+                a / D::F32Vec::splat(d, 12.92),
             )
             .copysign(x)
             .store(vec);
@@ -541,6 +540,46 @@ mod test {
 
     use super::*;
     use crate::util::test::assert_all_almost_abs_eq;
+
+    fn srgb_linear_threshold_is_inclusive<D: SimdDescriptor>(d: D) {
+        let threshold = 0.0031308_f32;
+        for input in [
+            0.0_f32,
+            -0.0,
+            threshold,
+            -threshold,
+            f32::from_bits(threshold.to_bits() - 1),
+        ] {
+            let mut samples = vec![input; D::F32Vec::LEN];
+            linear_to_srgb_simd(d, &mut samples);
+            // libjxl v0.12 TF_SRGB chooses the exact linear operation at
+            // equality, not the rational approximation to the high branch.
+            let expected = (input.abs() * 12.92).copysign(input).to_bits();
+            for actual in samples {
+                assert_eq!(actual.to_bits(), expected, "input {input:?}");
+            }
+        }
+    }
+    jxl_simd::test_all_instruction_sets!(srgb_linear_threshold_is_inclusive);
+
+    fn srgb_encoded_threshold_is_inclusive<D: SimdDescriptor>(d: D) {
+        let threshold = 0.04045_f32;
+        for input in [
+            0.0_f32,
+            -0.0,
+            threshold,
+            -threshold,
+            f32::from_bits(threshold.to_bits() - 1),
+        ] {
+            let mut samples = vec![input; D::F32Vec::LEN];
+            srgb_to_linear_simd(d, &mut samples);
+            let expected = (input.abs() / 12.92).copysign(input).to_bits();
+            for actual in samples {
+                assert_eq!(actual.to_bits(), expected, "input {input:?}");
+            }
+        }
+    }
+    jxl_simd::test_all_instruction_sets!(srgb_encoded_threshold_is_inclusive);
 
     fn arb_samples(
         u: &mut arbtest::arbitrary::Unstructured,

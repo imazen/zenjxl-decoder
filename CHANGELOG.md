@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Include exact sRGB thresholds in the linear branch in both directions, and share forward sRGB arithmetic between separate and fused output paths.
+
 - Retain tiny-tile flush, squeeze-corner and reordered multiframe regressions; explicitly assert nonseekable reordered frames while preserving ordinary fixture seek guarantees (`6e9738e2`).
 
 - Enforce the Level 5 minimum nonzero animation duration of 1/120 second with exact rational arithmetic and the existing limit error; preserve zero-duration compositing frames and Level 10 support (`63e35670`).

@@ -6,8 +6,7 @@
 use crate::color::tf;
 use crate::headers::color_encoding::CustomTransferFunction;
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
-use crate::util::eval_rational_poly_simd;
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
+use jxl_simd::{F32SimdVec, simd_function};
 
 /// Apply transfer function to display-referred linear color samples.
 #[derive(Debug)]
@@ -278,31 +277,12 @@ simd_function!(
         position: (usize, usize),
         dither: bool,
     ) {
-        #[allow(clippy::excessive_precision)]
-        const P: [f32; 5] = [
-            -5.135152395e-4,
-            5.287254571e-3,
-            3.903842876e-1,
-            1.474205315,
-            7.352629620e-1,
-        ];
-        #[allow(clippy::excessive_precision)]
-        const Q: [f32; 5] = [
-            1.004519624e-2,
-            3.036675394e-1,
-            1.340816930,
-            9.258482155e-1,
-            2.424867759e-2,
-        ];
-
         assert_eq!(input_rows.len(), 3);
         assert_eq!(output_rows.len(), 3);
 
         let zero = D::F32Vec::splat(d, 0.0);
         let one = D::F32Vec::splat(d, 1.0);
         let scale = D::F32Vec::splat(d, max_val);
-        let threshold = D::F32Vec::splat(d, 0.0031308);
-        let linear_scale = D::F32Vec::splat(d, 12.92);
 
         let end = xsize.next_multiple_of(D::F32Vec::LEN);
 
@@ -319,12 +299,7 @@ simd_function!(
                 // Clamp to [0, 1]
                 let a = v.max(zero).min(one);
                 // Apply sRGB transfer function
-                let srgb = threshold
-                    .gt(a)
-                    .if_then_else_f32(
-                        a * linear_scale,
-                        eval_rational_poly_simd(d, a.sqrt(), P, Q),
-                    );
+                let srgb = tf::linear_to_srgb_positive(d, a);
                 // Scale (+ dither, like libjxl's MakeUnsigned) and convert to u8
                 if dither {
                     let noise = super::dither::dither_vec(

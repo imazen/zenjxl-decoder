@@ -1,5 +1,22 @@
 # Decoder investigation notes
 
+
+## Resolved: inclusive sRGB transfer thresholds (2026-11-04)
+
+The exact linear-to-sRGB threshold 0.0031308 and inverse threshold 0.04045
+were selecting the rational high branch rather than the linear branch.
+Strict raw-f32-bit regressions reproduced both failures on scalar, SSE4.2
+and AVX2. Both equality cases now take the linear branch, preserving sign
+(including negative zero). Separate float output and the two fused u8 stages
+share one nonnegative sRGB magnitude implementation.
+
+Reference: libjxl v0.12
+[`TF_SRGB`](https://github.com/libjxl/libjxl/blob/v0.12.0/lib/jxl/cms/transfer_functions-inl.h#L197).
+The six cases on the available scalar/SSE4.2/AVX2 tiers pass after the repair;
+AVX-512 is unavailable on the local host. Strict workspace all-target,
+all-feature Clippy passes. Full integration and post-repair fixture-oracle
+validation are tracked separately.
+
 ## Resolved: inverse-XYB rounding boundary (2026-11-04)
 
 The inverse XYB kernels now share the same implementation and accumulate

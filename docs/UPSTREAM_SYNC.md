@@ -12,6 +12,13 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Exact sRGB transfer thresholds now take the linear branch in both directions,
+  matching libjxl v0.12's inclusive comparison. Separate output and both fused
+  u8 output stages share the same forward magnitude implementation. Strict
+  bit regressions fail before and pass after on scalar, SSE4.2 and AVX2;
+  sign and negative-zero behavior are preserved. This was found during the
+  final bit-exact review, in addition to the original nine dispositions.
+
 - Retained tiny-tile flushing, squeeze-corner source pixels and reordered
   multiframe coverage. The new reordered fixture explicitly has no seek
   targets for either frame; the ordinary seek sweep still requires targets

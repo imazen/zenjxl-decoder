@@ -11,8 +11,8 @@ use crate::error::Result;
 use crate::headers::{FileHeader, OpsinInverseMatrix};
 use crate::render::stages::from_linear;
 use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage, RenderPipelineInPlaceStage};
-use crate::util::{Matrix3x3, eval_rational_poly_simd, inv_3x3_matrix, mul_3x3_matrix};
-use jxl_simd::{F32SimdVec, SimdMask, simd_function};
+use crate::util::{Matrix3x3, inv_3x3_matrix, mul_3x3_matrix};
+use jxl_simd::{F32SimdVec, simd_function};
 
 const SRGB_LUMINANCES: [f32; 3] = [0.2126, 0.7152, 0.0722];
 
@@ -344,27 +344,9 @@ simd_function!(
         let bias = bias.map(|x| D::F32Vec::splat(d, x));
         let mat = mat.map(|x| D::F32Vec::splat(d, x * intensity_scale));
 
-        #[allow(clippy::excessive_precision)]
-        const P: [f32; 5] = [
-            -5.135152395e-4,
-            5.287254571e-3,
-            3.903842876e-1,
-            1.474205315,
-            7.352629620e-1,
-        ];
-        #[allow(clippy::excessive_precision)]
-        const Q: [f32; 5] = [
-            1.004519624e-2,
-            3.036675394e-1,
-            1.340816930,
-            9.258482155e-1,
-            2.424867759e-2,
-        ];
         let zero = D::F32Vec::splat(d, 0.0);
         let one = D::F32Vec::splat(d, 1.0);
         let scale = D::F32Vec::splat(d, max_val);
-        let threshold = D::F32Vec::splat(d, 0.0031308);
-        let linear_scale = D::F32Vec::splat(d, 12.92);
 
         let in_x = input_rows[0][0];
         let in_y = input_rows[1][0];
@@ -390,20 +372,11 @@ simd_function!(
             // sRGB TF + u8 quantize (optionally dithered, like libjxl's
             // MakeUnsigned: v * max + noise, clamp [0, max], round).
             let r_c = r_lin.max(zero).min(one);
-            let r_srgb = threshold.gt(r_c).if_then_else_f32(
-                r_c * linear_scale,
-                eval_rational_poly_simd(d, r_c.sqrt(), P, Q),
-            );
+            let r_srgb = crate::color::tf::linear_to_srgb_positive(d, r_c);
             let g_c = g_lin.max(zero).min(one);
-            let g_srgb = threshold.gt(g_c).if_then_else_f32(
-                g_c * linear_scale,
-                eval_rational_poly_simd(d, g_c.sqrt(), P, Q),
-            );
+            let g_srgb = crate::color::tf::linear_to_srgb_positive(d, g_c);
             let b_c = b_lin.max(zero).min(one);
-            let b_srgb = threshold.gt(b_c).if_then_else_f32(
-                b_c * linear_scale,
-                eval_rational_poly_simd(d, b_c.sqrt(), P, Q),
-            );
+            let b_srgb = crate::color::tf::linear_to_srgb_positive(d, b_c);
             if let Some(position) = dither_at {
                 let pos = (position.0 + idx, position.1);
                 let nr = super::dither::dither_vec(d, pos, 0);
