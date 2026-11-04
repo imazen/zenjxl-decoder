@@ -156,3 +156,14 @@ downstream-negative-canvas-check:
 # Caller wraps this full-decode diagnostic with heavy.lock and run-heavy.
 downstream-tier-check:
     cargo test --locked -p zenjxl-decoder --all-features --test cross_tier_determinism -- decode_is_identical_on_every_dispatch_tier --test-threads=1
+
+# Explicitly enable the CMYK stage when comparing the existing LCMS backend.
+downstream-cmyk-dump input output:
+    cargo run --locked -p zenjxl-decoder-cli --all-features --features jxl/cms --example cmyk_lcms_reference -- {{quote(input)}} {{quote(output)}}
+
+# Caller wraps with heavy.lock and run-heavy; test the custom CMS without MoxCMS.
+downstream-cms-check:
+    cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+    cargo test --locked -p zenjxl-decoder-cli --lib -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder-cli --no-default-features --lib -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- moxcms_wrapper custom_cms_receives_documented_reflectance --test-threads=1

@@ -151,7 +151,7 @@ To force single-threaded mode at runtime, use `JxlDecoderOptions::default().with
 | `all-simd` | ✅ | All SIMD backends, dispatched at runtime via [`archmage`](https://crates.io/crates/archmage) |
 | `sse42` / `avx` / `avx512` / `neon` / `wasm128` | — | Individual SIMD targets |
 | `threads` | — | Rayon-based parallel group decode and render |
-| `cms` | — | [`moxcms`](https://crates.io/crates/moxcms) ICC-profile color transforms (required for CMYK input) |
+| `cms` | — | [`moxcms`](https://crates.io/crates/moxcms) optional ICC-profile color transforms; custom CMS backends and raw CMYK do not require this feature |
 | `jpeg` | — | Lossless JPEG reconstruction from JXL containers (pulls in `brotli`) |
 | `allow-unsafe` | — | Opt into a small set of `unsafe` fast paths guarded by safe fallbacks (the default build is `#![forbid(unsafe_code)]`) |
 
