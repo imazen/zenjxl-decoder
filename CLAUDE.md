@@ -60,8 +60,9 @@ comparisons and seven available x86 permutations. ARM64 also passes all 40
 configurations over nine permutations, all 40 selected decoder regressions,
 and both exact crop frames. Native scalar/SSE4.2/AVX2/NEON and WASI
 scalar/wasm128 fused-operation contracts pass. The cross-tier gate requires
-exact bytes throughout. Full integration is rerunning after this repair;
-AVX-512 execution and fallback performance on CPUs without FMA are unmeasured.
+exact bytes throughout. The final full workspace, CMS, WASI and frozen-reference
+gates pass after the large-IDCT precision repair. AVX-512 execution and
+fallback performance on CPUs without FMA are unmeasured.
 
 Optional MoxCMS CMYK display output retains whole-image differences from
 LCMS-backed djxl. The CLI's supplied LCMS backend has a strict whole-image

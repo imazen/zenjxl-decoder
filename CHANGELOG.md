@@ -8,7 +8,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
-- Preserve the existing large-IDCT accuracy bound after fused fallback arithmetic by retaining f64 intermediates through 64–256-point factorizations. Scalar and vector paths produce identical f32 bits for all nine large shapes under four deterministic inputs. The paired 64×64 AVX2 kernel measures 9.4 µs versus 3.8 µs for the f32 baseline; whole-decoder impact is unmeasured. Measurements and the rejected scalar prototype are retained under `benchmarks/`.
+- Preserve the existing large-IDCT accuracy bound after fused fallback arithmetic by retaining f64 intermediates through 64–256-point factorizations. Scalar and vector paths produce identical f32 bits for all nine large shapes under four deterministic inputs. The paired 64×64 AVX2 kernel measures 9.4 µs versus 3.8 µs for the f32 baseline; whole-decoder impact is unmeasured. Measurements and the rejected scalar prototype are retained under `benchmarks/` (`310207f4`).
 
 - Use single-rounding fused multiply-add semantics in scalar, SSE4.2 and WASM SIMD fallbacks. The dispatch comparison now requires identical bytes for float and dithered rendering as well as integer output.
 
