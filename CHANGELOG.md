@@ -8,29 +8,29 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
-- Retain tiny-tile flush, squeeze-corner and reordered multiframe regressions; explicitly assert nonseekable reordered frames while preserving ordinary fixture seek guarantees.
+- Retain tiny-tile flush, squeeze-corner and reordered multiframe regressions; explicitly assert nonseekable reordered frames while preserving ordinary fixture seek guarantees (`6e9738e2`).
 
-- Enforce the Level 5 minimum nonzero animation duration of 1/120 second with exact rational arithmetic and the existing limit error; preserve zero-duration compositing frames and Level 10 support.
+- Enforce the Level 5 minimum nonzero animation duration of 1/120 second with exact rational arithmetic and the existing limit error; preserve zero-duration compositing frames and Level 10 support (`63e35670`).
 
-- Give the inspector fixture sweep an explicit Level 10 policy, retaining a separate default-Level-5 rejection test.
+- Give the inspector fixture sweep an explicit Level 10 policy, retaining a separate default-Level-5 rejection test (`7473dc8e`).
 
-- Bound global and local modular transform lists to eight at Level 5 and 512 at Level 10, with boundary regressions for both entry points.
+- Bound global and local modular transform lists to eight at Level 5 and 512 at Level 10, with boundary regressions for both entry points (`bbb31b01`).
 
-- Enforce the conformance-level extra-channel caps (4 at Level 5, 256 at Level 10), independently of the caller-configured cap. Correctness corpus helpers explicitly select Level 10 while dedicated tests preserve default Level 5 coverage.
+- Enforce the conformance-level extra-channel caps (4 at Level 5, 256 at Level 10), independently of the caller-configured cap. Correctness corpus helpers explicitly select Level 10 while dedicated tests preserve default Level 5 coverage (`29f39a3b`).
 
-- Apply extra-channel dimension shifts even when color is not upsampled, and reject effective extra-channel upsampling above 8x.
+- Apply extra-channel dimension shifts even when color is not upsampled, and reject effective extra-channel upsampling above 8x (`463c1673`).
 
-- Match inverse-XYB matrix accumulation and intensity scaling to libjxl v0.12, sharing the arithmetic between fused and separate output paths. The cropped animation now matches its independent reference byte for byte.
+- Match inverse-XYB matrix accumulation and intensity scaling to libjxl v0.12, sharing the arithmetic between fused and separate output paths. The cropped animation now matches its independent reference byte for byte (`d8d26977`).
 
-- Reject deferred ICC entropy errors before appending corrupt symbols; retain exact malformed-input rejection at every input chunk size.
+- Reject deferred ICC entropy errors before appending corrupt symbols; retain exact malformed-input rejection at every input chunk size (`d4ac1df0`).
 
-- Dequantize spline colors with base HF correlation rather than LF adjustments; add a nonzero-LF correlation regression.
+- Dequantize spline colors with base HF correlation rather than LF adjustments; add a nonzero-LF correlation regression (`f8cc9ddf`).
 
-- Smooth subsampled LF planes on their packed channel grids, with independent channel gap decisions.
+- Smooth subsampled LF planes on their packed channel grids, with independent channel gap decisions (`aa4ef590`).
 
-- Clamp negative indices on Zero-predictor palette lookup paths to entry zero, preserving delta-predictor behavior.
+- Clamp negative indices on Zero-predictor palette lookup paths to entry zero, preserving delta-predictor behavior (`7ab41b9c`).
 
-- Keep the native-only corpus downloader out of WASI example compilation and run the macOS CI matrix on ARM64.
+- Keep the native-only corpus downloader out of WASI example compilation and run the macOS CI matrix on ARM64 (`75d7420c`).
 
 - Preserve post-transform reference colors with fused u8 output and use canvas coordinates and height after extending cropped frames. The cropped animation now has identical u8 pixels across both pipelines and input chunkings (`48c14662`).
 

@@ -21,13 +21,17 @@ pub enum JxlCodestreamLevel {
     /// Level 5 bounds:
     /// - total spline area estimate at most `min(8 · pixels + 2^25, 2^30)`;
     /// - total patch area at most `max(8 · pixels, 2^20)`;
-    /// - at most 256 modular channels after transforms.
+    /// - at most 256 modular channels after transforms;
+    /// - at most four extra channels and eight transforms per modular list;
+    /// - nonzero animation durations at least 1/120 second.
     #[default]
     Level5,
     /// Level 10 bounds:
     /// - total spline area estimate at most `min(1024 · pixels + 2^32, 2^42)`;
     /// - total patch area at most `max(1024 · pixels, 2^20)`;
-    /// - at most 65,536 modular channels after transforms.
+    /// - at most 65,536 modular channels after transforms;
+    /// - at most 256 extra channels and 512 transforms per modular list;
+    /// - no Level 5 minimum animation duration.
     Level10,
 }
 
@@ -130,15 +134,18 @@ pub struct JxlDecoderLimits {
     /// Each reference frame consumes memory equal to the image size.
     pub max_reference_frames: Option<usize>,
 
-    /// Maximum total memory budget in bytes. Default: None (unlimited).
+    /// Maximum total memory budget in bytes. Default: 4 GB on 64-bit targets,
+    /// 2 GB on 32-bit targets. [`unlimited`](Self::unlimited) disables this cap.
     /// When set, the decoder tracks allocations and fails if budget exceeded.
     /// This provides defense-in-depth against memory exhaustion attacks.
     pub max_memory_bytes: Option<u64>,
 
     /// Highest JPEG XL conformance level accepted: files that use splines,
-    /// patches or modular channels beyond this level's bounds are rejected
-    /// with [`Error::LimitExceeded`](crate::error::Error::LimitExceeded) (see
-    /// [`JxlCodestreamLevel`] for the bounds). Default and
+    /// patches, extra channels, modular channels or transforms, or animation
+    /// rates beyond this level's bounds are rejected. Count and rate bounds use
+    /// [`Error::LimitExceeded`](crate::error::Error::LimitExceeded); spline area
+    /// uses [`Error::SplinesAreaTooLarge`](crate::error::Error::SplinesAreaTooLarge).
+    /// See [`JxlCodestreamLevel`] for the bounds. Default and
     /// [`restrictive`](Self::restrictive): Level 5. [`unlimited`](Self::unlimited):
     /// Level 10, the specification's maximum. Set Level 10 to decode files
     /// that need it.

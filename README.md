@@ -58,8 +58,10 @@ let image = decode_with(&data, options)?;
 ### Resource limits
 
 These caller-configurable caps also combine with the selected conformance
-level: default Level 5 accepts at most four extra channels; Level 10 accepts
-at most 256.
+level: default Level 5 accepts at most four extra channels and eight transforms
+per modular list, with nonzero animation durations of at least 1/120 second.
+Level 10 accepts at most 256 extra channels and 512 transforms per list,
+without the Level 5 duration floor.
 
 | Limit | Default | Restrictive |
 |-------|---------|-------------|
@@ -72,7 +74,7 @@ at most 256.
 | `max_reference_frames` | 4 | 2 |
 | `max_memory_bytes` | 4 GB (2 GB on 32-bit) | 1 GB |
 
-`JxlDecoderLimits` is also `#[non_exhaustive]`: start from `default()`, `restrictive()`, or `unlimited()` (caller resource caps disabled, Level 10 format bounds retained — **trusted input only**) and override individual fields with the `with_*` setters. Exceeding any limit returns `Error::LimitExceeded { resource, actual, limit }` — never a panic. The `resource` string is one of `pixels`, `memory_bytes`, `icc_size`, `icc_amplification`, `extra_channels`, `reference_frames`.
+`JxlDecoderLimits` is also `#[non_exhaustive]`: start from `default()`, `restrictive()`, or `unlimited()` (caller resource caps disabled, Level 10 format bounds retained — **trusted input only**) and override individual fields with the `with_*` setters. Limit failures return errors, including `Error::LimitExceeded { resource, actual, limit }`. Examples of `resource` names include `pixels`, `memory_bytes`, `icc_size`, `icc_amplification`, `extra_channels`, `reference_frames`, `modular transforms`, `frame rate`.
 
 ### Cancellation
 
