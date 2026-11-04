@@ -189,9 +189,8 @@ simd_function!(
         // TODO(veluca): consider computing the cbrt in advance.
         let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
         let intensity_scale = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale));
-        let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale);
+        let bias = bias.map(|x| D::F32Vec::splat(d, x));
+        let mat = mat.map(|x| D::F32Vec::splat(d, x * intensity_scale));
 
         // Pre-loop assertions: prove row lengths so LLVM can eliminate bounds checks.
         assert!(row_x.len() >= xsize);
@@ -203,26 +202,7 @@ simd_function!(
             let y = D::F32Vec::load_from(d, row_y, idx);
             let b = D::F32Vec::load_from(d, row_b, idx);
 
-            // Mix and apply bias
-            let l = y + x - bias_cbrt[0];
-            let m = y - x - bias_cbrt[1];
-            let s = b - bias_cbrt[2];
-
-            // Apply biased inverse gamma and scale (1.0 corresponds to `intensity_target` nits)
-            let l2 = l * l;
-            let m2 = m * m;
-            let s2 = s * s;
-            let scaled_l = l * intensity_scale;
-            let scaled_m = m * intensity_scale;
-            let scaled_s = s * intensity_scale;
-            let l = l2.mul_add(scaled_l, scaled_bias[0]);
-            let m = m2.mul_add(scaled_m, scaled_bias[1]);
-            let s = s2.mul_add(scaled_s, scaled_bias[2]);
-
-            // Apply opsin inverse matrix (linear LMS to linear sRGB)
-            let r = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
-            let g = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
-            let b = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
+            let (r, g, b) = xyb_inverse(d, x, y, b, &bias_cbrt, &bias, &mat);
             r.store_at(row_x, idx);
             g.store_at(row_y, idx);
             b.store_at(row_b, idx);
@@ -317,8 +297,7 @@ fn xyb_inverse<D: jxl_simd::SimdDescriptor>(
     y: D::F32Vec,
     b: D::F32Vec,
     bias_cbrt: &[D::F32Vec; 3],
-    intensity_scale: D::F32Vec,
-    scaled_bias: &[D::F32Vec; 3],
+    bias: &[D::F32Vec; 3],
     mat: &[D::F32Vec; 9],
 ) -> (D::F32Vec, D::F32Vec, D::F32Vec) {
     let l = y + x - bias_cbrt[0];
@@ -328,16 +307,15 @@ fn xyb_inverse<D: jxl_simd::SimdDescriptor>(
     let l2 = l * l;
     let m2 = m * m;
     let s2 = s * s;
-    let scaled_l = l * intensity_scale;
-    let scaled_m = m * intensity_scale;
-    let scaled_s = s * intensity_scale;
-    let l = l2.mul_add(scaled_l, scaled_bias[0]);
-    let m = m2.mul_add(scaled_m, scaled_bias[1]);
-    let s = s2.mul_add(scaled_s, scaled_bias[2]);
+    let l = l2.mul_add(l, bias[0]);
+    let m = m2.mul_add(m, bias[1]);
+    let s = s2.mul_add(s, bias[2]);
 
-    let r_lin = mat[0].mul_add(l, mat[1].mul_add(m, mat[2] * s));
-    let g_lin = mat[3].mul_add(l, mat[4].mul_add(m, mat[5] * s));
-    let b_lin = mat[6].mul_add(l, mat[7].mul_add(m, mat[8] * s));
+    // Follow libjxl v0.12 XybToRgb's accumulation order. Reassociation can
+    // move a small cancellation result across a final u8 rounding boundary.
+    let r_lin = mat[2].mul_add(s, mat[1].mul_add(m, mat[0] * l));
+    let g_lin = mat[5].mul_add(s, mat[4].mul_add(m, mat[3] * l));
+    let b_lin = mat[8].mul_add(s, mat[7].mul_add(m, mat[6] * l));
     (r_lin, g_lin, b_lin)
 }
 
@@ -362,10 +340,9 @@ simd_function!(
         } = opsin;
 
         let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
-        let intensity_scale_f = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale_f));
-        let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale_f);
+        let intensity_scale = 255.0 / intensity_target;
+        let bias = bias.map(|x| D::F32Vec::splat(d, x));
+        let mat = mat.map(|x| D::F32Vec::splat(d, x * intensity_scale));
 
         #[allow(clippy::excessive_precision)]
         const P: [f32; 5] = [
@@ -408,9 +385,7 @@ simd_function!(
             let y = D::F32Vec::load_from(d, in_y, idx);
             let b = D::F32Vec::load_from(d, in_b, idx);
 
-            let (r_lin, g_lin, b_lin) = xyb_inverse(
-                d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
-            );
+            let (r_lin, g_lin, b_lin) = xyb_inverse(d, x, y, b, &bias_cbrt, &bias, &mat);
 
             // sRGB TF + u8 quantize (optionally dithered, like libjxl's
             // MakeUnsigned: v * max + noise, clamp [0, max], round).
@@ -475,10 +450,9 @@ simd_function!(
         } = opsin;
 
         let bias_cbrt = bias.map(|x| D::F32Vec::splat(d, x.cbrt()));
-        let intensity_scale_f = 255.0 / intensity_target;
-        let scaled_bias = bias.map(|x| D::F32Vec::splat(d, x * intensity_scale_f));
-        let mat = mat.map(|x| D::F32Vec::splat(d, x));
-        let intensity_scale = D::F32Vec::splat(d, intensity_scale_f);
+        let intensity_scale = 255.0 / intensity_target;
+        let bias = bias.map(|x| D::F32Vec::splat(d, x));
+        let mat = mat.map(|x| D::F32Vec::splat(d, x * intensity_scale));
 
         let zero = D::F32Vec::splat(d, 0.0);
         let scale = D::F32Vec::splat(d, max_val);
@@ -503,9 +477,7 @@ simd_function!(
             let y = D::F32Vec::load_from(d, in_y, idx);
             let b = D::F32Vec::load_from(d, in_b, idx);
 
-            let (r_lin, g_lin, b_lin) = xyb_inverse(
-                d, x, y, b, &bias_cbrt, intensity_scale, &scaled_bias, &mat,
-            );
+            let (r_lin, g_lin, b_lin) = xyb_inverse(d, x, y, b, &bias_cbrt, &bias, &mat);
 
             // Gamma TF + u8 quantize: powf(abs(x), gamma) * copysign(1, x)
             let r_abs = r_lin.abs().max(zero);

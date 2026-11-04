@@ -1,18 +1,18 @@
 # Decoder investigation notes
 
-## Known Bugs: remaining inverse-XYB rounding boundary (2026-11-04)
+## Resolved: inverse-XYB rounding boundary (2026-11-04)
 
-After `48c14662`, the crop regression agrees across both pipelines and all
-input chunkings. The strict `just downstream-oracle` comparison still reports
-one blue byte at canvas pixel (22,57): 7 instead of djxl v0.12's 8, in both
-frames. The corresponding float values are 0.0285712704 and 0.0285731927;
-the dithered values straddle 7.5. No tolerance is applied.
+The inverse XYB kernels now share the same implementation and accumulate
+matrix terms in libjxl v0.12's order, scaling the matrix coefficients for
+intensity rather than the cubic operands. This resolves the remaining blue
+byte at canvas pixel (22,57): the previous 7 now matches the reference's 8.
 
-Source review finds a different inverse-matrix accumulation order: the Rust
-XYB kernels accumulate from the last term, while libjxl v0.12's
-`dec_xyb-inl.h::XybToRgb` accumulates from the first term. The reference also
-scales matrix coefficients rather than cubic operands for intensity. A
-correction needs strict oracle validation before this bug is marked resolved.
+The exact candidate source was built with Rust 1.99.1 on ARM64. All 12
+selected crop, XYB, palette, LF smoothing and spline checks passed. Strict
+RGBA comparison against the frozen independent djxl v0.12 reference reports
+zero different bytes in each 64x64 animation frame, with no tolerance.
+The existing NEON and scalar XYB consistency tests also executed. Full
+integrated and platform CI validation remains a separate gate.
 
 ## 2026-11-04: cropped u8 animation references and coordinates
 

@@ -3705,6 +3705,19 @@ pub(crate) mod tests {
         }
 
         #[test]
+        fn cropped_animation_matches_libjxl_rounding_boundary() {
+            // Independently decoded by djxl v0.12. The old inverse-matrix
+            // association put this blue sample just below the rounding tie.
+            for simple in [false, true] {
+                let frames = decode(simple, usize::MAX, 0);
+                assert_eq!(frames.len(), 2);
+                for frame in frames {
+                    assert_eq!(frame[(57 * 64 + 22) * 4 + 2], 8);
+                }
+            }
+        }
+
+        #[test]
         fn cropped_animation_preserves_reference_background() {
             for simple in [false, true] {
                 for chunk in [1, 7, usize::MAX] {
