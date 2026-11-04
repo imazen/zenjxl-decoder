@@ -12,6 +12,12 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Spline dequantization now uses the base/HF zero-adjustment factors rather
+  than LF correlation adjustments (upstream `cc83182`, reviewed `2ac8e77d`).
+  The procedural LF-invariance regression was compiled and run in the audit:
+  it fails before the correction and passes with it. Unlike the older golden
+  test, it varies nonzero LF adjustments while keeping base factors fixed.
+
 - Non-444 adaptive LF smoothing now uses each packed channel's valid region
   and gap decision. Ported from upstream `d1aefec` through reviewed `7fc4d361`;
   the fork's packed layout does not need upstream's padded-group mapping.

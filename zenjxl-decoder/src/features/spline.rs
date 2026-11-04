@@ -761,8 +761,8 @@ impl Splines {
             let spline = qspline.dequantize(
                 &self.starting_points[index],
                 self.quantization_adjustment,
-                color_correlation_params.y_to_x_lf(),
-                color_correlation_params.y_to_b_lf(),
+                color_correlation_params.y_to_x(0),
+                color_correlation_params.y_to_b(0),
                 area_limit,
             )?;
             total_estimated_area_reached += spline.estimated_area_reached;
@@ -2079,5 +2079,28 @@ mod test_splines {
             verify_segment_almost_equal(&segment, &splines.segments[index]);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod correlation_tests {
+    use super::*;
+    #[test]
+    fn spline_colors_ignore_lf_correlation() {
+        let mut colors=[[0i32;32];3];colors[1][0]=64;
+        let mut sigmas=[0i32;32];sigmas[0]=4;
+        let original=Splines {
+            splines:vec![QuantizedSpline {control_points:vec![(10,0)],color_dct:colors,sigma_dct:sigmas}],
+            starting_points:vec![Point{x:10.,y:10.}],..Default::default()
+        };
+        let ccp=ColorCorrelationParams{base_correlation_x:0.25,base_correlation_b:0.5,..Default::default()};
+        let mut changed=ccp;changed.ytox_lf=64;changed.ytob_lf=-32;
+        let mut a=original.clone();let mut b=original;
+        a.initialize_draw_cache(64,64,&ccp,true,JxlCodestreamLevel::Level10).unwrap();
+        b.initialize_draw_cache(64,64,&changed,true,JxlCodestreamLevel::Level10).unwrap();
+        assert!(!a.segments.is_empty());assert_eq!(a.segments.len(),b.segments.len());
+        for (a,b) in a.segments.iter().zip(&b.segments) {
+            assert_eq!(a.color.map(f32::to_bits),b.color.map(f32::to_bits),"LF-only correlation must not affect splines");
+        }
     }
 }

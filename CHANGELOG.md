@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Dequantize spline colors with base HF correlation rather than LF adjustments; add a nonzero-LF correlation regression.
+
 - Smooth subsampled LF planes on their packed channel grids, with independent channel gap decisions.
 
 - Clamp negative indices on Zero-predictor palette lookup paths to entry zero, preserving delta-predictor behavior.
