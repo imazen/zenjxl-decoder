@@ -133,3 +133,22 @@ frame-duration-check:
 downstream-coverage-check:
     cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
     cargo test --locked -p zenjxl-decoder --all-features --lib -- flush_truncated_squeeze_small_tiles squeeze_partial_last_group reordered_jxlp_frames downstream_fixture_u8 seek_every_visible_frame_sweep --test-threads=1
+
+# Caller provides CODEC_CORPUS_PATH and wraps with run-heavy + heavy.lock.
+# Constrain CPU affinity at invocation if fixture workers need a lower cap.
+downstream-integrated-check:
+    python3 scripts/upstream-audit/prepare_feature_references.py --check
+    cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+    cargo test --locked -p zenjxl-decoder --all-features --lib threshold_is_inclusive -- --test-threads=1
+    cargo fmt -p zenjxl-decoder -p zenjxl-decoder-cli -p zenjxl-decoder-macros -p zenjxl-decoder-simd -- --check
+    just downstream-negative-canvas-check
+    cargo test --locked --workspace --all-features -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- cropped_animation conformance_limit transform_count incremental_error_tests subsampled_channels_smooth_on_their_own_grid zero_predictor_palette_clips_negative_indices spline_colors_ignore_lf_correlation downstream_fixture_u8 reordered_jxlp_frames squeeze_partial_last_group flush_truncated_squeeze_small_tiles --test-threads=1
+
+# Input cache comes from codec-corpus; write required v0.12 references separately.
+feature-corpus-references output:
+    flock "$HOME/tmp/heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 12G --jobs 4 -- python3 scripts/upstream-audit/prepare_feature_references.py --output {{quote(output)}}
+
+# Keep debug overflow checks enabled for cropped/padded rows crossing zero.
+downstream-negative-canvas-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- wrapped_canvas serial_parallel_parity_palette_across_thread_counts --test-threads=1

@@ -9,6 +9,7 @@ procedure and the current ledger.
 | `corpus_compare.sh` | decode each fixture with the fork CLI and an upstream `jxl_cli` at 16-bit, report exact pixel equality per file |
 | `speed_compare.sh`  | rough interleaved single-thread `--speedtest` A/B (smoke-level; not zenbench) |
 | `pngdiff.py`        | stdlib-only PNG pixel diff (8/16-bit, gray/RGB/+alpha); `FULL16=1` compares full 16-bit values |
+| `prepare_feature_references.py` | prepare the two required codec-corpus diagnostic PNGs with pinned v0.12; input cache remains unchanged |
 | `verify_downstream.py` | strict v0.12 decoder byte comparison; requires Pillow and a caller-provided fresh output directory |
 | `groupdiff.py`      | per-256px-group map of where two decodes differ (for thread-count / tile bugs) |
 
@@ -29,3 +30,10 @@ requires exact equality, retains diagnostics on failure, and serializes its
 resource-capped build/test/oracle run with the shared heavy-job lock. Honor any
 active host reservation before invoking it. Output must name a new directory so
 previous measurements are preserved.
+
+The input cache fetched by `just feature-corpus` does not contain generated PNG
+references. Before the full local gate, run
+`CODEC_CORPUS_PATH=/path/to/input/cache DJXL_PATH=/path/to/v0.12/djxl just feature-corpus-references /path/to/fresh-output`,
+then use the printed `CODEC_CORPUS_PATH` for `just downstream-integrated-check`.
+The preflight fails on either missing reference before starting the long tests.
+This prepares the two diagnostic references, not a full feature parity corpus.

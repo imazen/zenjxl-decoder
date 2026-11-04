@@ -14,6 +14,7 @@ from PIL import Image
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--djxl", default=os.environ.get("DJXL_PATH", "djxl"))
+parser.add_argument("--decoder-revision", help="Explicit source revision for a source export without Git metadata")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 args.output.mkdir(parents=True, exist_ok=False)
@@ -54,8 +55,8 @@ for name, extension, size, frames in fixtures:
                   "max_abs_diff": max(abs(a-b) for a, b in zip(actual, expected))}
         results.append(result)
         print(json.dumps(result), flush=True)
-metadata = {"decoder_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
-            "decoder_diff": subprocess.check_output(["git", "diff", "--stat"], cwd=root, text=True),
+metadata = {"decoder_commit": args.decoder_revision or subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
+            "decoder_diff": None if args.decoder_revision else subprocess.check_output(["git", "diff", "--stat"], cwd=root, text=True),
             "version": version, "commands": commands, "results": results}
 (args.output / "results.json").write_text(json.dumps(metadata, indent=2) + "\n")
 if any(r["different_bytes"] for r in results):
