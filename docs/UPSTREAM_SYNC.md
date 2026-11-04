@@ -12,6 +12,13 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Non-444 adaptive LF smoothing now uses each packed channel's valid region
+  and gap decision. Ported from upstream `d1aefec` through reviewed `7fc4d361`;
+  the fork's packed layout does not need upstream's padded-group mapping.
+  The supplied procedural regression reproduced 127.041725 instead of 100
+  before the repair and passed after it. The smoothing source is byte-identical
+  to the version exercised in the audit export.
+
 - Negative Zero-predictor palette indices now select entry zero. This is a
   lower-bound clamp; high indices can still address implicit cube colors.
   Ported from upstream `f536e2a`, preserving the reviewed `f7ce3085` source.

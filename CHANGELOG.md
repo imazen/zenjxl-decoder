@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Smooth subsampled LF planes on their packed channel grids, with independent channel gap decisions.
+
 - Clamp negative indices on Zero-predictor palette lookup paths to entry zero, preserving delta-predictor behavior.
 
 - Keep the native-only corpus downloader out of WASI example compilation and run the macOS CI matrix on ARM64.
