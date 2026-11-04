@@ -37,3 +37,15 @@ references. Before the full local gate, run
 then use the printed `CODEC_CORPUS_PATH` for `just downstream-integrated-check`.
 The preflight fails on either missing reference before starting the long tests.
 This prepares the two diagnostic references, not a full feature parity corpus.
+
+For cross-host comparisons, `verify_downstream.py --reference-directory <capture>`
+uses a frozen v0.12 reference capture with `reference-provenance.json`. Every
+input and reference image must match its SHA-256 record. Fresh runs write this
+manifest automatically. This preserves strict bytes when djxl itself has a
+host-dependent floating-point rounding boundary; it adds no pixel tolerance.
+
+The per-tier diagnostic `just downstream-tier-check` reports each differing
+fixture. Set `ZENJXL_TIER_OUTPUT_DIR` to an existing empty directory to retain
+each executed permutation's label and decoded bytes. Its existing float
+envelope remains in place; passing this gate does not establish whole-decoder
+bit identity across SIMD tiers.

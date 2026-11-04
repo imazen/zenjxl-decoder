@@ -1,6 +1,23 @@
 # Decoder investigation notes
 
 
+## Known Bugs: remaining display parity — 2026-11-04
+
+The same djxl v0.12 runtime produces a host-dependent green byte at
+canvas (18,18) of crop frame zero: 72 on i270 and 73 on r5900xt. Rust
+produces 72 on both hosts, with and without optimization. This is a
+reference-portability finding, not evidence that optimization changed Rust's
+pixels. Cross-host gates can use frozen v0.12 reference images with verified
+input and reference SHA-256 records; comparison remains byte-exact.
+
+The existing cross-tier gate permits float rounding differences: current
+optimized x86 output differs between AVX2 and SSE/scalar in
+`grayscale_patches_var_dct.jxl` (one byte) and
+`squeeze_empty_residual.jxl` (two bytes), all by one code. No established
+threshold has been relaxed. Optional MoxCMS CMYK display output also retains
+whole-image differences from LCMS-backed djxl; decoder correctness and CMS
+matching must be reported separately.
+
 ## Resolved: negative canvas dither coordinates — 2026-11-04
 
 [RESOLVED] The canvas-coordinate repair represents negative padding/crop
