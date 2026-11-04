@@ -64,6 +64,14 @@ impl JxlCodestreamLevel {
             Self::Level10 => 1 << 16,
         }
     }
+
+    /// Maximum extra channels accepted by this conformance level.
+    pub(crate) fn max_extra_channels(self) -> usize {
+        match self {
+            Self::Level5 => 4,
+            Self::Level10 => 256,
+        }
+    }
 }
 
 /// Security limits for the JXL decoder to prevent resource exhaustion attacks.

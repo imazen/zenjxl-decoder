@@ -104,6 +104,14 @@ fn check_size_limit(
             limit: limit as u64,
         }));
     }
+    let level_limit = limits.max_codestream_level.max_extra_channels();
+    if num_ec > level_limit {
+        return Err(at!(Error::LimitExceeded {
+            resource: "extra_channels",
+            actual: num_ec as u64,
+            limit: level_limit as u64,
+        }));
+    }
     Ok(())
 }
 
@@ -505,5 +513,40 @@ impl CodestreamParser {
         self.frame = Some(frame);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod conformance_limit_tests {
+    use super::*;
+    use crate::api::{JxlCodestreamLevel, JxlDecoderLimits};
+
+    #[test]
+    fn extra_channel_level_boundaries() {
+        for (level, maximum) in [
+            (JxlCodestreamLevel::Level5, 4),
+            (JxlCodestreamLevel::Level10, 256),
+        ] {
+            let limits = JxlDecoderLimits::unlimited().with_max_codestream_level(level);
+            assert!(check_size_limit(&limits, (1, 1), maximum).is_ok());
+            let error = check_size_limit(&limits, (1, 1), maximum + 1).unwrap_err();
+            assert!(matches!(error.error(), Error::LimitExceeded {
+                resource: "extra_channels", actual, limit,
+            } if *actual == (maximum + 1) as u64 && *limit == maximum as u64));
+        }
+    }
+
+    #[test]
+    fn caller_extra_channel_bound_still_applies() {
+        let limits = JxlDecoderLimits::unlimited().with_max_extra_channels(1);
+        assert!(check_size_limit(&limits, (1, 1), 1).is_ok());
+        assert!(matches!(
+            check_size_limit(&limits, (1, 1), 2).unwrap_err().error(),
+            Error::LimitExceeded {
+                resource: "extra_channels",
+                actual: 2,
+                limit: 1
+            }
+        ));
     }
 }

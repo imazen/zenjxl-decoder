@@ -579,6 +579,10 @@ pub(crate) mod tests {
         // Correctness tests should not be constrained by memory limits.
         // OOM/limit tests verify those separately.
         options.limits.max_memory_bytes = None;
+        // Conformance-level limits are exercised by dedicated tests; the
+        // fixture corpus includes Level 10 content (upstream jxl-rs dd95039
+        // moved its test harness to Main10 for the same reason).
+        options.limits.max_codestream_level = crate::api::options::JxlCodestreamLevel::Level10;
         let mut initialized_decoder = JxlDecoder::<states::Initialized>::new(options);
 
         if let Some(callback) = callback {
@@ -2627,7 +2631,10 @@ pub(crate) mod tests {
     /// Header-only scan (`scan_frames_only`), the intended way to build a
     /// seek table.
     fn scan_frames_with_decoder(input: &[u8], chunk_size: usize) -> Vec<VisibleFrameInfo> {
-        let options = JxlDecoderOptions::default().with_scan_frames_only(true);
+        let mut options = JxlDecoderOptions::default().with_scan_frames_only(true);
+        // Same convention as the `decode` helper: corpus files may use
+        // Level 10 features; dedicated tests exercise the Level 5 limits.
+        options.limits.max_codestream_level = crate::api::options::JxlCodestreamLevel::Level10;
         scan_frames_with_options(input, chunk_size, options)
     }
 
@@ -2640,6 +2647,9 @@ pub(crate) mod tests {
     fn decoder_with_image_info(data: &[u8]) -> (JxlDecoder<states::WithImageInfo>, &[u8]) {
         let mut options = JxlDecoderOptions::default();
         options.limits.max_memory_bytes = None;
+        // Same convention as the `decode` helper: corpus files may use
+        // Level 10 features; dedicated tests exercise the Level 5 limits.
+        options.limits.max_codestream_level = crate::api::options::JxlCodestreamLevel::Level10;
         let decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = data;
         let ProcessingResult::Complete {

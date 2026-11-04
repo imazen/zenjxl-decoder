@@ -12,6 +12,14 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Extra-channel counts now obey the selected conformance level as well as
+  caller caps: Level 5 permits four, Level 10 permits 256 (upstream `dd95039`).
+  Header checks cover both image and frame sizes. Tests cover 4/5 and 256/257,
+  a stricter caller cap, and the real 256-channel header. Correctness corpus
+  helpers explicitly choose Level 10; default API rejection is tested directly.
+  The ARM64 integration batch passed all 18 selected checks and retained zero
+  crop-reference byte differences after this change.
+
 - Extra-channel dim_shift now applies with full-resolution color as well as
   upsampled color (upstream `9f86443`, reviewed `e1d05559`). The valid fixture
   corrects all 355 alpha-byte mismatches against djxl v0.12; the effective-16x

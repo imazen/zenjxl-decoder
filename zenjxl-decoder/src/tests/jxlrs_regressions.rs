@@ -274,3 +274,45 @@ fn issue865_large_toc_streams_and_matches_one_shot() {
         }
     }
 }
+
+/// jxl-rs `dd95039`: the conformance level bounds extra channels -- Level 5
+/// (the default) allows at most 4, Level 10 the bitstream maximum of 256.
+/// `large_header.jxl` carries 256 extra channels, so the default limits must
+/// reject it at header parse while Level 10 reads on.
+#[test]
+fn level5_extra_channel_limit_rejects_256_channel_file() {
+    use crate::api::{
+        JxlCodestreamLevel, JxlDecoder, JxlDecoderOptions, ProcessingResult, decode_with, states,
+    };
+    use crate::error::Error;
+
+    let data = fixture_bytes("large_header.jxl");
+
+    let err = decode_with(&data, JxlDecoderOptions::default())
+        .err()
+        .expect("256 extra channels must be rejected at Level 5");
+    assert!(
+        matches!(
+            err.error(),
+            Error::LimitExceeded {
+                resource: "extra_channels",
+                actual: 256,
+                limit: 4,
+            }
+        ),
+        "expected extra_channels LimitExceeded(256 > 4), got {err:?}"
+    );
+
+    // Level 10 accepts the image header; driving to BasicInfo proves the
+    // level check passed without decoding 256 full channels.
+    let mut options = JxlDecoderOptions::default();
+    options.limits.max_codestream_level = JxlCodestreamLevel::Level10;
+    let mut decoder = JxlDecoder::<states::Initialized>::new(options);
+    let mut input = data.as_slice();
+    loop {
+        match decoder.process(&mut input).unwrap() {
+            ProcessingResult::Complete { .. } => break,
+            ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
+        }
+    }
+}
