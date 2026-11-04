@@ -263,9 +263,9 @@ mod tests {
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
-        for c in 0..3 {
+        for (c, image) in lf_image.iter_mut().enumerate() {
             for y in 0..8 {
-                for (x, v) in lf_image[c].row_mut(y).iter_mut().enumerate() {
+                for (x, v) in image.row_mut(y).iter_mut().enumerate() {
                     *v = if c == 0 || (x < 4 && y < 4) {
                         100.0
                     } else {
@@ -285,13 +285,13 @@ mod tests {
         // Every chroma sample inside the valid region stays 100: borders copy
         // through, interiors smooth only against in-region neighbours (a
         // luma-grid neighbourhood would pull the output ~27 towards 200).
-        for c in 1..3 {
+        for (c, image) in lf_image.iter().enumerate().skip(1) {
             for y in 0..4 {
                 for x in 0..4 {
                     assert!(
-                        (lf_image[c].row(y)[x] - 100.0).abs() < 1e-4,
+                        (image.row(y)[x] - 100.0).abs() < 1e-4,
                         "channel {c} pixel ({x}, {y}): {}",
-                        lf_image[c].row(y)[x]
+                        image.row(y)[x]
                     );
                 }
             }

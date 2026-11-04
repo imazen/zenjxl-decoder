@@ -1013,6 +1013,20 @@ pub struct Checkpoint<const N: usize> {
 }
 
 #[cfg(test)]
+impl Histograms {
+    pub(crate) fn lz77_byte_histogram() -> Self {
+        let mut histograms = Self::reverse_octet(41);
+        histograms.lz77_params = Lz77Params {
+            enabled: true,
+            min_symbol: Some(240),
+            min_length: Some(3),
+        };
+        histograms.lz77_length_uint = Some(HybridUint::new(8, 0, 0));
+        histograms
+    }
+}
+
+#[cfg(test)]
 mod test {
     use std::ops::ControlFlow;
 
@@ -1073,19 +1087,5 @@ mod test {
 
             Ok(())
         });
-    }
-}
-
-#[cfg(test)]
-impl Histograms {
-    pub(crate) fn lz77_byte_histogram() -> Self {
-        let mut histograms = Self::reverse_octet(41);
-        histograms.lz77_params = Lz77Params {
-            enabled: true,
-            min_symbol: Some(240),
-            min_length: Some(3),
-        };
-        histograms.lz77_length_uint = Some(HybridUint::new(8, 0, 0));
-        histograms
     }
 }
