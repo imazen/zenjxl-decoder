@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Apply extra-channel dimension shifts even when color is not upsampled, and reject effective extra-channel upsampling above 8x.
+
 - Match inverse-XYB matrix accumulation and intensity scaling to libjxl v0.12, sharing the arithmetic between fused and separate output paths. The cropped animation now matches its independent reference byte for byte.
 
 - Reject deferred ICC entropy errors before appending corrupt symbols; retain exact malformed-input rejection at every input chunk size.

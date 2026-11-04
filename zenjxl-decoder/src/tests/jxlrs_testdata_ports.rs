@@ -302,3 +302,21 @@ fn flush_truncated_squeeze_missing_avg() {
         );
     }
 }
+
+/// Upstream `test_ec_upsampling_too_large_without_upsampling` (jxl-rs
+/// `9f86443`): an extra channel's `dim_shift` applies to its `ec_upsampling`
+/// even when the frame itself is not upsampled, and the cumulative factor
+/// must not exceed 8. `dim_shift = 3` with `ec_upsampling = 2` is rejected.
+#[test]
+fn ec_upsampling_too_large_without_upsampling_is_rejected() {
+    let data = testdata("ec_upsampling16_no_upsampling.jxl");
+    let result = decode_with(&data, JxlDecoderOptions::default());
+    assert!(
+        matches!(
+            result.as_ref().map_err(|e| e.error()),
+            Err(crate::error::Error::InvalidEcUpsampling(1, 3, 16))
+        ),
+        "expected InvalidEcUpsampling(1, 3, 16), got {:?}",
+        result.map(|_| "a decoded image")
+    );
+}

@@ -12,6 +12,14 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Extra-channel dim_shift now applies with full-resolution color as well as
+  upsampled color (upstream `9f86443`, reviewed `e1d05559`). The valid fixture
+  corrects all 355 alpha-byte mismatches against djxl v0.12; the effective-16x
+  fixture is rejected with `InvalidEcUpsampling(1, 3, 16)`, as the independent
+  decoder also rejects it. Both fixture bytes and the regression were validated
+  in the audit. The same implementation was already represented in the paired
+  API review; this isolated correctness landing does not merge that API stack.
+
 - Incremental ICC reads now check deferred SymbolReader errors before
   appending a symbol (upstream `7f539c8`, reviewed `38d85e55`). The procedural
   regression reproduces the old successful append of a corrupt zero and
