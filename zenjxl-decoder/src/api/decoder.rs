@@ -1934,6 +1934,16 @@ pub(crate) mod tests {
     ) -> Vec<(usize, Vec<u8>)> {
         let mut options = JxlDecoderOptions::default();
         options.limits.max_memory_bytes = None;
+        decode_frames_with_options(data, chunk, pick, false, options)
+    }
+
+    pub(crate) fn decode_frames_with_options(
+        data: &[u8],
+        chunk: usize,
+        pick: impl Fn(usize) -> usize,
+        use_simple: bool,
+        options: JxlDecoderOptions,
+    ) -> Vec<(usize, Vec<u8>)> {
         let mut input: &[u8] = data;
         let mut fed = 0usize;
         macro_rules! step {
@@ -1955,6 +1965,7 @@ pub(crate) mod tests {
                 ProcessingResult::NeedsMoreInput { fallback, .. } => d = fallback,
             }
         };
+        info.set_use_simple_pipeline(use_simple);
         let nec = info.current_pixel_format().extra_channel_format.len();
         let (w, h) = info.basic_info().size;
         let formats = [JxlPixelFormat::rgba8(nec), JxlPixelFormat::rgb_f32(nec)];
@@ -3673,6 +3684,55 @@ pub(crate) mod tests {
             if consumed == 0 {
                 // No progress on this chunk — advance to feed more bytes.
                 fed = end;
+            }
+        }
+    }
+    mod cropped_animation {
+        use crate::api::{JxlDecoderOptions, decoder::tests::decode_frames_with_options};
+        use crate::util::test::fixture_bytes;
+
+        fn decode(simple: bool, chunk: usize, format: usize) -> Vec<Vec<u8>> {
+            decode_frames_with_options(
+                &fixture_bytes("crop2x_small.jxl"),
+                chunk,
+                |_| format,
+                simple,
+                JxlDecoderOptions::default(),
+            )
+            .into_iter()
+            .map(|(_, bytes)| bytes)
+            .collect()
+        }
+
+        #[test]
+        fn cropped_animation_preserves_reference_background() {
+            for simple in [false, true] {
+                for chunk in [1, 7, usize::MAX] {
+                    let frames = decode(simple, chunk, 0);
+                    assert_eq!(frames.len(), 2);
+                    // The 2x cropped second frame does not cover the top-left corner.
+                    // A saved reference must be in the same post-transform color space
+                    // regardless of whether output conversion is fused.
+                    assert_eq!(
+                        &frames[0][..4],
+                        &frames[1][..4],
+                        "simple={simple} chunk={chunk}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn cropped_animation_u8_pipelines_and_chunks_are_bit_exact() {
+            let expected = decode(true, usize::MAX, 0);
+            for simple in [false, true] {
+                for chunk in [1, 7, usize::MAX] {
+                    assert_eq!(
+                        decode(simple, chunk, 0),
+                        expected,
+                        "simple={simple} chunk={chunk}"
+                    );
+                }
             }
         }
     }

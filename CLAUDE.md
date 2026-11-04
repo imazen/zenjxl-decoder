@@ -1,5 +1,21 @@
 # Decoder investigation notes
 
+## 2026-11-04: cropped u8 animation references and coordinates
+
+[RESOLVED] Fused XYB/transfer/u8 output could defer color conversion past a
+reference save. The saved float planes then contained XYB or linear RGB where
+a later frame expected post-transform values. Fusion is now disabled when
+a frame saves a reference after color conversion. The low-memory pipeline
+also uses the extended canvas height for outside-frame row lookup and passes
+canvas coordinates after Extend to position-dependent stages such as dithering.
+
+`cropped_animation_preserves_reference_background` and
+`cropped_animation_u8_pipelines_and_chunks_are_bit_exact` fail before the
+repair and pass for both pipelines with whole-file, 1- and 7-byte input.
+The 198-byte crop fixture is retained with owner approval. Independent
+libjxl byte comparison is tracked separately; these tests establish internal
+reference, pipeline and chunking invariants.
+
 ## 2026-11-04: ICC header read-ahead can exceed the whole stream
 
 The ICC parser's `OutOfBounds(c + remaining / 8)` estimate assumed at least

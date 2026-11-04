@@ -417,6 +417,7 @@ pub(crate) fn render(
                             start_of_row,
                             end_of_row,
                             image_height: shifted_ysize,
+                            image_origin: current_origin,
                         },
                         &mut buffers,
                         ctx.local_states[i].as_deref_mut(),
@@ -508,6 +509,7 @@ pub(crate) fn render(
                             start_of_row,
                             end_of_row,
                             image_height: shifted_ysize,
+                            image_origin: current_origin,
                         },
                         &input_data,
                         &mut outb[0][..],
@@ -534,18 +536,23 @@ pub(super) fn render_outside(
     let y0 = yrange.start;
     let xsize = xrange.clone().count();
     let ysize = yrange.clone().count();
+
+    let extend = view.shared.extend_stage_index.unwrap();
+    let Stage::Extend(extend_stage) = &view.shared.stages[extend] else {
+        unreachable!("extend stage is not an extend stage");
+    };
+    // The height stages see is the extended (cropped-to-frame) height, not the
+    // coded input height (upstream jxl-rs 5ccf869).
+    let image_height = extend_stage.image_size.1;
+
     // Significantly simplified version of render_group.
     for y in yrange.clone() {
-        let extend = view.shared.extend_stage_index.unwrap();
         // Step 1: get padding from extend stage.
         for c in 0..num_channels {
             let (si, ci) = view.stage_input_buffer_index[extend][c];
             let buffer = &mut ctx.row_buffers[si][ci];
-            let Stage::Extend(extend) = &view.shared.stages[extend] else {
-                unreachable!("extend stage is not an extend stage");
-            };
             let row = &mut buffer.get_row_mut(y)[RowBuffer::x0_offset::<f32>()..];
-            extend.process_row_chunk((x0, y), xsize, c, row);
+            extend_stage.process_row_chunk((x0, y), xsize, c, row);
         }
         // Step 2: go through remaining stages one by one.
         for (i, stage) in view.shared.stages.iter().enumerate().skip(extend + 1) {
@@ -563,7 +570,8 @@ pub(super) fn render_outside(
                             out_extra_x: 0,
                             start_of_row: false,
                             end_of_row: false,
-                            image_height: view.shared.input_size.1,
+                            image_height,
+                            image_origin: (0, 0),
                         },
                         &mut buffers,
                         ctx.local_states[i].as_deref_mut(),
@@ -609,7 +617,8 @@ pub(super) fn render_outside(
                             out_extra_x: 0,
                             start_of_row: false,
                             end_of_row: false,
-                            image_height: view.shared.input_size.1,
+                            image_height,
+                            image_origin: (0, 0),
                         },
                         &input_data,
                         &mut outb[0][..],

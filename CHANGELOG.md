@@ -6,6 +6,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve post-transform reference colors with fused u8 output and use canvas coordinates and height after extending cropped frames. The cropped animation now has identical u8 pixels across both pipelines and input chunkings.
+
 ### Dependency compatibility
 
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions. Formatting, strict library lint and library tests pass (`4a576da1`).

@@ -29,6 +29,9 @@ pub struct ExtraInfo {
     pub(super) start_of_row: bool,
     pub(super) end_of_row: bool,
     pub(super) image_height: usize,
+    // Storage coordinates stay frame-local. Stages after Extend receive
+    // canvas coordinates, including for position-indexed output dithering.
+    pub(super) image_origin: (isize, isize),
 }
 
 impl PipelineBuffer for RowBuffer {
@@ -44,6 +47,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
             xsize,
             current_row,
             group_x0,
+            image_origin,
             out_extra_x,
             image_height: _,
             start_of_row,
@@ -62,7 +66,10 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
             .collect();
 
         self.process_row_chunk(
-            (group_x0 - xpre, current_row),
+            (
+                (group_x0 - xpre).wrapping_add_signed(image_origin.0),
+                current_row.wrapping_add_signed(image_origin.1),
+            ),
             xend - xstart,
             &mut rows[..],
             state,
@@ -78,6 +85,7 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
             xsize,
             current_row,
             group_x0,
+            image_origin,
             out_extra_x,
             image_height,
             start_of_row,
@@ -142,7 +150,10 @@ impl<T: RenderPipelineInOutStage> RunInOutStage<RowBuffer> for T {
         }
 
         self.process_row_chunk(
-            (group_x0 - xpre, current_row),
+            (
+                (group_x0 - xpre).wrapping_add_signed(image_origin.0),
+                current_row.wrapping_add_signed(image_origin.1),
+            ),
             xend - xstart,
             &input_rows,
             &mut output_rows,

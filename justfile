@@ -108,3 +108,7 @@ icc-check:
     cargo clippy --locked -p zenjxl-decoder --lib --example icc_header_regression --example fetch_feature_corpus -- -D warnings
     cargo test --locked -p zenjxl-decoder --lib icc
 
+
+# Run through run-heavy on shared hosts; verifies crop/reference u8 parity.
+cropped-animation-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- cropped_animation pixel_format_can_change_between_frames --test-threads=1

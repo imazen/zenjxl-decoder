@@ -1844,6 +1844,10 @@ impl Frame {
                 .extra_channel_info
                 .iter()
                 .any(|info| info.ec_type == ExtraChannel::SpotColor);
+        // References saved after the color transform must contain output-space
+        // floats before the save stage. Deferring CT/TF to the u8 writer would
+        // save XYB or linear RGB instead and corrupt later blending/extension.
+        let saves_color_reference = frame_header.can_be_referenced && !frame_header.save_before_ct;
         let mut fuse_xyb_u8: Option<(u8, TransferFunction)> = None;
         if xyb_encoded
             && !frame_header.do_ycbcr
@@ -1855,6 +1859,7 @@ impl Frame {
             && let Some(JxlDataFormat::U8 { bit_depth }) = pixel_format.color_data_format
             && !has_black_channel
             && !frame_header.needs_blending()
+            && !saves_color_reference
             && !has_spot_colors
             && !decoder_state.premultiply_output
         {
@@ -2056,6 +2061,7 @@ impl Frame {
                 && let Some(JxlDataFormat::U8 { bit_depth }) = pixel_format.color_data_format
                 && !has_black_channel
                 && !frame_header.needs_blending()
+                && !saves_color_reference
                 && !has_spot_colors
                 && !decoder_state.premultiply_output
             {
