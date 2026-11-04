@@ -95,3 +95,16 @@ beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked --workspace --lib -- -D warnings
     cargo test --locked --workspace --lib --no-fail-fast
+# Caller supplies the stream and its original ICC; no missing-file skips.
+icc-header-repro stream profile:
+    cargo run --locked -p zenjxl-decoder --example icc_header_regression -- {{quote(stream)}} {{quote(profile)}}
+
+# Prints CODEC_CORPUS_PATH for corpus-backed feature tests.
+feature-corpus:
+    cargo run --locked -p zenjxl-decoder --example fetch_feature_corpus
+
+icc-check:
+    cargo fmt -p zenjxl-decoder -p zenjxl-decoder-cli -p zenjxl-decoder-macros -p zenjxl-decoder-simd -- --check
+    cargo clippy --locked -p zenjxl-decoder --lib --example icc_header_regression --example fetch_feature_corpus -- -D warnings
+    cargo test --locked -p zenjxl-decoder --lib icc
+

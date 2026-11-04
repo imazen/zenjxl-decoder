@@ -234,8 +234,11 @@ impl CodestreamParser {
                             };
                             self.non_section_buf.consume(bits / 8);
                             self.non_section_bit_offset = (bits % 8) as u8;
-                            // Estimate >= one bit per remaining character to read.
-                            return Err(at!(Error::OutOfBounds(c + icc_parser.remaining() / 8)));
+                            // LZ77 can produce many remaining ICC bytes from a
+                            // few coded bits. Only request the actual deficit;
+                            // a one-bit-per-byte estimate can exceed the entire
+                            // valid codestream and prevent the final retry.
+                            return Err(at!(Error::OutOfBounds(c)));
                         }
                         Err(e) => return Err(e),
                     }
