@@ -3725,6 +3725,13 @@ pub(crate) mod tests {
         #[test]
         fn cropped_animation_u8_pipelines_and_chunks_are_bit_exact() {
             let expected = decode(true, usize::MAX, 0);
+            if let Some(directory) = std::env::var_os("ZENJXL_CORRECTNESS_OUTPUT_DIR") {
+                let directory = std::path::PathBuf::from(directory);
+                for (frame, bytes) in expected.iter().enumerate() {
+                    std::fs::write(directory.join(format!("crop2x_small-{frame}.rgba8")), bytes)
+                        .unwrap();
+                }
+            }
             for simple in [false, true] {
                 for chunk in [1, 7, usize::MAX] {
                     assert_eq!(

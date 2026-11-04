@@ -112,3 +112,7 @@ icc-check:
 # Run through run-heavy on shared hosts; verifies crop/reference u8 parity.
 cropped-animation-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- cropped_animation pixel_format_can_change_between_frames --test-threads=1
+
+# Caller supplies a fresh output directory. run-heavy covers build and oracle.
+downstream-oracle output:
+    flock "$HOME/tmp/heavy.lock" flock "$HOME/tmp/jxl-codec-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 12G --jobs 4 -- python3 scripts/upstream-audit/verify_downstream.py --output {{quote(output)}}
