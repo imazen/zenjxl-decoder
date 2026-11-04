@@ -46,6 +46,6 @@ host-dependent floating-point rounding boundary; it adds no pixel tolerance.
 
 The per-tier diagnostic `just downstream-tier-check` reports each differing
 fixture. Set `ZENJXL_TIER_OUTPUT_DIR` to an existing empty directory to retain
-each executed permutation's label and decoded bytes. Its existing float
-envelope remains in place; passing this gate does not establish whole-decoder
-bit identity across SIMD tiers.
+each executed permutation's label and decoded bytes. Every exercised fixture/configuration must match across tiers byte for byte.
+The fixture grid is finite, and a passing run does not cover unavailable
+CPU tiers or all possible JPEG XL streams.

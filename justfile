@@ -167,3 +167,10 @@ downstream-cms-check:
     cargo test --locked -p zenjxl-decoder-cli --lib -- --test-threads=1
     cargo test --locked -p zenjxl-decoder-cli --no-default-features --lib -- --test-threads=1
     cargo test --locked -p zenjxl-decoder --all-features --lib -- moxcms_wrapper custom_cms_receives_documented_reflectance --test-threads=1
+
+# Caller holds heavy.lock and run-heavy. Both WASI feature configurations execute.
+downstream-fma-check:
+    cargo test --locked -p zenjxl-decoder-simd --all-features --lib fused_multiply_add_contract -- --test-threads=1
+    just downstream-tier-check
+    cargo test --locked -p zenjxl-decoder-simd --target wasm32-wasip1 --no-default-features --lib fused_multiply_add_contract -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder-simd --target wasm32-wasip1 --no-default-features --features wasm128 --lib fused_multiply_add_contract -- --test-threads=1

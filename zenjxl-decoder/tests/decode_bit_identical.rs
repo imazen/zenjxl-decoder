@@ -9,32 +9,16 @@
 //! the decoded image; buffer reuse that fails to fully reset state would
 //! silently corrupt the decode — exactly the class of bug this guards against.
 //!
-//! Why a tolerance instead of a byte-exact hash: the VarDCT decode is FP-heavy,
-//! and the runtime-dispatched SIMD backend (avx512 / avx / sse / neon) and the
-//! scalar fallback round the last bit differently. A whole-image FNV hash is
-//! therefore not reproducible across the CI matrix (it was only valid on the CPU
-//! that generated it). The irreducible part of that is `mul_add`: it is a fused
-//! multiply-add on avx/avx512/neon and an unfused multiply-then-add on sse42 and
-//! wasm128, which have no FMA instruction, so those tiers round once versus
-//! twice. Re-measured across all 80 fixtures (557 MB of output) after the
-//! round_store_u8 fixes: scalar-vs-neon divergence is 12,217 bytes, 0.0022%, max
-//! delta 1 — far below any buffer-reuse corruption, which replays a whole stale
-//! group (hundreds of bytes off by large amounts).
+//! The historical strided references use a per-byte tolerance because they
+//! were captured before the fused/unfused SIMD distinction was repaired. The
+//! separate `cross_tier_determinism` gate now requires identical bytes across
+//! the executed tiers, including float output and dithering. Keeping these
+//! existing references and expectations preserves their buffer-corruption
+//! coverage while the strict gate checks current dispatch consistency.
 //!
-//! The "at most 1 LSB" part of that was **not** true when it was written. On
-//! avx512 a negative sample stored 255 where every other tier stored 0, so
-//! cross-backend divergence there was a full 0-to-255 inversion that this
-//! tolerance would have flagged had CI ever run on an avx512 host that reached
-//! the affected path. That is fixed, and `tests/cross_tier_determinism.rs` now
-//! gates it directly by decoding the same fixtures on every dispatch tier the
-//! host supports rather than inferring cross-tier behaviour from one reference.
-//!
-//! So this compares against a committed reference within a small per-byte
-//! tolerance. The reference is a strided sample (every `STRIDE`-th pixel in each
-//! axis) of the clean-`main` decode — small enough to commit (~20 KB) while
-//! still covering every 256x256 group, so a stale-group corruption is caught.
-//! Set `JXL_GEN_BITID_REF=1` to regenerate the committed references after an
-//! intended output change (and independently confirm the change first).
+//! The reference samples every `STRIDE`th pixel in both axes, covering every
+//! 256x256 group. `JXL_GEN_BITID_REF=1` regenerates them only after an intended,
+//! independently verified output change.
 
 use std::path::{Path, PathBuf};
 
@@ -42,14 +26,8 @@ use std::path::{Path, PathBuf};
 /// fixtures (20 KB), with 8x8 = 64 samples inside every 256x256 group.
 const STRIDE: usize = 32;
 
-/// Per-byte tolerance. Cross-backend FP rounding is <= 1 LSB; a buffer-reuse
-/// corruption is far larger. 2 leaves headroom for backends not measured locally
-/// (e.g. NEON FMA) without coming anywhere near corruption magnitude.
-///
-/// Kept at 2 rather than tightened to the measured 1: the measurement covers
-/// scalar-vs-neon on one aarch64 host, and the x86 tiers cannot be executed
-/// there. `tests/cross_tier_determinism.rs` is the gate that actually bounds
-/// cross-tier divergence, and it holds the float pipeline to 1.
+/// Historical buffer-reuse reference tolerance, retained unchanged. Current
+/// cross-tier consistency is checked byte-exactly by its dedicated gate.
 const MAX_DIFF: u8 = 2;
 
 struct Expected {
