@@ -8,7 +8,10 @@ use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::SymbolReader,
     error::{Error, Result},
-    frame::modular::{ModularChannel, Tree, transforms::apply::meta_apply_local_transforms},
+    frame::modular::{
+        ModularChannel, Tree,
+        transforms::apply::{TransformLimits, meta_apply_local_transforms},
+    },
     headers::{JxlHeader, modular::GroupHeader},
     util::MemoryTracker,
 };
@@ -23,7 +26,7 @@ pub fn decode_modular_subbitstream(
     global_tree: &Option<Tree>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
-    max_channels: usize,
+    limits: TransformLimits,
 ) -> Result<()> {
     // Skip decoding if all grids are zero-sized.
     let is_empty = buffers
@@ -46,7 +49,7 @@ pub fn decode_modular_subbitstream(
                 // applying transforms later.
                 let new_bufs;
                 (new_bufs, transform_steps) =
-                    meta_apply_local_transforms(buffers, &mut buffer_storage, &h, max_channels)?;
+                    meta_apply_local_transforms(buffers, &mut buffer_storage, &h, limits)?;
                 (h, new_bufs)
             } else {
                 (h, buffers)

@@ -65,6 +65,14 @@ impl JxlCodestreamLevel {
         }
     }
 
+    /// Maximum transforms in each global or group-local modular list.
+    pub(crate) fn max_modular_transforms(self) -> usize {
+        match self {
+            Self::Level5 => 8,
+            Self::Level10 => 512,
+        }
+    }
+
     /// Maximum extra channels accepted by this conformance level.
     pub(crate) fn max_extra_channels(self) -> usize {
         match self {

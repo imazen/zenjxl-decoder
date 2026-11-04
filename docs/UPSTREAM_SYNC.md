@@ -12,6 +12,12 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Global and local modular transform lists now share the conformance-level
+  bounds: eight at Level 5 and 512 at Level 10. Both entry points accept
+  the boundary and reject the next count with `LimitExceeded`. The ARM64
+  integration batch passed all 20 selected checks and both crop frames
+  retained zero different bytes against the independent reference.
+
 - Extra-channel counts now obey the selected conformance level as well as
   caller caps: Level 5 permits four, Level 10 permits 256 (upstream `dd95039`).
   Header checks cover both image and frame sizes. Tests cover 4/5 and 256/257,

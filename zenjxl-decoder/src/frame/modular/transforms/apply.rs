@@ -445,7 +445,7 @@ fn check_equal_channels(
 }
 
 /// Bounds on what a transform list may create (upstream jxl-rs 7dad7ef,
-/// accec18).
+/// accec18, 32c13d0).
 #[derive(Clone, Copy, Debug)]
 pub struct TransformLimits {
     /// Channels present after any transform (see
@@ -453,6 +453,9 @@ pub struct TransformLimits {
     pub max_channels: usize,
     /// Summed samples over all palette meta-channels of one transform list.
     pub max_palette_samples: usize,
+    /// Transforms in one list (see
+    /// `JxlCodestreamLevel::max_modular_transforms`).
+    pub max_transforms: usize,
 }
 
 impl TransformLimits {
@@ -466,6 +469,17 @@ impl TransformLimits {
                 resource: "modular channels",
                 actual: channels as u64,
                 limit: self.max_channels as u64,
+            }));
+        }
+        Ok(())
+    }
+
+    fn check_transforms(&self, transforms: usize) -> Result<()> {
+        if transforms > self.max_transforms {
+            return Err(at!(Error::LimitExceeded {
+                resource: "modular transforms",
+                actual: transforms as u64,
+                limit: self.max_transforms as u64,
             }));
         }
         Ok(())
@@ -664,6 +678,7 @@ pub fn meta_apply_transforms(
     header: &headers::modular::GroupHeader,
     limits: TransformLimits,
 ) -> Result<(Vec<ModularBufferInfo>, Vec<TransformStep>)> {
+    limits.check_transforms(header.transforms.len())?;
     limits.check_channels(channels.len())?;
     let mut buffer_info = vec![];
     let mut transform_steps = vec![];
@@ -787,12 +802,13 @@ pub fn meta_apply_local_transforms<'a, 'b>(
     channels_in: Vec<&'a mut ModularChannel>,
     buffer_storage: &'b mut Vec<LocalTransformBuffer<'a>>,
     header: &headers::modular::GroupHeader,
-    max_channels: usize,
+    limits: TransformLimits,
 ) -> Result<(Vec<&'b mut ModularChannel>, Vec<TransformStep>)> {
     let limits = TransformLimits {
-        max_channels,
         max_palette_samples: TransformLimits::LOCAL_MAX_PALETTE_SAMPLES,
+        ..limits
     };
+    limits.check_transforms(header.transforms.len())?;
     limits.check_channels(channels_in.len())?;
     let mut transform_steps = vec![];
 
@@ -1119,6 +1135,7 @@ mod limit_tests {
         TransformLimits {
             max_channels: level.max_modular_channels(),
             max_palette_samples,
+            max_transforms: level.max_modular_transforms(),
         }
     }
 
@@ -1157,6 +1174,81 @@ mod limit_tests {
             "modular channels"
         ));
         assert!(meta_apply_transforms(&sized_channels(200, 64), &h, l10).is_ok());
+    }
+
+    /// Transforms in one list are capped per level: 8 at Level 5, 512 at
+    /// Level 10 (upstream jxl-rs 32c13d0). The count check runs before any
+    /// transform is validated, so even a well-formed list of 9 is rejected
+    /// at Level 5.
+    #[test]
+    fn transform_count_bounded_by_level() {
+        let l5 = limits(JxlCodestreamLevel::Level5, usize::MAX);
+        let l10 = limits(JxlCodestreamLevel::Level10, usize::MAX);
+        let eight = header(
+            std::iter::repeat_with(|| transform(TransformId::Rct))
+                .take(8)
+                .collect(),
+        );
+        let nine = header(
+            std::iter::repeat_with(|| transform(TransformId::Rct))
+                .take(9)
+                .collect(),
+        );
+        let at_l10 = header(
+            std::iter::repeat_with(|| transform(TransformId::Rct))
+                .take(512)
+                .collect(),
+        );
+        let over_l10 = header(
+            std::iter::repeat_with(|| transform(TransformId::Rct))
+                .take(513)
+                .collect(),
+        );
+        assert!(meta_apply_transforms(&channels(3), &eight, l5).is_ok());
+        assert!(is_limit(
+            meta_apply_transforms(&channels(3), &nine, l5),
+            "modular transforms"
+        ));
+        assert!(meta_apply_transforms(&channels(3), &nine, l10).is_ok());
+        assert!(meta_apply_transforms(&channels(3), &at_l10, l10).is_ok());
+        assert!(is_limit(
+            meta_apply_transforms(&channels(3), &over_l10, l10),
+            "modular transforms"
+        ));
+    }
+
+    #[test]
+    fn local_transform_count_bounded_by_level() {
+        for (level, count, accepted) in [
+            (JxlCodestreamLevel::Level5, 8, true),
+            (JxlCodestreamLevel::Level5, 9, false),
+            (JxlCodestreamLevel::Level10, 512, true),
+            (JxlCodestreamLevel::Level10, 513, false),
+        ] {
+            let h = header(
+                std::iter::repeat_with(|| transform(TransformId::Rct))
+                    .take(count)
+                    .collect(),
+            );
+            let mut input: Vec<_> = (0..3)
+                .map(|_| ModularChannel::new((4, 4), BitDepth::integer_samples(8)).unwrap())
+                .collect();
+            let mut storage = Vec::new();
+            let result = meta_apply_local_transforms(
+                input.iter_mut().collect(),
+                &mut storage,
+                &h,
+                limits(level, usize::MAX),
+            );
+            if accepted {
+                assert!(result.is_ok(), "level={level:?} count={count}");
+            } else {
+                assert!(
+                    matches!(result, Err(e) if matches!(e.error(), Error::LimitExceeded { resource: "modular transforms", actual, limit } if *actual == count as u64 && *limit == (count - 1) as u64)),
+                    "level={level:?} count={count}"
+                );
+            }
+        }
     }
 
     /// Palette meta-channel samples are summed across the transform list

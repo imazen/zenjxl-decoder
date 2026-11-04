@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Bound global and local modular transform lists to eight at Level 5 and 512 at Level 10, with boundary regressions for both entry points.
+
 - Enforce the conformance-level extra-channel caps (4 at Level 5, 256 at Level 10), independently of the caller-configured cap. Correctness corpus helpers explicitly select Level 10 while dedicated tests preserve default Level 5 coverage.
 
 - Apply extra-channel dimension shifts even when color is not upsampled, and reject effective extra-channel upsampling above 8x.

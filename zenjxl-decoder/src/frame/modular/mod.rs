@@ -433,16 +433,16 @@ pub struct FullModularImage {
     parallel: bool,
     log_group_dim: usize,
     num_groups: (usize, usize),
-    /// Channel bound for group-local transforms (from the conformance level).
-    max_channels: usize,
+    /// Bounds applied to group-local transforms (from the conformance level).
+    limits: TransformLimits,
     /// Pool shared by every entry of `buffer_info`; see [`RecyclePool`].
     recycle_pool: Option<Arc<RecyclePool>>,
 }
 
 impl FullModularImage {
-    /// Channel bound applied to group-local transforms.
-    pub(crate) fn max_channels(&self) -> usize {
-        self.max_channels
+    /// Transform bounds applied to group-local transforms.
+    pub(crate) fn transform_limits(&self) -> TransformLimits {
+        self.limits
     }
 
     pub fn can_do_partial_render(&self) -> bool {
@@ -528,7 +528,7 @@ impl FullModularImage {
                 parallel: false,
                 log_group_dim: frame_header.log_group_dim(),
                 num_groups: frame_header.size_groups(),
-                max_channels: limits.max_channels,
+                limits,
                 recycle_pool: None,
             });
         }
@@ -694,7 +694,7 @@ impl FullModularImage {
                 global_tree,
                 br,
                 memory_tracker,
-                limits.max_channels,
+                limits,
             )
         })?;
 
@@ -723,7 +723,7 @@ impl FullModularImage {
             parallel: false,
             log_group_dim: frame_header.log_group_dim(),
             num_groups: frame_header.size_groups(),
-            max_channels: limits.max_channels,
+            limits,
             recycle_pool: Some(recycle_pool),
         })
     }
@@ -801,7 +801,7 @@ impl FullModularImage {
                     global_tree,
                     br,
                     memory_tracker,
-                    self.max_channels,
+                    self.limits,
                 )
             },
         )?;
@@ -1245,7 +1245,7 @@ pub fn decode_vardct_lf(
     quant_lf: &mut Image<u8>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
-    max_channels: usize,
+    limits: TransformLimits,
 ) -> Result<()> {
     let extra_precision = br.read(2)?;
     debug!(?extra_precision);
@@ -1272,7 +1272,7 @@ pub fn decode_vardct_lf(
         global_tree,
         br,
         memory_tracker,
-        max_channels,
+        limits,
     )?;
     let lf_rects = if frame_header.is444() {
         let [lf0, lf1, lf2] = lf_image;
@@ -1340,7 +1340,7 @@ pub fn decode_hf_metadata(
     hf_meta: &mut HfMetadata,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
-    max_channels: usize,
+    limits: TransformLimits,
 ) -> Result<()> {
     let r = frame_header.lf_group_rect(group);
     let cr = Rect {
@@ -1366,7 +1366,7 @@ pub fn decode_hf_metadata(
         epf_rect,
         br,
         memory_tracker,
-        max_channels,
+        limits,
     )?;
     hf_meta.used_hf_types |= used;
     Ok(())
@@ -1389,7 +1389,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
     mut epf_map_rect: ImageRectMut<'_, u8>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
-    max_channels: usize,
+    limits: TransformLimits,
 ) -> Result<u32> {
     let stream_id = ModularStreamId::LFMeta(group).get_id(frame_header);
     debug!(?stream_id);
@@ -1411,7 +1411,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
         global_tree,
         br,
         memory_tracker,
-        max_channels,
+        limits,
     )?;
     let ytox_image = &buffers[0].data;
     let ytob_image = &buffers[1].data;
