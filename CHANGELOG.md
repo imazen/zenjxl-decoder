@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Enforce the Level 5 minimum nonzero animation duration of 1/120 second with exact rational arithmetic and the existing limit error; preserve zero-duration compositing frames and Level 10 support.
+
 - Give the inspector fixture sweep an explicit Level 10 policy, retaining a separate default-Level-5 rejection test.
 
 - Bound global and local modular transform lists to eight at Level 5 and 512 at Level 10, with boundary regressions for both entry points.

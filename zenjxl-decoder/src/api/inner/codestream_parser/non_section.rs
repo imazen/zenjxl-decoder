@@ -78,6 +78,30 @@ fn frame_is_progressive(frame_header: &FrameHeader) -> bool {
     }
 }
 
+fn check_frame_duration(
+    level: crate::api::JxlCodestreamLevel,
+    animation: Option<&crate::headers::Animation>,
+    duration: u32,
+) -> Result<()> {
+    if level == crate::api::JxlCodestreamLevel::Level5
+        && duration != 0
+        && let Some(animation) = animation
+        && (duration as u128) * (animation.tps_denominator as u128) * 120
+            < animation.tps_numerator as u128
+    {
+        // Both factors are u32, so their product fits in u64. The header
+        // coders guarantee a positive denominator. Round up for the error
+        // report; the comparison above retains the exact rational boundary.
+        let denominator = (duration as u64) * (animation.tps_denominator as u64);
+        return Err(at!(Error::LimitExceeded {
+            resource: "frame rate",
+            actual: (animation.tps_numerator as u64).div_ceil(denominator),
+            limit: 120,
+        }));
+    }
+    Ok(())
+}
+
 fn check_size_limit(
     limits: &crate::api::JxlDecoderLimits,
     (xs, ys): (usize, usize),
@@ -346,6 +370,11 @@ impl CodestreamParser {
                 frame_header.size_upsampled(),
                 frame_header.num_extra_channels as usize,
             )?;
+            check_frame_duration(
+                decode_options.limits.max_codestream_level,
+                self.animation.as_ref(),
+                frame_header.duration,
+            )?;
 
             // Reject progressive content before decoding any of its passes, when
             // the caller's policy forbids it. The preview frame (parsed while
@@ -520,6 +549,102 @@ impl CodestreamParser {
 mod conformance_limit_tests {
     use super::*;
     use crate::api::{JxlCodestreamLevel, JxlDecoderLimits};
+
+    #[test]
+    fn frame_duration_level_boundaries() {
+        use crate::headers::Animation;
+        for (numerator, denominator, duration, allowed) in [
+            (120, 1, 1, true),
+            (121, 1, 1, false),
+            (120_000, 1000, 1, true),
+            (120_001, 1000, 1, false),
+            (240, 1, 2, true),
+            (241, 1, 2, false),
+            (u32::MAX, 1, 0, true),
+            (u32::MAX, u32::MAX, u32::MAX, true),
+        ] {
+            let animation = Animation {
+                tps_numerator: numerator,
+                tps_denominator: denominator,
+                num_loops: 0,
+                have_timecodes: false,
+            };
+            let result =
+                check_frame_duration(JxlCodestreamLevel::Level5, Some(&animation), duration);
+            assert_eq!(
+                result.is_ok(),
+                allowed,
+                "{numerator}/{denominator}, duration {duration}"
+            );
+            if !allowed {
+                assert!(matches!(
+                    result.unwrap_err().error(),
+                    Error::LimitExceeded {
+                        resource: "frame rate",
+                        actual: 121,
+                        limit: 120,
+                    }
+                ));
+            }
+            assert!(
+                check_frame_duration(JxlCodestreamLevel::Level10, Some(&animation), duration)
+                    .is_ok()
+            );
+        }
+        assert!(check_frame_duration(JxlCodestreamLevel::Level5, None, 1).is_ok());
+    }
+
+    #[test]
+    fn frame_duration_encoded_animation() {
+        let original =
+            crate::util::test::fixture_bytes("conformance_test_images/animation_spline_5.jxl");
+        let mut reader = BitReader::new(&original);
+        let header = FileHeader::read(&mut reader).unwrap();
+        let header_bits = reader.total_bits_read();
+        let animation = header.image_metadata.animation.as_ref().unwrap();
+        assert_eq!(
+            (animation.tps_numerator, animation.tps_denominator),
+            (100, 1)
+        );
+        let expected_header =
+            format!("{header:?}").replacen("tps_numerator: 100,", "tps_numerator: 1000,", 1);
+        // The two constant clock codings differ by one selector bit and have
+        // identical lengths. Locate that bit using the existing header reader,
+        // requiring every other decoded field and the bit count to be equal.
+        let mut candidates = Vec::new();
+        for bit in 0..header_bits {
+            let mut candidate = original.clone();
+            candidate[bit / 8] ^= 1 << (bit % 8);
+            let mut reader = BitReader::new(&candidate);
+            if let Ok(header) = FileHeader::read(&mut reader)
+                && reader.total_bits_read() == header_bits
+                && format!("{header:?}") == expected_header
+            {
+                candidates.push(candidate);
+            }
+        }
+        assert_eq!(candidates.len(), 1, "clock selector must be unambiguous");
+        let fast = &candidates[0];
+        let (_, frame, _) = crate::util::test::read_headers_and_toc(fast).unwrap();
+        assert_eq!(frame.duration, 2); // 2/1000 seconds: 500 fps.
+        let original_image = crate::api::decode(&original).unwrap();
+        let error = crate::api::decode(fast)
+            .err()
+            .expect("Level 5 must reject 500 fps");
+        assert!(matches!(
+            error.error(),
+            Error::LimitExceeded {
+                resource: "frame rate",
+                actual: 500,
+                limit: 120,
+            }
+        ));
+        let options = JxlDecoderOptions::default().with_limits(
+            JxlDecoderLimits::default().with_max_codestream_level(JxlCodestreamLevel::Level10),
+        );
+        let fast_image = crate::api::decode_with(fast, options).unwrap();
+        assert_eq!(fast_image.data, original_image.data);
+    }
 
     #[test]
     fn extra_channel_level_boundaries() {

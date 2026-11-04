@@ -12,6 +12,14 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Nonzero animation durations must be at least 1/120 second at Level 5
+  (upstream `22207d9`), using an exact overflow-safe rational comparison.
+  Zero-duration compositing frames and Level 10 remain permitted. Errors use
+  the existing `LimitExceeded` variant. Boundary tests cover rational clocks,
+  long durations and zero duration; an encoded animation with only its clock
+  changed from 100 to 1000 ticks/second is rejected at 500 fps by Level 5 and
+  decodes to the original pixels at Level 10. Both regressions pass locally.
+
 - Global and local modular transform lists now share the conformance-level
   bounds: eight at Level 5 and 512 at Level 10. Both entry points accept
   the boundary and reject the next count with `LimitExceeded`. The ARM64

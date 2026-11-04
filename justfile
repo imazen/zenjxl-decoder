@@ -124,3 +124,7 @@ conformance-limit-check:
 # Preserve normal Level 5 CLI coverage while sweeping Level 10 corpus files.
 inspector-conformance-check:
     cargo test --locked -p zenjxl-decoder-cli --all-features --bin jxlinspect -- --test-threads=1
+
+# Exact rational and encoded animation-clock boundary regressions.
+frame-duration-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib frame_duration -- --test-threads=1
