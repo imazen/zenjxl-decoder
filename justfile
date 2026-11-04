@@ -115,8 +115,12 @@ cropped-animation-check:
 
 # Caller supplies a fresh output directory. run-heavy covers build and oracle.
 downstream-oracle output:
-    flock "$HOME/tmp/heavy.lock" flock "$HOME/tmp/jxl-codec-heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 12G --jobs 4 -- python3 scripts/upstream-audit/verify_downstream.py --output {{quote(output)}}
+    flock "$HOME/tmp/heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 12G --jobs 4 -- python3 scripts/upstream-audit/verify_downstream.py --output {{quote(output)}}
 
-# Caller wraps with heavy locks and run-heavy on shared hosts.
+# Caller wraps with the shared heavy lock and run-heavy on shared hosts.
 conformance-limit-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- conformance_limit level5_extra_channel_limit transform_count frame_duration --test-threads=1
+
+# Preserve normal Level 5 CLI coverage while sweeping Level 10 corpus files.
+inspector-conformance-check:
+    cargo test --locked -p zenjxl-decoder-cli --all-features --bin jxlinspect -- --test-threads=1

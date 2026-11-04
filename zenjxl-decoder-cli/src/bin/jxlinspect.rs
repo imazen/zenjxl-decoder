@@ -15,10 +15,13 @@ use std::io::BufReader;
 use std::path::Path;
 
 fn parse_jxl(path: &Path) -> Result<()> {
+    parse_jxl_with_options(path, JxlDecoderOptions::default())
+}
+
+fn parse_jxl_with_options(path: &Path, options: JxlDecoderOptions) -> Result<()> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
 
-    let options = JxlDecoderOptions::default();
     let initialized_decoder = JxlDecoder::<jxl::api::states::Initialized>::new(options);
 
     let mut decoder_with_image_info = match initialized_decoder.process(&mut reader)? {
@@ -218,6 +221,23 @@ fn main() {
 mod jxl_cli_test {
     use super::*;
     use jxl_macros::for_each_test_file;
+
+    fn parse_jxl(path: &Path) -> Result<()> {
+        let limits = jxl::api::JxlDecoderLimits::default()
+            .with_max_codestream_level(jxl::api::JxlCodestreamLevel::Level10);
+        super::parse_jxl_with_options(path, JxlDecoderOptions::default().with_limits(limits))
+    }
+
+    #[test]
+    fn default_inspector_rejects_level10_extra_channel_fixture() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenjxl-decoder/resources/test/large_header.jxl");
+        let error = super::parse_jxl(&path).unwrap_err();
+        assert_eq!(
+            error.root_cause().to_string(),
+            "Security limit exceeded: extra_channels is 256, limit is 4"
+        );
+    }
 
     for_each_test_file!(parse_jxl);
 }

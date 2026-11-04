@@ -22,7 +22,9 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
   caller caps: Level 5 permits four, Level 10 permits 256 (upstream `dd95039`).
   Header checks cover both image and frame sizes. Tests cover 4/5 and 256/257,
   a stricter caller cap, and the real 256-channel header. Correctness corpus
-  helpers explicitly choose Level 10; default API rejection is tested directly.
+  helpers and the inspector fixture sweep explicitly choose Level 10; default
+  API and inspector rejection are tested directly. The inspector suite passes
+  all 130 cases after making this corpus policy explicit.
   The ARM64 integration batch passed all 18 selected checks and retained zero
   crop-reference byte differences after this change.
 
