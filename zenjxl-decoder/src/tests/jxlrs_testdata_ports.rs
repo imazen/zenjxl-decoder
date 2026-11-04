@@ -303,6 +303,24 @@ fn flush_truncated_squeeze_missing_avg() {
     }
 }
 
+/// Upstream `flush_truncated_squeeze_small_tiles` (jxl-rs `13987fb`): flushing
+/// a truncated image whose squeeze transform produced group-tiled channels
+/// with a tile dimension of at most 1 used to panic during smooth-squeeze
+/// upsampling. This fork already passes every input chunk size without
+/// disabling previews; retain the chunked flushing regression.
+#[test]
+fn flush_truncated_squeeze_small_tiles() {
+    let data = testdata("truncated_squeeze_flush_small_tiles.jxl");
+    for chunk_size in [1, 7, 64, 256, usize::MAX] {
+        let flushes = decode_partial_with_flush(&data, chunk_size)
+            .unwrap_or_else(|e| panic!("chunk_size {chunk_size}: {e:?}"));
+        assert!(
+            flushes > 0,
+            "chunk_size {chunk_size}: stalled before the frame body"
+        );
+    }
+}
+
 /// Upstream `test_ec_upsampling_too_large_without_upsampling` (jxl-rs
 /// `9f86443`): an extra channel's `dim_shift` applies to its `ec_upsampling`
 /// even when the frame itself is not upsampled, and the cumulative factor

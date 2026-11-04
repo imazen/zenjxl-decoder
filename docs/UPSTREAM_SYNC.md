@@ -12,6 +12,15 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Retained tiny-tile flushing, squeeze-corner source pixels and reordered
+  multiframe coverage. The new reordered fixture explicitly has no seek
+  targets for either frame; the ordinary seek sweep still requires targets
+  and compares each frame with its sequential decode. All five selected
+  coverage checks pass, including the complete fixture seek sweep. Strict
+  workspace Clippy passes with all features and targets.
+  The preview-disabling tiny-tile guard was not ported: the audit's exhaustive
+  1–1024 chunk-size run passes without it. No tolerance or skip was added.
+
 - Nonzero animation durations must be at least 1/120 second at Level 5
   (upstream `22207d9`), using an exact overflow-safe rational comparison.
   Zero-duration compositing frames and Level 10 remain permitted. Errors use

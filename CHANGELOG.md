@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Retain tiny-tile flush, squeeze-corner and reordered multiframe regressions; explicitly assert nonseekable reordered frames while preserving ordinary fixture seek guarantees.
+
 - Enforce the Level 5 minimum nonzero animation duration of 1/120 second with exact rational arithmetic and the existing limit error; preserve zero-duration compositing frames and Level 10 support.
 
 - Give the inspector fixture sweep an explicit Level 10 policy, retaining a separate default-Level-5 rejection test.

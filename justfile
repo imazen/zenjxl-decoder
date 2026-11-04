@@ -128,3 +128,8 @@ inspector-conformance-check:
 # Exact rational and encoded animation-clock boundary regressions.
 frame-duration-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib frame_duration -- --test-threads=1
+
+# Retain ordinary seek guarantees while exercising the named reordered file.
+downstream-coverage-check:
+    cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- flush_truncated_squeeze_small_tiles squeeze_partial_last_group reordered_jxlp_frames downstream_fixture_u8 seek_every_visible_frame_sweep --test-threads=1

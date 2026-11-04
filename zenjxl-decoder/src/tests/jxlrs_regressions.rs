@@ -246,6 +246,57 @@ fn streamed_flush_of_undecoded_neighbour_groups() {
     }
 }
 
+/// jxl-rs `cd61e92`: a 2049x257 lossless image whose average channels sit on
+/// a coarser grid than the unsqueezed outputs. Upstream indexed the
+/// `in_next_avg` border by the average cell's own coordinates and read the
+/// border at the wrong row when the used region started at a non-zero cell
+/// offset, producing 83 wrong samples in the bottom-right corner. This
+/// decoder slices `in_next_avg` by the next output position's own rectangle
+/// (see `TransformStep::{H,V}Squeeze` in `frame/modular/transforms/apply.rs`),
+/// so the bug never applied; the test pins the ground truth anyway.
+///
+/// cjxl v0.12.0 `-d 0 -e 3 --responsive=1`: flat grey 128 everywhere except a
+/// 5x5 noise patch at the bottom-right corner.
+#[test]
+fn squeeze_partial_last_group_is_lossless() {
+    #[rustfmt::skip]
+    const PATCH: [u8; 75] = [
+        68, 32, 130, 60, 253, 230, 241, 194, 107, 48, 249, 14, 199, 221, 1,
+        228, 136, 117, 52, 162, 15, 11, 13, 4, 195, 110, 216, 14, 113, 224,
+        253, 119, 176, 118, 112, 235, 148, 11, 213, 51, 95, 151, 61, 170, 216,
+        97, 155, 145, 255, 201, 17, 245, 124, 206, 212, 88, 187, 191, 44, 224,
+        55, 83, 201, 189, 250, 15, 240, 22, 157, 201, 87, 86, 116, 6, 102,
+    ];
+    let (_, frames) = decode(
+        &fixture_bytes("squeeze_2049x257_corner_patch.jxl"),
+        usize::MAX,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(frames.len(), 1);
+    let img = &frames[0][0];
+    assert_eq!(img.size(), (2049 * 3, 257));
+    let mut wrong = 0;
+    for y in 0..257 {
+        let row = img.row(y);
+        for x in 0..2049 {
+            for c in 0..3 {
+                let want = if x >= 2044 && y >= 252 {
+                    PATCH[((y - 252) * 5 + (x - 2044)) * 3 + c]
+                } else {
+                    128
+                };
+                if (row[x * 3 + c] * 255.0).round() as u8 != want {
+                    wrong += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(wrong, 0, "{wrong} samples differ from the source");
+}
+
 /// jxl-rs #865 (fixed in 4413527): the incremental parser stopped refilling
 /// its buffer after making progress inside a section, stalling on files
 /// whose TOC alone is bigger than one refill (5249x5377 = 462 groups). The

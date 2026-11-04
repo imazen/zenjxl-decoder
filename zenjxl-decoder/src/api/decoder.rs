@@ -1952,7 +1952,7 @@ pub(crate) mod tests {
         let mut fed = 0usize;
         macro_rules! step {
             ($dec:ident $(, $extra:expr)?) => {{
-                fed = (fed + chunk).min(input.len());
+                fed = fed.saturating_add(chunk).min(input.len());
                 let mut slice = &input[..fed];
                 let before = slice.len();
                 let r = $dec.process(&mut slice $(, $extra)?).unwrap();
@@ -2011,6 +2011,44 @@ pub(crate) mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn downstream_fixture_u8_pipelines_and_chunks_are_bit_exact() {
+        for (name, frame_count) in [
+            ("ec_dim_shift_no_upsampling", 1),
+            ("squeeze_2049x257_corner_patch", 1),
+            ("ooo_jxlp_multiframe", 2),
+        ] {
+            let data = crate::util::test::fixture_bytes(&format!("{name}.jxl"));
+            let decode_rgba = |simple, chunk| {
+                let options = JxlDecoderOptions::default().with_limits(
+                    crate::api::JxlDecoderLimits::default()
+                        .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+                );
+                decode_frames_with_options(&data, chunk, |_| 0, simple, options)
+            };
+            let expected = decode_rgba(true, usize::MAX);
+            assert_eq!(expected.len(), frame_count, "{name}");
+            if let Some(directory) = std::env::var_os("ZENJXL_CORRECTNESS_OUTPUT_DIR") {
+                for (frame, (_, bytes)) in expected.iter().enumerate() {
+                    std::fs::write(
+                        Path::new(&directory).join(format!("{name}-{frame}.rgba8")),
+                        bytes,
+                    )
+                    .unwrap();
+                }
+            }
+            for simple in [false, true] {
+                for chunk in [1, 7, usize::MAX] {
+                    assert_eq!(
+                        decode_rgba(simple, chunk),
+                        expected,
+                        "{name}, simple={simple}, chunk={chunk}"
+                    );
+                }
+            }
+        }
     }
 
     /// The pixel format may change between frames, including while
@@ -3275,6 +3313,22 @@ pub(crate) mod tests {
         compare_frames(Path::new("patches_seek"), 0, &decoded[0], &planes).unwrap();
     }
 
+    #[test]
+    fn reordered_jxlp_frames_are_explicitly_nonseekable() {
+        let data = crate::util::test::fixture_bytes("ooo_jxlp_multiframe.jxl");
+        for chunk in [1, 7, usize::MAX] {
+            let frames = scan_frames_with_decoder(&data, chunk);
+            assert_eq!(frames.len(), 2);
+            assert_eq!(
+                frames
+                    .iter()
+                    .map(|f| f.seek_target.is_some())
+                    .collect::<Vec<_>>(),
+                [false, false]
+            );
+        }
+    }
+
     /// Seeks to every visible frame of every fixture and checks the pixels
     /// against the from-start sequential decode, bit for bit. Also proves
     /// the corpus exercises the "pass over earlier visible frames" path
@@ -3294,7 +3348,20 @@ pub(crate) mod tests {
                 "{}: scan and decode disagree on the visible frame count",
                 path.display()
             );
+            let reordered_fixture = path
+                .file_name()
+                .is_some_and(|name| name == "ooo_jxlp_multiframe.jxl");
+            if reordered_fixture {
+                assert_eq!(scanned.len(), 2);
+                assert!(scanned.iter().all(|frame| frame.seek_target.is_none()));
+            }
             for frame in &scanned {
+                if reordered_fixture {
+                    // Only this named fixture has an explicit nonseekable contract.
+                    // Every ordinary fixture still requires a usable seek target.
+                    assert!(frame.seek_target.is_none());
+                    continue;
+                }
                 let target = frame.seek_target.unwrap_or_else(|| {
                     panic!("{}: frame {} not seekable", path.display(), frame.index)
                 });
