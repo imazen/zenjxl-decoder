@@ -194,10 +194,13 @@ pub fn do_palette_step_general(
                 let row_index = buf_in.data.row(y);
                 let row_out = out.data.row_mut(y);
                 for x in 0..w {
+                    // Zero-predictor palettes clip indices at 0: a negative
+                    // index selects explicit entry 0, not a delta-palette
+                    // value (upstream jxl-rs f536e2a).
                     let index = row_index[x];
                     let palette_value = get_palette_value(
                         palette,
-                        index as isize,
+                        index.max(0) as isize,
                         /*c=*/ chan_index,
                         /*palette_size=*/ num_colors,
                         /*bit_depth=*/ bit_depth,
@@ -297,6 +300,14 @@ pub fn do_palette_step_general(
                 let mut last_last = last;
 
                 for (x, &index) in idx.iter().enumerate() {
+                    // Zero-predictor palettes clip indices at 0 (upstream
+                    // jxl-rs f536e2a); other predictors keep delta-palette
+                    // semantics for negative indices.
+                    let index = if predictor == Predictor::Zero {
+                        index.max(0)
+                    } else {
+                        index
+                    };
                     let palette_entry = get_palette_value(
                         palette,
                         index as isize,
@@ -451,6 +462,9 @@ fn palette_one_group_channel(
         // lossless palette image from libjxl's encoder takes, so it matters
         // that the inner loop is a tight row-to-row map (the general loop
         // below re-resolves the output row per pixel).
+        //
+        // Indices clip at 0: a negative index selects explicit entry 0, not
+        // a delta-palette value (upstream jxl-rs f536e2a).
         let palette_size = num_colors;
         let out = &mut buf_out[out_idx].data;
         if num_colors == 1 {
@@ -464,7 +478,13 @@ fn palette_one_group_channel(
                     *o = if index == 0 {
                         only
                     } else {
-                        get_palette_value(palette, index as isize, c, palette_size, bit_depth)
+                        get_palette_value(
+                            palette,
+                            index.max(0) as isize,
+                            c,
+                            palette_size,
+                            bit_depth,
+                        )
                     };
                 }
             }
@@ -477,7 +497,13 @@ fn palette_one_group_channel(
             for (o, &index) in out_row.iter_mut().zip(idx) {
                 *o = match pal_row.get(index as usize) {
                     Some(&v) if index >= 0 => v,
-                    _ => get_palette_value(palette, index as isize, c, palette_size, bit_depth),
+                    _ => get_palette_value(
+                        palette,
+                        index.max(0) as isize,
+                        c,
+                        palette_size,
+                        bit_depth,
+                    ),
                 };
             }
         }
@@ -522,6 +548,14 @@ fn palette_one_group_channel(
         let mut last_last = initial_left;
 
         for (x, &index) in index_img.iter().enumerate() {
+            // Zero-predictor palettes clip indices at 0 (upstream jxl-rs
+            // f536e2a); other predictors keep delta-palette semantics for
+            // negative indices.
+            let index = if predictor == Predictor::Zero {
+                index.max(0)
+            } else {
+                index
+            };
             let palette_entry = get_palette_value(
                 palette,
                 index as isize,
@@ -853,4 +887,60 @@ pub fn do_palette_step_group_row(
             )
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::headers::{bit_depth::BitDepth, encodings::Empty};
+
+    fn channel(data: &[&[i32]]) -> ModularChannel {
+        let mut ch =
+            ModularChannel::new((data[0].len(), data.len()), BitDepth::integer_samples(8)).unwrap();
+        for (y, row) in data.iter().enumerate() {
+            ch.data.row_mut(y).copy_from_slice(row);
+        }
+        ch
+    }
+
+    /// Upstream jxl-rs `f536e2a`: a Zero-predictor palette clips indices at
+    /// 0 -- a negative index selects explicit entry 0, never the implicit
+    /// delta-palette values. Both palette step entry points clip the same
+    /// way (the global `do_palette_step_general` and the per-group
+    /// `do_palette_step_one_group`).
+    #[test]
+    fn zero_predictor_palette_clips_negative_indices() {
+        let buf_in = channel(&[&[-5, 0, 1, i32::MIN]]);
+        let buf_pal = channel(&[&[100, 200, 30]]);
+
+        let mut out_general = channel(&[&[0; 4]]);
+        do_palette_step_general(
+            &buf_in,
+            &buf_pal,
+            &mut [&mut out_general],
+            /*num_colors=*/ 3,
+            /*num_deltas=*/ 0,
+            Predictor::Zero,
+            &WeightedHeader::default(&Empty {}),
+        )
+        .unwrap();
+        assert_eq!(out_general.data.row(0), &[100, 100, 200, 100]);
+
+        let mut out_group = channel(&[&[0; 4]]);
+        do_palette_step_one_group(
+            &buf_in,
+            &buf_pal,
+            &mut [&mut out_group],
+            /*grid_x=*/ 0,
+            /*grid_y=*/ 0,
+            /*grid_xsize=*/ 1,
+            /*grid_ysize=*/ 1,
+            /*num_colors=*/ 3,
+            /*num_deltas=*/ 0,
+            Predictor::Zero,
+            /*parallel=*/ false,
+        )
+        .unwrap();
+        assert_eq!(out_group.data.row(0), &[100, 100, 200, 100]);
+    }
 }

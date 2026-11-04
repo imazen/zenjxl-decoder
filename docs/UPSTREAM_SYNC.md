@@ -10,6 +10,15 @@ results) for the 2026-08-22 audit lives in
 [`upstream-audit-2026-08-22.md`](upstream-audit-2026-08-22.md). The tools
 used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
+## Correctness ports — 2026-11-04
+
+- Negative Zero-predictor palette indices now select entry zero. This is a
+  lower-bound clamp; high indices can still address implicit cube colors.
+  Ported from upstream `f536e2a`, preserving the reviewed `f7ce3085` source.
+  The general and one-group procedural regression fails without the clamp
+  and passes with it in the audit export. Source bytes were compared before
+  landing; no new heavy job was launched during the host reservation.
+
 ## Status (audited 2026-08-22)
 
 | | |

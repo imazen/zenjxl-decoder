@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Clamp negative indices on Zero-predictor palette lookup paths to entry zero, preserving delta-predictor behavior.
+
 - Keep the native-only corpus downloader out of WASI example compilation and run the macOS CI matrix on ARM64.
 
 - Preserve post-transform reference colors with fused u8 output and use canvas coordinates and height after extending cropped frames. The cropped animation now has identical u8 pixels across both pipelines and input chunkings (`48c14662`).
