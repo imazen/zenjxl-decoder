@@ -1,5 +1,28 @@
 # Decoder investigation notes
 
+## 2026-11-04: ICC header read-ahead can exceed the whole stream
+
+The ICC parser's `OutOfBounds(c + remaining / 8)` estimate assumed at least
+one coded bit per remaining predicted ICC byte. LZ77 can encode many such
+bytes with fewer bits. The refill loop then waited for bytes beyond the
+valid file and returned `UnexpectedCodestreamBoxEnd` without its final
+parse attempt. Requesting the actual deficit `c` fixes that retry.
+
+Reproduction: `just icc-header-repro <stream.jxl> <original.icc>`. The
+caller-supplied regression fails with the old estimate, then recovers the
+ICC bytes exactly with whole-file, 1-, 7- and 257-byte input chunks after
+the repair. Tested on the 1x1 CMYK Probev1_ICCv4 stream retained at
+`~/tmp/jxl128-read-ahead-controls-2026-11-04/4.jxl`, expected profile
+`~/tmp/icc-fetch-test/Probev1_ICCv4.icc` (SHA256
+`47f4e71af3c03b5801f6555a57be645040c8a83011947a35bc50b599bfc8613a`).
+Before/after logs: `~/tmp/jxl128-native-header-{before,after}.log`.
+This is header/ICC validation; CMYK display conversion remains a separate
+CMS capability. No trailing padding workaround or limit relaxation is used.
+`just feature-corpus` provisions the existing feature corpus through
+codec-corpus and prints `CODEC_CORPUS_PATH`. With that caller setting,
+`just icc-check` passes formatting, strict library/example Clippy and all
+24 ICC-filtered library tests; log `~/tmp/jxl128-native-final-check.log`.
+
 ## Known Bugs: CMS callback contracts — 2026-10-26
 
 Real decoder regressions reproduce RGB/grayscale callback errors becoming panics,
