@@ -23,8 +23,9 @@ grep -vc 'differing pixels=0/' ~/tmp/cmp.tsv   # anything but the header line is
 ```
 
 Run `DJXL_PATH=/path/to/v0.12/tools/djxl just downstream-oracle /path/to/new-output`
-to compare cropped animation bytes with the independent decoder. The command
+to compare cropped animation, extra-channel, squeeze and reordered-stream RGBA
+bytes with the independent decoder. The command
 requires exact equality, retains diagnostics on failure, and serializes its
-resource-capped build/test/oracle run with the shared heavy-job locks. Honor any
+resource-capped build/test/oracle run with the shared heavy-job lock. Honor any
 active host reservation before invoking it. Output must name a new directory so
 previous measurements are preserved.
