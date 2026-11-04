@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Wrap negative canvas dither coordinates through vector chunk and channel-phase additions, retaining debug overflow checks. The existing palette serial/parallel regression and new separate/fused-output tests cover rows crossing canvas zero.
+
 - Include exact sRGB thresholds in the linear branch in both directions, and share forward sRGB arithmetic between separate and fused output paths.
 
 - Retain tiny-tile flush, squeeze-corner and reordered multiframe regressions; explicitly assert nonseekable reordered frames while preserving ordinary fixture seek guarantees (`6e9738e2`).

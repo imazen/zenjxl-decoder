@@ -239,3 +239,28 @@ pub(super) fn test_stage_consistency<S: RenderPipelineTestableStage<V>, V>(
     });
     Ok(())
 }
+
+/// Wrapped negative canvas positions must have the same dither phase as
+/// their equivalent positive positions in the 32-pixel noise period.
+pub(super) fn check_wrapped_dither_position<S>(stage: S)
+where
+    S: RenderPipelineInOutStage<InputT = f32, OutputT = u8>,
+{
+    let source = [[0.0; 64], [0.25; 64], [0.0; 64]];
+    let mut input = super::Channels::empty(3, 1);
+    for row in &source {
+        input.push(row);
+    }
+    let render = |position| {
+        let mut pixels = [[0; 64]; 3];
+        {
+            let mut output = super::ChannelsMut::empty(3, 1);
+            for row in &mut pixels {
+                output.push(row);
+            }
+            stage.process_row_chunk(position, 64, &input, &mut output, None);
+        }
+        pixels
+    };
+    assert_eq!(render((usize::MAX - 15, usize::MAX - 3)), render((16, 28)));
+}

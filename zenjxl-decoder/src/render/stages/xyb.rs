@@ -378,7 +378,7 @@ simd_function!(
             let b_c = b_lin.max(zero).min(one);
             let b_srgb = crate::color::tf::linear_to_srgb_positive(d, b_c);
             if let Some(position) = dither_at {
-                let pos = (position.0 + idx, position.1);
+                let pos = (position.0.wrapping_add(idx), position.1);
                 let nr = super::dither::dither_vec(d, pos, 0);
                 let ng = super::dither::dither_vec(d, pos, 1);
                 let nb = super::dither::dither_vec(d, pos, 2);
@@ -460,7 +460,7 @@ simd_function!(
             let b_abs = b_lin.abs().max(zero);
             let b_tf = crate::util::fast_powf_simd(d, b_abs, gamma_vec).copysign(b_lin);
             if let Some(position) = dither_at {
-                let pos = (position.0 + idx, position.1);
+                let pos = (position.0.wrapping_add(idx), position.1);
                 let nr = super::dither::dither_vec(d, pos, 0);
                 let ng = super::dither::dither_vec(d, pos, 1);
                 let nb = super::dither::dither_vec(d, pos, 2);
@@ -542,6 +542,22 @@ mod test {
     use crate::util::round_up_size_to_cache_line;
     use crate::util::test::assert_all_almost_abs_eq;
     use jxl_simd::{ScalarDescriptor, SimdDescriptor, test_all_instruction_sets};
+
+    #[test]
+    fn wrapped_canvas_fused_xyb() {
+        for transfer in [
+            from_linear::TransferFunction::Srgb,
+            from_linear::TransferFunction::Gamma(0.454545),
+        ] {
+            crate::render::test::check_wrapped_dither_position(XybToU8Stage::new(
+                0,
+                OutputColorInfo::default(),
+                8,
+                transfer,
+                true,
+            ));
+        }
+    }
 
     #[test]
     fn consistency() -> Result<()> {

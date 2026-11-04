@@ -34,8 +34,8 @@ pub(crate) fn dither_vec<D: SimdDescriptor>(
     channel: usize,
 ) -> D::F32Vec {
     debug_assert!(D::F32Vec::LEN <= 16);
-    let dx = (x + channel * 23) % DITHER_PERIOD;
-    let dy = (y + channel * 13) % DITHER_PERIOD;
+    let dx = (x % DITHER_PERIOD + (channel % DITHER_PERIOD) * 23) % DITHER_PERIOD;
+    let dy = (y % DITHER_PERIOD + (channel % DITHER_PERIOD) * 13) % DITHER_PERIOD;
     D::F32Vec::load(d, &DITHER_TABLE[dy][dx..])
 }
 
@@ -305,6 +305,25 @@ pub(crate) const DITHER_TABLE: [[f32; 48]; 32] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn wrapped_canvas_coordinates<D: SimdDescriptor>(d: D) {
+        for (wrapped, small) in [
+            ((usize::MAX, usize::MAX), (31, 31)),
+            ((usize::MAX - 4, usize::MAX - 2), (27, 29)),
+            ((usize::MAX - 31, usize::MAX - 31), (0, 0)),
+        ] {
+            for channel in 0..4 {
+                let mut actual = [0.0; 16];
+                dither_vec(d, wrapped, channel).store(&mut actual[..D::F32Vec::LEN]);
+                for (lane, &value) in actual[..D::F32Vec::LEN].iter().enumerate() {
+                    let expected = DITHER_TABLE[(small.1 + channel * 13) % 32]
+                        [(small.0 + lane + channel * 23) % 32];
+                    assert_eq!(value.to_bits(), expected.to_bits());
+                }
+            }
+        }
+    }
+    jxl_simd::test_all_instruction_sets!(wrapped_canvas_coordinates);
 
     #[test]
     fn table_is_zero_mean_and_below_half_a_code() {

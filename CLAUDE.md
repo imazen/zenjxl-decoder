@@ -1,6 +1,23 @@
 # Decoder investigation notes
 
 
+## Resolved: negative canvas dither coordinates — 2026-11-04
+
+[RESOLVED] The canvas-coordinate repair represents negative padding/crop
+positions with wrapping usize arithmetic. Later dither chunk additions and
+channel offsets still used checked addition. The full debug-assertion suite
+reproduced an overflow in `convert.rs` through the existing
+`serial_parallel_parity_palette_across_thread_counts` regression.
+
+The repair wraps chunk offsets and reduces coordinates/channel phase to
+the 32-pixel table period before adding. New table, conversion and fused-stage
+regressions compare wrapped negative coordinates with equivalent positive
+coordinates. The full workspace all-feature suite passes with debug overflow
+checks enabled: 1,024 library tests pass, 29 existing ignores; integrations,
+CLI tests and doctests also pass. All 18 selected no-default-feature
+regressions, strict Clippy and scoped formatting pass. No expectation or
+overflow check was removed.
+
 ## Resolved: inclusive sRGB transfer thresholds (2026-11-04)
 
 The exact linear-to-sRGB threshold 0.0031308 and inverse threshold 0.04045

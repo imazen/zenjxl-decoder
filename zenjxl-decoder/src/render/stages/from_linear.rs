@@ -304,7 +304,7 @@ simd_function!(
                 if dither {
                     let noise = super::dither::dither_vec(
                         d,
-                        (position.0 + i * D::F32Vec::LEN, position.1),
+                        (position.0.wrapping_add(i * D::F32Vec::LEN), position.1),
                         c,
                     );
                     (srgb * scale + noise)
@@ -330,6 +330,13 @@ mod test {
     use crate::util::test::assert_all_almost_abs_eq;
 
     const LUMINANCE_BT2020: [f32; 3] = [0.2627, 0.678, 0.0593];
+
+    #[test]
+    fn wrapped_canvas_fused_srgb() {
+        crate::render::test::check_wrapped_dither_position(FromLinearSrgbToU8Stage::new(
+            0, 8, true,
+        ));
+    }
 
     #[test]
     fn consistency_hlg() -> Result<()> {

@@ -377,7 +377,7 @@ simd_function!(
                 let val = D::F32Vec::load(d, input_chunk);
                 let noise = super::dither::dither_vec(
                     d,
-                    (position.0 + i * D::F32Vec::LEN, position.1),
+                    (position.0.wrapping_add(i * D::F32Vec::LEN), position.1),
                     channel,
                 );
                 let scaled = (val * scale + noise).max(zero).min(scale);
@@ -651,6 +651,24 @@ mod test {
     use crate::error::Result;
     use crate::headers::bit_depth::BitDepth;
     use test_log::test;
+
+    fn wrapped_canvas_u8_conversion<D: jxl_simd::SimdDescriptor>(d: D) {
+        let input = [0.5; 64];
+        let mut actual = [0; 64];
+        let mut expected = [0; 64];
+        f32_to_u8_simd(
+            d,
+            &input,
+            &mut actual,
+            255.0,
+            64,
+            (usize::MAX - 15, usize::MAX - 3),
+            Some(1),
+        );
+        f32_to_u8_simd(d, &input, &mut expected, 255.0, 64, (16, 28), Some(1));
+        assert_eq!(actual, expected);
+    }
+    jxl_simd::test_all_instruction_sets!(wrapped_canvas_u8_conversion);
 
     #[test]
     fn f32_to_u8_consistency() -> Result<()> {

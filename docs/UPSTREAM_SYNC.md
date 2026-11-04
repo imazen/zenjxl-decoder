@@ -12,6 +12,12 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Follow-up crop-coordinate repair wraps vector chunk offsets and bounds dither
+  channel-phase arithmetic to its 32-pixel period. Negative canvas coordinates
+  no longer overflow in debug builds. The existing palette concurrency test
+  and new separate/fused-output checks pass; the full workspace suite passes
+  with debug assertions enabled. No test expectation or overflow check changed.
+
 - Exact sRGB transfer thresholds now take the linear branch in both directions,
   matching libjxl v0.12's inclusive comparison. Separate output and both fused
   u8 output stages share the same forward magnitude implementation. Strict
