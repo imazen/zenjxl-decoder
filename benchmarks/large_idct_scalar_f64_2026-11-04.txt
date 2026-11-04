@@ -1,0 +1,69 @@
+# Exploratory paired large-IDCT precision cost, 2026-11-04
+# Host: Ryzen 9 5900XT, CPU affinity 0-3; Rust 1.99.1.
+# Frozen f32 kernel: afab87c4426c586128b907402d65be2c945c1363.
+# Input setup is outside timing; deterministic seed 7; no target-cpu=native.
+# Bench profile: opt-level=3, debug=0, LTO=false, codegen-units=16.
+# Not a whole-decoder or cross-platform performance claim.
+# Rejected scalar-lane f64 candidate: large_idct_scalar_f64_2026-11-04.rs (from snapshot c5e3373c), archmage 0.9.29.
+# Prototype source SHA-256: 103ddc84b449f4d2cd2a1595441ea6d7f2349975bab6f4211d6644cdd246e399
+# Command: cargo bench --locked -p zenjxl-decoder --features __bench_kernels --bench large_idct_precision -- --rounds=5
+# zenbench 0.1.10 ignored --rounds; actual adaptive round counts are below.
+[zenbench] calibration: int=0.20ns/iter mem_bw=81.6GiB/s mem_lat=10.7ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.20ns/iter, TSC: 3.300 ticks/ns (invariant)
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1793820539-33d5db
+═══════════════════════════════════════════════════════════════
+
+  scalar/idct2d_64_64  40 rounds × 37 calls
+                     mean ±mad µs  95% CI vs base     ops/s
+  ├─ f32-baseline    95.5 ±4.9µs  [93.3–97.9]µs      42.9M
+  ╰─ candidate      123.7 ±4.7µs  [+27.6%–+32.0%]    33.1M
+
+  f32-baseline  ████████████████████████████████████████████████████ 42.9 Mops/s
+  candidate     ████████████████████████████████████████ 33.1 Mops/s
+
+  scalar/idct2d_128_128  120 rounds × 7 calls
+                      mean ±mad µs  95% CI vs base      ops/s
+  ├─ f32-baseline   502.5 ±13.8µs  [493.0–514.8]µs     32.6M
+  ╰─ candidate      626.2 ±36.7µs  [+24.4%–+27.4%]     26.2M
+
+  f32-baseline  ████████████████████████████████████████████████████ 32.6 Mops/s
+  candidate     ██████████████████████████████████████████ 26.2 Mops/s
+
+  scalar/idct2d_256_256  110 rounds × 1 calls
+                   mean ±mad ms  95% CI vs base     ops/s
+  ├─ f32-baseline   2.4 ±0.0ms  [2.4–2.4]ms        27.5M
+  ╰─ candidate      2.8 ±0.1ms  [+16.6%–+20.2%]    23.3M
+
+  f32-baseline  ████████████████████████████████████████████████████ 27.5 Mops/s
+  candidate     ████████████████████████████████████████████ 23.3 Mops/s
+
+  avx2/idct2d_64_64  30 rounds × 39 calls
+                     mean ±mad µs  95% CI vs base         ops/s
+  ├─ f32-baseline     4.1 ±0.2µs  [3.9–4.4]µs             990M
+  ╰─ candidate      119.7 ±4.9µs  [+2738.2%–+2838.0%]    34.2M
+
+  f32-baseline  ████████████████████████████████████████████████████ 990 Mops/s
+  candidate     ██ 34.2 Mops/s
+
+  avx2/idct2d_128_128  30 rounds × 7 calls
+                      mean ±mad µs  95% CI vs base         ops/s
+  ├─ f32-baseline     27.2 ±2.8µs  [25.9–28.7]µs           602M
+  ╰─ candidate      593.2 ±32.0µs  [+2035.2%–+2114.0%]    27.6M
+
+  f32-baseline  ████████████████████████████████████████████████████ 602 Mops/s
+  candidate     ██ 27.6 Mops/s
+
+  avx2/idct2d_256_256  30 rounds × 1 calls
+                        mean ±mad µs  95% CI vs base         ops/s
+  ├─ f32-baseline     137.5 ±19.3µs  [131.2–144.0]µs         477M
+  ╰─ candidate      2794.9 ±178.4µs  [+1880.6%–+1988.2%]    23.4M
+
+  f32-baseline  ████████████████████████████████████████████████████ 477 Mops/s
+  candidate     ███ 23.4 Mops/s
+
+  total: 124.2s  (147 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 126s | peak-RSS 0.19GiB | min-avail 47550MiB | peak-load 3.34

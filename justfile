@@ -174,3 +174,11 @@ downstream-fma-check:
     just downstream-tier-check
     cargo test --locked -p zenjxl-decoder-simd --target wasm32-wasip1 --no-default-features --lib fused_multiply_add_contract -- --test-threads=1
     cargo test --locked -p zenjxl-decoder-simd --target wasm32-wasip1 --no-default-features --features wasm128 --lib fused_multiply_add_contract -- --test-threads=1
+
+# Caller holds heavy.lock and run-heavy; optional ZENJXL_DCT_DIAGNOSTICS retains values.
+downstream-idct-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib test_idct1d_ -- --test-threads=1
+
+# Caller holds heavy.lock and run-heavy; frozen baseline is from afab87c4.
+large-idct-precision-cost group="avx2/idct2d_64_64":
+    cargo bench --locked -p zenjxl-decoder --features __bench_kernels --bench large_idct_precision -- --group={{quote(group)}}

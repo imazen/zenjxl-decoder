@@ -1,0 +1,30 @@
+# Exploratory paired large-IDCT precision cost, 2026-11-04
+# Host: Ryzen 9 5900XT, CPU affinity 0-3; Rust 1.99.1.
+# Frozen f32 kernel: afab87c4426c586128b907402d65be2c945c1363.
+# Input setup is outside timing; deterministic seed 7; no target-cpu=native.
+# Bench profile: opt-level=3, debug=0, LTO=false, codegen-units=16.
+# Not a whole-decoder or cross-platform performance claim.
+# Vector candidate uses magetypes/archmage 0.9.30; idct32_precise.rs derived from the existing idct32.rs.
+# Command: cargo bench --locked -p zenjxl-decoder --features __bench_kernels --bench large_idct_precision -- --group=avx2/idct2d_64_64
+# Candidate source hashes:
+# zenjxl-decoder/src/transforms/idct_large.rs 72a53c0c731a337d00b6b23f279328c2fdc89d117371f101d69da2dde73b2036
+# zenjxl-decoder/src/transforms/idct32_precise.rs 10642ec887eca57ac3bc0351ca86e175118a8cb062402e1c9855666b473e6e85
+[zenbench] calibration: int=0.20ns/iter mem_bw=80.3GiB/s mem_lat=10.7ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.20ns/iter, TSC: 3.300 ticks/ns (invariant)
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1793821517-344c28
+═══════════════════════════════════════════════════════════════
+
+  avx2/idct2d_64_64  30 rounds × 106 calls
+                   mean ±mad µs  95% CI vs base       ops/s
+  ├─ f32-baseline   3.8 ±0.2µs  [3.6–3.9]µs          1.08G
+  ╰─ candidate      9.4 ±0.6µs  [+134.7%–+148.3%]     435M
+
+  f32-baseline  ████████████████████████████████████████████████████ 1.08 Gops/s
+  candidate     █████████████████████ 435 Mops/s
+
+  total: 10.9s  (1 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+run-heavy: done rc=0 86s | peak-RSS 1.64GiB | min-avail 46750MiB | peak-load 3.76

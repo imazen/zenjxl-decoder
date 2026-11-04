@@ -99,3 +99,8 @@ name = "heaptrack_decode"
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "large_idct_precision"
+harness = false
+required-features = ["__bench_kernels"]
