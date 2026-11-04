@@ -11,6 +11,7 @@ pub mod transform_map;
 mod idct16;
 mod idct2;
 mod idct32;
+mod idct32_precise;
 mod idct4;
 mod idct8;
 mod idct_large;

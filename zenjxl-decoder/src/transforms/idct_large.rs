@@ -8,14 +8,12 @@
 
 #![allow(clippy::excessive_precision)]
 
-use std::f32::consts::SQRT_2;
-
 use jxl_simd::F32SimdVec;
 use jxl_simd::SimdDescriptor;
 
 use super::idct_32;
 
-const WC_WEIGHTS_64: [f32; 32] = [
+const WC_WEIGHTS_64: [f64; 32] = [
     0.500150636020651,
     0.5013584524464084,
     0.5037887256810443,
@@ -50,7 +48,7 @@ const WC_WEIGHTS_64: [f32; 32] = [
     20.373878167231453,
 ];
 
-const WC_WEIGHTS_128: [f32; 64] = [
+const WC_WEIGHTS_128: [f64; 64] = [
     0.5000376519155477,
     0.5003390374428216,
     0.5009427176380873,
@@ -117,7 +115,7 @@ const WC_WEIGHTS_128: [f32; 64] = [
     40.744688103351834,
 ];
 
-const WC_WEIGHTS_256: [f32; 128] = [
+const WC_WEIGHTS_256: [f64; 128] = [
     0.5000094125358878,
     0.500084723455784,
     0.5002354020255269,
@@ -273,40 +271,29 @@ fn idct_impl_inner<D: SimdDescriptor>(d: D, data: &mut [D::F32Vec], scratch: &mu
         return;
     }
 
-    let wc_weights = match n {
-        64 => &WC_WEIGHTS_64[..],
-        128 => &WC_WEIGHTS_128[..],
-        256 => &WC_WEIGHTS_256[..],
-        _ => unreachable!("invalid large-dct size: {n}"),
-    };
-
-    assert_eq!(wc_weights.len(), n / 2);
-
-    let (first_half, second_half) = scratch[..n].split_at_mut(n / 2);
-    for i in 0..n / 2 {
-        first_half[i] = data[i * 2];
-        second_half[i] = data[2 * i + 1];
-    }
-
-    d.call(
-        #[inline(always)]
-        |_| idct_impl_inner(d, first_half, data),
-    );
-
-    for i in (1..n / 2).rev() {
-        second_half[i] += second_half[i - 1];
-    }
-    second_half[0] *= D::F32Vec::splat(d, SQRT_2);
-
-    d.call(
-        #[inline(always)]
-        |_| idct_impl_inner(d, second_half, data),
-    );
-
-    for i in 0..n / 2 {
-        let mul = D::F32Vec::splat(d, wc_weights[i]);
-        data[i] = second_half[i].mul_add(mul, first_half[i]);
-        data[n - i - 1] = second_half[i].neg_mul_add(mul, first_half[i]);
+    // A large transform's final secant weights amplify the inner f32
+    // cancellation error. Keep this recursive transform in f64, rounding once
+    // when its output returns to the pixel pipeline. Every dispatch tier uses
+    // the same arithmetic, including scalar and SIMD tails.
+    assert!(matches!(n, 64 | 128 | 256));
+    let mut lanes = [0.0f32; 16];
+    let mut values = [[0.0f64; 4]; 256];
+    let mut work = [[0.0f64; 4]; 256];
+    for first_lane in (0..D::F32Vec::LEN).step_by(4) {
+        for i in 0..n {
+            data[i].store(&mut lanes[..D::F32Vec::LEN]);
+            for j in 0..4.min(D::F32Vec::LEN - first_lane) {
+                values[i][j] = f64::from(lanes[first_lane + j]);
+            }
+        }
+        precise_vectors_dispatch::<D>(&mut values[..n], &mut work[..n]);
+        for i in 0..n {
+            data[i].store(&mut lanes[..D::F32Vec::LEN]);
+            for j in 0..4.min(D::F32Vec::LEN - first_lane) {
+                lanes[first_lane + j] = values[i][j] as f32;
+            }
+            data[i] = D::F32Vec::load(d, &lanes[..D::F32Vec::LEN]);
+        }
     }
 }
 
@@ -612,4 +599,82 @@ pub fn do_idct_256<D: SimdDescriptor>(
             do_idct(d, data, stride, &mut storage, &mut scratch);
         },
     );
+}
+
+#[inline(always)]
+fn precise_weights(n: usize) -> &'static [f64] {
+    match n {
+        64 => &WC_WEIGHTS_64,
+        128 => &WC_WEIGHTS_128,
+        256 => &WC_WEIGHTS_256,
+        _ => unreachable!("invalid precise IDCT size: {n}"),
+    }
+}
+
+fn precise_vectors_dispatch<D: SimdDescriptor>(data: &mut [[f64; 4]], work: &mut [[f64; 4]]) {
+    use archmage::SimdToken;
+    #[cfg(target_arch = "x86_64")]
+    if D::F32Vec::LEN >= 8
+        && let Some(token) = archmage::X64V3Token::summon()
+    {
+        return idct_precise_vectors_v3(token, data, work);
+    }
+    #[cfg(target_arch = "aarch64")]
+    if D::F32Vec::LEN >= 4
+        && let Some(token) = archmage::NeonToken::summon()
+    {
+        return idct_precise_vectors_neon(token, data, work);
+    }
+    #[cfg(target_arch = "wasm32")]
+    if D::F32Vec::LEN >= 4
+        && let Some(token) = archmage::Wasm128Token::summon()
+    {
+        return idct_precise_vectors_wasm128(token, data, work);
+    }
+    idct_precise_vectors_scalar(archmage::ScalarToken, data, work)
+}
+
+#[archmage::magetypes(define(f64x4), v3, neon, wasm128, scalar)]
+fn idct_precise_vectors<'a>(token: Token, data: &'a mut [[f64; 4]], scratch: &'a mut [[f64; 4]]) {
+    let n = data.len();
+    let (mut source, mut destination) = (data, scratch);
+    let sqrt2 = f64x4::splat_t(token, std::f64::consts::SQRT_2);
+    let mut size = n;
+    while size > 32 {
+        let half = size / 2;
+        for base in (0..n).step_by(size) {
+            for i in 0..half {
+                destination[base + i] = source[base + 2 * i];
+                destination[base + half + i] = source[base + 2 * i + 1];
+            }
+            for i in (1..half).rev() {
+                let a = f64x4::load_t(token, &destination[base + half + i]);
+                let b = f64x4::load_t(token, &destination[base + half + i - 1]);
+                (a + b).store(&mut destination[base + half + i]);
+            }
+            (f64x4::load_t(token, &destination[base + half]) * sqrt2)
+                .store(&mut destination[base + half]);
+        }
+        std::mem::swap(&mut source, &mut destination);
+        size /= 2;
+    }
+    for base in (0..n).step_by(32) {
+        super::idct32_precise::idct32_precise(token, &mut source[base..base + 32]);
+    }
+    size = 64;
+    while size <= n {
+        let half = size / 2;
+        let weights = precise_weights(size);
+        for base in (0..n).step_by(size) {
+            for i in 0..half {
+                let even = f64x4::load_t(token, &source[base + i]);
+                let odd = f64x4::load_t(token, &source[base + half + i]);
+                let product = odd * f64x4::splat_t(token, weights[i]);
+                (even + product).store(&mut destination[base + i]);
+                (even - product).store(&mut destination[base + size - i - 1]);
+            }
+        }
+        std::mem::swap(&mut source, &mut destination);
+        size *= 2;
+    }
 }

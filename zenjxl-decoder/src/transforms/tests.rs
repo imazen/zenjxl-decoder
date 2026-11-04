@@ -269,6 +269,23 @@ macro_rules! test_idct1d_eq_slow_n {
             assert!(remainder.is_empty());
             $do_idct_fun(d, output_chunks, 1);
 
+            if let Some(directory) = std::env::var_os("ZENJXL_DCT_DIAGNOSTICS") {
+                let mut text = String::from("index,input_bits,actual,reference,error\n");
+                for i in 0..N {
+                    text.push_str(&format!(
+                        "{i},{},{},{},{}\n",
+                        (input_matrix_for_ref[i][0] as f32).to_bits(),
+                        output[i],
+                        output_matrix_slow[i][0],
+                        f64::from(output[i]) - output_matrix_slow[i][0]
+                    ));
+                }
+                std::fs::write(
+                    std::path::Path::new(&directory).join(format!("idct-{N}.csv")),
+                    text,
+                )
+                .unwrap();
+            }
             for i in 0..N {
                 check_close(output[i] as f64, output_matrix_slow[i][0], $tolerance);
             }
@@ -488,3 +505,51 @@ test_reinterpreting_dct_eq_slow!(
     32,
     5e-6
 );
+
+fn large_idct_dispatch_is_bit_exact<D: SimdDescriptor>(d: D) {
+    type Transform<T> = fn(T, &mut [f32]);
+    type Case<T> = (
+        &'static str,
+        usize,
+        Transform<T>,
+        Transform<ScalarDescriptor>,
+    );
+    let cases: [Case<D>; 9] = [
+        ("32x64", 32 * 64, idct2d_32_64, idct2d_32_64),
+        ("64x32", 64 * 32, idct2d_64_32, idct2d_64_32),
+        ("64x64", 64 * 64, idct2d_64_64, idct2d_64_64),
+        ("64x128", 64 * 128, idct2d_64_128, idct2d_64_128),
+        ("128x64", 128 * 64, idct2d_128_64, idct2d_128_64),
+        ("128x128", 128 * 128, idct2d_128_128, idct2d_128_128),
+        ("128x256", 128 * 256, idct2d_128_256, idct2d_128_256),
+        ("256x128", 256 * 128, idct2d_256_128, idct2d_256_128),
+        ("256x256", 256 * 256, idct2d_256_256, idct2d_256_256),
+    ];
+    for (name, size, vector, scalar) in cases {
+        for pattern in 0..4 {
+            let mut expected = match pattern {
+                0 => vec![0.0; size],
+                1 => random_matrix(size, 1)
+                    .into_iter()
+                    .map(|row| row[0] as f32)
+                    .collect(),
+                _ => {
+                    let mut values = vec![0.0; size];
+                    values[if pattern == 2 { 0 } else { size - 1 }] = 1.0;
+                    values
+                }
+            };
+            let mut actual = expected.clone();
+            scalar(ScalarDescriptor {}, &mut expected);
+            vector(d, &mut actual);
+            for (index, (a, b)) in actual.iter().zip(&expected).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "{name} pattern={pattern} sample={index}"
+                );
+            }
+        }
+    }
+}
+test_all_instruction_sets!(large_idct_dispatch_is_bit_exact);

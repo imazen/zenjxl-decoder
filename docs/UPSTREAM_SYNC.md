@@ -12,6 +12,21 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Additional large-IDCT accuracy repair: the fused-fallback change exposed the
+  existing 64-point accuracy test's unchanged 5e-6 bound. Large transforms now
+  retain f64 intermediates through the existing factorization, with a private
+  f64 adaptation of this fork's generated `idct32.rs` (baseline `afab87c4`,
+  original BSD license retained). The ordinary 32-point and smaller kernels
+  remain unchanged. New internal archmage/magetypes 0.9.30 dependencies provide
+  vector dispatch; no public signature changes. All nine large shapes produce
+  identical f32 bits across executed tiers for four deterministic input patterns.
+  Original accuracy assertions remain intact. The paired AVX2 64×64 kernel
+  measures 9.4 µs versus 3.8 µs; whole-image performance is unmeasured. See
+  [`large_idct_vector_f64_2026-11-04.txt`](../benchmarks/large_idct_vector_f64_2026-11-04.txt)
+  for the measured cost and
+  [`large_idct_scalar_f64_2026-11-04.txt`](../benchmarks/large_idct_scalar_f64_2026-11-04.txt)
+  for the rejected scalar prototype's measurements.
+
 - Additional dispatch consistency review: scalar, SSE4.2 and WASM fallbacks use
   single-rounding fused multiply-add semantics, matching the hardware-FMA tiers.
   The native x86 grid changes from three differing bytes across two fixtures

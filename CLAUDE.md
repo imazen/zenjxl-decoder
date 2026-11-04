@@ -1,5 +1,29 @@
 # Decoder investigation notes
 
+## Resolved: 64-point IDCT after fused fallbacks — 2026-11-04
+
+The deterministic `test_idct1d_64_eq_slow` exceeds its unchanged 5e-6
+absolute/relative bound after scalar multiply-adds become fused. Index 32
+produces -1.9676225185394287 versus -1.9676337791674359: absolute error
+1.1260628007159212e-5, relative error 5.7229287921271194e-6. The full
+library run passes the other 1,024 cases, with 29 existing ignores.
+
+Retaining extra secant-coefficient bits alone does not fix it. A candidate
+that retains f64 intermediates through the existing large-transform
+factorization passes all eight original 1D size checks (2 through 256)
+without changing assertions. Its scalar-per-lane implementation was rejected
+on measured cost. The current register-based implementation reuses the
+existing generated 32-point factorization through magetypes f64 vectors;
+all original 1D/2D accuracy checks and all nine large-shape raw-f32 parity
+checks pass on scalar/SSE4.2/AVX2. ARM64 passes 54 selected transform
+checks and all 40 decoder regressions; WASI passes 31 scalar and 54 SIMD128
+transform checks. The full native workspace gate passes (1,029 library cases,
+29 existing ignores, integrations and doctests), with strict Clippy and
+formatting. Six fixture frames retain exact frozen djxl reference bytes on
+x86 and ARM64. LCMS whole-image checks pass in both CLI configurations.
+The paired 64x64 AVX2 microbenchmark measures 9.4 us versus 3.8 us for the
+f32 baseline; whole-decoder impact is unmeasured. No expectation is weakened.
+
 
 ## Resolved: custom CMYK CMS conversion — 2026-11-04
 
