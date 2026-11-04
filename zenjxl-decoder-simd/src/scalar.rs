@@ -127,12 +127,12 @@ impl F32SimdVec for f32 {
 
     #[inline(always)]
     fn mul_add(self, mul: Self, add: Self) -> Self {
-        (self * mul) + add
+        f32::mul_add(self, mul, add)
     }
 
     #[inline(always)]
     fn neg_mul_add(self, mul: Self, add: Self) -> Self {
-        -(self * mul) + add
+        f32::mul_add(-self, mul, add)
     }
 
     #[inline(always)]

@@ -3,135 +3,25 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//! Cross-tier determinism gate: the same bytes in must give the same bytes out
-//! no matter which SIMD tier the dispatcher picks.
+//! Every executed dispatch tier must produce identical bytes for the same
+//! fixture and options, including float rendering and dithered output.
 //!
-//! The decoder dispatches per call site through `simd_function!`, which summons
-//! the best token the CPU offers (avx512 -> avx -> sse42 -> scalar on x86_64,
-//! neon -> scalar on aarch64, wasm128 -> scalar on wasm32). Every one of those
-//! tiers is a separate hand-written implementation, and nothing used to check
-//! that they agreed. Three defects lived in that gap:
+//! Scalar, SSE and WASM fallbacks use fused multiply-add semantics so the
+//! operation rounds once, as it does on AVX2, AVX-512 and NEON. The old float
+//! envelope admitted one-code differences; this gate now requires exact bytes.
 //!
-//! * `round_store_u8` stored 255 on avx512 where every other tier stored 0 for
-//!   a negative sample — a black/white inversion selected by the CPU.
-//! * `round_store_u8` disagreed between sse42/avx (0) and neon (255) on values
-//!   above the i32 range.
-//! * The scalar tier rounded exact halves away from zero while all five SIMD
-//!   tiers rounded to even.
-//!
-//! None were reachable by the fuzzers, which pinned `default-features = false`
-//! and therefore compiled only the scalar tier into the fuzz binaries — the
-//! code carrying two of the three defects was not present to be fuzzed. The
-//! root fuzz package now builds with `all-simd`; this test covers the same
-//! ground deterministically and on every CI target rather than opportunistically.
-//!
-//! `archmage::testing::for_each_token_permutation` disables tokens
-//! process-wide, so `summon()` falls through to the next tier and the whole
-//! decoder — not just one kernel — runs on it. Decoding every fixture under
-//! every permutation and comparing the bytes is what makes the tiers testable
-//! against each other.
-//!
-//! # What is asserted, and why it is not simply "all tiers are byte-equal"
-//!
-//! Byte-equality is the right contract for the integer pipeline and is
-//! asserted exactly there: [`EXACT_FIXTURES`] decoded with dithering off go
-//! through modular decode and an integer-valued conversion, so every tier must
-//! agree to the byte. Any divergence there is a defect, and that is where the
-//! squeeze inverse's SIMD/scalar split lives.
-//!
-//! "Lossless" alone is *not* the criterion, and assuming it was is how this
-//! test first went wrong: `squeeze_empty_residual.jxl` was put in the exact
-//! list on the strength of its name, is actually lossy, and failed on
-//! windows-on-arm while passing on aarch64 macOS. See [`EXACT_FIXTURES`] for
-//! the four conditions that actually have to hold and how each entry was
-//! checked.
-//!
-//! The float pipeline cannot be held to byte-equality, and the reason is
-//! structural rather than a defect: `mul_add` is a fused multiply-add on
-//! avx/avx512/neon and an unfused multiply-then-add on sse42 and wasm128,
-//! which have no FMA instruction. Fused rounds once, unfused rounds twice, so
-//! the tiers differ by an ULP in the last place no matter how carefully each
-//! is written. Removing FMA from the tiers that have it to buy exactness would
-//! be a large, deliberate performance decision, not a bug fix. So the float
-//! path is gated by an envelope instead: no byte may differ by more than
-//! [`MAX_TIER_DIFF`], and no more than [`MAX_DIFFERING_FRACTION`] of the image
-//! may differ at all.
-//!
-//! That explanation is measured, not assumed. Run on x86_64 where only the
-//! non-FMA tiers are reachable (macOS under Rosetta, which offers x86-64-v2
-//! but neither v3 nor v4), sse42 and scalar come out **byte-identical** across
-//! all 38 comparisons — worst per-byte difference 0. On aarch64, where the
-//! reachable pair is neon (fused) against scalar (unfused), the same 38
-//! comparisons differ by at most 1 on at most 0.0122% of bytes. Two unfused
-//! tiers agree exactly; a fused tier and an unfused one do not.
-//!
-//! That envelope is not a weakened form of the byte-equality check — it is
-//! chosen to be far tighter than any of the defects above, all of which move a
-//! byte from 0 to 255. A tie-rounding change is a 1-LSB move and *is* inside
-//! the envelope; that one is caught exactly, on every tier, by
-//! `round_store_u8_contract` in zenjxl-decoder-simd, which is where a
-//! per-sample rule belongs. The two gates are complementary: this one covers
-//! the whole decoder including paths no unit test reaches, that one pins the
-//! per-sample rule the envelope cannot see.
-//!
-//! # Coverage is bounded by the host
-//!
-//! A tier the CPU does not implement cannot be exercised here — an aarch64 host
-//! can reach neon and scalar, and nothing on x86. Building the avx512 tier is
-//! not the same as running it: CI's `avx512` job proves it compiles, and only
-//! proves it *executes* if the runner's CPU actually has AVX-512.
-//!
-//! Two things keep that from being mistaken for coverage. On x86_64 and aarch64
-//! the run asserts that at least two permutations executed, so a baseline
-//! compared against nothing fails instead of passing vacuously. And on x86_64
-//! it reports whether the avx512 token could be summoned at all. Both matter
-//! because `cargo test` captures output for passing tests: a printed summary
-//! alone is invisible in CI unless something fails, so the guarantee has to be
-//! an assertion.
-//!
-//! i686 and wasm32 are exempt from that floor, and the exemption is real rather
-//! than convenient: archmage registers disable-able token slots for x86_64 and
-//! aarch64 only, so there is nothing to permute on either. On i686 — a target
-//! this crate treats as primary — the scalar tier is simply what runs, which is
-//! why the per-sample rules it must obey are pinned by
-//! `round_store_u8_contract` in zenjxl-decoder-simd instead.
+//! Coverage is bounded by the host. Token permutations exercise the tiers the
+//! CPU implements; the assertions below reject vacuous native coverage and
+//! explicitly report whether AVX-512 actually executed. i686 and WASM have no
+//! disable-able token slots and only prove repeat-decode behavior here. Their
+//! arithmetic is also checked by the SIMD primitive contract tests.
 
 use std::path::{Path, PathBuf};
 
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zenjxl_decoder::api::JxlDecoderOptions;
 
-/// Fixtures held to byte-equality: 8-bit modular lossless, whose decode carries
-/// no float quantization onto the output path, so with dithering off every tier
-/// must agree to the byte.
-///
-/// Membership is measured, not inferred from the filename — every entry was
-/// checked with `jxlinspect`, which reports mode, bit depth and channels. Two
-/// fixtures were originally put here on the strength of their names and do not
-/// belong: `squeeze_alpha.jxl` and `squeeze_empty_residual.jxl` are both
-/// **lossy** (jxlinspect: "203x354, lossy" and "64x64, lossy"), so they go
-/// through VarDCT and are held to the envelope below instead. Windows-on-arm
-/// CI is what caught that — `squeeze_empty_residual` differed by one byte of
-/// 16384 there while being byte-equal on this aarch64 host, because a 1-ULP
-/// fused-vs-unfused difference only crosses a rounding boundary on some
-/// codegen.
-///
-/// Three more constraints are load-bearing, and "the header says lossless" does
-/// not imply them, which is why several `(possibly) lossless` fixtures are in
-/// the envelope list instead:
-///
-/// * **8-bit output.** `k / 255.0 * 255.0` round-trips exactly in f32 for every
-///   `k` in `0..=255`, so the conversion is exact on every tier. At 10- or
-///   16-bit (`hdr_pq_test`, `hdr_hlg_test`, `pq_gradient`) it is not.
-/// * **An sRGB transfer function.** PQ and HLG are evaluated in float.
-/// * **No spline or noise synthesis**, both of which are float
-///   (`splines.jxl`, `spline_on_first_frame.jxl`).
-///
-/// This is the list the squeeze inverse is gated by. `squeeze_edge.jxl` is the
-/// one that matters there: 513x513 is deliberately not a multiple of any lane
-/// count, so the decode crosses from the vector body into the scalar tail at
-/// `h & !(lanes - 1)` — exactly the split the two implementations disagreed
-/// across.
+/// Integer-oriented fixtures, also exercised with dithering enabled.
 const EXACT_FIXTURES: &[&str] = &[
     "3x3_srgb_lossless.jxl",
     "3x3a_srgb_lossless.jxl",
@@ -142,16 +32,7 @@ const EXACT_FIXTURES: &[&str] = &[
     "extra_channels.jxl",
 ];
 
-/// Fixtures whose decode involves float arithmetic somewhere, and which are
-/// therefore held to the FMA envelope rather than to byte-equality: VarDCT,
-/// noise, splines, upsampling, non-sRGB transfer functions, and any output
-/// deeper than 8 bits.
-///
-/// PQ and HLG matter specifically because they take the Gamma/DCI branch of
-/// `XybToU8Stage`, which clamps the *absolute* value before the transfer
-/// function and then restores the sign with `copysign` — the one caller that
-/// reached `round_store_u8` with a signed, unbounded value. Measured on
-/// `3x3_srgb_lossy.jxl`, samples from -44.6 to +262.3 arrive at that store.
+/// Fixtures exercising float rendering, noise, splines, upsampling and HDR.
 const FLOAT_FIXTURES: &[&str] = &[
     "crop2x_small.jxl",
     "3x3_srgb_lossy.jxl",
@@ -167,21 +48,6 @@ const FLOAT_FIXTURES: &[&str] = &[
     "squeeze_alpha.jxl",
     "squeeze_empty_residual.jxl",
 ];
-
-/// Largest per-byte difference any two tiers may show on the float pipeline.
-///
-/// One ULP of the u8 quantization, i.e. the most a single fused-vs-unfused
-/// `mul_add` can move a sample. Every defect this test exists for moves a byte
-/// between 0 and 255, so they are two orders of magnitude outside this.
-const MAX_TIER_DIFF: u8 = 1;
-
-/// Largest fraction of an image that may differ at all between tiers.
-///
-/// Bounds a *systematic* 1-LSB shift — a wholesale rounding-mode change would
-/// stay within `MAX_TIER_DIFF` per byte but move a large share of the image,
-/// and that is a defect, not FMA noise. Measured worst case on this aarch64
-/// host (neon vs scalar) is 2 bytes of 16384, i.e. 0.012%.
-const MAX_DIFFERING_FRACTION: f64 = 0.001;
 
 /// Root of the fixture tree: the local checkout when present (the normal dev/CI
 /// case, no network), otherwise downloaded on demand via codec-corpus.
@@ -227,59 +93,21 @@ struct Decoded {
     data: Vec<u8>,
 }
 
-/// One decoded grid entry: its label, how strictly it is compared, and either
-/// the decoded image or the error text.
-type GridResult = (String, Strictness, Result<Decoded, String>);
+/// One decoded grid entry: its label and either pixels or the error text.
+type GridResult = (String, Result<Decoded, String>);
 
 /// A whole grid decoded under one token permutation, tagged with that
 /// permutation's label.
 type PermutationRun = (String, Vec<GridResult>);
 
-/// How strictly a given (fixture, option set) pair is compared.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Strictness {
-    /// Every byte must match. Integer pipeline, no float quantization.
-    Exact,
-    /// Bounded by `MAX_TIER_DIFF` / `MAX_DIFFERING_FRACTION`.
-    FmaEnvelope,
-}
-
-/// The (fixture, option set, strictness) grid.
-///
-/// `dither_u8` defaults to true, and the dithered branch of `XybToU8Stage`
-/// clamps at the call site — so the unclamped store is only reachable with
-/// dithering off, which is why that configuration is swept explicitly rather
-/// than relying on the default.
-///
-/// Dithering deliberately adds sub-LSB noise before rounding, and that noise is
-/// computed in float, so a dithered decode is held to the envelope even for a
-/// lossless fixture. With dithering off a lossless decode must be exact.
-fn grid() -> Vec<(&'static str, &'static str, JxlDecoderOptions, Strictness)> {
-    // Single-threaded, always. The dispatch tier is the only thing this test is
-    // allowed to vary; `parallel` defaults to `true` whenever the `threads`
-    // feature is on, and leaving it on would let rayon's scheduling — which
-    // depends on the machine's core count — confound a tier difference with a
-    // scheduling one. `decode_is_deterministic_when_parallel` covers the
-    // parallel path separately, where run-to-run equality is the actual claim.
-    let base = || JxlDecoderOptions::default().with_parallel(false);
+/// Keep thread count fixed while varying dispatch. Parallel repeat-decode
+/// determinism is exercised separately below.
+fn grid() -> Vec<(&'static str, &'static str, JxlDecoderOptions)> {
     let mut out = Vec::new();
-    for name in EXACT_FIXTURES {
-        out.push((
-            *name,
-            "dither_u8=false",
-            base().with_dither_u8(false),
-            Strictness::Exact,
-        ));
-        out.push((*name, "default", base(), Strictness::FmaEnvelope));
-    }
-    for name in FLOAT_FIXTURES {
-        out.push((
-            *name,
-            "dither_u8=false",
-            base().with_dither_u8(false),
-            Strictness::FmaEnvelope,
-        ));
-        out.push((*name, "default", base(), Strictness::FmaEnvelope));
+    for name in EXACT_FIXTURES.iter().chain(FLOAT_FIXTURES.iter()) {
+        let base = || JxlDecoderOptions::default().with_parallel(false);
+        out.push((*name, "dither_u8=false", base().with_dither_u8(false)));
+        out.push((*name, "default", base()));
     }
     out
 }
@@ -291,7 +119,7 @@ fn grid() -> Vec<(&'static str, &'static str, JxlDecoderOptions, Strictness)> {
 /// on the CPU.
 fn decode_grid(inputs: &[(&'static str, Vec<u8>)]) -> Vec<GridResult> {
     let mut out = Vec::new();
-    for (name, opt_name, opts, strictness) in grid() {
+    for (name, opt_name, opts) in grid() {
         let data = &inputs
             .iter()
             .find(|(n, _)| *n == name)
@@ -306,7 +134,7 @@ fn decode_grid(inputs: &[(&'static str, Vec<u8>)]) -> Vec<GridResult> {
             }),
             Err(e) => Err(format!("{e:?}")),
         };
-        out.push((format!("{name} [{opt_name}]"), strictness, result));
+        out.push((format!("{name} [{opt_name}]"), result));
     }
     out
 }
@@ -371,7 +199,7 @@ fn decode_is_identical_on_every_dispatch_tier() {
             let directory = PathBuf::from(directory).join(format!("tier-{}", labels.len() - 1));
             std::fs::create_dir(&directory).expect("fresh tier output directory");
             std::fs::write(directory.join("label.txt"), &perm.label).unwrap();
-            for (index, (key, _, result)) in got.iter().enumerate() {
+            for (index, (key, result)) in got.iter().enumerate() {
                 if let Ok(image) = result {
                     std::fs::write(directory.join(format!("{index}.rgba8")), &image.data).unwrap();
                     std::fs::write(
@@ -398,7 +226,7 @@ fn decode_is_identical_on_every_dispatch_tier() {
             perm.label
         );
 
-        for ((key, strictness, want), (got_key, _, have)) in base.iter().zip(got.iter()) {
+        for ((key, want), (got_key, have)) in base.iter().zip(got.iter()) {
             assert_eq!(key, got_key, "result order changed between permutations");
 
             let (want, have) = match (want, have) {
@@ -448,28 +276,7 @@ fn decode_is_identical_on_every_dispatch_tier() {
             );
 
             report_uncaptured(&context);
-            match strictness {
-                Strictness::Exact => panic!(
-                    "{context}\n  This fixture's decode carries no float quantization \
-                     onto the output path (8-bit modular lossless, sRGB transfer, no \
-                     splines or noise), so every dispatch tier must agree to the byte. \
-                     If the fixture does not actually satisfy that, fix its \
-                     classification in EXACT_FIXTURES rather than this assertion."
-                ),
-                Strictness::FmaEnvelope => {
-                    assert!(
-                        max <= MAX_TIER_DIFF,
-                        "{context}\n  Exceeds MAX_TIER_DIFF ({MAX_TIER_DIFF}): a difference \
-                         this large is not fused-vs-unfused multiply-add rounding."
-                    );
-                    assert!(
-                        fraction <= MAX_DIFFERING_FRACTION,
-                        "{context}\n  Exceeds MAX_DIFFERING_FRACTION \
-                         ({MAX_DIFFERING_FRACTION}): a shift affecting this much of the \
-                         image is systematic, not FMA noise."
-                    );
-                }
-            }
+            panic!("{context}\n  Every dispatch tier must produce identical output bytes.");
         }
     });
 

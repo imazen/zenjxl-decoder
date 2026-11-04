@@ -347,13 +347,25 @@ impl F32SimdVec for F32VecWasm128 {
 
     fn_wasm128! {
         fn mul_add(this: F32VecWasm128, mul: F32VecWasm128, add: F32VecWasm128) -> F32VecWasm128 {
-            // No hardware FMA on wasm32 — use mul+add.
-            F32VecWasm128(f32x4_add(f32x4_mul(this.0, mul.0), add.0), this.1)
+            let mut a = [0.0; 4];
+            let mut b = [0.0; 4];
+            let mut c = [0.0; 4];
+            this.store(&mut a);
+            mul.store(&mut b);
+            add.store(&mut c);
+            let out = std::array::from_fn::<_, 4, _>(|i| a[i].mul_add(b[i], c[i]));
+            F32VecWasm128::load(this.1, &out)
         }
 
         fn neg_mul_add(this: F32VecWasm128, mul: F32VecWasm128, add: F32VecWasm128) -> F32VecWasm128 {
-            // add - this * mul
-            F32VecWasm128(f32x4_sub(add.0, f32x4_mul(this.0, mul.0)), this.1)
+            let mut a = [0.0; 4];
+            let mut b = [0.0; 4];
+            let mut c = [0.0; 4];
+            this.store(&mut a);
+            mul.store(&mut b);
+            add.store(&mut c);
+            let out = std::array::from_fn::<_, 4, _>(|i| (-a[i]).mul_add(b[i], c[i]));
+            F32VecWasm128::load(this.1, &out)
         }
 
         fn abs(this: F32VecWasm128) -> F32VecWasm128 {

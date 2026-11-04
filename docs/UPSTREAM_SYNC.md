@@ -12,6 +12,17 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Correctness ports — 2026-11-04
 
+- Additional dispatch consistency review: scalar, SSE4.2 and WASM fallbacks use
+  single-rounding fused multiply-add semantics, matching the hardware-FMA tiers.
+  The native x86 grid changes from three differing bytes across two fixtures
+  to zero differences in all 40 fixture/configuration comparisons over seven
+  dispatch permutations. ARM64 also matches all 40 configurations across nine
+  permutations and retains zero crop-frame differences. The float envelope is
+  removed: the gate now requires
+  exact bytes for every selected configuration. WASI scalar and SIMD128 pass
+  the fused-operation primitive contracts. AVX-512 execution remains unmeasured
+  on the local hosts; compiling it is not reported as execution coverage.
+
 - Additional custom-CMS review: compile the CMYK stage independently of optional
   MoxCMS, preserve the public reflectance contract through the stage, and let
   each backend normalize ink. LCMS uses percentage ink, BPC and high-resolution

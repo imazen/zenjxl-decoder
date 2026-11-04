@@ -130,10 +130,11 @@ pub trait F32SimdVec:
 
     fn zero(d: Self::Descriptor) -> Self;
 
+    /// Computes `self * mul + add` with a single rounding on every tier.
     fn mul_add(self, mul: Self, add: Self) -> Self;
 
     /// Computes `add - self * mul`, equivalent to `self * (-mul) + add`.
-    /// Uses fused multiply-add with negation when available (FMA3 fnmadd).
+    /// Uses fused multiply-add semantics, including on software fallbacks.
     fn neg_mul_add(self, mul: Self, add: Self) -> Self;
 
     // Requires `mem.len() >= Self::LEN` or it will panic.
@@ -512,6 +513,30 @@ mod test {
         F32SimdVec, I32SimdVec, ScalarDescriptor, SimdDescriptor, U8SimdVec, U16SimdVec,
         test_all_instruction_sets,
     };
+
+    fn fused_multiply_add_contract<D: SimdDescriptor>(d: D) {
+        // The product rounds to 1 in an unfused operation, losing the residual.
+        let a = f32::from_bits(0x3f800001);
+        let b = f32::from_bits(0x3f7ffffe);
+        let x = D::F32Vec::splat(d, a);
+        let y = D::F32Vec::splat(d, b);
+        let z = D::F32Vec::splat(d, -1.0);
+        let mut actual = vec![0.0; D::F32Vec::LEN];
+        x.mul_add(y, z).store(&mut actual);
+        assert!(
+            actual
+                .iter()
+                .all(|value| value.to_bits() == a.mul_add(b, -1.0).to_bits())
+        );
+        x.neg_mul_add(y, D::F32Vec::splat(d, 1.0))
+            .store(&mut actual);
+        assert!(
+            actual
+                .iter()
+                .all(|value| value.to_bits() == (-a).mul_add(b, 1.0).to_bits())
+        );
+    }
+    test_all_instruction_sets!(fused_multiply_add_contract);
 
     enum Distribution {
         Floats,

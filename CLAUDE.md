@@ -27,13 +27,22 @@ reference-portability finding, not evidence that optimization changed Rust's
 pixels. Cross-host gates can use frozen v0.12 reference images with verified
 input and reference SHA-256 records; comparison remains byte-exact.
 
-The existing cross-tier gate permits float rounding differences: current
-optimized x86 output differs between AVX2 and SSE/scalar in
+The previous cross-tier gate permitted float rounding differences: optimized
+x86 output differed between AVX2 and SSE/scalar in
 `grayscale_patches_var_dct.jxl` (one byte) and
-`squeeze_empty_residual.jxl` (two bytes), all by one code. No established
-threshold has been relaxed. Optional MoxCMS CMYK display output also retains
-whole-image differences from LCMS-backed djxl; decoder correctness and CMS
-matching must be reported separately.
+`squeeze_empty_residual.jxl` (two bytes), all by one code. Fused fallback
+arithmetic eliminates these differences across all 40 fixture/configuration
+comparisons and seven available x86 permutations. ARM64 also passes all 40
+configurations over nine permutations, all 40 selected decoder regressions,
+and both exact crop frames. Native scalar/SSE4.2/AVX2/NEON and WASI
+scalar/wasm128 fused-operation contracts pass. The cross-tier gate requires
+exact bytes throughout. Full integration is rerunning after this repair;
+AVX-512 execution and fallback performance on CPUs without FMA are unmeasured.
+
+Optional MoxCMS CMYK display output retains whole-image differences from
+LCMS-backed djxl. The CLI's supplied LCMS backend has a strict whole-image
+regression and matches every byte. This report does not claim that the two
+independent CMS implementations have identical interpolation results.
 
 ## Resolved: negative canvas dither coordinates — 2026-11-04
 

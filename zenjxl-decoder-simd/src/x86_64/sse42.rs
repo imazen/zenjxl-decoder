@@ -316,11 +316,25 @@ impl F32SimdVec for F32VecSse42 {
     }
 
     fn_sse42!(this: F32VecSse42, fn mul_add(mul: F32VecSse42, add: F32VecSse42) -> F32VecSse42 {
-        this * mul + add
+        let mut a = [0.0; 4];
+        let mut b = [0.0; 4];
+        let mut c = [0.0; 4];
+        this.store(&mut a);
+        mul.store(&mut b);
+        add.store(&mut c);
+        let out = std::array::from_fn::<_, 4, _>(|i| a[i].mul_add(b[i], c[i]));
+        F32VecSse42::load(this.1, &out)
     });
 
     fn_sse42!(this: F32VecSse42, fn neg_mul_add(mul: F32VecSse42, add: F32VecSse42) -> F32VecSse42 {
-        add - this * mul
+        let mut a = [0.0; 4];
+        let mut b = [0.0; 4];
+        let mut c = [0.0; 4];
+        this.store(&mut a);
+        mul.store(&mut b);
+        add.store(&mut c);
+        let out = std::array::from_fn::<_, 4, _>(|i| (-a[i]).mul_add(b[i], c[i]));
+        F32VecSse42::load(this.1, &out)
     });
 
     #[inline(always)]

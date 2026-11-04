@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Use single-rounding fused multiply-add semantics in scalar, SSE4.2 and WASM SIMD fallbacks. The dispatch comparison now requires identical bytes for float and dithered rendering as well as integer output.
+
 - Honor caller-supplied CMYK color-management systems without enabling the optional MoxCMS feature. CMS backends receive the documented reflectance values. The CLI's LCMS backend converts ink to percentages and enables black-point compensation; a strict whole-image regression matches the djxl v0.12 CMYK reference.
 
 - Wrap negative canvas dither coordinates through vector chunk and channel-phase additions, retaining debug overflow checks. The existing palette serial/parallel regression and new separate/fused-output tests cover rows crossing canvas zero.
