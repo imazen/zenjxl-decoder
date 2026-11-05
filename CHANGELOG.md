@@ -169,6 +169,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   which of the five out-of-order `jxlp` defects are fork-only.
 
 ### QUEUED BREAKING CHANGES
+- Proposed in PR60: require `JxlCms: Send` so decoder states can migrate between workers. Non-Send providers need adaptation; no `Sync` bound is added to providers.
 <!-- Breaking changes that will ship together in the next 0.x minor release.
      Add items here as you discover them. Do NOT ship these piecemeal. -->
 - `JxlDecoderOptions::coalescing` and `with_coalescing()` — accepted but read
