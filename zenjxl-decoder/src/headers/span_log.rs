@@ -9,9 +9,9 @@
 //! `extensions` while a log is active (see [`begin`]). It is how the codestream
 //! layout API finds frame names, extra-channel names and extension bits
 //! without a second parser. Off by default: `record` is one thread-local
-//! check.
+//! Cell check; disabled reads do not initialize or borrow the log.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 /// `(field name, first bit, end bit)`, relative to the reader the header was
 /// read from.
@@ -37,6 +37,7 @@ impl Log {
 
 thread_local! {
     static LOG: RefCell<Option<Log>> = const { RefCell::new(None) };
+    static ENABLED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Restores an enclosing parse's log on success or error.
@@ -44,18 +45,23 @@ pub(crate) struct Session(Option<Log>);
 
 impl Drop for Session {
     fn drop(&mut self) {
+        let enabled = self.0.is_some();
         LOG.with(|log| *log.borrow_mut() = self.0.take());
+        ENABLED.with(|flag| flag.set(enabled));
     }
 }
 
 pub(crate) fn begin(tracker: crate::util::MemoryTracker) -> Session {
-    Session(LOG.with(|log| log.borrow_mut().replace(Log::new(tracker))))
+    let previous = LOG.with(|log| log.borrow_mut().replace(Log::new(tracker)));
+    ENABLED.with(|flag| flag.set(true));
+    Session(previous)
 }
 
 /// Retains the log's memory reservation while its entries are being consumed.
 pub(crate) fn take() -> Log {
-    LOG.with(|l| l.borrow_mut().take())
-        .unwrap_or_else(|| Log::new(crate::util::MemoryTracker::unlimited()))
+    let log = LOG.with(|l| l.borrow_mut().take());
+    ENABLED.with(|flag| flag.set(false));
+    log.unwrap_or_else(|| Log::new(crate::util::MemoryTracker::unlimited()))
 }
 
 /// Called by the header derive macro after reading a tracked field.
@@ -64,6 +70,9 @@ pub(crate) fn record(
     start: usize,
     end: usize,
 ) -> crate::error::Result<(), crate::error::Error> {
+    if !ENABLED.with(Cell::get) {
+        return Ok(());
+    }
     LOG.with(|l| {
         if let Some(log) = l.borrow_mut().as_mut() {
             log.memory

@@ -397,7 +397,7 @@ version = "0.0.0"
 dependencies = [
  "zenbench",
  "zenjxl-decoder 0.4.0",
- "zenjxl-decoder 0.4.0 (git+https://github.com/imazen/zenjxl-decoder?rev=552da56869e2de2a089e3f3a11941e3369795f62)",
+ "zenjxl-decoder 0.4.0 (git+https://github.com/imazen/zenjxl-decoder?rev=6d060afb26462780c3690c771d7d3674dbd23ebf)",
 ]
 
 [[package]]
@@ -1067,7 +1067,7 @@ dependencies = [
 [[package]]
 name = "zenjxl-decoder"
 version = "0.4.0"
-source = "git+https://github.com/imazen/zenjxl-decoder?rev=552da56869e2de2a089e3f3a11941e3369795f62#552da56869e2de2a089e3f3a11941e3369795f62"
+source = "git+https://github.com/imazen/zenjxl-decoder?rev=6d060afb26462780c3690c771d7d3674dbd23ebf#6d060afb26462780c3690c771d7d3674dbd23ebf"
 dependencies = [
  "aligned-vec",
  "archmage",
@@ -1083,8 +1083,8 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.21",
  "whereat",
- "zenjxl-decoder-macros 0.3.9 (git+https://github.com/imazen/zenjxl-decoder?rev=552da56869e2de2a089e3f3a11941e3369795f62)",
- "zenjxl-decoder-simd 0.3.9 (git+https://github.com/imazen/zenjxl-decoder?rev=552da56869e2de2a089e3f3a11941e3369795f62)",
+ "zenjxl-decoder-macros 0.3.9 (git+https://github.com/imazen/zenjxl-decoder?rev=6d060afb26462780c3690c771d7d3674dbd23ebf)",
+ "zenjxl-decoder-simd 0.3.9 (git+https://github.com/imazen/zenjxl-decoder?rev=6d060afb26462780c3690c771d7d3674dbd23ebf)",
 ]
 
 [[package]]
@@ -1099,7 +1099,7 @@ dependencies = [
 [[package]]
 name = "zenjxl-decoder-macros"
 version = "0.3.9"
-source = "git+https://github.com/imazen/zenjxl-decoder?rev=552da56869e2de2a089e3f3a11941e3369795f62#552da56869e2de2a089e3f3a11941e3369795f62"
+source = "git+https://github.com/imazen/zenjxl-decoder?rev=6d060afb26462780c3690c771d7d3674dbd23ebf#6d060afb26462780c3690c771d7d3674dbd23ebf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1117,7 +1117,7 @@ dependencies = [
 [[package]]
 name = "zenjxl-decoder-simd"
 version = "0.3.9"
-source = "git+https://github.com/imazen/zenjxl-decoder?rev=552da56869e2de2a089e3f3a11941e3369795f62#552da56869e2de2a089e3f3a11941e3369795f62"
+source = "git+https://github.com/imazen/zenjxl-decoder?rev=6d060afb26462780c3690c771d7d3674dbd23ebf#6d060afb26462780c3690c771d7d3674dbd23ebf"
 dependencies = [
  "archmage",
  "paste",
