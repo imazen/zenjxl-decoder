@@ -1,0 +1,20 @@
+[package]
+name = "jxl-layout-overhead"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zenbench = "0.1.10"
+candidate = { package = "zenjxl-decoder", path = "../../zenjxl-decoder", default-features = false }
+baseline = { package = "zenjxl-decoder", git = "https://github.com/imazen/zenjxl-decoder", rev = "552da56869e2de2a089e3f3a11941e3369795f62", default-features = false }
+
+[[bench]]
+name = "layout_overhead"
+harness = false
+
+[profile.release]
+lto = "thin"
+debug = "line-tables-only"

@@ -218,3 +218,12 @@ source-metadata-oracle artifacts oracle:
 operation-contract-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
+
+# Caller holds heavy.lock and run-heavy; current limits and structural errors remain.
+layout-contract-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- codestream_layout large_compressible_icc layout_memory failed_or_nested_parse failed_log_reservation hf_table_budget_tests --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- codestream_layout large_compressible_icc layout_memory failed_or_nested_parse failed_log_reservation hf_table_budget_tests --test-threads=1
+
+# Paired zenbench comparison against pinned runtime main; no pixels are decoded.
+layout-disabled-cost:
+    cargo bench --manifest-path perf/layout-overhead/Cargo.toml --bench layout_overhead -- --format=llm

@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Added
 
+- Proposed bounded codestream-layout recording with absolute logical-codestream spans, preview/frame/TOC records, and stable seek offsets. Recording is opt-in; caller clones are outside the retained decoder budget.
+
 - Proposed operational API: preserve timeout/future stop reasons with `Error::Stopped` and `stop_reason()`, while keeping the coarse cancellation class. Add an opt-in frame-header count cap covering hidden frames and replay; existing defaults remain unchanged.
 
 - Proposed source-metadata API: extra-channel precision/spot/CFA details, frame timecodes, fallible source layer facts, and fallible frame selection. Existing Eq structs, fields and pixel-output behavior remain unchanged.

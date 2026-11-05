@@ -462,6 +462,17 @@ impl Field {
         let ident = &self.name;
         let ty = &self.ty;
         let nonserialized_inits = &self.nonserialized_inits;
+        // `name` and `extensions` fields can carry arbitrary text or skipped
+        // bits; their bit spans are logged for the codestream layout API.
+        let tracked = matches!(ident.to_string().as_str(), "name" | "extensions");
+        let (span_start, span_end) = if tracked {
+            (
+                quote! { let __span_start = br.total_bits_read(); },
+                quote! { crate::headers::span_log::record(stringify!(#ident), __span_start, br.total_bits_read())?; },
+            )
+        } else {
+            (quote! {}, quote! {})
+        };
         match &self.kind {
             FieldKind::Unconditional(coder) => {
                 let cfg_ty = coder.ty();
@@ -470,12 +481,14 @@ impl Field {
                     crate::util::tracing_wrappers::trace!("Setting {} to {:?}. total_bits_read: {}, peek: {:08b}", stringify!(#ident), #ident, br.total_bits_read(), br.peek(8));
                 };
                 quote! {
+                    #span_start
                     let #ident = {
                         let cfg = #cfg;
                         type NS = <#ty as UnconditionalCoder<#cfg_ty>>::Nonserialized;
                         let nonserialized = NS { #(#nonserialized_inits),* };
                         <#ty>::read_unconditional(&cfg, br, &nonserialized)?
                     };
+                    #span_end
                     #trc
                 }
             }
@@ -488,6 +501,7 @@ impl Field {
                     crate::util::tracing_wrappers::trace!("{} is {}, setting {} to {:?}. total_bits_read: {}, peek {:08b}", #pretty_cnd, #cnd, stringify!(#ident), #ident, br.total_bits_read(), br.peek(8));
                 };
                 quote! {
+                    #span_start
                     let #ident = {
                         let cond = #cnd;
                         let cfg = #cfg;
@@ -495,6 +509,7 @@ impl Field {
                         let nonserialized = NS { #(#nonserialized_inits),* };
                         <#ty>::read_conditional(&cfg, cond, br, &nonserialized)?
                     };
+                    #span_end
                     #trc
                 }
             }
@@ -515,6 +530,7 @@ impl Field {
                 };
 
                 quote! {
+                    #span_start
                     let #ident = {
                         let cond = #cnd;
                         let cfg = #cfg;
@@ -523,6 +539,7 @@ impl Field {
                         let default = #default;
                         <#ty>::#read_fn(&cfg, cond, default, br, &field_nonserialized)?
                     };
+                    #span_end
                     #trc
                 }
             }
