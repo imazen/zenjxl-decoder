@@ -145,6 +145,11 @@ downstream-integrated-check:
     cargo test --locked --workspace --all-features -- --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib -- cropped_animation conformance_limit transform_count incremental_error_tests subsampled_channels_smooth_on_their_own_grid zero_predictor_palette_clips_negative_indices spline_colors_ignore_lf_correlation downstream_fixture_u8 reordered_jxlp_frames squeeze_partial_last_group flush_truncated_squeeze_small_tiles --test-threads=1
 
+# Caller holds heavy.lock and run-heavy; dependencies are cmake/ninja, Brotli,
+# LCMS2, PNG and JPEG development packages. Output directory must be fresh.
+build-feature-oracle output:
+    bash scripts/upstream-audit/build_pinned_reference.sh {{quote(output)}}
+
 # Input cache comes from codec-corpus; write required v0.12 references separately.
 feature-corpus-references output:
     flock "$HOME/tmp/heavy.lock" "$HOME/work/claudehints/scripts/run-heavy" --mem 12G --jobs 4 -- python3 scripts/upstream-audit/prepare_feature_references.py --output {{quote(output)}}

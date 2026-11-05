@@ -49,3 +49,21 @@ fixture. Set `ZENJXL_TIER_OUTPUT_DIR` to an existing empty directory to retain
 each executed permutation's label and decoded bytes. Every exercised fixture/configuration must match across tiers byte for byte.
 The fixture grid is finite, and a passing run does not cover unavailable
 CPU tiers or all possible JPEG XL streams.
+
+## Pinned feature-test reference tool
+
+`just build-feature-oracle <fresh-output-directory>` builds djxl v0.12.0 from
+libjxl `a7a9c787341cf703dede03c2009fa460cae5e5df` and its pinned Highway
+revision. Source archives are SHA-256 checked before extraction. It uses system
+Brotli, LCMS2, PNG and JPEG development packages and records their relevant
+versions with the executable hash under the output directory. Build parallelism
+defaults to two. Run under the shared resource wrapper on shared hosts.
+
+Use this tool with `prepare_feature_references.py` when provisioning the two
+PNG references required by codec-corpus diagnostics. The source, build, command
+logs and generated references remain separate from immutable corpus inputs.
+This helper does not overwrite the existing frozen byte-comparison references.
+
+A fresh native build completes successfully and prints v0.12.0. The validation
+wrapper reports rc0, 119s, peak-RSS 0.58GiB, minimum available 46365MiB and peak
+load 4.34; those are build-process-tree receipts, not decoder memory claims.
