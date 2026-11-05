@@ -53,6 +53,10 @@ def fused_math(source):
     replace(source, "zenjxl-decoder/src/util/fast_math.rs",
             "cosx_scale1 * cosx_scale1 - 1.0", "cosx_scale1.mul_add(cosx_scale1, -1.0)")
 
+    replace(source, "zenjxl-decoder/src/util/fast_math.rs",
+            "D::F32Vec::splat(d, 1.0) - inv_denom5 * inv_denom5",
+            "inv_denom5.mul_add(-inv_denom5, D::F32Vec::splat(d, 1.0))")
+
 
 def spline_reduction(source):
     # The pinned AVX2 reference accumulates eight lanes, then combines 128-bit

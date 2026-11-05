@@ -35,6 +35,7 @@ def main():
         (destination / "stderr.txt").write_bytes(result.stderr)
         assert result.returncode == 0, (name, result.returncode, result.stderr.decode())
         independent = json.loads(result.stdout)
+        assert independent["libjxl"] == 12000, "independent reader must use libjxl v0.12"
         assert len(native) == len(independent["layers"]), name
         entry = {"fixture": name, "sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
                  "libjxl": independent["libjxl"], "layers": []}

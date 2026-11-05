@@ -236,3 +236,7 @@ raw-layer-oracle artifacts oracle-root:
     JXL_RAW_LAYER_ARTIFACTS="$output/captured" cargo test --locked -p zenjxl-decoder --all-features --lib tests::raw_layers::raw_layer_output_uses_the_public_decoder_without_compositing -- --exact --test-threads=1
     python3 perf/raw-layer-validation/compare.py "$output/captured" zenjxl-decoder/resources/test "$output/oracle" "$output/comparison"
     python3 perf/raw-layer-validation/negative.py "$output/captured" zenjxl-decoder/resources/test "$output/oracle" "$output/negative"
+
+# Caller holds heavy.lock and run-heavy. All variants are new isolated exports.
+raw-layer-precision-experiments output oracle:
+    python3 perf/raw-layer-validation/precision_experiments.py {{quote(output)}} {{quote(oracle)}}
