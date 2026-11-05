@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
 # usage: fnprof_outer.py <profile.json.gz> <binary> [N]
 # Self time by the compiled (outermost inlined-into) zenjxl function of each sample.
 import gzip, json, sys, subprocess, collections, re

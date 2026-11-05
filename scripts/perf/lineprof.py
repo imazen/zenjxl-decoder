@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
 # usage: lineprof.py <profile.json.gz> <binary> [N]
 # Leaf-sample self time by innermost source line (atos -i), for the given binary.
 import gzip, json, sys, subprocess, collections

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
 # usage: abn.py <threads> <rounds> <file> <label=cmd>...  interleaved; median/max MP/s per variant
 import sys, subprocess, re, statistics as st, os
 T, R, f = sys.argv[1], int(sys.argv[2]), sys.argv[3]
