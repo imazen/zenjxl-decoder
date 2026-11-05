@@ -61,3 +61,10 @@ retains source pins, raw pairs and counters. The older, different-host/base
 measurement is retained as a historical receipt in
 [`benchmarks/layout_disabled_2026-11-05.txt`](../../benchmarks/layout_disabled_2026-11-05.txt).
 No threshold, assertion, ignore or corpus policy is relaxed.
+
+The final combined gate on the landed spline repair also passes both feature
+contract suites, strict all-target Clippy and all six frozen exact RGBA frame
+comparisons. The companion raw branch passes its full workspace and independent
+raw/negative gates in the same serialized batch: rc0,374s,peakRSS6.97GiB,
+minimum available18038MiB,peakload10.68. This is a combined validation receipt,
+not a decoder-only memory measurement.
