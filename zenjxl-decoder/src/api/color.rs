@@ -1403,6 +1403,10 @@ pub trait JxlCmsTransformer {
     /// floating point (0..1) samples, where `num_channels` is the number of color channels of
     /// their respective color profiles. For CMYK data, 0 represents the maximum amount of ink
     /// while 1 represents no ink.
+    ///
+    /// Returning an error ends the decode and preserves its `whereat` context.
+    /// No substitute color transform is attempted. Caller-provided decode buffers
+    /// may contain partial output after failure; they are not a completed image.
     fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> Result<()>;
 
     /// Runs a single transform in-place. The buffer contains `num_pixels` x `num_channels`
@@ -1416,7 +1420,9 @@ pub trait JxlCms {
     /// Initializes `n` transforms (different transforms might be used in parallel) to
     /// convert from color space `input` to colorspace `output`, assuming an intensity of 1.0 for
     /// non-absolute luminance colorspaces of `intensity_target`.
-    /// It is an error to not return `n` transforms.
+    /// The decoder rejects a result with a transform count other than `n`, or
+    /// an output channel count different from the output profile. A custom CMS
+    /// works independently of the `cms` feature, which enables the bundled backend.
     /// Returns the number of channels the ICC outputs, and the transforms.
     fn initialize_transforms(
         &self,

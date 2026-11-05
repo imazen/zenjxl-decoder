@@ -10,6 +10,22 @@ results) for the 2026-08-22 audit lives in
 [`upstream-audit-2026-08-22.md`](upstream-audit-2026-08-22.md). The tools
 used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
+## Fork PR extractions — 2026-11-05
+
+The [five-PR triage](PR_TRIAGE_2026-11-05.md) distinguishes existing changes,
+compatible extractions, and API/performance work still requiring adaptation.
+Original PR branches remain preserved.
+
+- Fork PR68: private fallible renderer entry points (`20c0550a`) and existing-API
+  CMS error/count/channel/destination contracts (`2a05aafe`). Both renderers
+  propagate the original callback error; the shared stage preserves reflectance
+  input and the CLI's exact LCMS whole-image reference. Public local-layer,
+  metadata, stop and header-count APIs are not included.
+- Fork PR65: delay and budget HF section tables, skip scan-only allocation, and
+  drain unused codestream payload before collecting valid trailing metadata
+  (`eb144e45`). Existing structural and I/O errors remain errors; the broad
+  trailing-error recovery is excluded.
+
 ## Correctness ports — 2026-11-04
 
 - Additional large-IDCT accuracy repair: the fused-fallback change exposed the
