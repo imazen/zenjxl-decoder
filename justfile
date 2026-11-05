@@ -218,3 +218,21 @@ source-metadata-oracle artifacts oracle:
 operation-contract-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
+
+# Caller holds heavy.lock and run-heavy; no missing-corpus bypass.
+raw-layer-contract-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- raw_layers coalescing_ source_layer_facts --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- raw_layers coalescing_ source_layer_facts --test-threads=1
+
+# Fresh artifacts; oracle-root contains source/ and build/ from pinned builder.
+raw-layer-oracle artifacts oracle-root:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    output={{quote(artifacts)}}
+    reference={{quote(oracle-root)}}
+    mkdir "$output"
+    mkdir "$output/captured" "$output/comparison"
+    cc -std=c11 -Wall -Wextra -Werror -I"$reference/source/lib/include" -I"$reference/build/lib/include" perf/raw-layer-validation/oracle.c -L"$reference/build/lib" -Wl,-rpath,"$reference/build/lib" -ljxl -ljxl_threads -ljxl_cms -lm -o "$output/oracle"
+    JXL_RAW_LAYER_ARTIFACTS="$output/captured" cargo test --locked -p zenjxl-decoder --all-features --lib tests::raw_layers::raw_layer_output_uses_the_public_decoder_without_compositing -- --exact --test-threads=1
+    python3 perf/raw-layer-validation/compare.py "$output/captured" zenjxl-decoder/resources/test "$output/oracle" "$output/comparison"
+    python3 perf/raw-layer-validation/negative.py "$output/captured" zenjxl-decoder/resources/test "$output/oracle" "$output/negative"

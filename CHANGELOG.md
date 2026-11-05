@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Added
 
+- Proposed opt-in local F32 layer output before compositing, with explicit unsupported-mode errors and independent CMYK/alpha exactness coverage. Lossy RGB uses the unchanged F32 conformance bound; see `docs/api-review/raw-layers.md`.
+
 - Proposed operational API: preserve timeout/future stop reasons with `Error::Stopped` and `stop_reason()`, while keeping the coarse cancellation class. Add an opt-in frame-header count cap covering hidden frames and replay; existing defaults remain unchanged.
 
 - Proposed source-metadata API: extra-channel precision/spot/CFA details, frame timecodes, fallible source layer facts, and fallible frame selection. Existing Eq structs, fields and pixel-output behavior remain unchanged.
