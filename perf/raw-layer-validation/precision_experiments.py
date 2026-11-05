@@ -55,7 +55,7 @@ def fused_math(source):
 
     replace(source, "zenjxl-decoder/src/util/fast_math.rs",
             "D::F32Vec::splat(d, 1.0) - inv_denom5 * inv_denom5",
-            "inv_denom5.mul_add(-inv_denom5, D::F32Vec::splat(d, 1.0))")
+            "inv_denom5.neg_mul_add(inv_denom5, D::F32Vec::splat(d, 1.0))")
 
 
 def spline_reduction(source):
