@@ -139,6 +139,8 @@ To force single-threaded mode at runtime, use `JxlDecoderOptions::default().with
 
 ## SIMD composition
 
+[Migration status and remaining work](docs/SIMD_TRANSITION.md) includes the current API review and branch/issue inventory.
+
 The `zenjxl-decoder-simd` crate retains runtime construction through
 `SimdDescriptor::new()`. Inside a function with the full target feature set,
 concrete descriptors now offer `from_context()`; equivalent constructors live
