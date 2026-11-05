@@ -309,7 +309,9 @@ mod frame_skip_tests {
         assert!(anim.tps_denominator > 0);
     }
 
-    // TODO: Frame skipping API not yet implemented in jxl-rs.
+    // TODO: Add the libjxl JxlDecoderSkipFrames compatibility cases below.
+    // Current native seeking already uses scanned_frames()/start_new_frame();
+    // that contract is distinct from the libjxl skip-count API.
     // These tests would verify:
     // - JxlDecoderSkipFrames functionality
     // - Correct handling of frame dependencies when skipping

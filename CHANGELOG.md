@@ -6,6 +6,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+- Document the pending SIMD migration, complete branch/issue/TODO inventory and preserved legacy contracts in [SIMD transition](docs/SIMD_TRANSITION.md).
+
 ### zenjxl-decoder-simd
 
 - Added token-free descriptor `from_context()` and `target_features` constructors for V2, V3, V4, NEON and WASM128. Deprecated token constructors/accessors while retaining their signatures; internal dispatch macros now use feature context. Native calls require matching feature attributes; WASM validates module features on load.
