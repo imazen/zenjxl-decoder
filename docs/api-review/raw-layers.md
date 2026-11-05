@@ -1,7 +1,8 @@
 # Qualified local F32 layers
 
-This draft is stacked on the source-metadata proposal. It adds
-`JxlDecoderOptions::coalescing` / `with_coalescing(bool)`, default true.
+This draft is stacked on the source-metadata proposal. It implements the existing
+`JxlDecoderOptions::coalescing` / `with_coalescing(bool)` option, default true.
+On main, false is currently accepted but ignored.
 False emits regular local layers before compositing; stored source geometry
 and blend facts come from `frame_layer_info() -> Result<JxlLayerInfo>`.
 Full local extents include samples outside the canvas. Composed reference

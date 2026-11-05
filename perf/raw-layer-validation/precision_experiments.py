@@ -74,24 +74,40 @@ def spline_reduction(source):
         }""")
 
 
+def high_precision(source):
+    # Use the existing option in both the public raw path and the independent
+    # native pre-composition probe. Production defaults remain unchanged.
+    replace(source, "zenjxl-decoder/src/tests/raw_layers.rs",
+            "let options = JxlDecoderOptions::default()\n        .with_coalescing(false)",
+            "let options = JxlDecoderOptions::default()\n        .with_high_precision(true)\n        .with_coalescing(false)")
+    replace(source, "zenjxl-decoder/src/api/decoder.rs",
+            "let mut options = JxlDecoderOptions::default();\n        // Correctness tests should not be constrained by memory limits.",
+            "let mut options = JxlDecoderOptions::default().with_high_precision(true);\n        // Correctness tests should not be constrained by memory limits.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("oracle", type=Path)
+    cases = ["unchanged", "fused-math", "fused-math-spline", "high-precision", "high-precision-fused-math", "high-precision-fused-math-spline"]
+    parser.add_argument("--case", action="append", choices=cases,
+                        help="select explicit experiment cases; default runs all")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     args.output.mkdir()
     rows = []
-    for name in ["unchanged", "fused-math", "fused-math-spline"]:
+    for name in args.case or cases:
         case = args.output / name
         case.mkdir()
         source = case / "source"
         shutil.copytree(root, source, ignore=shutil.ignore_patterns(
             ".git", ".jj", "target", ".workongoing", ".zenbench"))
-        if name != "unchanged":
+        if "fused-math" in name:
             fused_math(source)
-        if name == "fused-math-spline":
+        if name.endswith("-spline"):
             spline_reduction(source)
+        if name.startswith("high-precision"):
+            high_precision(source)
         # Source switches sharing a Cargo target must be newer than the prior
         # compilation, including exports whose archive timestamps were retained.
         for path in source.rglob("*.rs"):
