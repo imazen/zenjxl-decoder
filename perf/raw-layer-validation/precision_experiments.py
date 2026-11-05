@@ -78,8 +78,8 @@ def high_precision(source):
     # Use the existing option in both the public raw path and the independent
     # native pre-composition probe. Production defaults remain unchanged.
     replace(source, "zenjxl-decoder/src/tests/raw_layers.rs",
-            "let options = JxlDecoderOptions::default()\n        .with_coalescing(false)",
-            "let options = JxlDecoderOptions::default()\n        .with_high_precision(true)\n        .with_coalescing(false)")
+            "let mut input = bytes;\n    let options = JxlDecoderOptions::default()\n        .with_coalescing(false)",
+            "let mut input = bytes;\n    let options = JxlDecoderOptions::default()\n        .with_high_precision(true)\n        .with_coalescing(false)")
     replace(source, "zenjxl-decoder/src/api/decoder.rs",
             "let mut options = JxlDecoderOptions::default();\n        // Correctness tests should not be constrained by memory limits.",
             "let mut options = JxlDecoderOptions::default().with_high_precision(true);\n        // Correctness tests should not be constrained by memory limits.")
