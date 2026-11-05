@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Spline point spacing investigation — 2026-11-05
+
+The former point walker precomputed a unit direction with hypot and advanced
+by repeated unit steps. Pinned libjxl v0.12 instead recomputes the distance from
+the last emitted point using sqrt(dx*dx+dy*dy), divides the remaining distance
+once, and multiplies the delta. Those operation orders accumulate different
+rounding and shift spline samples. The pinned C++ oracle and exact Rust
+regression are retained under perf/raw-layer-validation and features/spline.rs.
+The old walker fails that new golden; the reference-order walker passes it,
+including singleton and repeated-point cases. Existing numerical expectations
+remain unchanged. See perf/spline-precision/README.md for reproduction and cost
+measurement. This does not establish bit-exact raw RGB output.
+
 ## Known bug: noncoalesced output option — 2026-11-05
 
 Main already exposes coalescing / with_coalescing(), defaults true, and stores

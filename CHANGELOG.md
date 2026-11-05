@@ -14,6 +14,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Preserve the reference operation order when locating equally spaced spline samples; retain an independent C++ float-bit golden for curved, singleton and repeated-point input. No precision option or existing tolerance changes.
+
 - Retain the LCMS thread context alongside each transform, dropping the transform first. A real transform migrates across threads with identical float bits; the existing whole-image CMYK golden remains exact.
 
 - Charge the HF group/pass section table to the shared memory budget after the TOC is available, and omit it during header-only scans. Drain unused finite codestream-box bytes so valid trailing metadata is collected, while retaining structural-container and I/O errors (`eb144e45`).
