@@ -55,7 +55,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
         }: ExtraInfo,
         buffers: &mut [&mut RowBuffer],
         state: Option<&mut (dyn Any + Send)>,
-    ) {
+    ) -> crate::error::Result<()> {
         let x0 = RowBuffer::x0_offset::<T::Type>();
         let xpre = if start_of_row { 0 } else { out_extra_x };
         let xstart = x0 - xpre;
@@ -65,7 +65,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
             .map(|x| &mut x.get_row_mut::<T::Type>(current_row)[xstart..])
             .collect();
 
-        self.process_row_chunk(
+        self.try_process_row_chunk(
             (
                 (group_x0 - xpre).wrapping_add_signed(image_origin.0),
                 current_row.wrapping_add_signed(image_origin.1),
@@ -73,7 +73,7 @@ impl<T: RenderPipelineInPlaceStage> RunInPlaceStage<RowBuffer> for T {
             xend - xstart,
             &mut rows[..],
             state,
-        );
+        )
     }
 }
 

@@ -210,7 +210,7 @@ pub trait RunInPlaceStage<Buffer: PipelineBuffer>: InPlaceStage + Send + Sync {
         info: Buffer::InPlaceExtraInfo,
         buffers: &mut [&mut Buffer],
         state: Option<&mut (dyn Any + Send)>,
-    );
+    ) -> Result<()>;
 }
 
 impl<T: RenderPipelineInPlaceStage + Send + Sync> InPlaceStage for T {

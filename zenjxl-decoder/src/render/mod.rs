@@ -60,6 +60,19 @@ pub trait RenderPipelineInPlaceStage: Any + std::fmt::Display + Send + Sync {
         state: Option<&mut (dyn Any + Send)>,
     );
 
+    /// Fallible entry point used by every pipeline runner. Pure numerical
+    /// stages delegate to their existing kernel; callback stages override it.
+    fn try_process_row_chunk(
+        &self,
+        position: (usize, usize),
+        xsize: usize,
+        row: &mut [&mut [Self::Type]],
+        state: Option<&mut (dyn Any + Send)>,
+    ) -> Result<()> {
+        self.process_row_chunk(position, xsize, row, state);
+        Ok(())
+    }
+
     fn init_local_state(&self, _thread_index: usize) -> Result<Option<Box<dyn Any + Send>>> {
         Ok(None)
     }
