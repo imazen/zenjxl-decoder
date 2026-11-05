@@ -226,3 +226,7 @@ spline-spacing-oracle binary:
 
 spline-spacing-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- equally_spaced_points noise spline fast_math --test-threads=1
+
+# Caller holds heavy.lock and run-heavy; use a uniform cpuset on hybrid CPUs.
+spline-spacing-cost:
+    cargo bench --locked --manifest-path perf/spline-precision/Cargo.toml --bench spline_precision

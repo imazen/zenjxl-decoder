@@ -438,33 +438,34 @@ fn for_each_equally_spaced_point<F: FnMut(Point, f32)>(
     if points.is_empty() {
         return;
     }
-    let mut accumulated_distance = 0.0;
-    f(points[0], desired_distance);
-    if points.len() == 1 {
-        return;
-    }
-    for index in 0..(points.len() - 1) {
-        let mut current = points[index];
-        let next = points[index + 1];
-        let segment = next - current;
-        let segment_length = segment.abs();
-        let unit_step = segment / segment_length;
-        if accumulated_distance + segment_length >= desired_distance {
-            current = current + unit_step * (desired_distance - accumulated_distance);
-            f(current, desired_distance);
-            accumulated_distance -= desired_distance;
+    // Preserve the reference point walker's operation order. Reusing a unit
+    // direction accumulates rounding drift and moves later spline samples.
+    let mut current = points[0];
+    f(current, desired_distance);
+    let mut next = 0;
+    while next < points.len() {
+        let mut previous = current;
+        let mut distance_from_previous = 0.0;
+        loop {
+            if next == points.len() {
+                f(previous, distance_from_previous);
+                return;
+            }
+            let delta = points[next] - previous;
+            let distance_to_next = (delta.x * delta.x + delta.y * delta.y).sqrt();
+            if distance_from_previous + distance_to_next >= desired_distance {
+                current = previous
+                    + delta * ((desired_distance - distance_from_previous) / distance_to_next);
+                f(current, desired_distance);
+                break;
+            }
+            distance_from_previous += distance_to_next;
+            previous = points[next];
+            next += 1;
         }
-        accumulated_distance += segment_length;
-        while accumulated_distance >= desired_distance {
-            current = current + unit_step * desired_distance;
-            f(current, desired_distance);
-            accumulated_distance -= desired_distance;
-        }
     }
-    f(points[points.len() - 1], accumulated_distance);
 }
 
-/// Precomputed multipliers for DCT: PI / 32.0 * i for i in 0..32
 const DCT_MULTIPLIERS: [f32; 32] = [
     PI / 32.0 * 0.0,
     PI / 32.0 * 1.0,
