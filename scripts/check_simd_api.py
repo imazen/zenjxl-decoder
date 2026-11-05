@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC. All rights reserved.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
 """Check the token-free surface, including bare token re-exports."""
 import re
 from pathlib import Path
