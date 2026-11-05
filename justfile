@@ -213,3 +213,8 @@ source-metadata-check:
 # Caller supplies a fresh artifact directory and the pinned independent C reader.
 source-metadata-oracle artifacts oracle:
     JXL_INTERPRETATION_ARTIFACTS={{quote(artifacts)}} JXL_INTERPRETATION_ORACLE={{quote(oracle)}} cargo test --manifest-path perf/interpretation-validation/Cargo.toml --locked -- --nocapture --test-threads=1
+
+# Caller holds heavy.lock and run-heavy.
+operation-contract-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
