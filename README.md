@@ -137,6 +137,23 @@ zenjxl-decoder = { version = "0.3.10", features = ["threads"] }
 
 To force single-threaded mode at runtime, use `JxlDecoderOptions::default().with_parallel(false)`.
 
+## SIMD composition
+
+The `zenjxl-decoder-simd` crate retains runtime construction through
+`SimdDescriptor::new()`. Inside a function with the full target feature set,
+concrete descriptors now offer `from_context()`; equivalent constructors live
+in `target_features` with `_v2`, `_v3`, `_v4`, `_neon` and `_wasm128` suffixes.
+Their documentation lists the features and shows safe array/slice composition.
+A native baseline call gets E0133 and should use runtime construction.
+
+On wasm32, Rust permits safe baseline calls; the engine validates module
+features at load time. SIMD128 still requires engine support.
+
+The original token constructors and token accessors remain available and are
+deprecated. `ScalarDescriptor` continues to use its unit constructor. Arithmetic,
+vector layout and runtime dispatch behavior are unchanged; no new speed or
+inlining guarantee is made.
+
 ## Other entry points
 
 - [`decode_with(bytes, options)`](https://docs.rs/zenjxl-decoder/latest/zenjxl_decoder/api/fn.decode_with.html) — full control over limits, cancellation, parallel mode, CMS, and premultiplied alpha.

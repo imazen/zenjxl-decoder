@@ -9,5 +9,20 @@
 //! zenjxl-decoder-macros, zenjxl-decoder-simd; the cli is publish = false).
 #[test]
 fn public_api_surface_docs_are_current() {
-    zenutils_apidoc::ApiDoc::new().workspace_dir("..").run();
+    zenutils_apidoc::ApiDoc::new()
+        .workspace_dir("..")
+        .crates(["zenjxl-decoder", "zenjxl-decoder-macros"])
+        .run();
+}
+
+/// Descriptor names and inherent methods vary by architecture even when no
+/// token appears in their spelling. Keep complete SIMD snapshots per target.
+#[test]
+fn simd_public_api_surface_docs_are_current() {
+    let output = format!("docs/public-api/{}", std::env::consts::ARCH);
+    zenutils_apidoc::ApiDoc::new()
+        .workspace_dir("..")
+        .crates(["zenjxl-decoder-simd"])
+        .out_dir(&output)
+        .run();
 }
