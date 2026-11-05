@@ -104,11 +104,51 @@ def spline_floor(source):
             .unwrap()""", """color.into_iter().fold(0.01f32, |maximum, channel| maximum.max((channel * intensity).abs()))""")
 
 
+def reference_spacing(source):
+    # Reference operation order, including recomputing the remaining distance:
+    # https://github.com/libjxl/libjxl/blob/a7a9c787341cf703dede03c2009fa460cae5e5df/lib/jxl/splines.cc
+    # The source is BSD-licensed, Copyright (c) the JPEG XL Project Authors.
+    path = source / "zenjxl-decoder/src/features/spline.rs"
+    text = path.read_text()
+    start = text.index("fn for_each_equally_spaced_point<")
+    end = text.index("\nconst DCT_MULTIPLIERS", start)
+    function = """fn for_each_equally_spaced_point<F: FnMut(Point, f32)>(
+    points: &[Point], desired_distance: f32, mut f: F,
+) {
+    if points.is_empty() { return; }
+    let mut current = points[0];
+    f(current, desired_distance);
+    let mut next = 0;
+    while next < points.len() {
+        let mut previous = current;
+        let mut distance_from_previous = 0.0;
+        loop {
+            if next == points.len() {
+                f(previous, distance_from_previous);
+                return;
+            }
+            let delta = points[next] - previous;
+            let distance_to_next = (delta.x * delta.x + delta.y * delta.y).sqrt();
+            if distance_from_previous + distance_to_next >= desired_distance {
+                current = previous + delta * ((desired_distance - distance_from_previous) / distance_to_next);
+                f(current, desired_distance);
+                break;
+            }
+            distance_from_previous += distance_to_next;
+            previous = points[next];
+            next += 1;
+        }
+    }
+}
+"""
+    path.write_text(text[:start] + function + text[end:])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("oracle", type=Path)
-    cases = ["unchanged", "fused-math", "fused-math-spline", "high-precision", "high-precision-fused-math", "high-precision-fused-math-spline", "high-precision-constants", "high-precision-constants-fused-math-spline-floor"]
+    cases = ["unchanged", "fused-math", "fused-math-spline", "high-precision", "high-precision-fused-math", "high-precision-fused-math-spline", "high-precision-constants", "high-precision-constants-fused-math-spline-floor", "high-precision-reference-spacing", "high-precision-constants-fused-math-spline-floor-reference-spacing"]
     parser.add_argument("--case", action="append", choices=cases,
                         help="select explicit experiment cases; default runs all")
     args = parser.parse_args()
@@ -129,8 +169,10 @@ def main():
             high_precision(source)
         if "constants" in name:
             spline_constants(source)
-        if name.endswith("-floor"):
+        if "-floor" in name:
             spline_floor(source)
+        if name.endswith("reference-spacing"):
+            reference_spacing(source)
         # Source switches sharing a Cargo target must be newer than the prior
         # compilation, including exports whose archive timestamps were retained.
         for path in source.rglob("*.rs"):
