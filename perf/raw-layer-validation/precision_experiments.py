@@ -111,6 +111,9 @@ def main():
             ("independent comparison", ["python3", "perf/raw-layer-validation/compare.py",
                                        str(captured), str(source / "zenjxl-decoder/resources/test"),
                                        str(args.oracle.resolve()), str(comparison)]),
+            ("existing numeric regressions", ["cargo", "test", "--locked", "-p", "zenjxl-decoder",
+                                              "--all-features", "--lib", "--", "noise", "spline",
+                                              "fast_math", "--test-threads=1"]),
         ]:
             print(name, stage, flush=True)
             log = case / (stage.replace(" ", "-") + ".log")
