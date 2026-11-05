@@ -1,5 +1,25 @@
 # Decoder investigation notes
 
+## LCMS context ownership and Send qualification — 2026-11-05
+
+lcms2 6.2.0's Transform holds a PhantomData context marker. Passing a
+ThreadContext by value to new_flags_context drops that actual context on return.
+The callback now retains it, with the transform field dropped first. The
+context is Send rather than Sync; a private Mutex retains ownership while
+preserving the callback object's existing Send + Sync contract. No unsafe
+code or public API change is required.
+
+Compile assertions establish that Lcms2Cms and the bundled transformer are
+Send + Sync. The runtime test moves an initialized real transform across four
+threads, requires identical float bits at each step, and destroys it on another
+thread. Both CLI configurations pass all seven tests, including the unchanged
+exact whole-image CMYK golden. Candidate Memcheck reports zero errors. The
+baseline identity test also reports zero errors: this work does not claim a
+reproduced invalid memory access. Strict all-feature workspace Clippy passes.
+
+This does not make Box<dyn JxlCms> Send. The provider is already Send; decoder
+migration still requires the separately reviewed Send bound on its trait object.
+
 ## Resolved: HF table accounting and trailing metadata — 2026-11-05
 
 The parser allocated group/pass section tables before the TOC and outside its

@@ -59,7 +59,7 @@ impl JxlCms for Lcms2Cms {
 
             let transform: Transform<u8, u8, ThreadContext, DisallowCache> =
                 Transform::new_flags_context(
-                    context,
+                    &context,
                     &input_profile,
                     input_format,
                     &output_profile,
@@ -71,6 +71,7 @@ impl JxlCms for Lcms2Cms {
 
             transforms.push(Box::new(Lcms2Transformer {
                 transform,
+                _context: std::sync::Mutex::new(context),
                 input_channels,
                 output_channels,
                 cmyk_input: Vec::new(),
@@ -93,7 +94,12 @@ fn channels_to_pixel_format(channels: usize) -> PixelFormat {
 
 /// Transformer implementation using lcms2 with ThreadContext for thread safety.
 struct Lcms2Transformer {
+    // Drop the transform before its context. lcms2's context type parameter
+    // is a marker; the transform does not retain the actual ThreadContext.
     transform: Transform<u8, u8, ThreadContext, DisallowCache>,
+    // ThreadContext is Send but not Sync. Keep exclusive ownership behind a
+    // mutex to retain the callback object's existing Send + Sync contract.
+    _context: std::sync::Mutex<ThreadContext>,
     input_channels: usize,
     output_channels: usize,
     cmyk_input: Vec<f32>,
@@ -190,6 +196,33 @@ mod tests {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
         });
         assert_eq!(hash, 0xd931c4898c628de9);
+    }
+
+    #[test]
+    fn owned_context_transform_migrates_between_threads() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Lcms2Cms>();
+        assert_send_sync::<Lcms2Transformer>();
+
+        let (_, mut transforms) = Lcms2Cms
+            .initialize_transforms(1, 16, srgb_profile(), linear_srgb_profile(), 255.0)
+            .unwrap();
+        let mut transform = transforms.pop().unwrap();
+        let input = [0.0f32, 0.25, 0.5, 0.75, 1.0, 0.125];
+        let mut expected = [0.0f32; 6];
+        transform.do_transform(&input, &mut expected).unwrap();
+        for _ in 0..4 {
+            transform = std::thread::spawn(move || {
+                let mut actual = [0.0f32; 6];
+                transform.do_transform(&input, &mut actual).unwrap();
+                assert_eq!(actual.map(f32::to_bits), expected.map(f32::to_bits));
+                transform
+            })
+            .join()
+            .unwrap();
+        }
+        // Destruction also happens after migration, with the context retained.
+        std::thread::spawn(move || drop(transform)).join().unwrap();
     }
 
     #[test]

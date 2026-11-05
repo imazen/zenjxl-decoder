@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Retain the LCMS thread context alongside each transform, dropping the transform first. A real transform migrates across threads with identical float bits; the existing whole-image CMYK golden remains exact.
+
 - Charge the HF group/pass section table to the shared memory budget after the TOC is available, and omit it during header-only scans. Drain unused finite codestream-box bytes so valid trailing metadata is collected, while retaining structural-container and I/O errors (`eb144e45`).
 
 - Return custom CMS callback errors through both renderers with their original context, validate initializer counts/channels, and pass the requested CMYK destination profile. Preserve reflectance inputs and the existing LCMS exact-image regression. No public signatures change (`2a05aafe`, private renderer prerequisite `20c0550a`).
