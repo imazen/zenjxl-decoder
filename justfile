@@ -192,3 +192,8 @@ inventory-behavior-check:
 # Caller holds heavy.lock + run-heavy; binary is the CLI library-test executable.
 lcms-context-memcheck binary log:
     valgrind --error-exitcode=99 --leak-check=no --log-file={{quote(log)}} {{quote(binary)}} cms::tests::owned_context_transform_migrates_between_threads --exact --nocapture
+
+# Caller holds heavy.lock and run-heavy; preserves existing conformance and pixels.
+operation-contract-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1

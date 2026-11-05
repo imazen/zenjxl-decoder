@@ -6,6 +6,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Added
+
+- Proposed operational API: preserve timeout/future stop reasons with `Error::Stopped` and `stop_reason()`, while keeping the coarse cancellation class. Add an opt-in frame-header count cap covering hidden frames and replay; existing defaults remain unchanged.
+
 ### Fixed
 
 - Retain the LCMS thread context alongside each transform, dropping the transform first. A real transform migrates across threads with identical float bits; the existing whole-image CMYK golden remains exact.
