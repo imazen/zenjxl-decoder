@@ -1,6 +1,7 @@
 # Qualified local F32 layers
 
-This draft is stacked on the source-metadata proposal. It implements the existing
+This draft is adapted to main after the approved Send, source-metadata and
+operation-contract APIs, the safe inventory resolution and the spline point-spacing repair. It implements the existing
 `JxlDecoderOptions::coalescing` / `with_coalescing(bool)` option, default true.
 On main, false is currently accepted but ignored.
 False emits regular local layers before compositing; stored source geometry
@@ -21,7 +22,7 @@ pixel fixtures, arbitrary preview/reference combinations, random raw seeks,
 progressive raw output and non-F32 representations. RGB agreement with libjxl
 is not bit-exact. Keep this draft until its API and supported scope are accepted.
 
-Current-source evidence uses the existing two layered fixtures and an
+Historical pre-spacing evidence uses the existing two layered fixtures and an
 independent C API reader built from checksum-pinned libjxl v0.12 source
 `a7a9c787341cf703dede03c2009fa460cae5e5df`. This runtime is distinct from the
 separately pinned Clang static oracle used in the PQ investigation.

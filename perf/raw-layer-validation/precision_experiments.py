@@ -151,11 +151,22 @@ def main():
     cases = ["unchanged", "fused-math", "fused-math-spline", "high-precision", "high-precision-fused-math", "high-precision-fused-math-spline", "high-precision-constants", "high-precision-constants-fused-math-spline-floor", "high-precision-reference-spacing", "high-precision-constants-fused-math-spline-floor-reference-spacing"]
     parser.add_argument("--case", action="append", choices=cases,
                         help="select explicit experiment cases; default runs all")
+    parser.add_argument("--source-root", type=Path,
+                        help="explicit source export; historical spacing experiments require the pre-repair tree")
+    parser.add_argument("--source-revision", help="provenance label for the source export")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[2]
+    root = (args.source_root or Path(__file__).resolve().parents[2]).resolve()
+    selected = args.case or [case for case in cases if not case.endswith("reference-spacing")]
+    spacing_source = (root / "zenjxl-decoder/src/features/spline.rs").read_text()
+    if any(case.endswith("reference-spacing") for case in selected) and "let mut distance_from_previous" in spacing_source:
+        parser.error("reference spacing is already present; use --source-root with a pre-repair export such as 34a99d25")
+    source_hash = hashlib.sha256()
+    for path in sorted(root.rglob("*.rs")):
+        if not {".git", ".jj", "target"}.intersection(path.relative_to(root).parts):
+            source_hash.update(str(path.relative_to(root)).encode() + b"\0" + path.read_bytes())
     args.output.mkdir()
     rows = []
-    for name in args.case or cases:
+    for name in selected:
         case = args.output / name
         case.mkdir()
         source = case / "source"
@@ -221,6 +232,8 @@ def main():
                              "max_absolute_error": max(p["max_absolute_error"] for p in planes)})
         rows.append({"case": name, "fixtures": fixtures})
         (args.output / "results.json").write_text(json.dumps({
+            "source_revision": args.source_revision,
+            "source_rust_sha256": source_hash.hexdigest(),
             "oracle_sha256": hashlib.sha256(args.oracle.read_bytes()).hexdigest(),
             "results": rows,
         }, indent=2) + "\n")

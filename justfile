@@ -219,6 +219,18 @@ operation-contract-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib -- frame_header_budget stop_reason test_stop_cancellation --test-threads=1
 
+# Caller holds heavy.lock and run-heavy; emitted text is the pinned C++ oracle.
+spline-spacing-oracle binary:
+    c++ -std=c++17 -O2 -ffp-contract=off -Wall -Wextra -Werror perf/raw-layer-validation/spline_spacing_oracle.cc -o {{quote(binary)}}
+    {{quote(binary)}}
+
+spline-spacing-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- equally_spaced_points noise spline fast_math --test-threads=1
+
+# Caller holds heavy.lock and run-heavy; use a uniform cpuset on hybrid CPUs.
+spline-spacing-cost:
+    cargo bench --locked --manifest-path perf/spline-precision/Cargo.toml --bench spline_precision
+
 # Caller holds heavy.lock and run-heavy; no missing-corpus bypass.
 raw-layer-contract-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- raw_layers coalescing_ source_layer_facts --test-threads=1

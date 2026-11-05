@@ -1,5 +1,32 @@
 # Decoder investigation notes
 
+## Spline point spacing investigation — 2026-11-05
+
+The former point walker precomputed a unit direction with hypot and advanced
+by repeated unit steps. Pinned libjxl v0.12 instead recomputes the distance from
+the last emitted point using sqrt(dx*dx+dy*dy), divides the remaining distance
+once, and multiplies the delta. Those operation orders accumulate different
+rounding and shift spline samples. The pinned C++ oracle and exact Rust
+regression are retained under perf/raw-layer-validation and features/spline.rs.
+The old walker fails that new golden; the reference-order walker passes it,
+including singleton and repeated-point cases. Existing numerical expectations
+remain unchanged. See perf/spline-precision/README.md for reproduction and cost
+measurement. This does not establish bit-exact raw RGB output.
+
+## Known bug: noncoalesced output option — 2026-11-05
+
+Main already exposes coalescing / with_coalescing(), defaults true, and stores
+false without consuming it in the decoder. Output remains composed. Draft
+PR75 implements qualified local F32 output and explicit unsupported-mode errors;
+that runtime work is not merged. This corrects the earlier inventory claim
+that the option itself was absent.
+
+The spline precision documentation also previously said false matched libjxl's
+default. Pinned v0.12 common.h defines JXL_HIGH_PRECISION=1 unless overridden;
+its spline cutoff exponent is 5. Native false uses3 and true uses5. Source
+and generated Ninja definitions confirm the pinned reference has no override.
+Matching comparisons need the existing true option; no default is changed.
+
 ## LCMS context ownership and Send qualification — 2026-11-05
 
 lcms2 6.2.0's Transform holds a PhantomData context marker. Passing a
@@ -17,8 +44,10 @@ exact whole-image CMYK golden. Candidate Memcheck reports zero errors. The
 baseline identity test also reports zero errors: this work does not claim a
 reproduced invalid memory access. Strict all-feature workspace Clippy passes.
 
-This does not make Box<dyn JxlCms> Send. The provider is already Send; decoder
-migration still requires the separately reviewed Send bound on its trait object.
+Context ownership alone does not make Box<dyn JxlCms> Send. Approved PR60
+now adds that separate provider trait-object bound (0458ab95), without requiring
+Sync on providers. Combined main6d060afb passes the full workspace, strict
+Clippy, both feature-specific API/LCMS gates and six frozen exact RGBA frames.
 
 ## Resolved: HF table accounting and trailing metadata — 2026-11-05
 
