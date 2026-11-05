@@ -545,3 +545,10 @@ was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
 - d3 1T: per decode djxl 146M cycles / 710M instructions, zen 152M / 900M.
   Our EPF1 and EPF2 kernels take ~2x djxl's share each; the sRGB transfer
   (`linear_to_srgb_simd`, 9% here) is the same algorithm as libjxl's.
+
+## Known Bugs: resolved SIMD transition source-check failure (2026-11-05)
+
+New SIMD scripts/module/tests initially lacked the required BSD copyright/license
+headers. Repair `c09eb4fa` adds them; `source_checks` passed on that remote head.
+Current descriptor migration, branch dispositions and issue/TODO qualification
+are recorded in [docs/SIMD_TRANSITION.md](docs/SIMD_TRANSITION.md) and PR 77.

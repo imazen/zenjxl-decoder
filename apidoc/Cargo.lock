@@ -61,9 +61,9 @@ dependencies = [
 
 [[package]]
 name = "public-api"
-version = "0.52.1"
+version = "0.52.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d410e0b50432be9a8708e0bab4f5e0ddfde07236cc7f9481476aa9c5ef60ece3"
+checksum = "d102ca8df9d07fa01215671136dd188312ebdd901b7f7e70765c51df87dd35e1"
 dependencies = [
  "hashbag",
  "rustdoc-types",
@@ -84,9 +84,9 @@ dependencies = [
 
 [[package]]
 name = "rustdoc-types"
-version = "0.57.3"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6919c49bdd9cca072b3b502d16c073d0a4d3b7283ff6e0c86a5f6e6b07bbfe"
+checksum = "b3e25ff539c83e47de65a6a790446186286d3a64bfadc780ed557cc3410d9509"
 dependencies = [
  "serde",
  "serde_derive",
@@ -133,9 +133,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -289,9 +289,8 @@ dependencies = [
 
 [[package]]
 name = "zenutils-apidoc"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65a6d52c06c93b0b41541a5eb40dd397134981df6cb44c38298b160281079925"
+version = "0.1.2"
+source = "git+https://github.com/imazen/zenutils?rev=aad4ee3ed25b7f3fef09e2a172892ecfefc02873#aad4ee3ed25b7f3fef09e2a172892ecfefc02873"
 dependencies = [
  "public-api",
  "rustup-toolchain",

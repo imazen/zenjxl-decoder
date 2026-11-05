@@ -6,11 +6,12 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder-simd.txt 137 lines (supported surface) | zenjxl-decoder-simd.features.txt 5 added (features: all-simd,avx,avx512,neon,sse42,wasm128) | zenjxl-decoder-simd.internal.txt 10 lines (10 hidden + 0 excluded-feature)
+# files: zenjxl-decoder-simd.txt 138 lines (supported surface) | zenjxl-decoder-simd.features.txt 4 added (features: all-simd,avx,avx512,neon,sse42,wasm128) | zenjxl-decoder-simd.internal.txt 7 lines (10 hidden + 0 excluded-feature)
+# arch-unique surface: (none — portable on every target)
 
 ## summary
 #
-#   pub modules                                 3
+#   pub modules                                 4
 #   pub types (struct/enum/trait/alias)        27
 #   pub consts/statics                         15
 #   pub macros                                  5
@@ -20,11 +21,11 @@
 #   auto-trait-complete types                   2
 #
 # per-module pub lines:
-#   (root)                          123
+#   (root)                          124
 #   float16                          13
 #   scalar                            3
 
-## items (127 lines)
+## items (128 lines)
 
 pub mod zenjxl_decoder_simd
 pub mod float16
@@ -40,6 +41,7 @@ pub fn float16::f16::to_f64(self) -> f64 [also: float16::f16]
 pub const fn float16::f16::to_le_bytes(self) -> [u8; 2] [also: (root)]
 pub mod scalar
 pub fn scalar::ScalarDescriptor::from_token(archmage::tokens::ScalarToken) -> Self
+pub mod target_features
 pub macro bench_all_instruction_sets!
 pub macro shl!
 pub macro shr!

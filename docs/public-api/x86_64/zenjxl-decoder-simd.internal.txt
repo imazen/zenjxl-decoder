@@ -1,0 +1,50 @@
+# zenjxl-decoder-simd public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   free functions                              1
+#   re-exports                                  3
+#   trait roster entries (type × trait)         5
+#
+# per-module pub lines:
+#   (root)                            3
+#   float16                           1
+
+## items (4 lines)
+
+pub fn float16::f16::assert_fields_are_eq(&self)
+pub use ScalarToken
+pub use __SimdToken
+pub use __arcane
+
+## trait impls (5 types)
+
+Avx512Descriptor: TrivialClone
+AvxDescriptor: TrivialClone
+Sse42Descriptor: TrivialClone
+float16::f16: TrivialClone
+scalar::ScalarDescriptor: TrivialClone
+## arch shapes (3 shapes: 3 on every recorded arch, 0 arch-unique)
+
+[x86_64] pub macro bench_<tier>!
+[x86_64] pub macro test_<tier>!
+[x86_64] pub use <ArchToken>
+
+## arch surface: x86_64 (9 lines)
+
+pub macro bench_avx!
+pub macro bench_avx512!
+pub macro bench_sse42!
+pub macro test_avx!
+pub macro test_avx512!
+pub macro test_sse42!
+pub use X64V2Token
+pub use X64V3Token
+pub use X64V4Token

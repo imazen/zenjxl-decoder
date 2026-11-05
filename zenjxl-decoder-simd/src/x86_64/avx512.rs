@@ -19,19 +19,40 @@ use std::ops::{
 pub struct Avx512Descriptor(archmage::X64V4Token);
 
 impl Avx512Descriptor {
+    /// Construct inside a function with the complete `v4` target features.
+    ///
+    /// No runtime detection occurs. Baseline callers should use
+    /// [`crate::SimdDescriptor::new`]; do not bypass E0133 with an unsafe block.
+    #[archmage::rite(v4)]
+    pub fn from_context() -> Self {
+        let token = archmage::X64V4Token::from_context();
+        Self(token)
+    }
+
     #[inline]
+    #[deprecated(
+        note = "Use from_context() inside matching target features, or SimdDescriptor::new() for runtime detection."
+    )]
     pub fn from_token(token: archmage::X64V4Token) -> Self {
         Self(token)
     }
 
     #[inline(always)]
+    #[deprecated(
+        note = "Keep the descriptor inside SIMD code; external token identity is no longer needed."
+    )]
     pub fn token(&self) -> archmage::X64V4Token {
+        self.0
+    }
+
+    #[inline(always)]
+    fn token_internal(&self) -> archmage::X64V4Token {
         self.0
     }
 
     #[inline]
     pub fn as_avx(&self) -> AvxDescriptor {
-        AvxDescriptor::from_token(self.0.v3())
+        AvxDescriptor::from_token_internal(self.0.v3())
     }
 }
 
@@ -65,7 +86,7 @@ impl SimdDescriptor for Avx512Descriptor {
     }
 
     fn new() -> Option<Self> {
-        archmage::X64V4Token::summon().map(Self::from_token)
+        archmage::X64V4Token::summon().map(Self)
     }
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
@@ -78,7 +99,7 @@ impl SimdDescriptor for Avx512Descriptor {
         ) -> R {
             f(d)
         }
-        impl_(self.token(), self, f)
+        impl_(self.token_internal(), self, f)
     }
 }
 
@@ -91,7 +112,7 @@ macro_rules! fn_avx {
             #[arcane]
             #[inline(always)]
             fn impl_(_t: archmage::X64V4Token, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
-            impl_(self.1.token(), self, $($arg),*)
+            impl_(self.1.token_internal(), self, $($arg),*)
         }
     };
 }
@@ -114,7 +135,7 @@ impl F32SimdVec for F32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, mem: &[f32]) -> __m512 {
             _mm512_loadu_ps(mem.first_chunk::<16>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -124,7 +145,7 @@ impl F32SimdVec for F32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: __m512, mem: &mut [f32]) {
             _mm512_storeu_ps(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -153,7 +174,7 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[..16].first_chunk_mut::<16>().unwrap(), out0);
             _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -186,7 +207,7 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -275,7 +296,7 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm512_storeu_ps(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
@@ -411,7 +432,18 @@ impl F32SimdVec for F32VecAvx512 {
             _mm512_storeu_ps(dest[96..112].first_chunk_mut::<16>().unwrap(), out6);
             _mm512_storeu_ps(dest[112..128].first_chunk_mut::<16>().unwrap(), out7);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
+        impl_(
+            a.1.token_internal(),
+            a.0,
+            b.0,
+            c.0,
+            d.0,
+            e.0,
+            f.0,
+            g.0,
+            h.0,
+            dest,
+        )
     }
 
     #[inline(always)]
@@ -436,7 +468,7 @@ impl F32SimdVec for F32VecAvx512 {
 
             (a, b)
         }
-        let (a, b) = impl_(d.token(), src);
+        let (a, b) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d))
     }
 
@@ -486,7 +518,7 @@ impl F32SimdVec for F32VecAvx512 {
 
             (a, b, c)
         }
-        let (a, b, c) = impl_(d.token(), src);
+        let (a, b, c) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
@@ -530,7 +562,7 @@ impl F32SimdVec for F32VecAvx512 {
 
             (a, b, c, dv)
         }
-        let (a, b, c, dv) = impl_(d.token(), src);
+        let (a, b, c, dv) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -549,7 +581,7 @@ impl F32SimdVec for F32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: f32) -> __m512 {
             _mm512_set1_ps(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -559,7 +591,7 @@ impl F32SimdVec for F32VecAvx512 {
         fn impl_(_: archmage::X64V4Token) -> __m512 {
             _mm512_setzero_ps()
         }
-        Self(impl_(d.token()), d)
+        Self(impl_(d.token_internal()), d)
     }
 
     fn_avx!(this: F32VecAvx512, fn abs() -> F32VecAvx512 {
@@ -626,7 +658,7 @@ impl F32SimdVec for F32VecAvx512 {
             // comment promised zeros. Upstream jxl-rs 32d61f4.
             _mm512_zextps256_ps512(table_256)
         }
-        Bf16Table8Avx512(impl_(d.token(), table))
+        Bf16Table8Avx512(impl_(d.token_internal(), table))
     }
 
     #[inline(always)]
@@ -640,7 +672,7 @@ impl F32SimdVec for F32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, indices: __m512i, table: __m512) -> __m512 {
             _mm512_permutexvar_ps(indices, table)
         }
-        F32VecAvx512(impl_(d.token(), indices.0, table.0), d)
+        F32VecAvx512(impl_(d.token_internal(), indices.0, table.0), d)
     }
 
     #[inline(always)]
@@ -667,7 +699,7 @@ impl F32SimdVec for F32VecAvx512 {
             // Store 16 bytes
             _mm_storeu_si128(dest.first_chunk_mut::<16>().unwrap(), u8s);
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -690,7 +722,7 @@ impl F32SimdVec for F32VecAvx512 {
             // Store 16 u16s (32 bytes)
             _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), u16s);
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     impl_f32_array_interface!();
@@ -705,7 +737,7 @@ impl F32SimdVec for F32VecAvx512 {
             let bits = _mm256_loadu_si256(mem.first_chunk::<16>().unwrap());
             F32VecAvx512(_mm512_cvtph_ps(bits), d)
         }
-        impl_(d.token(), d, mem)
+        impl_(d.token_internal(), d, mem)
     }
 
     #[inline(always)]
@@ -718,7 +750,7 @@ impl F32SimdVec for F32VecAvx512 {
             let bits = _mm512_cvtps_ph::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(v);
             _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), bits);
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -880,7 +912,7 @@ impl F32SimdVec for F32VecAvx512 {
             F32VecAvx512(o14, d).store_array(&mut data[14 * stride]);
             F32VecAvx512(o15, d).store_array(&mut data[15 * stride]);
         }
-        impl_(d.token(), d, data, stride)
+        impl_(d.token_internal(), d, data, stride)
     }
 }
 
@@ -951,7 +983,7 @@ impl I32SimdVec for I32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, mem: &[i32]) -> __m512i {
             _mm512_loadu_epi32(mem.first_chunk::<16>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -961,7 +993,7 @@ impl I32SimdVec for I32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: __m512i, mem: &mut [i32]) {
             _mm512_storeu_epi32(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -971,7 +1003,7 @@ impl I32SimdVec for I32VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: i32) -> __m512i {
             _mm512_set1_epi32(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     fn_avx!(this: I32VecAvx512, fn as_f32() -> F32VecAvx512 {
@@ -1014,7 +1046,7 @@ impl I32SimdVec for I32VecAvx512 {
         fn impl_<const AMOUNT_U: u32>(_: archmage::X64V4Token, v: __m512i) -> __m512i {
             _mm512_slli_epi32::<AMOUNT_U>(v)
         }
-        Self(impl_::<AMOUNT_U>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_U>(self.1.token_internal(), self.0), self.1)
     }
 
     #[inline(always)]
@@ -1024,7 +1056,7 @@ impl I32SimdVec for I32VecAvx512 {
         fn impl_<const AMOUNT_U: u32>(_: archmage::X64V4Token, v: __m512i) -> __m512i {
             _mm512_srai_epi32::<AMOUNT_U>(v)
         }
-        Self(impl_::<AMOUNT_U>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_U>(self.1.token_internal(), self.0), self.1)
     }
 
     fn_avx!(this: I32VecAvx512, fn mul_wide_take_high(rhs: I32VecAvx512) -> I32VecAvx512 {
@@ -1043,7 +1075,7 @@ impl I32SimdVec for I32VecAvx512 {
             let tmp = _mm512_cvtepi32_epi16(v);
             _mm256_storeu_si256(dest.first_chunk_mut::<16>().unwrap(), tmp);
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -1058,7 +1090,7 @@ impl I32SimdVec for I32VecAvx512 {
                 dest[i] = tmp[i] as u8;
             }
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 }
 
@@ -1193,7 +1225,7 @@ impl U32SimdVec for U32VecAvx512 {
         fn impl_<const AMOUNT_U: u32>(_: archmage::X64V4Token, v: __m512i) -> __m512i {
             _mm512_srli_epi32::<AMOUNT_U>(v)
         }
-        Self(impl_::<AMOUNT_U>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_U>(self.1.token_internal(), self.0), self.1)
     }
 }
 
@@ -1211,7 +1243,7 @@ impl U8SimdVec for U8VecAvx512 {
         fn impl_(_: archmage::X64V4Token, mem: &[u8]) -> __m512i {
             _mm512_loadu_si512(mem.first_chunk::<64>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -1221,7 +1253,7 @@ impl U8SimdVec for U8VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: u8) -> __m512i {
             _mm512_set1_epi8(v as i8)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -1231,7 +1263,7 @@ impl U8SimdVec for U8VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: __m512i, mem: &mut [u8]) {
             _mm512_storeu_si512(mem.first_chunk_mut::<64>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -1250,7 +1282,7 @@ impl U8SimdVec for U8VecAvx512 {
             _mm512_storeu_si512(dest[..64].first_chunk_mut::<64>().unwrap(), out0);
             _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), out1);
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -1328,7 +1360,7 @@ impl U8SimdVec for U8VecAvx512 {
             _mm512_storeu_si512(dest[64..128].first_chunk_mut::<64>().unwrap(), final1);
             _mm512_storeu_si512(dest[128..192].first_chunk_mut::<64>().unwrap(), final2);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -1375,7 +1407,7 @@ impl U8SimdVec for U8VecAvx512 {
             _mm512_storeu_si512(dest[128..192].first_chunk_mut::<64>().unwrap(), out2);
             _mm512_storeu_si512(dest[192..256].first_chunk_mut::<64>().unwrap(), out3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
@@ -1393,7 +1425,7 @@ impl U16SimdVec for U16VecAvx512 {
         fn impl_(_: archmage::X64V4Token, mem: &[u16]) -> __m512i {
             _mm512_loadu_si512(mem.first_chunk::<32>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -1403,7 +1435,7 @@ impl U16SimdVec for U16VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: u16) -> __m512i {
             _mm512_set1_epi16(v as i16)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -1413,7 +1445,7 @@ impl U16SimdVec for U16VecAvx512 {
         fn impl_(_: archmage::X64V4Token, v: __m512i, mem: &mut [u16]) {
             _mm512_storeu_si512(mem.first_chunk_mut::<32>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -1432,7 +1464,7 @@ impl U16SimdVec for U16VecAvx512 {
             _mm512_storeu_si512(dest[..32].first_chunk_mut::<32>().unwrap(), out0);
             _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), out1);
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -1513,7 +1545,7 @@ impl U16SimdVec for U16VecAvx512 {
             _mm512_storeu_si512(dest[32..64].first_chunk_mut::<32>().unwrap(), final1);
             _mm512_storeu_si512(dest[64..96].first_chunk_mut::<32>().unwrap(), final2);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -1561,7 +1593,7 @@ impl U16SimdVec for U16VecAvx512 {
             _mm512_storeu_si512(dest[64..96].first_chunk_mut::<32>().unwrap(), out2);
             _mm512_storeu_si512(dest[96..128].first_chunk_mut::<32>().unwrap(), out3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 }
 

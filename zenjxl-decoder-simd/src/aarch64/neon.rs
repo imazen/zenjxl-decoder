@@ -20,12 +20,33 @@ use super::super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, 
 pub struct NeonDescriptor(archmage::NeonToken);
 
 impl NeonDescriptor {
+    /// Construct inside a function with the complete `neon` target features.
+    ///
+    /// No runtime detection occurs. Baseline callers should use
+    /// [`crate::SimdDescriptor::new`]; do not bypass E0133 with an unsafe block.
+    #[archmage::rite(neon)]
+    pub fn from_context() -> Self {
+        let token = archmage::NeonToken::from_context();
+        Self(token)
+    }
+
     #[inline]
+    #[deprecated(
+        note = "Use from_context() inside matching target features, or SimdDescriptor::new() for runtime detection."
+    )]
     pub fn from_token(token: archmage::NeonToken) -> Self {
         Self(token)
     }
     #[inline(always)]
+    #[deprecated(
+        note = "Keep the descriptor inside SIMD code; external token identity is no longer needed."
+    )]
     pub fn token(&self) -> archmage::NeonToken {
+        self.0
+    }
+
+    #[inline(always)]
+    fn token_internal(&self) -> archmage::NeonToken {
         self.0
     }
 }
@@ -54,7 +75,7 @@ impl SimdDescriptor for NeonDescriptor {
     type Descriptor128 = Self;
 
     fn new() -> Option<Self> {
-        archmage::NeonToken::summon().map(Self::from_token)
+        archmage::NeonToken::summon().map(Self)
     }
 
     #[inline]
@@ -77,7 +98,7 @@ impl SimdDescriptor for NeonDescriptor {
         ) -> R {
             f(d)
         }
-        impl_(self.token(), self, f)
+        impl_(self.token_internal(), self, f)
     }
 }
 
@@ -90,7 +111,7 @@ macro_rules! fn_neon {
             #[arcane]
             #[inline(always)]
             fn impl_(_t: archmage::NeonToken, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
-            impl_(self.1.token(), self, $($arg),*)
+            impl_(self.1.token_internal(), self, $($arg),*)
         }
     };
 }
@@ -110,7 +131,7 @@ impl F32SimdVec for F32VecNeon {
         fn impl_(_: archmage::NeonToken, v: f32) -> float32x4_t {
             vdupq_n_f32(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -120,7 +141,7 @@ impl F32SimdVec for F32VecNeon {
         fn impl_(_: archmage::NeonToken) -> float32x4_t {
             vdupq_n_f32(0.0)
         }
-        Self(impl_(d.token()), d)
+        Self(impl_(d.token_internal()), d)
     }
 
     #[inline(always)]
@@ -131,7 +152,7 @@ impl F32SimdVec for F32VecNeon {
             assert!(mem.len() >= F32VecNeon::LEN);
             vld1q_f32(mem.first_chunk::<4>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -142,7 +163,7 @@ impl F32SimdVec for F32VecNeon {
             assert!(mem.len() >= F32VecNeon::LEN);
             vst1q_f32(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -153,7 +174,7 @@ impl F32SimdVec for F32VecNeon {
             assert!(dest.len() >= 2 * F32VecNeon::LEN);
             vst2q_f32(dest.first_chunk_mut::<8>().unwrap(), float32x4x2_t(a, b))
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -173,7 +194,7 @@ impl F32SimdVec for F32VecNeon {
                 float32x4x3_t(a, b, c),
             )
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -194,7 +215,7 @@ impl F32SimdVec for F32VecNeon {
                 float32x4x4_t(a, b, c, d),
             )
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
@@ -286,7 +307,18 @@ impl F32SimdVec for F32VecNeon {
             vst1q_f32(dest[28..32].first_chunk_mut::<4>().unwrap(), out7);
         }
 
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
+        impl_(
+            a.1.token_internal(),
+            a.0,
+            b.0,
+            c.0,
+            d.0,
+            e.0,
+            f.0,
+            g.0,
+            h.0,
+            dest,
+        )
     }
 
     #[inline(always)]
@@ -298,7 +330,7 @@ impl F32SimdVec for F32VecNeon {
             let float32x4x2_t(a, b) = vld2q_f32(src.first_chunk::<8>().unwrap());
             (a, b)
         }
-        let (a, b) = impl_(d.token(), src);
+        let (a, b) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d))
     }
 
@@ -311,7 +343,7 @@ impl F32SimdVec for F32VecNeon {
             let float32x4x3_t(a, b, c) = vld3q_f32(src.first_chunk::<12>().unwrap());
             (a, b, c)
         }
-        let (a, b, c) = impl_(d.token(), src);
+        let (a, b, c) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
@@ -327,7 +359,7 @@ impl F32SimdVec for F32VecNeon {
             let float32x4x4_t(a, b, c, e) = vld4q_f32(src.first_chunk::<16>().unwrap());
             (a, b, c, e)
         }
-        let (a, b, c, e) = impl_(d.token(), src);
+        let (a, b, c, e) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(e, d))
     }
 
@@ -381,9 +413,9 @@ impl F32SimdVec for F32VecNeon {
         }
 
         if stride == 1 {
-            transpose4x4f32_contiguous(d.token(), d, data)
+            transpose4x4f32_contiguous(d.token_internal(), d, data)
         } else {
-            transpose4x4f32(d.token(), d, data, stride)
+            transpose4x4f32(d.token_internal(), d, data, stride)
         }
     }
 
@@ -475,7 +507,7 @@ impl F32SimdVec for F32VecNeon {
                 dest[i] = crate::f16::from_f32(arr[i]).to_bits();
             }
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -491,7 +523,7 @@ impl F32SimdVec for F32VecNeon {
             }
             vld1q_f32(&arr)
         }
-        F32VecNeon(impl_(d.token(), mem), d)
+        F32VecNeon(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -511,7 +543,7 @@ impl F32SimdVec for F32VecNeon {
             let bf16_table_u16 = vcombine_u16(bf16_lo_u16, bf16_hi_u16);
             vreinterpretq_u8_u16(bf16_table_u16)
         }
-        Bf16Table8Neon(impl_(d.token(), table))
+        Bf16Table8Neon(impl_(d.token_internal(), table))
     }
 
     #[inline(always)]
@@ -533,7 +565,7 @@ impl F32SimdVec for F32VecNeon {
 
             vreinterpretq_f32_u8(result)
         }
-        F32VecNeon(impl_(d.token(), table.0, indices.0), d)
+        F32VecNeon(impl_(d.token_internal(), table.0, indices.0), d)
     }
 }
 
@@ -604,7 +636,7 @@ impl I32SimdVec for I32VecNeon {
         fn impl_(_: archmage::NeonToken, v: i32) -> int32x4_t {
             vdupq_n_s32(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -615,7 +647,7 @@ impl I32SimdVec for I32VecNeon {
             assert!(mem.len() >= I32VecNeon::LEN);
             vld1q_s32(mem.first_chunk::<4>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -626,7 +658,7 @@ impl I32SimdVec for I32VecNeon {
             assert!(mem.len() >= I32VecNeon::LEN);
             vst1q_s32(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     fn_neon!(this: I32VecNeon, fn abs() -> I32VecNeon {
@@ -676,7 +708,7 @@ impl I32SimdVec for I32VecNeon {
         fn impl_<const AMOUNT_I: i32>(_: archmage::NeonToken, v: int32x4_t) -> int32x4_t {
             vshlq_n_s32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token_internal(), self.0), self.1)
     }
 
     #[inline(always)]
@@ -686,7 +718,7 @@ impl I32SimdVec for I32VecNeon {
         fn impl_<const AMOUNT_I: i32>(_: archmage::NeonToken, v: int32x4_t) -> int32x4_t {
             vshrq_n_s32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token_internal(), self.0), self.1)
     }
 
     #[inline(always)]
@@ -701,7 +733,7 @@ impl I32SimdVec for I32VecNeon {
                 vreinterpret_u16_s16(narrowed),
             );
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -716,7 +748,7 @@ impl I32SimdVec for I32VecNeon {
                 dest[i] = tmp[i] as u8;
             }
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 }
 
@@ -824,7 +856,7 @@ impl U32SimdVec for U32VecNeon {
         fn impl_<const AMOUNT_I: i32>(_: archmage::NeonToken, v: uint32x4_t) -> uint32x4_t {
             vshrq_n_u32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token_internal(), self.0), self.1)
     }
 }
 
@@ -843,7 +875,7 @@ impl U8SimdVec for U8VecNeon {
             assert!(mem.len() >= U8VecNeon::LEN);
             vld1q_u8(mem.first_chunk::<16>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -853,7 +885,7 @@ impl U8SimdVec for U8VecNeon {
         fn impl_(_: archmage::NeonToken, v: u8) -> uint8x16_t {
             vdupq_n_u8(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -864,7 +896,7 @@ impl U8SimdVec for U8VecNeon {
             assert!(mem.len() >= U8VecNeon::LEN);
             vst1q_u8(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -875,7 +907,7 @@ impl U8SimdVec for U8VecNeon {
             assert!(dest.len() >= 2 * U8VecNeon::LEN);
             vst2q_u8(dest.first_chunk_mut::<32>().unwrap(), uint8x16x2_t(a, b))
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -892,7 +924,7 @@ impl U8SimdVec for U8VecNeon {
             assert!(dest.len() >= 3 * U8VecNeon::LEN);
             vst3q_u8(dest.first_chunk_mut::<48>().unwrap(), uint8x16x3_t(a, b, c))
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -913,7 +945,7 @@ impl U8SimdVec for U8VecNeon {
                 uint8x16x4_t(a, b, c, d),
             )
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
@@ -932,7 +964,7 @@ impl U16SimdVec for U16VecNeon {
             assert!(mem.len() >= U16VecNeon::LEN);
             vld1q_u16(mem.first_chunk::<8>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -942,7 +974,7 @@ impl U16SimdVec for U16VecNeon {
         fn impl_(_: archmage::NeonToken, v: u16) -> uint16x8_t {
             vdupq_n_u16(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -953,7 +985,7 @@ impl U16SimdVec for U16VecNeon {
             assert!(mem.len() >= U16VecNeon::LEN);
             vst1q_u16(mem.first_chunk_mut::<8>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -964,7 +996,7 @@ impl U16SimdVec for U16VecNeon {
             assert!(dest.len() >= 2 * U16VecNeon::LEN);
             vst2q_u16(dest.first_chunk_mut::<16>().unwrap(), uint16x8x2_t(a, b))
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -981,7 +1013,7 @@ impl U16SimdVec for U16VecNeon {
             assert!(dest.len() >= 3 * U16VecNeon::LEN);
             vst3q_u16(dest.first_chunk_mut::<24>().unwrap(), uint16x8x3_t(a, b, c))
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -1002,7 +1034,7 @@ impl U16SimdVec for U16VecNeon {
                 uint16x8x4_t(a, b, c, d),
             )
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 }
 

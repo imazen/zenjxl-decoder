@@ -18,7 +18,20 @@ use super::super::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, 
 pub struct Wasm128Descriptor(());
 
 impl Wasm128Descriptor {
+    /// Construct inside a function with the complete `wasm128` target features.
+    ///
+    /// No runtime detection occurs. Baseline callers should use
+    /// [`crate::SimdDescriptor::new`]; do not bypass E0133 with an unsafe block.
+    #[archmage::rite(wasm128)]
+    pub fn from_context() -> Self {
+        let _token = archmage::Wasm128Token::from_context();
+        Self(())
+    }
+
     #[inline]
+    #[deprecated(
+        note = "Use from_context() inside matching target features, or SimdDescriptor::new() for runtime detection."
+    )]
     pub fn from_token(_token: archmage::Wasm128Token) -> Self {
         Self(())
     }

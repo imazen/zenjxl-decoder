@@ -14,6 +14,7 @@ pub struct ScalarDescriptor;
 
 impl ScalarDescriptor {
     #[inline]
+    #[deprecated(note = "Use the ScalarDescriptor unit constructor.")]
     pub fn from_token(_token: archmage::ScalarToken) -> Self {
         Self
     }

@@ -9,21 +9,17 @@
 
 ## summary
 #
-#   pub macros                                  2
 #   free functions                              1
-#   re-exports                                  4
+#   re-exports                                  3
 #   trait roster entries (type × trait)         3
 #
 # per-module pub lines:
-#   (root)                            6
+#   (root)                            3
 #   float16                           1
 
-## items (7 lines)
+## items (4 lines)
 
 pub fn float16::f16::assert_fields_are_eq(&self)
-pub macro bench_neon!
-pub macro test_neon!
-pub use NeonToken
 pub use ScalarToken
 pub use __SimdToken
 pub use __arcane
@@ -33,3 +29,14 @@ pub use __arcane
 NeonDescriptor: TrivialClone
 float16::f16: TrivialClone
 scalar::ScalarDescriptor: TrivialClone
+## arch shapes (3 shapes: 3 on every recorded arch, 0 arch-unique)
+
+[aarch64] pub macro bench_<tier>!
+[aarch64] pub macro test_<tier>!
+[aarch64] pub use <ArchToken>
+
+## arch surface: aarch64 (3 lines)
+
+pub macro bench_neon!
+pub macro test_neon!
+pub use NeonToken

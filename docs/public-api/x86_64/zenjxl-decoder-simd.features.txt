@@ -1,0 +1,106 @@
+# zenjxl-decoder-simd public API — additions from non-default features
+# features: all-simd,avx,avx512,neon,sse42,wasm128
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)         3
+#   inherent methods                            3
+#   trait roster entries (type × trait)        12
+#   auto-trait-complete types                   3
+#
+# per-module pub lines:
+#   (root)                            6
+
+## items (6 lines)
+
+pub struct Avx512Descriptor(_)
+pub fn Avx512Descriptor::from_context() -> Self
+pub struct AvxDescriptor(_)
+pub fn AvxDescriptor::from_context() -> Self
+pub struct Sse42Descriptor(_)
+pub fn Sse42Descriptor::from_context() -> Self
+
+## trait impls (3 types)
+
+Avx512Descriptor: Clone, Copy, Debug, SimdDescriptor
+AvxDescriptor: Clone, Copy, Debug, SimdDescriptor
+Sse42Descriptor: Clone, Copy, Debug, SimdDescriptor
+
+## auto traits
+
+3 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+## arch shapes (32 shapes: 32 on every recorded arch, 0 arch-unique)
+
+[x86_64] pub fn Avx512Descriptor::as_<tier>(&self) -> AvxDescriptor
+[x86_64] pub fn Avx512Descriptor::from_token(archmage::tokens::generated::<arch>::<ArchToken>) -> Self
+[x86_64] pub fn Avx512Descriptor::token(&self) -> archmage::tokens::generated::<arch>::<ArchToken>
+[x86_64] pub fn AvxDescriptor::as_<tier>(&self) -> Sse42Descriptor
+[x86_64] pub fn AvxDescriptor::from_token(archmage::tokens::generated::<arch>::<ArchToken>) -> Self
+[x86_64] pub fn AvxDescriptor::token(&self) -> archmage::tokens::generated::<arch>::<ArchToken>
+[x86_64] pub fn Sse42Descriptor::from_token(archmage::tokens::generated::<arch>::<ArchToken>) -> Self
+[x86_64] pub fn Sse42Descriptor::token(&self) -> archmage::tokens::generated::<arch>::<ArchToken>
+[x86_64] pub fn target_features::descriptor_<tier>() -> Avx512Descriptor
+[x86_64] pub fn target_features::descriptor_<tier>() -> AvxDescriptor
+[x86_64] pub fn target_features::descriptor_<tier>() -> Sse42Descriptor
+[x86_64] pub type Avx512Descriptor::Bf16Table8 = <arch>::<tier>::Bf16Table8Avx512
+[x86_64] pub type Avx512Descriptor::F32Vec = <arch>::<tier>::F32VecAvx512
+[x86_64] pub type Avx512Descriptor::I32Vec = <arch>::<tier>::I32VecAvx512
+[x86_64] pub type Avx512Descriptor::Mask = <arch>::<tier>::MaskAvx512
+[x86_64] pub type Avx512Descriptor::U16Vec = <arch>::<tier>::U16VecAvx512
+[x86_64] pub type Avx512Descriptor::U32Vec = <arch>::<tier>::U32VecAvx512
+[x86_64] pub type Avx512Descriptor::U8Vec = <arch>::<tier>::U8VecAvx512
+[x86_64] pub type AvxDescriptor::Bf16Table8 = <arch>::<tier>::Bf16Table8Avx
+[x86_64] pub type AvxDescriptor::F32Vec = <arch>::<tier>::F32VecAvx
+[x86_64] pub type AvxDescriptor::I32Vec = <arch>::<tier>::I32VecAvx
+[x86_64] pub type AvxDescriptor::Mask = <arch>::<tier>::MaskAvx
+[x86_64] pub type AvxDescriptor::U16Vec = <arch>::<tier>::U16VecAvx
+[x86_64] pub type AvxDescriptor::U32Vec = <arch>::<tier>::U32VecAvx
+[x86_64] pub type AvxDescriptor::U8Vec = <arch>::<tier>::U8VecAvx
+[x86_64] pub type Sse42Descriptor::Bf16Table8 = <arch>::<tier>::Bf16Table8Sse42
+[x86_64] pub type Sse42Descriptor::F32Vec = <arch>::<tier>::F32VecSse42
+[x86_64] pub type Sse42Descriptor::I32Vec = <arch>::<tier>::I32VecSse42
+[x86_64] pub type Sse42Descriptor::Mask = <arch>::<tier>::MaskSse42
+[x86_64] pub type Sse42Descriptor::U16Vec = <arch>::<tier>::U16VecSse42
+[x86_64] pub type Sse42Descriptor::U32Vec = <arch>::<tier>::U32VecSse42
+[x86_64] pub type Sse42Descriptor::U8Vec = <arch>::<tier>::U8VecSse42
+
+## arch surface: x86_64 (32 lines)
+
+pub fn Avx512Descriptor::as_avx(&self) -> AvxDescriptor
+pub fn Avx512Descriptor::from_token(archmage::tokens::generated::x86::X64V4Token) -> Self
+pub fn Avx512Descriptor::token(&self) -> archmage::tokens::generated::x86::X64V4Token
+pub fn AvxDescriptor::as_sse42(&self) -> Sse42Descriptor
+pub fn AvxDescriptor::from_token(archmage::tokens::generated::x86::X64V3Token) -> Self
+pub fn AvxDescriptor::token(&self) -> archmage::tokens::generated::x86::X64V3Token
+pub fn Sse42Descriptor::from_token(archmage::tokens::generated::x86::X64V2Token) -> Self
+pub fn Sse42Descriptor::token(&self) -> archmage::tokens::generated::x86::X64V2Token
+pub fn target_features::descriptor_v2() -> Sse42Descriptor
+pub fn target_features::descriptor_v3() -> AvxDescriptor
+pub fn target_features::descriptor_v4() -> Avx512Descriptor
+pub type Avx512Descriptor::Bf16Table8 = x86_64::avx512::Bf16Table8Avx512
+pub type Avx512Descriptor::F32Vec = x86_64::avx512::F32VecAvx512
+pub type Avx512Descriptor::I32Vec = x86_64::avx512::I32VecAvx512
+pub type Avx512Descriptor::Mask = x86_64::avx512::MaskAvx512
+pub type Avx512Descriptor::U16Vec = x86_64::avx512::U16VecAvx512
+pub type Avx512Descriptor::U32Vec = x86_64::avx512::U32VecAvx512
+pub type Avx512Descriptor::U8Vec = x86_64::avx512::U8VecAvx512
+pub type AvxDescriptor::Bf16Table8 = x86_64::avx::Bf16Table8Avx
+pub type AvxDescriptor::F32Vec = x86_64::avx::F32VecAvx
+pub type AvxDescriptor::I32Vec = x86_64::avx::I32VecAvx
+pub type AvxDescriptor::Mask = x86_64::avx::MaskAvx
+pub type AvxDescriptor::U16Vec = x86_64::avx::U16VecAvx
+pub type AvxDescriptor::U32Vec = x86_64::avx::U32VecAvx
+pub type AvxDescriptor::U8Vec = x86_64::avx::U8VecAvx
+pub type Sse42Descriptor::Bf16Table8 = x86_64::sse42::Bf16Table8Sse42
+pub type Sse42Descriptor::F32Vec = x86_64::sse42::F32VecSse42
+pub type Sse42Descriptor::I32Vec = x86_64::sse42::I32VecSse42
+pub type Sse42Descriptor::Mask = x86_64::sse42::MaskSse42
+pub type Sse42Descriptor::U16Vec = x86_64::sse42::U16VecSse42
+pub type Sse42Descriptor::U32Vec = x86_64::sse42::U32VecSse42
+pub type Sse42Descriptor::U8Vec = x86_64::sse42::U8VecSse42

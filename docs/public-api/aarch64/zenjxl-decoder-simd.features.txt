@@ -1,0 +1,56 @@
+# zenjxl-decoder-simd public API — additions from non-default features
+# features: all-simd,avx,avx512,neon,sse42,wasm128
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)         1
+#   inherent methods                            1
+#   trait roster entries (type × trait)         4
+#   auto-trait-complete types                   1
+#
+# per-module pub lines:
+#   (root)                            2
+
+## items (2 lines)
+
+pub struct NeonDescriptor(_)
+pub fn NeonDescriptor::from_context() -> Self
+
+## trait impls (1 types)
+
+NeonDescriptor: Clone, Copy, Debug, SimdDescriptor
+
+## auto traits
+
+1 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+## arch shapes (10 shapes: 10 on every recorded arch, 0 arch-unique)
+
+[aarch64] pub fn NeonDescriptor::from_token(archmage::tokens::generated::<arch>::<ArchToken>) -> Self
+[aarch64] pub fn NeonDescriptor::token(&self) -> archmage::tokens::generated::<arch>::<ArchToken>
+[aarch64] pub fn target_features::descriptor_<tier>() -> NeonDescriptor
+[aarch64] pub type NeonDescriptor::Bf16Table8 = <arch>::<tier>::Bf16Table8Neon
+[aarch64] pub type NeonDescriptor::F32Vec = <arch>::<tier>::F32VecNeon
+[aarch64] pub type NeonDescriptor::I32Vec = <arch>::<tier>::I32VecNeon
+[aarch64] pub type NeonDescriptor::Mask = <arch>::<tier>::MaskNeon
+[aarch64] pub type NeonDescriptor::U16Vec = <arch>::<tier>::U16VecNeon
+[aarch64] pub type NeonDescriptor::U32Vec = <arch>::<tier>::U32VecNeon
+[aarch64] pub type NeonDescriptor::U8Vec = <arch>::<tier>::U8VecNeon
+
+## arch surface: aarch64 (10 lines)
+
+pub fn NeonDescriptor::from_token(archmage::tokens::generated::arm::NeonToken) -> Self
+pub fn NeonDescriptor::token(&self) -> archmage::tokens::generated::arm::NeonToken
+pub fn target_features::descriptor_neon() -> NeonDescriptor
+pub type NeonDescriptor::Bf16Table8 = aarch64::neon::Bf16Table8Neon
+pub type NeonDescriptor::F32Vec = aarch64::neon::F32VecNeon
+pub type NeonDescriptor::I32Vec = aarch64::neon::I32VecNeon
+pub type NeonDescriptor::Mask = aarch64::neon::MaskNeon
+pub type NeonDescriptor::U16Vec = aarch64::neon::U16VecNeon
+pub type NeonDescriptor::U32Vec = aarch64::neon::U32VecNeon
+pub type NeonDescriptor::U8Vec = aarch64::neon::U8VecNeon
