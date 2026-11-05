@@ -1,0 +1,20 @@
+[package]
+name = "jxl-spline-precision-cost"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zenbench = "0.1.11"
+candidate = { package = "zenjxl-decoder", path = "../../zenjxl-decoder", default-features = false }
+baseline = { package = "zenjxl-decoder", git = "https://github.com/imazen/zenjxl-decoder", rev = "6d060afb26462780c3690c771d7d3674dbd23ebf", default-features = false }
+
+[[bench]]
+name = "spline_precision"
+harness = false
+
+[profile.release]
+lto = "thin"
+debug = "line-tables-only"
