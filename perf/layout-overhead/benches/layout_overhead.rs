@@ -41,7 +41,27 @@ scanner!(scan_main, baseline);
 scanner!(scan_layout_disabled, candidate);
 
 fn compare_scans(suite: &mut Suite) {
-    let cases: &[(&str, &[u8])] = &[
+    for &(name, input) in cases() {
+        let expected = scan_main(input);
+        assert!(expected > 0);
+        assert_eq!(scan_layout_disabled(input), expected);
+        suite.compare(
+            format!("header-scan/layout-disabled/{name}"),
+            move |group| {
+                group.bench("main-6d060afb", move |b| {
+                    b.with_input(move || input).run(scan_main)
+                });
+                group.bench("layout-disabled", move |b| {
+                    b.with_input(move || input).run(scan_layout_disabled)
+                });
+            },
+        );
+    }
+}
+// Repeated operations live only in the benchmark binary so perf/callgrind can
+// sample the same scanners without instrumenting decoder code or timing loops.
+fn cases() -> &'static [(&'static str, &'static [u8])] {
+    &[
         (
             "basic",
             include_bytes!("../../../zenjxl-decoder/resources/test/basic.jxl"),
@@ -58,22 +78,44 @@ fn compare_scans(suite: &mut Suite) {
                 "../../../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl"
             ),
         ),
-    ];
-    for &(name, input) in cases {
-        let expected = scan_main(input);
-        assert!(expected > 0);
-        assert_eq!(scan_layout_disabled(input), expected);
-        suite.compare(
-            format!("header-scan/layout-disabled/{name}"),
-            move |group| {
-                group.bench("main-552da568", move |b| {
-                    b.with_input(move || input).run(scan_main)
-                });
-                group.bench("layout-disabled", move |b| {
-                    b.with_input(move || input).run(scan_layout_disabled)
-                });
-            },
-        );
-    }
+    ]
 }
-zenbench::main!(compare_scans);
+
+fn main() {
+    let args: Vec<_> = std::env::args().collect();
+    if let Some(arm) = args.iter().find_map(|a| a.strip_prefix("--profile=")) {
+        let name = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--case="))
+            .unwrap_or("basic");
+        let iterations: usize = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--iterations="))
+            .unwrap_or("100000")
+            .parse()
+            .unwrap();
+        assert!(iterations > 0);
+        let input = cases()
+            .iter()
+            .find(|(key, _)| *key == name)
+            .expect("unknown fixture")
+            .1;
+        let scanner = match arm {
+            "baseline" => scan_main,
+            "candidate" => scan_layout_disabled,
+            _ => panic!("unknown profile arm"),
+        };
+        for _ in 0..iterations {
+            black_box(scanner(black_box(input)));
+        }
+        return;
+    }
+    let filter = args.iter().find_map(|a| a.strip_prefix("--group="));
+    let result = zenbench::run(|suite| {
+        if let Some(filter) = filter {
+            suite.set_group_filter(filter.to_owned());
+        }
+        compare_scans(suite);
+    });
+    zenbench::postprocess_result(&result);
+}

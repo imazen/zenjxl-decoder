@@ -227,3 +227,7 @@ layout-contract-check:
 # Paired zenbench comparison against pinned runtime main; no pixels are decoded.
 layout-disabled-cost:
     cargo bench --manifest-path perf/layout-overhead/Cargo.toml --bench layout_overhead -- --format=llm
+
+# Caller holds heavy.lock and run-heavy. Profiling reuses the paired scanners.
+layout-scan-profile binary arm fixture iterations output:
+    perf record --call-graph dwarf -o {{quote(output)}} {{quote(binary)}} --profile={{quote(arm)}} --case={{quote(fixture)}} --iterations={{quote(iterations)}}
