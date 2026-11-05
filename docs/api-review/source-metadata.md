@@ -1,7 +1,8 @@
 # Source metadata and fallible frame selection
 
-This proposal changes no pixel-output behavior. Raw local F32 output and
-operational limits are separate proposals.
+The source-metadata API landed in PR68 at `3d282df2`. It changes no
+pixel-output behavior. Raw local F32 output remains separate in draft PR75;
+the independent operational limits landed in PR74.
 
 - `extra_channel_details(index)` returns an owned optional snapshot with
   integer/float source precision, exponent bits, spot RGBA parameters and CFA

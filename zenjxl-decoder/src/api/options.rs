@@ -358,12 +358,12 @@ pub struct JxlDecoderOptions {
     pub desired_intensity_target: Option<f32>,
     pub skip_preview: bool,
     pub cms: Option<Box<dyn JxlCms>>,
-    /// Use high precision mode for decoding.
-    /// When false (default), uses lower precision settings that match libjxl's default.
-    /// When true, uses higher precision at the cost of performance.
+    /// Retain fainter spline tails at additional rendering cost. Default: false.
     ///
-    /// This affects multiple decoder decisions including spline rendering precision
-    /// and potentially intermediate buffer storage (e.g., using f32 vs f16).
+    /// The spline search-distance exponent is 3 when false and 5 when true.
+    /// This does not select the output sample format. libjxl v0.12 source
+    /// defaults to `JXL_HIGH_PRECISION=1`, so matching its spline policy requires
+    /// setting this option to true.
     pub high_precision: bool,
     /// If true, multiply RGB by alpha before writing to output buffer.
     /// This produces premultiplied alpha output, which is useful for compositing.

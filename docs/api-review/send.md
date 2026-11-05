@@ -1,9 +1,9 @@
 # Movable decoder states
 
-The proposed public change is `pub trait JxlCms: Send`. It requires movable
+`pub trait JxlCms: Send` landed in PR60 at `0458ab95`. It requires movable
 providers, while transformer objects keep their existing `Send + Sync` bound.
 Providers do not need concurrent access. Non-Send provider implementations
-stop compiling; this breaking bound remains an owner review decision.
+stop compiling; the owner approved this breaking bound for the next release.
 
 LCMS is already a Send provider. Its real transforms now retain their actual
 ThreadContext in a private mutex, with transform destruction first (main

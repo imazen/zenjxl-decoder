@@ -53,3 +53,33 @@ and benchmark, rather than standalone decoder memory usage. The small-header
 regression is a review trade-off; zero overhead is not established.
 [`benchmarks/layout_disabled_2026-11-05.txt`](../../benchmarks/layout_disabled_2026-11-05.txt)
 retains the raw pairs and source identities. No runtime threshold is changed.
+
+## Further investigation after the API merges
+
+The proposal is adapted to approved runtime main `6d060afb`; current main's
+later documentation corrections are retained. Existing frame-header budgets,
+source facts, Send migration and structural/I/O errors remain intact.
+
+Hardware profiling on i270 finds substantial state movement in the header-only
+workload: memmove accounts for 35.89% of candidate cycle samples. This does not
+attribute the entire patch's overhead to span logging. The disabled logger
+previously initialized/borrowed its drop-bearing TLS RefCell for every tracked
+field. A constant-initialized TLS Cell now returns before that borrow when off;
+nested sessions and taking/restoring logs retain the original behavior.
+
+The new same-process before/candidate zenbench pairs use an enforced uniform
+performance-core cpuset, CPUs0-3, release/thinLTO, no target-cpu=native and30
+exploratory rounds. Against the unrefactored layout code, the basic scan improves
+1.42% (95%CI[-1.82%,-1.01%], significant). Layered -1.44% and CMYK -0.84% do
+not satisfy the harness significance gate and are not claimed as speedups.
+
+Against approved main, the refactored candidate reports basic +0.62%, layered
++1.00% and CMYK -0.90%; none meets that significance gate. These observations
+are specific to this host/workload and do not establish zero cost or full-image
+throughput. The earlier measurements above remain historical receipts.
+
+Both feature contract gates, strict all-target Clippy and the full all-feature
+workspace pass. The combined validation wrapper completed rc0 in364s, peakRSS
+7.06GiB, minimum available18951MiB, peakload11.48. This is validation process-tree
+usage. The raw paired measurements and counters are retained in
+[`benchmarks/layout_disabled_fast_path_2026-11-05.txt`](../../benchmarks/layout_disabled_fast_path_2026-11-05.txt).
