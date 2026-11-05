@@ -45,6 +45,16 @@ fn advance<S, T>(
 }
 
 fn native_layers(bytes: &[u8], chunk: usize, simple: bool) -> Vec<Layer> {
+    native_layers_format(bytes, chunk, simple, JxlColorType::Rgb, false)
+}
+
+fn native_layers_format(
+    bytes: &[u8],
+    chunk: usize,
+    simple: bool,
+    color_type: JxlColorType,
+    drop_black: bool,
+) -> Vec<Layer> {
     let mut input = bytes;
     let options = JxlDecoderOptions::default()
         .with_coalescing(false)
@@ -53,11 +63,28 @@ fn native_layers(bytes: &[u8], chunk: usize, simple: bool) -> Vec<Layer> {
     let decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut decoder = advance(decoder, &mut input, chunk, |d, i| d.process(i)).unwrap();
     decoder.set_use_simple_pipeline(simple);
-    let extra_count = decoder.basic_info().extra_channels.len();
+    let extra_formats: Vec<_> = decoder
+        .basic_info()
+        .extra_channels
+        .iter()
+        .map(|channel| {
+            if drop_black && channel.ec_type == crate::headers::extra_channels::ExtraChannel::Black
+            {
+                None
+            } else {
+                Some(JxlDataFormat::f32())
+            }
+        })
+        .collect();
+    let extra_count = extra_formats
+        .iter()
+        .filter(|format| format.is_some())
+        .count();
+    let color_samples = color_type.samples_per_pixel();
     decoder.set_pixel_format(JxlPixelFormat {
-        color_type: JxlColorType::Rgb,
+        color_type,
         color_data_format: Some(JxlDataFormat::f32()),
-        extra_channel_format: vec![Some(JxlDataFormat::f32()); extra_count],
+        extra_channel_format: extra_formats,
     });
     if decoder.embedded_color_profile().is_cmyk() {
         assert_eq!(
@@ -76,7 +103,7 @@ fn native_layers(bytes: &[u8], chunk: usize, simple: bool) -> Vec<Layer> {
         let sentinel = f32::from_bits(0x7fc00001);
         let mut planes: Vec<_> = (0..=extra_count)
             .map(|channel| {
-                let active = width * if channel == 0 { 3 } else { 1 };
+                let active = width * if channel == 0 { color_samples } else { 1 };
                 (
                     active,
                     active + padding,
@@ -108,14 +135,14 @@ fn native_layers(bytes: &[u8], chunk: usize, simple: bool) -> Vec<Layer> {
                 );
             }
         }
-        let mut samples: Vec<Vec<u32>> = (0..3)
+        let mut samples: Vec<Vec<u32>> = (0..color_samples)
             .map(|channel| {
                 planes[0]
                     .2
                     .chunks_exact(planes[0].1)
                     .flat_map(|row| {
                         row[..planes[0].0]
-                            .chunks_exact(3)
+                            .chunks_exact(color_samples)
                             .map(move |p| p[channel].to_bits())
                     })
                     .collect()
@@ -555,5 +582,107 @@ fn raw_layer_probe_keeps_reference_pixels_and_all_local_samples() {
             );
         }
         export(name, &expected);
+    }
+}
+
+#[test]
+fn raw_layer_packed_f32_formats_preserve_source_planes_and_padding() {
+    use crate::headers::extra_channels::ExtraChannel;
+    for name in [
+        "basic.jxl",
+        "multiple_layers_noise_spline.jxl",
+        "conformance_test_images/cmyk_layers.jxl",
+    ] {
+        let bytes = crate::util::test::fixture_bytes(name);
+        let mut input = bytes.as_slice();
+        let ProcessingResult::Complete { result: image } =
+            JxlDecoder::new(JxlDecoderOptions::default())
+                .process(&mut input)
+                .unwrap()
+        else {
+            panic!("header incomplete")
+        };
+        let extras = &image.basic_info().extra_channels;
+        let alpha = extras
+            .iter()
+            .position(|e| e.ec_type == ExtraChannel::Alpha)
+            .map(|i| i + 3);
+        let black = extras
+            .iter()
+            .position(|e| e.ec_type == ExtraChannel::Black)
+            .map(|i| i + 3);
+        let extra_count = extras.len();
+        let expected = native_layers(&bytes, usize::MAX, false);
+        let mut formats = vec![(JxlColorType::Rgba, false), (JxlColorType::Bgra, false)];
+        if black.is_some() {
+            formats.extend([(JxlColorType::Cmyk, false), (JxlColorType::Cmyk, true)]);
+        }
+        for (format, drop_black) in formats {
+            let mut mapping = match format {
+                JxlColorType::Rgba => vec![Some(0), Some(1), Some(2), alpha],
+                JxlColorType::Bgra => vec![Some(2), Some(1), Some(0), alpha],
+                JxlColorType::Cmyk => vec![Some(0), Some(1), Some(2), black],
+                _ => unreachable!(),
+            };
+            mapping.extend(
+                (0..extra_count)
+                    .map(|i| i + 3)
+                    .filter(|i| !drop_black || Some(*i) != black)
+                    .map(Some),
+            );
+            for simple in [false, true] {
+                let actual = native_layers_format(&bytes, 16_384, simple, format, drop_black);
+                assert_eq!(actual.len(), expected.len());
+                for (actual, expected) in actual.iter().zip(&expected) {
+                    assert_eq!(
+                        (actual.origin, actual.size),
+                        (expected.origin, expected.size)
+                    );
+                    assert_eq!(actual.composition, expected.composition);
+                    assert_eq!(actual.planes.len(), mapping.len());
+                    for (plane, source) in actual.planes.iter().zip(&mapping) {
+                        if let Some(source) = source {
+                            exact_samples(plane, &expected.planes[*source]);
+                        } else {
+                            assert!(
+                                plane.iter().all(|v| *v == 1.0f32.to_bits()),
+                                "missing alpha was not opaque"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn raw_layer_feature_diagnostics_keep_actual_frame_flags() {
+    for (name, count) in [
+        ("multiple_layers_noise_spline.jxl", 5),
+        ("conformance_test_images/cmyk_layers.jxl", 4),
+        ("crop2x_small.jxl", 2),
+    ] {
+        let bytes = crate::util::test::fixture_bytes(name);
+        let facts = Rc::new(RefCell::new(Vec::new()));
+        let target = facts.clone();
+        decode(&bytes, usize::MAX, false, false, Some(Box::new(move |frame, _| {
+            let h = frame.header();
+            if h.frame_type == FrameType::RegularFrame {
+                target.borrow_mut().push(serde_json::json!({"origin":[h.x0,h.y0],"size":h.size_upsampled(),"encoding":format!("{:?}",h.encoding),"noise":h.has_noise(),"splines":h.has_splines(),"epf_iters":h.restoration_filter.epf_iters}));
+            }
+            Ok(())
+        }))).unwrap();
+        let facts = Rc::try_unwrap(facts).unwrap().into_inner();
+        assert_eq!(facts.len(), count);
+        if let Some(root) = std::env::var_os("JXL_RAW_LAYER_FEATURES") {
+            let path = std::path::Path::new(&root).join(name.replace('/', "_") + ".json");
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            serde_json::to_writer_pretty(file, &facts).unwrap();
+        }
     }
 }
