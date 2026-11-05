@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use whereat::at;
 
-use crate::api::JxlCmsTransformer;
+use crate::api::{JxlCms, JxlCmsTransformer, JxlColorProfile};
 use crate::error::{Error, Result};
 use crate::render::RenderPipelineInPlaceStage;
 
@@ -72,6 +72,45 @@ pub struct CmsStage {
 }
 
 impl CmsStage {
+    /// Validate the callback's response before any pixels reach a transformer.
+    pub fn initialize(
+        cms: &dyn JxlCms,
+        count: usize,
+        max_pixels: usize,
+        profiles: (JxlColorProfile, JxlColorProfile),
+        intensity_target: f32,
+        black_channel: Option<usize>,
+    ) -> Result<Self> {
+        let in_channels = profiles.0.channels();
+        let expected_out = profiles.1.channels();
+        let (out_channels, transformers) =
+            cms.initialize_transforms(count, max_pixels, profiles.0, profiles.1, intensity_target)?;
+        if out_channels > in_channels {
+            return Err(at!(Error::CmsChannelCountIncrease {
+                in_channels,
+                out_channels
+            }));
+        }
+        if out_channels != expected_out || !(1..=4).contains(&out_channels) {
+            return Err(at!(Error::CmsError(format!(
+                "CMS returned {out_channels} output channels; destination requires {expected_out}"
+            ))));
+        }
+        if count == 0 || transformers.len() != count {
+            return Err(at!(Error::CmsError(format!(
+                "CMS returned {} transforms; requested {count}",
+                transformers.len()
+            ))));
+        }
+        Ok(Self::new(
+            transformers,
+            in_channels,
+            out_channels,
+            black_channel,
+            max_pixels,
+        ))
+    }
+
     /// Creates a new CMS stage.
     ///
     /// # Arguments
@@ -188,11 +227,22 @@ impl RenderPipelineInPlaceStage for CmsStage {
 
     fn process_row_chunk(
         &self,
-        _position: (usize, usize),
+        position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
         state: Option<&mut (dyn Any + Send)>,
     ) {
+        self.try_process_row_chunk(position, xsize, row, state)
+            .expect("CMS errors require the fallible stage entry point");
+    }
+
+    fn try_process_row_chunk(
+        &self,
+        _position: (usize, usize),
+        xsize: usize,
+        row: &mut [&mut [f32]],
+        state: Option<&mut (dyn Any + Send)>,
+    ) -> crate::error::Result<()> {
         // `init_local_state` never yields `None` for this stage (it errors
         // instead), so a missing state is a pipeline bug, not a condition to
         // paper over by passing pixels through untransformed.
@@ -217,10 +267,9 @@ impl RenderPipelineInPlaceStage for CmsStage {
             transformer
                 .as_deref_mut()
                 .expect("CMS transformer is present until drop")
-                .do_transform(&input_buffer[..xsize], &mut output_buffer[..xsize])
-                .expect("CMS transform failed");
+                .do_transform(&input_buffer[..xsize], &mut output_buffer[..xsize])?;
             row[0][..xsize].copy_from_slice(&output_buffer[..xsize]);
-            return;
+            return Ok(());
         }
 
         // Pad to SIMD alignment (pipeline rows are already padded)
@@ -270,8 +319,7 @@ impl RenderPipelineInPlaceStage for CmsStage {
             .do_transform(
                 &input_buffer[..xsize * self.in_channels],
                 &mut output_buffer[..xsize * self.out_channels],
-            )
-            .expect("CMS transform failed");
+            )?;
 
         let output_buf = &state.output_buffer;
 
@@ -314,6 +362,7 @@ impl RenderPipelineInPlaceStage for CmsStage {
             }
             _ => unreachable!("CMS stage only supports 1-4 output channels"),
         }
+        Ok(())
     }
 }
 
@@ -401,7 +450,9 @@ mod tests {
         ch2.resize(16, 0.0);
 
         let mut rows: Vec<&mut [f32]> = vec![&mut ch0, &mut ch1, &mut ch2];
-        stage.process_row_chunk((0, 0), 4, &mut rows, Some(state_ref.as_mut()));
+        stage
+            .try_process_row_chunk((0, 0), 4, &mut rows, Some(state_ref.as_mut()))
+            .unwrap();
 
         // Values should be scaled by 2
         assert_eq!(ch0[0], 2.0);
@@ -436,7 +487,9 @@ mod tests {
         ch3.resize(16, 0.0);
 
         let mut rows: Vec<&mut [f32]> = vec![&mut ch0, &mut ch1, &mut ch2, &mut ch3];
-        stage.process_row_chunk((0, 0), 2, &mut rows, Some(state_ref.as_mut()));
+        stage
+            .try_process_row_chunk((0, 0), 2, &mut rows, Some(state_ref.as_mut()))
+            .unwrap();
 
         // Output should be RGB: R = 1-C, G = 1-M, B = 1-Y
         assert!((ch0[0] - 0.8).abs() < 0.001);
@@ -458,7 +511,9 @@ mod tests {
         ch0.resize(16, 0.0);
 
         let mut rows: Vec<&mut [f32]> = vec![&mut ch0];
-        stage.process_row_chunk((0, 0), 4, &mut rows, Some(state_ref.as_mut()));
+        stage
+            .try_process_row_chunk((0, 0), 4, &mut rows, Some(state_ref.as_mut()))
+            .unwrap();
 
         // Values should be scaled by 2
         assert_eq!(ch0[0], 2.0);
@@ -544,5 +599,39 @@ mod tests {
             (500, 500),
             3,
         )
+    }
+}
+
+#[cfg(test)]
+mod cmyk_contract_tests {
+    use super::*;
+    struct ReflectanceCms;
+    impl JxlCmsTransformer for ReflectanceCms {
+        fn do_transform(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
+            assert_eq!(input, [1.0, 0.5, 0.25, 0.75]);
+            output.copy_from_slice(&[0.3, 0.4, 0.5]);
+            Ok(())
+        }
+        fn do_transform_inplace(&mut self, _: &mut [f32]) -> Result<()> {
+            panic!("CMYK to RGB requires separate buffers")
+        }
+    }
+    #[test]
+    fn custom_cms_receives_documented_reflectance() {
+        let stage = CmsStage::new(vec![Box::new(ReflectanceCms)], 4, 3, Some(3), 1);
+        let mut state = stage.init_local_state(0).unwrap().unwrap();
+        let mut c = [1.0; 16];
+        let mut m = [0.5; 16];
+        let mut y = [0.25; 16];
+        let mut k = [0.75; 16];
+        stage
+            .try_process_row_chunk(
+                (0, 0),
+                1,
+                &mut [&mut c, &mut m, &mut y, &mut k],
+                Some(state.as_mut()),
+            )
+            .unwrap();
+        assert_eq!([c[0], m[0], y[0], k[0]], [0.3, 0.4, 0.5, 0.75]);
     }
 }

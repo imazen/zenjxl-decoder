@@ -35,3 +35,5 @@ pub mod reject_progressive;
 pub mod render_edges;
 pub mod streaming;
 pub mod synthetic;
+
+mod cms_contract;

@@ -1,5 +1,28 @@
 # Decoder investigation notes
 
+## Resolved: CMS callback contracts — 2026-11-05
+
+Current-main reproduction passes only one of eight imported callback-contract
+cases. RGB/gray callback errors panic, CMYK callback errors silently take the
+mathematical fallback, invalid initializer counts/channels are not consistently
+rejected, and the CMYK path substitutes an sRGB destination.
+
+Both renderer runners now use a private fallible stage entry point. Numerical
+kernels retain their existing implementation. A shared validated CMS stage
+propagates the callback's original error and location context, rejects malformed
+initializer responses before transforming pixels, and receives the requested
+destination profile. The mathematical path remains when no applicable CMS is
+configured. Reflectance inputs and raw-CMYK handling retain their contracts.
+
+All eight callback cases pass with all features; the seven applicable cases
+pass without default features (the parallel case requires `threads`). They
+exercise both renderers, first/later/parallel failures, initializer refusals,
+channel/count validation and CMYK destination selection. All 121 renderer
+checks, both CLI LCMS test configurations and the combined full workspace suite
+pass. The six frozen djxl regression frames have zero differing RGBA bytes.
+`just downstream-cms-check` reproduces the focused gates. No public API change,
+MoxCMS interpolation change or raw-layer API is included.
+
 ## Resolved: 64-point IDCT after fused fallbacks — 2026-11-04
 
 The deterministic `test_idct1d_64_eq_slow` exceeds its unchanged 5e-6

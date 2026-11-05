@@ -166,7 +166,8 @@ downstream-cms-check:
     cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
     cargo test --locked -p zenjxl-decoder-cli --lib -- --test-threads=1
     cargo test --locked -p zenjxl-decoder-cli --no-default-features --lib -- --test-threads=1
-    cargo test --locked -p zenjxl-decoder --all-features --lib -- moxcms_wrapper custom_cms_receives_documented_reflectance --test-threads=1
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- cms_contract moxcms_wrapper custom_cms_receives_documented_reflectance --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- cms_contract custom_cms_receives_documented_reflectance --test-threads=1
 
 # Caller holds heavy.lock and run-heavy. Both WASI feature configurations execute.
 downstream-fma-check:
