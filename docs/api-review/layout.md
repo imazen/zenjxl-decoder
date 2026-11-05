@@ -29,11 +29,27 @@ The existing 10,454-byte ICC fixture is unchanged, with SHA-256
 Targeted all-feature/no-default-feature gates cover fragmented input, preview,
 seeks, unchanged pixel bits, the large ICC profile, shared-budget competition,
 allocation growth and parse-log restoration. Strict all-target workspace
-Clippy passes. Full-suite and fresh default-off overhead receipts are being
-completed before the final review summary; old performance/fuzz numbers are
-not presented as current-source measurements.
+Clippy and the full all-feature workspace pass. Old performance/fuzz numbers
+are not presented as current-source measurements.
 
 `perf/layout-overhead` pairs the recording-disabled candidate with pinned
 runtime main `552da568` using zenbench in one process. Both arms perform header
 scanning and skip pixels. This measures the complete disabled-layout change,
 not only its thread-local checks, and does not claim whole-image decode cost.
+
+The fresh paired header-scan measurement finds a disabled-recording cost:
+
+| Fixture | Baseline mean | Candidate mean | Paired change (95% CI) |
+|---|---:|---:|---:|
+| Basic | 2.78 µs | 2.99 µs | +7.72% [+7.10%, +8.32%] |
+| Layered | 9.68 µs | 10.07 µs | +4.79% [+4.15%, +5.45%] |
+| CMYK | 15.19 ms | 14.86 ms | No significant difference; CV 15.2% / 17.5% |
+
+These are exploratory 30-round zenbench pairs on r5900xt, release/thin-LTO,
+without target-cpu=native. Both arms run on CPUs 0–3. The complete raw/layout
+validation wrapper finished rc=0 in 567s, peak RSS 7.29 GiB, minimum available
+36,471 MiB, peak load 7.03. That resource receipt covers the combined tests
+and benchmark, rather than standalone decoder memory usage. The small-header
+regression is a review trade-off; zero overhead is not established.
+[`benchmarks/layout_disabled_2026-11-05.txt`](../../benchmarks/layout_disabled_2026-11-05.txt)
+retains the raw pairs and source identities. No runtime threshold is changed.
