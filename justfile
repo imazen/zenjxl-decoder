@@ -258,3 +258,6 @@ simd-api-doc manifest="apidoc/Cargo.toml":
 
 simd-api-doc-check manifest="apidoc/Cargo.toml":
     ZEN_API_DOC=check cargo test --manifest-path "{{manifest}}" simd_public_api_surface
+
+review-inventory destination:
+    python3 scripts/inventory_review_state.py "{{destination}}"
