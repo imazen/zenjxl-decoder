@@ -1,6 +1,7 @@
 # Stop reasons and frame-header discovery
 
-This proposal is independent of source metadata and raw-layer output.
+These APIs landed in PR74 at `3e473486`, independently of source metadata
+and raw-layer output.
 
 ## Stop API
 
@@ -36,5 +37,6 @@ Strict all-target/all-feature workspace Clippy passes. No existing accuracy
 threshold, expected pixel, ignore, or default resource cap is relaxed.
 
 Source is adapted to main `552da568`, including its current conformance checks
-and shared HF section-table budgeting. The public additions remain in this PR
-for owner review; none is landed on main.
+and shared HF section-table budgeting. The approved combined main `6d060afb`
+passes the full workspace, both feature-specific contract gates, strict
+Clippy and all six frozen RGBA references.

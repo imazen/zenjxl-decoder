@@ -17,8 +17,10 @@ exact whole-image CMYK golden. Candidate Memcheck reports zero errors. The
 baseline identity test also reports zero errors: this work does not claim a
 reproduced invalid memory access. Strict all-feature workspace Clippy passes.
 
-This does not make Box<dyn JxlCms> Send. The provider is already Send; decoder
-migration still requires the separately reviewed Send bound on its trait object.
+Context ownership alone does not make Box<dyn JxlCms> Send. Approved PR60
+now adds that separate provider trait-object bound (0458ab95), without requiring
+Sync on providers. Combined main6d060afb passes the full workspace, strict
+Clippy, both feature-specific API/LCMS gates and six frozen exact RGBA frames.
 
 ## Resolved: HF table accounting and trailing metadata — 2026-11-05
 

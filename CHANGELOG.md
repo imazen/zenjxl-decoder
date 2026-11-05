@@ -8,9 +8,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Added
 
-- Proposed operational API: preserve timeout/future stop reasons with `Error::Stopped` and `stop_reason()`, while keeping the coarse cancellation class. Add an opt-in frame-header count cap covering hidden frames and replay; existing defaults remain unchanged.
+- Operational API: preserve timeout/future stop reasons with `Error::Stopped` and `stop_reason()`, while keeping the coarse cancellation class. Add an opt-in frame-header count cap covering hidden frames and replay; existing defaults remain unchanged.
 
-- Proposed source-metadata API: extra-channel precision/spot/CFA details, frame timecodes, fallible source layer facts, and fallible frame selection. Existing Eq structs, fields and pixel-output behavior remain unchanged.
+- Source-metadata API: extra-channel precision/spot/CFA details, frame timecodes, fallible source layer facts, and fallible frame selection. Existing Eq structs, fields and pixel-output behavior remain unchanged.
 
 ### Fixed
 
@@ -175,14 +175,13 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
   which of the five out-of-order `jxlp` defects are fork-only.
 
 ### QUEUED BREAKING CHANGES
-- Proposed in PR60: require `JxlCms: Send` so decoder states can migrate between workers. Non-Send providers need adaptation; no `Sync` bound is added to providers.
+- Require `JxlCms: Send` so decoder states can migrate between workers. Non-Send providers need adaptation; no `Sync` bound is added to providers (`0458ab95`, approved PR60).
 <!-- Breaking changes that will ship together in the next 0.x minor release.
      Add items here as you discover them. Do NOT ship these piecemeal. -->
-- `JxlDecoderOptions::coalescing` and `with_coalescing()` — accepted but read
-  nowhere; either implement the `false` case (return each frame's uncomposited
-  rectangle with its crop origin and blend mode, as libjxl's
-  `JXL_DEC_SET_COALESCING(false)` does) or remove both. Documented as
-  unimplemented in the meantime (#57).
+- Raw coalescing behavior remains under review in draft PR75 for issue 57.
+  `coalescing` / `with_coalescing()` are absent from main's current public API;
+  the draft exposes qualified local F32 layers and explicitly refuses unsupported
+  representations and operations. General raw-layer support is not complete.
 - Consider upstream jxl-rs `d7ecec1`'s `set_pixel_format(..) -> Result`,
   which rejects format changes after the first frame header. Not needed for
   safety here: format changes between frames decode correctly
