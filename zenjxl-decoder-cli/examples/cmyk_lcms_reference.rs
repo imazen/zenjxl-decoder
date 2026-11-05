@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Dump RGBA bytes using the CLI's LCMS backend for an exact oracle.
 use std::{error::Error, path::PathBuf};
 use zenjxl_decoder_cli::cms::Lcms2Cms;

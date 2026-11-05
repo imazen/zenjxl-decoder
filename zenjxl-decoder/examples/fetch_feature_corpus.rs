@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Provision the corpus used by the feature-test caller.
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {

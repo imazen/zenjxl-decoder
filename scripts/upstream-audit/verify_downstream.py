@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
 """Strict RGBA byte comparison of four decoder regressions against libjxl v0.12.
 
 Run under the shared-host heavy wrapper (see just downstream-oracle).

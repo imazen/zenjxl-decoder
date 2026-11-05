@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Caller-supplied ICC/header regression, including incremental input.
 use std::path::PathBuf;
 use zenjxl_decoder::api::{
