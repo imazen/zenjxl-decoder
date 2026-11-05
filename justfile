@@ -197,3 +197,12 @@ inventory-behavior-check:
 # Caller holds heavy.lock + run-heavy; binary is the CLI library-test executable.
 lcms-context-memcheck binary log:
     valgrind --error-exitcode=99 --leak-check=no --log-file={{quote(log)}} {{quote(binary)}} cms::tests::owned_context_transform_migrates_between_threads --exact --nocapture
+
+# Caller holds heavy.lock and run-heavy; metadata access does not alter output.
+source-metadata-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- basic_info_profile_guard source_layer_facts frame_duration --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- basic_info_profile_guard source_layer_facts frame_duration --test-threads=1
+
+# Caller supplies a fresh artifact directory and the pinned independent C reader.
+source-metadata-oracle artifacts oracle:
+    JXL_INTERPRETATION_ARTIFACTS={{quote(artifacts)}} JXL_INTERPRETATION_ORACLE={{quote(oracle)}} cargo test --manifest-path perf/interpretation-validation/Cargo.toml --locked -- --nocapture --test-threads=1
