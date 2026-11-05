@@ -226,6 +226,58 @@ mod tests {
     }
 
     #[test]
+    fn decoder_with_lcms_migrates_between_frame_states() {
+        use jxl::api::{
+            JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
+        };
+        const INPUT: &[u8] = include_bytes!(
+            "../../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl"
+        );
+        let (decoder, offset) = std::thread::spawn(|| {
+            let mut input = INPUT;
+            let options = JxlDecoderOptions::default().with_cms(Box::new(Lcms2Cms));
+            let ProcessingResult::Complete { mut result } =
+                JxlDecoder::new(options).process(&mut input).unwrap()
+            else {
+                panic!("image header incomplete")
+            };
+            let extras = result.basic_info().extra_channels.len();
+            result.set_pixel_format(JxlPixelFormat::rgba8(extras));
+            (result, INPUT.len() - input.len())
+        })
+        .join()
+        .unwrap();
+        let (frame, offset) = std::thread::spawn(move || {
+            let mut input = &INPUT[offset..];
+            let ProcessingResult::Complete { result } = decoder.process(&mut input).unwrap() else {
+                panic!("frame header incomplete")
+            };
+            (result, INPUT.len() - input.len())
+        })
+        .join()
+        .unwrap();
+        let (decoder, pixels) = std::thread::spawn(move || {
+            let mut input = &INPUT[offset..];
+            let mut pixels = vec![0; 512 * 512 * 4];
+            let buffer = JxlOutputBuffer::new(&mut pixels, 512, 512 * 4);
+            let ProcessingResult::Complete { result } =
+                frame.process(&mut input, &mut [buffer]).unwrap()
+            else {
+                panic!("pixels incomplete")
+            };
+            (result, pixels)
+        })
+        .join()
+        .unwrap();
+        let hash = pixels.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+        assert_eq!(hash, 0xd931c4898c628de9);
+        assert!(!decoder.has_more_frames());
+        std::thread::spawn(move || drop(decoder)).join().unwrap();
+    }
+
+    #[test]
     fn test_create_transform() {
         let cms = Lcms2Cms;
         let result =
