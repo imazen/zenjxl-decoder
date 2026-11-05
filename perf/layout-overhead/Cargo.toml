@@ -11,6 +11,8 @@ zenbench = "0.1.10"
 candidate = { package = "zenjxl-decoder", path = "../../zenjxl-decoder", default-features = false }
 baseline = { package = "zenjxl-decoder", git = "https://github.com/imazen/zenjxl-decoder", rev = "6d060afb26462780c3690c771d7d3674dbd23ebf", default-features = false }
 
+before = { package = "zenjxl-decoder", git = "https://github.com/imazen/zenjxl-decoder", rev = "65e776ab3d46e70ba16602e2df36025f3788c073", default-features = false }
+
 [[bench]]
 name = "layout_overhead"
 harness = false

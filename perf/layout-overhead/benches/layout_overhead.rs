@@ -39,12 +39,14 @@ macro_rules! scanner {
 }
 scanner!(scan_main, baseline);
 scanner!(scan_layout_disabled, candidate);
+scanner!(scan_layout_before, before);
 
 fn compare_scans(suite: &mut Suite) {
     for &(name, input) in cases() {
         let expected = scan_main(input);
         assert!(expected > 0);
         assert_eq!(scan_layout_disabled(input), expected);
+        assert_eq!(scan_layout_before(input), expected);
         suite.compare(
             format!("header-scan/layout-disabled/{name}"),
             move |group| {
@@ -52,6 +54,17 @@ fn compare_scans(suite: &mut Suite) {
                     b.with_input(move || input).run(scan_main)
                 });
                 group.bench("layout-disabled", move |b| {
+                    b.with_input(move || input).run(scan_layout_disabled)
+                });
+            },
+        );
+        suite.compare(
+            format!("header-scan/layout-refactor/{name}"),
+            move |group| {
+                group.bench("before", move |b| {
+                    b.with_input(move || input).run(scan_layout_before)
+                });
+                group.bench("fast-disabled", move |b| {
                     b.with_input(move || input).run(scan_layout_disabled)
                 });
             },
@@ -102,6 +115,7 @@ fn main() {
             .1;
         let scanner = match arm {
             "baseline" => scan_main,
+            "before" => scan_layout_before,
             "candidate" => scan_layout_disabled,
             _ => panic!("unknown profile arm"),
         };
