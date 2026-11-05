@@ -331,6 +331,15 @@ pub enum Error {
         "start_new_frame called before the image header was parsed: seeking needs the image info first"
     )]
     SeekBeforeImageInfo,
+    /// Operation settings conflict with the supported local-layer mode. The
+    /// requested view must not become composited output or ignore a transform.
+    #[error(
+        "Uncoalesced JPEG XL output requires stored orientation, skipped previews and no display transforms"
+    )]
+    UncoalescedOutputUnsupported,
+    /// The requested raw layer representation is not yet qualified.
+    #[error("Uncoalesced JPEG XL output requires {0}")]
+    UncoalescedOutputRequirement(&'static str),
 }
 
 /// A coarse, best-effort classification of an [`Error`], for operational
@@ -408,7 +417,10 @@ impl Error {
             | Error::SeekBeforeImageInfo => ErrorClass::OutputConfiguration,
 
             // Valid input using a feature this decoder / configuration refuses.
-            Error::ProgressiveRejected | Error::InvalidRenderingIntent => ErrorClass::Unsupported,
+            Error::ProgressiveRejected
+            | Error::InvalidRenderingIntent
+            | Error::UncoalescedOutputUnsupported
+            | Error::UncoalescedOutputRequirement(_) => ErrorClass::Unsupported,
 
             // Internal invariant violations — most likely a decoder bug. Includes
             // failures while *synthesising* an output ICC profile.

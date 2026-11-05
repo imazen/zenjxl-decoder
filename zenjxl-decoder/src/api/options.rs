@@ -322,21 +322,21 @@ pub struct JxlDecoderOptions {
     /// Default: `true`. Set to `false` for plain round-to-nearest.
     pub dither_u8: bool,
     pub render_spot_colors: bool,
-    /// **Not implemented — this field is read nowhere in the decoder.**
+    /// Coalesce frames onto the full canvas. Default: `true`.
     ///
-    /// The decoder always coalesces: every frame is composited onto the canvas
-    /// and returned full-size, which is what `coalescing: true` means, so the
-    /// default is honest and setting it to `true` is a no-op. Setting it to
-    /// `false` — libjxl's `JXL_DEC_SET_COALESCING(false)`, which returns each
-    /// frame's raw uncomposited rectangle plus its crop origin and blend mode —
-    /// is silently ignored and you still get coalesced output.
+    /// Setting this to `false` selects regular local layers before composition.
+    /// The qualified mode requires stored orientation (`adjust_orientation =
+    /// false`), skipped previews, no CMS/tone mapping/premultiplication, and F32
+    /// pixel formats. Spot channels must remain unrendered, and CMYK must retain
+    /// its black channel. Configure the pixel format after image information is
+    /// available. Header-only scanning does not require F32 buffers.
     ///
-    /// Tracked in imazen/zenjxl-decoder#57. Either the option gets implemented
-    /// or it gets removed; until then it is documented rather than advertised,
-    /// because removing a public field is a breaking change and this crate
-    /// batches those (see the changelog's QUEUED BREAKING CHANGES).
-    ///
-    /// Default: `true`.
+    /// [`crate::api::JxlDecoder::frame_layer_info`] returns signed placement and
+    /// per-channel blend facts. The caller's buffers use the local frame size,
+    /// including off-canvas samples. Composed references remain internal for
+    /// subsequent decoding. Visible-frame seeks, progressive flushing and
+    /// other representations refuse; no flattened substitute is returned.
+    /// Further configurations remain tracked in issue 57.
     pub coalescing: bool,
     pub desired_intensity_target: Option<f32>,
     pub skip_preview: bool,
@@ -460,9 +460,8 @@ impl JxlDecoderOptions {
 
     /// Coalesce animation frames onto the canvas.
     ///
-    /// **Not implemented.** The decoder always coalesces; passing `false` has
-    /// no effect. See [`JxlDecoderOptions::coalescing`] and
-    /// imazen/zenjxl-decoder#57.
+    /// See [`JxlDecoderOptions::coalescing`] for the qualified F32 local-layer
+    /// mode and explicit refusals for other configurations.
     #[must_use]
     pub fn with_coalescing(mut self, v: bool) -> Self {
         self.coalescing = v;
