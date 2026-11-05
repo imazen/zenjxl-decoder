@@ -230,3 +230,31 @@ spline-spacing-check:
 # Caller holds heavy.lock and run-heavy; use a uniform cpuset on hybrid CPUs.
 spline-spacing-cost:
     cargo bench --locked --manifest-path perf/spline-precision/Cargo.toml --bench spline_precision
+
+# Isolate SIMD checks from unrelated decoder dependencies.
+simd-api-stage destination:
+    python3 scripts/stage_simd_api.py "{{destination}}"
+
+# Run through run-heavy on an eligible host; the manifest may be an isolated stage.
+simd-api-check manifest="Cargo.toml":
+    cargo fmt --manifest-path "{{manifest}}" -p zenjxl-decoder-simd -- --check
+    cargo clippy --manifest-path "{{manifest}}" -p zenjxl-decoder-simd --all-targets --all-features -- -D warnings
+    cargo test --manifest-path "{{manifest}}" -p zenjxl-decoder-simd --all-features
+    cargo clippy --manifest-path "{{manifest}}" -p zenjxl-decoder-simd --all-targets --no-default-features -- -D warnings
+    cargo test --manifest-path "{{manifest}}" -p zenjxl-decoder-simd --no-default-features
+
+simd-api-gate:
+    python3 scripts/check_simd_api.py
+
+simd-api-target target manifest="Cargo.toml":
+    cargo clippy --manifest-path "{{manifest}}" -p zenjxl-decoder-simd --all-features --tests --target "{{target}}" -- -D warnings
+
+simd-api-wasm manifest="Cargo.toml":
+    JXL_REQUIRE_TOKEN=Wasm128Token CARGO_TARGET_WASM32_WASIP1_RUNNER="${CARGO_TARGET_WASM32_WASIP1_RUNNER:-wasmtime}" cargo test --manifest-path "{{manifest}}" -p zenjxl-decoder-simd --all-features --target wasm32-wasip1
+
+# Regenerate or check only this architecture's complete SIMD inventory.
+simd-api-doc manifest="apidoc/Cargo.toml":
+    cargo test --manifest-path "{{manifest}}" simd_public_api_surface
+
+simd-api-doc-check manifest="apidoc/Cargo.toml":
+    ZEN_API_DOC=check cargo test --manifest-path "{{manifest}}" simd_public_api_surface
