@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -82,14 +83,32 @@ def high_precision(source):
             "let mut input = bytes;\n    let options = JxlDecoderOptions::default()\n        .with_high_precision(true)\n        .with_coalescing(false)")
     replace(source, "zenjxl-decoder/src/api/decoder.rs",
             "let mut options = JxlDecoderOptions::default();\n        // Correctness tests should not be constrained by memory limits.",
-            "let mut options = JxlDecoderOptions::default().with_high_precision(true);\n        // Correctness tests should not be constrained by memory limits.")
+            "let mut options = JxlDecoderOptions::default().with_high_precision(capture_raw_layers);\n        // Correctness tests should not be constrained by memory limits.")
+
+
+def spline_constants(source):
+    path = source / "zenjxl-decoder/src/features/spline.rs"
+    text = path.read_text()
+    table = "const DCT_MULTIPLIERS: [f32; 32] = [\n" + "".join(
+        f"    (std::f64::consts::PI / 32.0 * {i}.0) as f32,\n" for i in range(32)) + "];"
+    text, count = re.subn(r"const DCT_MULTIPLIERS: \[f32; 32\] = \[.*?\n\];", lambda _: table, text, flags=re.S)
+    assert count == 1, "spline multiplier declaration changed"
+    path.write_text(text)
+
+
+def spline_floor(source):
+    replace(source, "zenjxl-decoder/src/features/spline.rs", """[0.01, color[0], color[1], color[2]]
+            .iter()
+            .map(|chan| (chan * intensity).abs())
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap()""", """color.into_iter().fold(0.01f32, |maximum, channel| maximum.max((channel * intensity).abs()))""")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("oracle", type=Path)
-    cases = ["unchanged", "fused-math", "fused-math-spline", "high-precision", "high-precision-fused-math", "high-precision-fused-math-spline"]
+    cases = ["unchanged", "fused-math", "fused-math-spline", "high-precision", "high-precision-fused-math", "high-precision-fused-math-spline", "high-precision-constants", "high-precision-constants-fused-math-spline-floor"]
     parser.add_argument("--case", action="append", choices=cases,
                         help="select explicit experiment cases; default runs all")
     args = parser.parse_args()
@@ -104,10 +123,14 @@ def main():
             ".git", ".jj", "target", ".workongoing", ".zenbench"))
         if "fused-math" in name:
             fused_math(source)
-        if name.endswith("-spline"):
+        if "spline" in name:
             spline_reduction(source)
         if name.startswith("high-precision"):
             high_precision(source)
+        if "constants" in name:
+            spline_constants(source)
+        if name.endswith("-floor"):
+            spline_floor(source)
         # Source switches sharing a Cargo target must be newer than the prior
         # compilation, including exports whose archive timestamps were retained.
         for path in source.rglob("*.rs"):
