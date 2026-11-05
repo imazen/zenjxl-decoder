@@ -22,6 +22,7 @@ also passes Memcheck. The baseline identity test has zero Memcheck errors;
 no invalid-memory-access reproduction is claimed.
 
 This refresh uses main `552da568` and preserves the original PR head as a merge
-parent. It drops the old coverage-workflow changes; current main's explicit
-corpus policy remains in effect. No precision kernel or pixel expectation is
+parent. Coverage retains the pinned corpus checkout, now also prepares both required
+PNG references with the checksum-pinned v0.12 oracle, and unsets the missing-
+corpus bypass for coverage. No precision kernel or pixel expectation is
 changed. The 735-byte animation fixture is the existing PR60 blob unchanged.

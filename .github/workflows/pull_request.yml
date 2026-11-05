@@ -13,8 +13,8 @@ on:
     types: [opened, reopened, synchronize]
 
 env:
-  # codec-corpus is not provisioned in CI; corpus-backed feature tests skip
-  # EXPLICITLY via this flag (without it they fail loudly — no silent skips).
+  # Most jobs do not provision codec-corpus and select this explicit policy.
+  # Coverage provisions inputs/references and unsets the bypass at invocation.
   ZENJXL_ALLOW_MISSING_CORPUS: "1"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -45,6 +45,23 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+    - name: Checkout pinned JXL corpus
+      uses: actions/checkout@v7
+      with:
+        repository: imazen/codec-corpus
+        ref: 8e10d4d765667c1c49d74413878fc4bfb46dcf8d
+        path: corpus
+        sparse-checkout: jxl
+        lfs: true
+
+    - name: Install reference build dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake ninja-build curl pkg-config libbrotli-dev liblcms2-dev libpng-dev libjpeg-dev
+
+    - name: Build pinned v0.12 reference and prepare required PNGs
+      run: |
+        bash scripts/upstream-audit/build_pinned_reference.sh "$RUNNER_TEMP/jxl-v012-reference"
+        python3 scripts/upstream-audit/prepare_feature_references.py --corpus "$GITHUB_WORKSPACE/corpus" --output "$RUNNER_TEMP/jxl-reference-corpus" --djxl "$RUNNER_TEMP/jxl-v012-reference/build/tools/djxl"
+
     - uses: dtolnay/rust-toolchain@stable
 
     - uses: Swatinem/rust-cache@v2
@@ -53,7 +70,9 @@ jobs:
       run: cargo +stable install cargo-llvm-cov --locked
 
     - name: Build and gather coverage
-      run: cargo llvm-cov --no-report --release
+      env:
+        CODEC_CORPUS_PATH: ${{ runner.temp }}/jxl-reference-corpus
+      run: env -u ZENJXL_ALLOW_MISSING_CORPUS cargo llvm-cov --no-report --release
 
     - name: Generate JSON report
       run: cargo llvm-cov report --json --release --output-path=coverage.json
