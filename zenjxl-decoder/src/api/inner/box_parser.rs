@@ -271,6 +271,39 @@ impl BoxParser {
         result
     }
 
+    /// Parses the boxes after the codestream: skips whatever is left of the
+    /// current codestream box (bytes the image no longer needs, such as junk
+    /// after the last frame) and carries on with the next box, until the end
+    /// of the input or a box that cannot be parsed. Captures `Exif`, `xml `,
+    /// `jhgm` and `jxli` boxes on the way.
+    pub(super) fn drain_after_codestream(
+        &mut self,
+        input: &mut dyn JxlBitstreamInput,
+    ) -> Result<()> {
+        loop {
+            let avail = match self.get_more_codestream(input) {
+                Ok(n) => n,
+                Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => return Ok(()),
+                Err(e) => return Err(e),
+            };
+            if avail == 0 || avail == u64::MAX {
+                return Ok(());
+            }
+            let want = avail.min(usize::MAX as u64) as usize;
+            let skipped = if !self.box_buffer.is_empty() {
+                self.box_buffer.consume(want)
+            } else {
+                let n = input.skip(want).map_err(|e| at!(Error::from(e)))?;
+                self.total_file_read += n as u64;
+                n
+            };
+            if skipped == 0 {
+                return Ok(());
+            }
+            self.consume_codestream(skipped as u64);
+        }
+    }
+
     /// Records the codestream box the parser is in, if it is a new one (each
     /// [`CodestreamBoxType`] value occurs once per file). Called right after
     /// the box header has been consumed and before any payload byte is handed
@@ -1045,6 +1078,38 @@ mod tests {
                 );
             }
             _ => panic!("expected to be buffering the gain map box"),
+        }
+    }
+    #[test]
+    fn trailing_box_io_errors_remain_errors() {
+        struct FailingInput;
+        impl crate::api::JxlBitstreamInput for FailingInput {
+            fn available_bytes(&mut self) -> std::io::Result<usize> {
+                Ok(0)
+            }
+            fn read(&mut self, _: &mut [std::io::IoSliceMut<'_>]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected trailing-box read error"))
+            }
+            fn skip(&mut self, _: usize) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected trailing-box skip error"))
+            }
+        }
+        for kind in [
+            super::CodestreamBoxType::None,
+            super::CodestreamBoxType::Jxlc,
+            super::CodestreamBoxType::LastJxlp,
+        ] {
+            let mut parser = BoxParser::new();
+            parser.box_type = kind;
+            parser.state = super::ParseState::BoxNeeded;
+            parser.ooo_jxlp.ftyp_seen = true;
+            let error = parser
+                .get_more_codestream(&mut FailingInput)
+                .expect_err("I/O errors must not become successful EOF");
+            assert!(
+                matches!(error.error(), crate::error::Error::IOError(_)),
+                "{error:?}"
+            );
         }
     }
 }

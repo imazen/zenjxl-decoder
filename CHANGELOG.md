@@ -8,7 +8,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
-- Return custom CMS callback errors through both renderers with their original context, validate initializer counts/channels, and pass the requested CMYK destination profile. Preserve reflectance inputs and the existing LCMS exact-image regression. No public signatures change.
+- Charge the HF group/pass section table to the shared memory budget after the TOC is available, and omit it during header-only scans. Drain unused finite codestream-box bytes so valid trailing metadata is collected, while retaining structural-container and I/O errors.
+
+- Return custom CMS callback errors through both renderers with their original context, validate initializer counts/channels, and pass the requested CMYK destination profile. Preserve reflectance inputs and the existing LCMS exact-image regression. No public signatures change (`2a05aafe`, private renderer prerequisite `20c0550a`).
 
 - Preserve the existing large-IDCT accuracy bound after fused fallback arithmetic by retaining f64 intermediates through 64–256-point factorizations. Scalar and vector paths produce identical f32 bits for all nine large shapes under four deterministic inputs. The paired 64×64 AVX2 kernel measures 9.4 µs versus 3.8 µs for the f32 baseline; whole-decoder impact is unmeasured. Measurements and the rejected scalar prototype are retained under `benchmarks/` (`310207f4`).
 

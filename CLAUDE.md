@@ -1,5 +1,28 @@
 # Decoder investigation notes
 
+## Resolved: HF table accounting and trailing metadata — 2026-11-05
+
+The parser allocated group/pass section tables before the TOC and outside its
+shared memory budget, including header-only scans. Allocation now happens after
+the TOC/frame setup, skips scans, checks size arithmetic, and reserves the outer
+and inner table together. A guard releases the reservation on frame reset/seek.
+Tests reject oversized tables before allocation, exercise competition with
+other frame storage, and check release.
+
+Unused bytes inside finite codestream boxes could hide later Exif, including
+across jxlp parts. The parser now drains those bytes before continuing ordinary
+metadata parsing. Tests cover 0 through 70,000 unused bytes, partitioned
+codestreams, seek-relative lengths, and memory-free scanning.
+
+PR65's blanket post-codestream recovery is excluded: it hides injected I/O
+errors and accepts a duplicate ftyp that djxl v0.12 rejects. Valid metadata
+draining preserves current errors; new tests retain duplicate-ftyp and invalid
+jxlp rejection and injected I/O failure. Recovery of malformed optional
+metadata is separate work. The seven targeted checks pass with all features
+and without default features. The combined full workspace suite and six
+frozen-reference RGBA frames also pass. `just inventory-behavior-check`
+reproduces the focused behavior and memory checks.
+
 ## Resolved: CMS callback contracts — 2026-11-05
 
 Current-main reproduction passes only one of eight imported callback-contract

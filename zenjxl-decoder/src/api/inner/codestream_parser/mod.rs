@@ -182,6 +182,7 @@ pub(super) struct CodestreamParser {
     hf_global_section: Option<SectionBuffer>,
     // indexed by group, then by pass.
     hf_sections: Vec<Vec<Option<SectionBuffer>>>,
+    hf_sections_memory: Option<crate::util::MemoryGuard>,
     // group indices that *might* have new renderable data.
     candidate_hf_sections: HashSet<usize>,
 
@@ -294,6 +295,7 @@ impl CodestreamParser {
             lf_sections: vec![],
             hf_global_section: None,
             hf_sections: vec![],
+            hf_sections_memory: None,
             candidate_hf_sections: HashSet::new(),
             file_length: None,
             codestream_length: None,
@@ -545,7 +547,8 @@ impl CodestreamParser {
         self.lf_global_section = None;
         self.lf_sections.clear();
         self.hf_global_section = None;
-        self.hf_sections.clear();
+        self.hf_sections = Vec::new();
+        self.hf_sections_memory = None;
         self.candidate_hf_sections.clear();
         self.file_length = None;
         self.codestream_length = None;
@@ -846,8 +849,8 @@ impl CodestreamParser {
                     // the last box — or an incomplete trailing box, whose
                     // parsing resumes if `process` is called again with more
                     // input.
-                    match box_parser.get_more_codestream(input) {
-                        Ok(_) => {}
+                    match box_parser.drain_after_codestream(input) {
+                        Ok(()) => {}
                         Err(e) if matches!(e.error(), Error::OutOfBounds(_)) => {}
                         Err(e) => return Err(e),
                     }

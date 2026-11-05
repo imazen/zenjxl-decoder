@@ -183,3 +183,8 @@ downstream-idct-check:
 # Caller holds heavy.lock and run-heavy; frozen baseline is from afab87c4.
 large-idct-precision-cost group="avx2/idct2d_64_64":
     cargo bench --locked -p zenjxl-decoder --features __bench_kernels --bench large_idct_precision -- --group={{quote(group)}}
+
+# Caller holds heavy.lock and run-heavy. Keep structural and I/O errors strict.
+inventory-behavior-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- structural_boxes_after_codestream_remain_invalid trailing_box_io_errors_remain_errors hf_table_budget_tests test_junk_after_the_codestream test_codestream_length_after_a_seek test_scan_needs_no_frame_memory --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- structural_boxes_after_codestream_remain_invalid trailing_box_io_errors_remain_errors hf_table_budget_tests test_junk_after_the_codestream test_codestream_length_after_a_seek test_scan_needs_no_frame_memory --test-threads=1
