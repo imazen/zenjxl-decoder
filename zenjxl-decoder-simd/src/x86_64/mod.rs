@@ -29,26 +29,26 @@ macro_rules! simd_function {
             #[$crate::__arcane]
             $(#[$($attr)*])*
             fn [<$dname __v4>](_token: $crate::X64V4Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::Avx512Descriptor::from_token(_token), $($arg),*)
+                $name($crate::Avx512Descriptor::from_context(), $($arg),*)
             }
 
             #[cfg(all(target_arch = "x86_64", feature = "avx"))]
             #[$crate::__arcane]
             $(#[$($attr)*])*
             fn [<$dname __v3>](_token: $crate::X64V3Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::AvxDescriptor::from_token(_token), $($arg),*)
+                $name($crate::AvxDescriptor::from_context(), $($arg),*)
             }
 
             #[cfg(all(target_arch = "x86_64", feature = "sse42"))]
             #[$crate::__arcane]
             $(#[$($attr)*])*
             fn [<$dname __v2>](_token: $crate::X64V2Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::Sse42Descriptor::from_token(_token), $($arg),*)
+                $name($crate::Sse42Descriptor::from_context(), $($arg),*)
             }
 
             $(#[$($attr)*])*
             fn [<$dname __scalar>](_token: $crate::ScalarToken, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::ScalarDescriptor::from_token(_token), $($arg),*)
+                $name($crate::ScalarDescriptor, $($arg),*)
             }
 
             $(#[$($attr)*])*
@@ -102,8 +102,8 @@ macro_rules! test_sse42 {
                 use $crate::__SimdToken;
                 let Some(token) = $crate::X64V2Token::summon() else { return; };
                 #[$crate::__arcane]
-                fn inner(token: $crate::X64V2Token) {
-                    $name($crate::Sse42Descriptor::from_token(token))
+                fn inner(_token: $crate::X64V2Token) {
+                    $name($crate::Sse42Descriptor::from_context())
                 }
                 inner(token);
             }
@@ -122,8 +122,8 @@ macro_rules! test_avx {
                 use $crate::__SimdToken;
                 let Some(token) = $crate::X64V3Token::summon() else { return; };
                 #[$crate::__arcane]
-                fn inner(token: $crate::X64V3Token) {
-                    $name($crate::AvxDescriptor::from_token(token))
+                fn inner(_token: $crate::X64V3Token) {
+                    $name($crate::AvxDescriptor::from_context())
                 }
                 inner(token);
             }
@@ -142,8 +142,8 @@ macro_rules! test_avx512 {
                 use $crate::__SimdToken;
                 let Some(token) = $crate::X64V4Token::summon() else { return; };
                 #[$crate::__arcane]
-                fn inner(token: $crate::X64V4Token) {
-                    $name($crate::Avx512Descriptor::from_token(token))
+                fn inner(_token: $crate::X64V4Token) {
+                    $name($crate::Avx512Descriptor::from_context())
                 }
                 inner(token);
             }

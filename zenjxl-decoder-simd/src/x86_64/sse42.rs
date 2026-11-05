@@ -19,11 +19,37 @@ pub struct Sse42Descriptor(archmage::X64V2Token);
 
 impl Sse42Descriptor {
     #[inline]
+    pub(super) fn from_token_internal(token: archmage::X64V2Token) -> Self {
+        Self(token)
+    }
+
+    /// Construct inside a function with the complete `v2` target features.
+    ///
+    /// No runtime detection occurs. Baseline callers should use
+    /// [`crate::SimdDescriptor::new`]; do not bypass E0133 with an unsafe block.
+    #[archmage::rite(v2)]
+    pub fn from_context() -> Self {
+        let token = archmage::X64V2Token::from_context();
+        Self(token)
+    }
+
+    #[inline]
+    #[deprecated(
+        note = "Use from_context() inside matching target features, or SimdDescriptor::new() for runtime detection."
+    )]
     pub fn from_token(token: archmage::X64V2Token) -> Self {
         Self(token)
     }
     #[inline(always)]
+    #[deprecated(
+        note = "Keep the descriptor inside SIMD code; external token identity is no longer needed."
+    )]
     pub fn token(&self) -> archmage::X64V2Token {
+        self.0
+    }
+
+    #[inline(always)]
+    fn token_internal(&self) -> archmage::X64V2Token {
         self.0
     }
 }
@@ -51,7 +77,7 @@ impl SimdDescriptor for Sse42Descriptor {
     }
 
     fn new() -> Option<Self> {
-        archmage::X64V2Token::summon().map(Self::from_token)
+        archmage::X64V2Token::summon().map(Self)
     }
 
     fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
@@ -64,7 +90,7 @@ impl SimdDescriptor for Sse42Descriptor {
         ) -> R {
             f(d)
         }
-        impl_(self.token(), self, f)
+        impl_(self.token_internal(), self, f)
     }
 }
 
@@ -77,7 +103,7 @@ macro_rules! fn_sse42 {
             #[arcane]
             #[inline(always)]
             fn impl_(_t: archmage::X64V2Token, $this: $self_ty, $($arg: $ty),*) $(-> $ret)? $body
-            impl_(self.1.token(), self, $($arg),*)
+            impl_(self.1.token_internal(), self, $($arg),*)
         }
     };
 }
@@ -105,7 +131,7 @@ impl F32SimdVec for F32VecSse42 {
         fn impl_(_: archmage::X64V2Token, mem: &[f32]) -> __m128 {
             _mm_loadu_ps(mem.first_chunk::<4>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -115,7 +141,7 @@ impl F32SimdVec for F32VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: __m128, mem: &mut [f32]) {
             _mm_storeu_ps(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -129,7 +155,7 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[..4].first_chunk_mut::<4>().unwrap(), lo);
             _mm_storeu_ps(dest[4..8].first_chunk_mut::<4>().unwrap(), hi);
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -153,7 +179,7 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[4..8].first_chunk_mut::<4>().unwrap(), out1);
             _mm_storeu_ps(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -184,7 +210,7 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[8..12].first_chunk_mut::<4>().unwrap(), out2);
             _mm_storeu_ps(dest[12..16].first_chunk_mut::<4>().unwrap(), out3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 
     #[inline(always)]
@@ -241,7 +267,18 @@ impl F32SimdVec for F32VecSse42 {
             _mm_storeu_ps(dest[24..28].first_chunk_mut::<4>().unwrap(), abcd_3);
             _mm_storeu_ps(dest[28..32].first_chunk_mut::<4>().unwrap(), efgh_3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, e.0, f.0, g.0, h.0, dest)
+        impl_(
+            a.1.token_internal(),
+            a.0,
+            b.0,
+            c.0,
+            d.0,
+            e.0,
+            f.0,
+            g.0,
+            h.0,
+            dest,
+        )
     }
 
     #[inline(always)]
@@ -256,7 +293,7 @@ impl F32SimdVec for F32VecSse42 {
             let b = _mm_shuffle_ps::<0xDD>(in0, in1);
             (a, b)
         }
-        let (a, b) = impl_(d.token(), src);
+        let (a, b) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d))
     }
 
@@ -284,7 +321,7 @@ impl F32SimdVec for F32VecSse42 {
 
             (a, b, c)
         }
-        let (a, b, c) = impl_(d.token(), src);
+        let (a, b, c) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d), Self(c, d))
     }
 
@@ -311,7 +348,7 @@ impl F32SimdVec for F32VecSse42 {
 
             (a, b, c, dv)
         }
-        let (a, b, c, dv) = impl_(d.token(), src);
+        let (a, b, c, dv) = impl_(d.token_internal(), src);
         (Self(a, d), Self(b, d), Self(c, d), Self(dv, d))
     }
 
@@ -344,7 +381,7 @@ impl F32SimdVec for F32VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: f32) -> __m128 {
             _mm_set1_ps(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -354,7 +391,7 @@ impl F32SimdVec for F32VecSse42 {
         fn impl_(_: archmage::X64V2Token) -> __m128 {
             _mm_setzero_ps()
         }
-        Self(impl_(d.token()), d)
+        Self(impl_(d.token_internal()), d)
     }
 
     fn_sse42!(this: F32VecSse42, fn abs() -> F32VecSse42 {
@@ -430,7 +467,7 @@ impl F32SimdVec for F32VecSse42 {
             let bf16_hi = _mm_shuffle_epi8(table_hi_i32, bf16_extract);
             _mm_unpacklo_epi64(bf16_lo, bf16_hi)
         }
-        Bf16Table8Sse42(impl_(_d.token(), table))
+        Bf16Table8Sse42(impl_(_d.token_internal(), table))
     }
 
     #[inline(always)]
@@ -449,7 +486,7 @@ impl F32SimdVec for F32VecSse42 {
             let result = _mm_shuffle_epi8(bf16_table, shuffle_mask);
             _mm_castsi128_ps(result)
         }
-        F32VecSse42(impl_(d.token(), table.0, indices.0), d)
+        F32VecSse42(impl_(d.token_internal(), table.0, indices.0), d)
     }
 
     #[inline(always)]
@@ -470,7 +507,7 @@ impl F32SimdVec for F32VecSse42 {
             let val = _mm_cvtsi128_si32(u8s);
             dest[..4].copy_from_slice(&val.to_ne_bytes());
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -489,7 +526,7 @@ impl F32SimdVec for F32VecSse42 {
             dest[2] = _mm_extract_epi16::<2>(u16s) as u16;
             dest[3] = _mm_extract_epi16::<3>(u16s) as u16;
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     impl_f32_array_interface!();
@@ -548,7 +585,7 @@ impl F32SimdVec for F32VecSse42 {
             F32VecSse42(r2, d).store_array(&mut data[2 * stride]);
             F32VecSse42(r3, d).store_array(&mut data[3 * stride]);
         }
-        impl_(d.token(), d, data, stride)
+        impl_(d.token_internal(), d, data, stride)
     }
 }
 
@@ -619,7 +656,7 @@ impl I32SimdVec for I32VecSse42 {
         fn impl_(_: archmage::X64V2Token, mem: &[i32]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<4>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -629,7 +666,7 @@ impl I32SimdVec for I32VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [i32]) {
             _mm_storeu_si128(mem.first_chunk_mut::<4>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -639,7 +676,7 @@ impl I32SimdVec for I32VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: i32) -> __m128i {
             _mm_set1_epi32(v)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     fn_sse42!(this: I32VecSse42, fn as_f32() -> F32VecSse42 {
@@ -692,7 +729,7 @@ impl I32SimdVec for I32VecSse42 {
         fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_slli_epi32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token_internal(), self.0), self.1)
     }
 
     #[inline(always)]
@@ -702,7 +739,7 @@ impl I32SimdVec for I32VecSse42 {
         fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_srai_epi32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token_internal(), self.0), self.1)
     }
 
     fn_sse42!(this: I32VecSse42, fn mul_wide_take_high(rhs: I32VecSse42) -> I32VecSse42 {
@@ -725,7 +762,7 @@ impl I32SimdVec for I32VecSse42 {
                 dest[i] = tmp[i] as u16;
             }
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 
     #[inline(always)]
@@ -740,7 +777,7 @@ impl I32SimdVec for I32VecSse42 {
                 dest[i] = tmp[i] as u8;
             }
         }
-        impl_(self.1.token(), self.0, dest)
+        impl_(self.1.token_internal(), self.0, dest)
     }
 }
 
@@ -849,7 +886,7 @@ impl U32SimdVec for U32VecSse42 {
         fn impl_<const AMOUNT_I: i32>(_: archmage::X64V2Token, v: __m128i) -> __m128i {
             _mm_srli_epi32::<AMOUNT_I>(v)
         }
-        Self(impl_::<AMOUNT_I>(self.1.token(), self.0), self.1)
+        Self(impl_::<AMOUNT_I>(self.1.token_internal(), self.0), self.1)
     }
 }
 
@@ -867,7 +904,7 @@ impl U8SimdVec for U8VecSse42 {
         fn impl_(_: archmage::X64V2Token, mem: &[u8]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<16>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -877,7 +914,7 @@ impl U8SimdVec for U8VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: u8) -> __m128i {
             _mm_set1_epi8(v as i8)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -887,7 +924,7 @@ impl U8SimdVec for U8VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [u8]) {
             _mm_storeu_si128(mem.first_chunk_mut::<16>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -901,7 +938,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[..16].first_chunk_mut::<16>().unwrap(), lo);
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), hi);
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -946,7 +983,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[16..32].first_chunk_mut::<16>().unwrap(), out1);
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -977,7 +1014,7 @@ impl U8SimdVec for U8VecSse42 {
             _mm_storeu_si128(dest[32..48].first_chunk_mut::<16>().unwrap(), out2);
             _mm_storeu_si128(dest[48..64].first_chunk_mut::<16>().unwrap(), out3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 }
 
@@ -995,7 +1032,7 @@ impl U16SimdVec for U16VecSse42 {
         fn impl_(_: archmage::X64V2Token, mem: &[u16]) -> __m128i {
             _mm_loadu_si128(mem.first_chunk::<8>().unwrap())
         }
-        Self(impl_(d.token(), mem), d)
+        Self(impl_(d.token_internal(), mem), d)
     }
 
     #[inline(always)]
@@ -1005,7 +1042,7 @@ impl U16SimdVec for U16VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: u16) -> __m128i {
             _mm_set1_epi16(v as i16)
         }
-        Self(impl_(d.token(), v), d)
+        Self(impl_(d.token_internal(), v), d)
     }
 
     #[inline(always)]
@@ -1015,7 +1052,7 @@ impl U16SimdVec for U16VecSse42 {
         fn impl_(_: archmage::X64V2Token, v: __m128i, mem: &mut [u16]) {
             _mm_storeu_si128(mem.first_chunk_mut::<8>().unwrap(), v)
         }
-        impl_(self.1.token(), self.0, mem)
+        impl_(self.1.token_internal(), self.0, mem)
     }
 
     #[inline(always)]
@@ -1029,7 +1066,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[..8].first_chunk_mut::<8>().unwrap(), lo);
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), hi);
         }
-        impl_(a.1.token(), a.0, b.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, dest)
     }
 
     #[inline(always)]
@@ -1074,7 +1111,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[8..16].first_chunk_mut::<8>().unwrap(), out1);
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, dest)
     }
 
     #[inline(always)]
@@ -1105,7 +1142,7 @@ impl U16SimdVec for U16VecSse42 {
             _mm_storeu_si128(dest[16..24].first_chunk_mut::<8>().unwrap(), out2);
             _mm_storeu_si128(dest[24..32].first_chunk_mut::<8>().unwrap(), out3);
         }
-        impl_(a.1.token(), a.0, b.0, c.0, d.0, dest)
+        impl_(a.1.token_internal(), a.0, b.0, c.0, d.0, dest)
     }
 }
 

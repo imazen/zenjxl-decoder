@@ -25,12 +25,12 @@ macro_rules! simd_function {
             #[$crate::__arcane]
             $(#[$($attr)*])*
             fn [<$dname __neon>](_token: $crate::NeonToken, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::NeonDescriptor::from_token(_token), $($arg),*)
+                $name($crate::NeonDescriptor::from_context(), $($arg),*)
             }
 
             $(#[$($attr)*])*
             fn [<$dname __scalar>](_token: $crate::ScalarToken, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::ScalarDescriptor::from_token(_token), $($arg),*)
+                $name($crate::ScalarDescriptor, $($arg),*)
             }
 
             $(#[$($attr)*])*
@@ -74,8 +74,8 @@ macro_rules! test_neon {
                 use $crate::__SimdToken;
                 let Some(token) = $crate::NeonToken::summon() else { return; };
                 #[$crate::__arcane]
-                fn inner(token: $crate::NeonToken) {
-                    $name($crate::NeonDescriptor::from_token(token))
+                fn inner(_token: $crate::NeonToken) {
+                    $name($crate::NeonDescriptor::from_context())
                 }
                 inner(token);
             }

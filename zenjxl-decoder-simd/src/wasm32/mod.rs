@@ -23,12 +23,12 @@ macro_rules! simd_function {
             #[$crate::__arcane]
             $(#[$($attr)*])*
             fn [<$dname __wasm128>](_token: $crate::Wasm128Token, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::Wasm128Descriptor::from_token(_token), $($arg),*)
+                $name($crate::Wasm128Descriptor::from_context(), $($arg),*)
             }
 
             $(#[$($attr)*])*
             fn [<$dname __scalar>](_token: $crate::ScalarToken, $($arg: $ty),*) $(-> $ret)? {
-                $name($crate::ScalarDescriptor::from_token(_token), $($arg),*)
+                $name($crate::ScalarDescriptor, $($arg),*)
             }
 
             $(#[$($attr)*])*
@@ -72,8 +72,8 @@ macro_rules! test_wasm128 {
                 use $crate::__SimdToken;
                 let Some(token) = $crate::Wasm128Token::summon() else { return; };
                 #[$crate::__arcane]
-                fn inner(token: $crate::Wasm128Token) {
-                    $name($crate::Wasm128Descriptor::from_token(token))
+                fn inner(_token: $crate::Wasm128Token) {
+                    $name($crate::Wasm128Descriptor::from_context())
                 }
                 inner(token);
             }
