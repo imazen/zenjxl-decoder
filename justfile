@@ -197,3 +197,12 @@ inventory-behavior-check:
 # Caller holds heavy.lock + run-heavy; binary is the CLI library-test executable.
 lcms-context-memcheck binary log:
     valgrind --error-exitcode=99 --leak-check=no --log-file={{quote(log)}} {{quote(binary)}} cms::tests::owned_context_transform_migrates_between_threads --exact --nocapture
+
+# Caller holds heavy.lock and run-heavy; current limits and structural errors remain.
+layout-contract-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- codestream_layout large_compressible_icc layout_memory failed_or_nested_parse failed_log_reservation hf_table_budget_tests --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- codestream_layout large_compressible_icc layout_memory failed_or_nested_parse failed_log_reservation hf_table_budget_tests --test-threads=1
+
+# Paired zenbench comparison against pinned runtime main; no pixels are decoded.
+layout-disabled-cost:
+    cargo bench --manifest-path perf/layout-overhead/Cargo.toml --bench layout_overhead -- --format=llm

@@ -6,6 +6,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Added
+
+- Proposed bounded codestream-layout recording with absolute logical-codestream spans, preview/frame/TOC records, and stable seek offsets. Recording is opt-in; caller clones are outside the retained decoder budget.
+
 ### Fixed
 
 - Retain the LCMS thread context alongside each transform, dropping the transform first. A real transform migrates across threads with identical float bits; the existing whole-image CMYK golden remains exact.
