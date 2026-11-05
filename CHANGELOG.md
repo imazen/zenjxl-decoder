@@ -179,8 +179,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 <!-- Breaking changes that will ship together in the next 0.x minor release.
      Add items here as you discover them. Do NOT ship these piecemeal. -->
 - Raw coalescing behavior remains under review in draft PR75 for issue 57.
-  `coalescing` / `with_coalescing()` are absent from main's current public API;
-  the draft exposes qualified local F32 layers and explicitly refuses unsupported
+  `coalescing` / `with_coalescing()` already exist on main, where false is
+  currently ignored. The draft implements qualified local F32 output and refuses unsupported
   representations and operations. General raw-layer support is not complete.
 - Consider upstream jxl-rs `d7ecec1`'s `set_pixel_format(..) -> Result`,
   which rejects format changes after the first frame header. Not needed for

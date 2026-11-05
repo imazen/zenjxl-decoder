@@ -1,5 +1,19 @@
 # Decoder investigation notes
 
+## Known bug: noncoalesced output option — 2026-11-05
+
+Main already exposes coalescing / with_coalescing(), defaults true, and stores
+false without consuming it in the decoder. Output remains composed. Draft
+PR75 implements qualified local F32 output and explicit unsupported-mode errors;
+that runtime work is not merged. This corrects the earlier inventory claim
+that the option itself was absent.
+
+The spline precision documentation also previously said false matched libjxl's
+default. Pinned v0.12 common.h defines JXL_HIGH_PRECISION=1 unless overridden;
+its spline cutoff exponent is 5. Native false uses3 and true uses5. Source
+and generated Ninja definitions confirm the pinned reference has no override.
+Matching comparisons need the existing true option; no default is changed.
+
 ## LCMS context ownership and Send qualification — 2026-11-05
 
 lcms2 6.2.0's Transform holds a PhantomData context marker. Passing a
