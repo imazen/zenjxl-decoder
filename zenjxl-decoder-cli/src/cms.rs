@@ -138,6 +138,13 @@ impl JxlCmsTransformer for Lcms2Transformer {
 
         self.transform.transform_pixels(input_bytes, output_bytes);
 
+        // LCMS writes ink percentages too; JxlCmsTransformer returns reflectance.
+        if self.output_channels == 4 {
+            for value in &mut output[..expected_output_len] {
+                *value = 1.0 - *value / 100.0;
+            }
+        }
+
         Ok(())
     }
 
@@ -150,10 +157,22 @@ impl JxlCmsTransformer for Lcms2Transformer {
             .into());
         }
 
+        if self.input_channels == 4 {
+            for value in inout.iter_mut() {
+                *value = 100.0 - 100.0 * *value;
+            }
+        }
+
         // Convert f32 slice to byte slice
         let inout_bytes: &mut [u8] = bytemuck::cast_slice_mut(inout);
 
         self.transform.transform_in_place(inout_bytes);
+
+        if self.output_channels == 4 {
+            for value in inout.iter_mut() {
+                *value = 1.0 - *value / 100.0;
+            }
+        }
 
         Ok(())
     }
@@ -181,6 +200,51 @@ mod tests {
             transfer_function: JxlTransferFunction::Linear,
             rendering_intent: RenderingIntent::Relative,
         })
+    }
+
+    /// The embedded profile of the committed `cmyk_layers.jxl` conformance image.
+    fn cmyk_layers_profile() -> JxlColorProfile {
+        use jxl::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl"
+        );
+        let data = std::fs::read(path).unwrap();
+        let mut input = data.as_slice();
+        let mut decoder = JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default());
+        let decoder = loop {
+            match decoder.process(&mut input).unwrap() {
+                ProcessingResult::Complete { result } => break result,
+                ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
+            }
+        };
+        decoder.embedded_color_profile().clone()
+    }
+
+    /// `JxlCmsTransformer` samples are reflectance on both sides: 1 is no ink. LCMS works in ink
+    /// percentages, so no ink came back as 0, the maximum amount of ink.
+    #[test]
+    fn cmyk_destination_returns_reflectance() {
+        let (channels, mut transforms) = Lcms2Cms
+            .initialize_transforms(1, 4, srgb_profile(), cmyk_layers_profile(), 255.0)
+            .unwrap();
+        assert_eq!(channels, 4);
+        let mut paper = [0.0f32; 4];
+        transforms[0]
+            .do_transform(&[1.0, 1.0, 1.0], &mut paper)
+            .unwrap();
+        for value in paper {
+            assert!((value - 1.0).abs() < 0.01, "white as ink: {paper:?}");
+        }
+
+        let (_, mut transforms) = Lcms2Cms
+            .initialize_transforms(1, 4, cmyk_layers_profile(), cmyk_layers_profile(), 255.0)
+            .unwrap();
+        let mut inout = [1.0f32; 4];
+        transforms[0].do_transform_inplace(&mut inout).unwrap();
+        for value in inout {
+            assert!((value - 1.0).abs() < 0.01, "no ink in place: {inout:?}");
+        }
     }
 
     #[test]
