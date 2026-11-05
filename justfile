@@ -204,3 +204,12 @@ send-state-check:
     cargo test --locked -p zenjxl-decoder --no-default-features --test sendable_state
     cargo test --locked -p zenjxl-decoder-cli --all-features --lib decoder_with_lcms_migrates
     cargo test --locked -p zenjxl-decoder-cli --no-default-features --lib decoder_with_lcms_migrates
+
+# Caller holds heavy.lock and run-heavy; metadata access does not alter output.
+source-metadata-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- basic_info_profile_guard source_layer_facts frame_duration --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- basic_info_profile_guard source_layer_facts frame_duration --test-threads=1
+
+# Caller supplies a fresh artifact directory and the pinned independent C reader.
+source-metadata-oracle artifacts oracle:
+    JXL_INTERPRETATION_ARTIFACTS={{quote(artifacts)}} JXL_INTERPRETATION_ORACLE={{quote(oracle)}} cargo test --manifest-path perf/interpretation-validation/Cargo.toml --locked -- --nocapture --test-threads=1

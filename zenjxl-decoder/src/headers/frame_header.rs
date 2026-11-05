@@ -520,6 +520,15 @@ impl FrameHeader {
             / (animation.tps_numerator as f64)
     }
 
+    pub(crate) fn timecode(&self, animation: Option<&Animation>) -> Option<u32> {
+        (animation.is_some_and(|a| a.have_timecodes)
+            && matches!(
+                self.frame_type,
+                FrameType::RegularFrame | FrameType::SkipProgressive
+            ))
+        .then_some(self.timecode)
+    }
+
     pub fn has_patches(&self) -> bool {
         self.flags & Flags::ENABLE_PATCHES != 0
     }

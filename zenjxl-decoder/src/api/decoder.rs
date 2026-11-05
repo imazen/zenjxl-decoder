@@ -288,6 +288,15 @@ impl JxlDecoder<WithImageInfo> {
         self.inner.basic_info().unwrap()
     }
 
+    /// Inspect source precision and spot/CFA parameters without decoding pixels.
+    ///
+    /// `index` addresses [`JxlBasicInfo::extra_channels`]; `None` means the index
+    /// is out of range. The returned snapshot is independent of the decoder and
+    /// of the selected output format. No additional channel buffer is allocated.
+    pub fn extra_channel_details(&self, index: usize) -> Option<super::JxlExtraChannelDetails> {
+        self.inner.extra_channel_details(index)
+    }
+
     /// Retrieves the file's color profile.
     pub fn embedded_color_profile(&self) -> &JxlColorProfile {
         self.inner.embedded_color_profile().unwrap()
@@ -411,9 +420,14 @@ impl JxlDecoder<WithImageInfo> {
     /// // 3. process() -> WithFrameInfo for frame n; process(buffers) decodes it.
     /// ```
     pub fn start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) {
-        self.inner
-            .start_new_frame(seek_target)
+        self.try_start_new_frame(seek_target)
             .expect("image info is available in the WithImageInfo state");
+    }
+
+    /// Fallible form of [`Self::start_new_frame`], preserving native errors.
+    /// Targets identify presentations in the same source bitstream.
+    pub fn try_start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) -> Result<()> {
+        self.inner.start_new_frame(seek_target)
     }
 
     #[cfg(test)]
@@ -440,6 +454,23 @@ impl JxlDecoder<WithFrameInfo> {
 
     pub fn frame_header(&self) -> JxlFrameHeader {
         self.inner.frame_header().unwrap()
+    }
+
+    /// Local source extent and per-channel blend facts, independently of the
+    /// requested output geometry. Reference slots are local to this decoder.
+    /// The owned snapshot is fallible because it allocates its blend list.
+    pub fn frame_layer_info(&self) -> Result<crate::api::JxlLayerInfo> {
+        Ok(self
+            .inner
+            .frame_layer_info()?
+            .expect("frame information is available"))
+    }
+
+    /// The selected frame's original timecode, separate from presentation time
+    /// and duration. `Some(0)` is a present zero timecode; `None` means absent.
+    /// The value is the encoded 32-bit timecode, without decimal reinterpretation.
+    pub fn frame_timecode(&self) -> Option<u32> {
+        self.inner.frame_timecode()
     }
 
     /// Number of passes we have full data for.
@@ -3917,5 +3948,40 @@ pub(crate) mod tests {
         tbx(&mut f, b"jxlp", &p1);
         tbx(&mut f, b"Exif", b"\0\0\0\0U");
         assert_eq!(exif_after_scan(&f).unwrap(), Some(b"U".to_vec()));
+    }
+    #[test]
+    fn source_layer_facts_preserve_composited_output_geometry() {
+        let data = crate::util::test::fixture_bytes("multiple_layers_noise_spline.jxl");
+        let mut input = data.as_slice();
+        let ProcessingResult::Complete {
+            result: mut decoder,
+        } = JxlDecoder::new(JxlDecoderOptions::default())
+            .process(&mut input)
+            .unwrap()
+        else {
+            panic!("image header incomplete")
+        };
+        let canvas = decoder.basic_info().size;
+        let extra_channels = decoder.basic_info().extra_channels.len();
+        let mut last = None;
+        while decoder.has_more_frames() {
+            let ProcessingResult::Complete { result: frame } = decoder.process(&mut input).unwrap()
+            else {
+                panic!("frame header incomplete")
+            };
+            let info = frame.frame_layer_info().unwrap();
+            assert_eq!(frame.frame_header().size, canvas);
+            assert_eq!(info.extra_channel_blends.len(), extra_channels);
+            last = Some(info);
+            let ProcessingResult::Complete { result } = frame.skip_frame(&mut input).unwrap()
+            else {
+                panic!("frame incomplete")
+            };
+            decoder = result;
+        }
+        let last = last.expect("selected source frame");
+        assert_eq!(last.origin, (1860, 950));
+        assert_eq!(last.size, (1024, 576));
+        assert!(last.is_last);
     }
 }

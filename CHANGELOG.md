@@ -6,6 +6,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Added
+
+- Proposed source-metadata API: extra-channel precision/spot/CFA details, frame timecodes, fallible source layer facts, and fallible frame selection. Existing Eq structs, fields and pixel-output behavior remain unchanged.
+
 ### Fixed
 
 - Retain the LCMS thread context alongside each transform, dropping the transform first. A real transform migrates across threads with identical float bits; the existing whole-image CMYK golden remains exact.

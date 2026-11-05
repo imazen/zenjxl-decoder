@@ -1,0 +1,15 @@
+[package]
+name = "jxl-interpretation-validation"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+zenjxl-decoder = { path = "../../zenjxl-decoder", default-features = false }
+jxl-encoder = { version = "0.4.0", git = "https://github.com/imazen/jxl-encoder", rev = "0255e5a9f61b7270cb3ed3f7b85fec2283deec55", default-features = false, features = ["std"] }
+
+[profile.release]
+lto = "thin"
+debug = "line-tables-only"
