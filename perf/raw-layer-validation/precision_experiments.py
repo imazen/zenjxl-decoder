@@ -156,6 +156,8 @@ def main():
     parser.add_argument("--source-revision", help="provenance label for the source export")
     args = parser.parse_args()
     root = (args.source_root or Path(__file__).resolve().parents[2]).resolve()
+    if args.output.resolve().is_relative_to(root):
+        parser.error("output must be outside the source tree to avoid recursive copies")
     selected = args.case or [case for case in cases if not case.endswith("reference-spacing")]
     spacing_source = (root / "zenjxl-decoder/src/features/spline.rs").read_text()
     if any(case.endswith("reference-spacing") for case in selected) and "let mut distance_from_previous" in spacing_source:
