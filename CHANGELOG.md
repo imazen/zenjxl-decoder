@@ -71,6 +71,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 - Upstream jxl-rs fixtures `red_420.jxl`, `red_422.jxl` and `red_440.jxl` (chroma-subsampled VarDCT) join the auto-swept `resources/test/` set; all six sweeps pass. Not shipped in the crate package.
 
 ### Changed
+
+- Accept the archmage and magetypes 0.9.31 stable release.
 - Dependencies: `brotli` 9, `num-derive` 0.5, `syn` 3 (macros); floors raised to the tested versions (2087c04).
 - **Multi-threaded lossless decoding no longer slows down from false sharing.** Each modular channel decoder's MA-tree property buffer, a few dozen bytes written for every sample, could share a cache line with another thread's data; it now has 128 bytes of unused space on each side (`IsolatedBuf`). M4 Pro, CLIC effort-7 lossless: 8 threads 52.7 -> 60.8 MP/s, 12 threads 57.6 -> 69.0 (`e404d64b`). Groups are also decoded largest section first from a shared queue (+3.5% on effort 7 at 8 threads, `8120d88c`). Output unchanged.
 - **Shorter AC coefficient dependency chain.** Whether a coefficient is nonzero now comes from its token, and the zero-density context part for the next coefficient is looked up before the symbol is read. M4 Pro, 1 thread: q90 4:4:4 JPEG transcode 91 -> 106 MP/s (djxl v0.12: ~98), cjxl d1 e7 72.8 -> 76.4 (`187ef674`). Output unchanged.
