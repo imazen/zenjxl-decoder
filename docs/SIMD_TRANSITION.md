@@ -76,6 +76,22 @@ Every remote tip is accounted for by these mutually exclusive dispositions:
 The 23 local heads are retained and included in the private evidence, along
 with all local remote-tracking refs and jj bookmarks.
 
+Four local heads have tips absent from the live remote branch list. They remain
+preserved, with these dispositions:
+
+- `abandoned/pipelined-batch`: one abandoned rayon pipeline commit; no approval
+  to revive it.
+- `alternate-simd/eliminate-jxl-simd`: residual cleanup/dependency work on the
+  closed replacement approach; compare individual changes before adoption.
+- `security-fixes-h1-h4`: six historical allocation/bitreader/revert commits;
+  verify each against current bounds and allocation handling before replaying.
+- `superseded/safe-parallel`: nine historical ownership/parallel-render and
+  benchmark commits; preserve as superseded experiments, with fresh parity and
+  performance qualification required for any extracted change.
+
+The other local tips match live remote tips in the capture. Local aliases do not
+create additional approved work.
+
 Other open PRs remain separate:
 
 - [66](https://github.com/imazen/zenjxl-decoder/pull/66): bounded codestream
