@@ -149,6 +149,18 @@ impl JxlDecoderInner {
         input: &mut dyn JxlBitstreamInput,
         buffers: Option<&mut [JxlOutputBuffer]>,
     ) -> Result<ProcessingResult<(), ()>> {
+        if !self.options.coalescing
+            && (self.options.adjust_orientation
+                || !self.options.skip_preview
+                || self.options.premultiply_output
+                || self.options.desired_intensity_target.is_some()
+                || self.options.cms.is_some())
+        {
+            return Err(whereat::at!(
+                crate::error::Error::UncoalescedOutputUnsupported
+            ));
+        }
+        self.validate_raw_output()?;
         let result = self.codestream_parser.process(
             &mut self.box_parser,
             input,
@@ -173,6 +185,59 @@ impl JxlDecoderInner {
         ProcessingResult::new(result)
     }
 
+    // Validate on every processing entry, including low-level format changes
+    // after a header. No caller buffer is touched by an unsupported request.
+    fn validate_raw_output(&self) -> Result<()> {
+        use crate::api::{JxlColorType, JxlDataFormat};
+        use crate::error::Error;
+        use crate::headers::extra_channels::ExtraChannel;
+        if self.options.coalescing || self.options.scan_frames_only {
+            return Ok(());
+        }
+        let Some(info) = self.basic_info() else {
+            return Ok(());
+        };
+        let format = self.current_pixel_format().unwrap();
+        let reject = |requirement| whereat::at!(Error::UncoalescedOutputRequirement(requirement));
+        if format.extra_channel_format.len() != info.extra_channels.len() {
+            return Err(reject("one format entry per source extra channel"));
+        }
+        if std::iter::once(&format.color_data_format)
+            .chain(format.extra_channel_format.iter())
+            .flatten()
+            .any(|f| !matches!(f, JxlDataFormat::F32 { .. }))
+        {
+            return Err(reject("F32 output samples"));
+        }
+        if self.options.render_spot_colors
+            && info
+                .extra_channels
+                .iter()
+                .any(|e| e.ec_type == ExtraChannel::SpotColor)
+        {
+            return Err(reject("separate, unrendered spot channels"));
+        }
+        if format.color_data_format.is_some()
+            && format.color_type != JxlColorType::Cmyk
+            && info
+                .extra_channels
+                .iter()
+                .enumerate()
+                .any(|(index, extra)| {
+                    extra.ec_type == ExtraChannel::Black
+                        && format.extra_channel_format[index].is_none()
+                })
+        {
+            return Err(reject("native CMYK components with the black channel"));
+        }
+        if self.codestream_parser.output_color_profile_set_by_user
+            && self.output_color_profile() != self.embedded_color_profile()
+        {
+            return Err(reject("the source color profile"));
+        }
+        Ok(())
+    }
+
     /// See [`JxlDecoder::codestream_ended`](crate::api::JxlDecoder::codestream_ended).
     pub(crate) fn codestream_ended(&self) -> bool {
         self.codestream_parser.has_more_frames && self.box_parser.codestream_ended()
@@ -183,6 +248,13 @@ impl JxlDecoderInner {
     /// returns `false` if no new rendering has happened, in which case the
     /// contents of `buffers` are unchanged from the caller's perspective.
     pub fn flush_pixels(&mut self, buffers: &mut [JxlOutputBuffer]) -> Result<bool> {
+        if !self.options.coalescing {
+            return Err(whereat::at!(
+                crate::error::Error::UncoalescedOutputRequirement(
+                    "completed layers; progressive raw-layer flush is not implemented"
+                )
+            ));
+        }
         if self.codestream_parser.frame.is_none() {
             // No frame is being decoded yet (or the previous frame completed):
             // nothing can possibly be rendered. Returning early also keeps the

@@ -176,15 +176,18 @@ impl JxlDecoderInner {
         // TODO(veluca): return an error if we are asking for both planar and
         // interleaved-in-color alpha.
         self.codestream_parser.pixel_format = Some(pixel_format);
-        self.codestream_parser.update_default_output_color_profile();
+        self.codestream_parser
+            .update_default_output_color_profile(self.options.coalescing);
     }
 
     pub fn frame_header(&self) -> Option<JxlFrameHeader> {
         let frame_header = self.codestream_parser.frame.as_ref()?.header();
-        // The render pipeline always adds ExtendToImageDimensionsStage which extends
-        // frames to the full image size. So the output size is always the image size,
-        // not the frame's upsampled size.
-        let size = self.codestream_parser.basic_info.as_ref()?.size;
+        // Composited output uses the canvas; raw output keeps its local extent.
+        let size = if self.options.coalescing {
+            self.codestream_parser.basic_info.as_ref()?.size
+        } else {
+            frame_header.size_upsampled()
+        };
         Some(JxlFrameHeader {
             name: frame_header.name.clone(),
             duration: self
@@ -273,6 +276,11 @@ impl JxlDecoderInner {
     /// Errors with [`Error::SeekBeforeImageInfo`] if the image header has
     /// not been parsed yet (or the decoder was `reset`/`rewind`-ed since).
     pub fn start_new_frame(&mut self, target: VisibleFrameSeekTarget) -> Result<()> {
+        if !self.options.coalescing {
+            return Err(at!(Error::UncoalescedOutputRequirement(
+                "sequential layer decoding; visible-frame seeks select presentations"
+            )));
+        }
         self.codestream_parser
             .start_new_frame(&self.options, &target)?;
         self.box_parser.reset_for_codestream_seek(
@@ -422,5 +430,14 @@ impl JxlDecoderInner {
     #[cfg(test)]
     pub(crate) fn set_use_simple_pipeline(&mut self, u: bool) {
         self.codestream_parser.set_use_simple_pipeline(u);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capture_raw_layers(&mut self) {
+        self.codestream_parser
+            .decoder_state
+            .as_mut()
+            .unwrap()
+            .capture_raw_layers = true;
     }
 }

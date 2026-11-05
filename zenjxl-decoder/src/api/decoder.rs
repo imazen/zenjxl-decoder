@@ -415,17 +415,23 @@ impl JxlDecoder<WithImageInfo> {
     ///
     /// // 2. Seek to visible frame n with a normal decoder that has parsed image info.
     /// let target = frames[n].seek_target.expect("seekable");
-    /// decoder.start_new_frame(target);
+    /// decoder.try_start_new_frame(target)?;
     /// let mut input = &file[target.decode_start_file_offset as usize..];
     /// // 3. process() -> WithFrameInfo for frame n; process(buffers) decodes it.
     /// ```
+    ///
+    /// # Panics
+    /// Panics if the seek is unsupported, including uncoalesced output. Prefer
+    /// [`Self::try_start_new_frame`] to receive the native error.
     pub fn start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) {
         self.try_start_new_frame(seek_target)
-            .expect("image info is available in the WithImageInfo state");
+            .expect("visible-frame seek must be supported");
     }
 
-    /// Fallible form of [`Self::start_new_frame`], preserving native errors.
-    /// Targets identify presentations in the same source bitstream.
+    /// Fallible form of [`Self::start_new_frame`]. A raw-layer decoder refuses
+    /// visible-presentation targets before changing state; sequential decoding
+    /// can continue after that refusal. The existing infallible method remains
+    /// for source compatibility.
     pub fn try_start_new_frame(&mut self, seek_target: VisibleFrameSeekTarget) -> Result<()> {
         self.inner.start_new_frame(seek_target)
     }
@@ -600,11 +606,30 @@ pub(crate) mod tests {
 
     #[allow(clippy::type_complexity)]
     pub fn decode(
+        input: &[u8],
+        chunk_size: usize,
+        use_simple_pipeline: bool,
+        do_flush: bool,
+        callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+    ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
+        decode_with_layer_capture(
+            input,
+            chunk_size,
+            use_simple_pipeline,
+            do_flush,
+            callback,
+            false,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn decode_with_layer_capture(
         mut input: &[u8],
         chunk_size: usize,
         use_simple_pipeline: bool,
         do_flush: bool,
         callback: Option<Box<dyn FnMut(&Frame, usize) -> Result<()>>>,
+        capture_raw_layers: bool,
     ) -> Result<(usize, Vec<Vec<Image<f32>>>)> {
         let mut options = JxlDecoderOptions::default();
         // Correctness tests should not be constrained by memory limits.
@@ -672,6 +697,9 @@ pub(crate) mod tests {
         // Process until we have image info
         let mut decoder_with_image_info = advance_decoder!(initialized_decoder);
         decoder_with_image_info.set_use_simple_pipeline(use_simple_pipeline);
+        if capture_raw_layers {
+            decoder_with_image_info.inner.capture_raw_layers();
+        }
 
         // Get basic info
         let basic_info = decoder_with_image_info.basic_info().clone();
@@ -3825,6 +3853,92 @@ pub(crate) mod tests {
             assert!(calls.load(Ordering::SeqCst) > 0);
             assert_eq!(error.error().stop_reason(), Some(reason));
             assert_eq!(error.error().kind(), crate::error::ErrorClass::Cancelled);
+        }
+    }
+
+    #[test]
+    fn coalescing_requirement_refuses_before_input_or_scan() {
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        for scan_only in [false, true] {
+            for bytes in [data.as_slice(), &[]] {
+                let mut input = bytes;
+                let decoder = JxlDecoder::new(
+                    JxlDecoderOptions::default()
+                        .with_coalescing(false)
+                        .with_scan_frames_only(scan_only),
+                );
+                let error = decoder
+                    .process(&mut input)
+                    .err()
+                    .expect("required uncoalesced output was silently ignored");
+                assert_eq!(error.error().kind(), crate::error::ErrorClass::Unsupported);
+                assert!(matches!(
+                    error.error(),
+                    crate::error::Error::UncoalescedOutputUnsupported
+                ));
+                assert_eq!(input.len(), bytes.len(), "refusal consumed caller input");
+            }
+        }
+        let error = crate::decode_with(&data, JxlDecoderOptions::default().with_coalescing(false))
+            .err()
+            .expect("one-shot decode substituted a composited image");
+        assert_eq!(error.error().kind(), crate::error::ErrorClass::Unsupported);
+    }
+
+    #[test]
+    fn coalescing_explicit_default_preserves_pixels() {
+        let data = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
+        let normal = crate::decode(&data).unwrap();
+        let explicit =
+            crate::decode_with(&data, JxlDecoderOptions::default().with_coalescing(true)).unwrap();
+        assert_eq!(
+            (normal.width, normal.height, normal.channels),
+            (explicit.width, explicit.height, explicit.channels)
+        );
+        assert_eq!(normal.data, explicit.data);
+    }
+
+    #[test]
+    fn coalescing_source_layers_keep_local_extents() {
+        use crate::headers::frame_header::FrameType;
+        use std::{cell::RefCell, rc::Rc};
+
+        // Independently read with libjxl 0.11.1, coalescing disabled and
+        // orientation retained. Source headers describe local raster size and
+        // signed placement, not a contained crop of the composited canvas.
+        let expected = [
+            (0, 0, 2048, 1152),
+            (512, 164, 1024, 576),
+            (512, 640, 1024, 576),
+            (512, 164, 1024, 576),
+            (1860, 950, 1024, 576),
+        ];
+        let data = std::fs::read(crate::util::test::fixture_path(
+            "multiple_layers_noise_spline.jxl",
+        ))
+        .unwrap();
+        for chunk in [16_384, usize::MAX] {
+            let layers = Rc::new(RefCell::new(Vec::new()));
+            let capture = layers.clone();
+            let (_, visible) = decode(
+                &data,
+                chunk,
+                false,
+                false,
+                Some(Box::new(move |frame, _| {
+                    let header = frame.header();
+                    if header.frame_type == FrameType::RegularFrame {
+                        let (width, height) = header.size_upsampled();
+                        capture
+                            .borrow_mut()
+                            .push((header.x0, header.y0, width, height));
+                    }
+                    Ok(())
+                })),
+            )
+            .unwrap();
+            assert_eq!(*layers.borrow(), expected);
+            assert_eq!(visible.len(), 1, "raw headers are not raw output support");
         }
     }
 
