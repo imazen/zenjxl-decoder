@@ -33,7 +33,7 @@ atomic_refcell = "0.1.14"
 smallvec = "1.16.2"
 enough = { version = "0.4.4", features = ["std"] }
 brotli = { version = "9.0.0", default-features = false, features = ["std"], optional = true }
-paste = "1.0.15"
+paste = { package = "pastey", version = "0.2.3" }
 
 [dev-dependencies]
 # `testable_dispatch` lets tests/cross_tier_determinism.rs disable SIMD tokens
