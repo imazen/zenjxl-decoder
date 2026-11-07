@@ -556,3 +556,8 @@ wrapper's missing peak-RSS result must not be reported as zero memory use.
 The unchanged full suite is being checked serially under the same cap, with
 debug assertions and overflow checks enabled. No test expectation or ignore
 was changed.
+
+The sweep helper also starts independent fixture workers, so libtest's
+thread limit alone does not bound decode concurrency. `ZENJXL_TEST_WORKERS`
+now caps that helper without removing fixtures; `just stable-cohort-check`
+sets both limits to one and keeps the same 8 GiB external cap.

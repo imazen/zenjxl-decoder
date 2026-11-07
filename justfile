@@ -234,5 +234,5 @@ spline-spacing-cost:
 # Full original unit suite; explicit corpus admission, debug checks retained.
 stable-cohort-check corpus:
     test -d "{{corpus}}/jxl/features"
-    env -u ZENJXL_ALLOW_MISSING_CORPUS CODEC_CORPUS_PATH="{{corpus}}" RUST_TEST_THREADS=1 CARGO_PROFILE_TEST_OPT_LEVEL=2 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --locked --workspace --lib -- --nocapture
+    env -u ZENJXL_ALLOW_MISSING_CORPUS CODEC_CORPUS_PATH="{{corpus}}" ZENJXL_TEST_WORKERS=1 RUST_TEST_THREADS=1 CARGO_PROFILE_TEST_OPT_LEVEL=2 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --locked --workspace --lib -- --nocapture
     cargo clippy --locked --workspace --lib -- -D warnings

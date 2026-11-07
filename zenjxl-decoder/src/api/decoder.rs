@@ -817,7 +817,23 @@ pub(crate) mod tests {
         } else {
             8
         };
-        let workers = cores.min(worker_cap).min(fixtures.len().max(1));
+        // Libtest's thread limit does not constrain these fixture workers.
+        // Let memory-capped callers bound them without dropping fixtures.
+        let requested_workers = std::env::var("ZENJXL_TEST_WORKERS")
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .expect("ZENJXL_TEST_WORKERS must be a positive integer")
+            })
+            .unwrap_or(worker_cap);
+        assert!(
+            requested_workers > 0,
+            "ZENJXL_TEST_WORKERS must be positive"
+        );
+        let workers = cores
+            .min(worker_cap)
+            .min(requested_workers)
+            .min(fixtures.len().max(1));
 
         let worker = || {
             loop {
