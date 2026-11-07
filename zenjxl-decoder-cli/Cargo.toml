@@ -51,3 +51,7 @@ workspace = true
 [[bench]]
 name = "decode"
 harness = false
+
+[[example]]
+name = "cmyk_float_reference"
+required-features = ["jxl/cms"]

@@ -166,6 +166,10 @@ downstream-tier-check:
 downstream-cmyk-dump input output:
     cargo run --locked -p zenjxl-decoder-cli --all-features --features jxl/cms --example cmyk_lcms_reference -- {{quote(input)}} {{quote(output)}}
 
+# Float values from the existing CMYK regression, through both existing adapters.
+downstream-cmyk-floats:
+    cargo run --locked -p zenjxl-decoder-cli --features jxl/cms --example cmyk_float_reference -- zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl
+
 # Caller wraps with heavy.lock and run-heavy; test the custom CMS without MoxCMS.
 downstream-cms-check:
     cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
