@@ -239,4 +239,4 @@ stable-cohort-check corpus:
 
 # Fresh independent output only; never writes to the supplied corpus.
 stable-unit-references corpus djxl output:
-    python3 scripts/prepare-unit-reference-controls.py "{{corpus}}" "{{djxl}}" "{{output}}"
+    python3 scripts/upstream-audit/prepare_feature_references.py --corpus "{{corpus}}" --djxl "{{djxl}}" --output "{{output}}"

@@ -4,7 +4,7 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-"""Prepare the two PNG references required by codec-corpus diagnostic tests.
+"""Prepare PNG references required by codec-corpus unit controls.
 
 Inputs come from codec-corpus. A fresh output tree links those immutable
 inputs and keeps generated references and their provenance separately.
@@ -19,6 +19,8 @@ import subprocess
 CASES = [
     ("conformance", "cmyk_layers"),
     ("features", "multiple_layers_noise_spline"),
+    ("edge-cases", "basic"),
+    ("edge-cases", "3x3_srgb_lossless"),
 ]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--corpus", type=Path, default=os.environ.get("CODEC_CORPUS_PATH"))
