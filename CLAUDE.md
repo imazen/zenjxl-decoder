@@ -553,11 +553,25 @@ while running decoder API unit tests, both in the default debug test build
 and in an optimized test build with four test threads. Kernel OOM receipts
 identify the decoder test processes; the scope then exits 143, so the
 wrapper's missing peak-RSS result must not be reported as zero memory use.
-The unchanged full suite is being checked serially under the same cap, with
-debug assertions and overflow checks enabled. No test expectation or ignore
-was changed.
+With both worker limits set to one, the full default-feature workspace
+library suite passes 1,247 tests with 28 existing ignores under the same
+8 GiB cap. An optimized test build retains debug assertions and overflow
+checks: peak RSS is 5.45 GiB. No test expectation or ignore was changed.
 
 The sweep helper also starts independent fixture workers, so libtest's
 thread limit alone does not bound decode concurrency. `ZENJXL_TEST_WORKERS`
 now caps that helper without removing fixtures; `just stable-cohort-check`
 sets both limits to one and keeps the same 8 GiB external cap.
+
+## Known Bugs: moxcms 0.9.2 CMYK float regression — 2026-11-07
+
+The stable-dependency candidate fails the existing
+`cmyk_to_srgb_matches_lcms2_relative_bpc` bound. At CMYK reflectance
+`[0.2347, 0.9601, 0.5918, 0.9813]`, red is `-0.066765495`, versus the
+frozen LCMS reference `-0.0645`; the existing strict absolute bound is
+`0.0013`. Identical source with moxcms 0.9.1 passes (`-0.06461855`).
+The current CLI LCMS backend independently yields `-0.064411186`.
+`just downstream-cmyk-floats` reproduces all four existing samples through
+both adapters. The complete default-feature suite does not enable `cms`
+and does not qualify this path. Preserve the old expectations and manual
+BPC/sign-preserving sRGB workaround until a reviewed correction is qualified.
