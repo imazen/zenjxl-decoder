@@ -50,3 +50,9 @@ preparer and fixes output at eight bits; no generated images enter git.
 The static djxl 0.12 binary identifies revision 4128790, but its linked CMS
 backend is not established. The float LCMS comparison above uses the CLI's
 explicit LCMS adapter and is independent of those PNG references.
+
+The final run using all four references from the existing eight-bit preparer
+also passes all 1,247 default-feature workspace library tests, with the same
+28 ignores, strict all-feature/all-target workspace Clippy and formatting.
+It takes 199 seconds, peak RSS 5.48 GiB, minimum available 13333 MiB and
+peak load 1.29. The optional CMYK float failure above remains a blocker.
