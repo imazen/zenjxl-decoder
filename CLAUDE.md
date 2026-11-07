@@ -545,3 +545,14 @@ was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
 - d3 1T: per decode djxl 146M cycles / 710M instructions, zen 152M / 900M.
   Our EPF1 and EPF2 kernels take ~2x djxl's share each; the sRGB transfer
   (`linear_to_srgb_simd`, 9% here) is the same algorithm as libjxl's.
+
+## Known Bugs: parallel unit-test memory cap — 2026-11-07
+
+The isolated stable-dependency candidate hit an 8 GiB memory-cgroup cap
+while running decoder API unit tests, both in the default debug test build
+and in an optimized test build with four test threads. Kernel OOM receipts
+identify the decoder test processes; the scope then exits 143, so the
+wrapper's missing peak-RSS result must not be reported as zero memory use.
+The unchanged full suite is being checked serially under the same cap, with
+debug assertions and overflow checks enabled. No test expectation or ignore
+was changed.
