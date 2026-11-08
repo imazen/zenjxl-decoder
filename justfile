@@ -170,6 +170,10 @@ downstream-cmyk-dump input output:
 downstream-cmyk-floats:
     cargo run --locked -p zenjxl-decoder-cli --features jxl/cms --example cmyk_float_reference -- zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl
 
+# The profile is read from this exact committed fixture; output must be fresh.
+downstream-cmyk-export-profile output:
+    cargo run --locked -p zenjxl-decoder-cli --features jxl/cms --example cmyk_float_reference -- zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl {{quote(output)}}
+
 # Caller wraps with heavy.lock and run-heavy; test the custom CMS without MoxCMS.
 downstream-cms-check:
     cargo clippy --locked --workspace --all-features --all-targets -- -D warnings

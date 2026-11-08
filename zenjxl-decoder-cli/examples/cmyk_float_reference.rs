@@ -9,9 +9,12 @@ use jxl::api::{
 use zenjxl_decoder_cli::cms::Lcms2Cms;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args_os()
-        .nth(1)
-        .ok_or("expected CMYK JXL fixture")?;
+    let mut args = std::env::args_os().skip(1);
+    let path = args.next().ok_or("expected CMYK JXL fixture")?;
+    let profile_output = args.next();
+    if args.next().is_some() {
+        return Err("expected fixture.jxl and optional fresh profile output".into());
+    }
     let data = std::fs::read(path)?;
     let mut input = data.as_slice();
     let mut decoder = JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default());
@@ -21,6 +24,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
         }
     };
+    if let Some(path) = profile_output {
+        use std::io::Write;
+        let icc = profile.try_as_icc().ok_or("fixture has no ICC profile")?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?
+            .write_all(icc.as_slice())?;
+    }
     let output = JxlColorProfile::Simple(JxlColorEncoding::srgb(false));
     let cases = [
         [0.2863, 1.0, 0.6706, 1.0],
