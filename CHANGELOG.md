@@ -996,3 +996,7 @@ Initial public release of the zenjxl-decoder fork.
 - Extra channel bit depth: use the channel's own `bit_depth` for modular-to-f32 conversion.
 - Noise seeding: separate RNG seeds per subregion for upsampled frames.
 - CMYK blending order: blend in CMYK space, then CMS-convert to RGB.
+
+## Frozen consumer compatibility (2026-11-08)
+
+Admit stable SIMD 0.9.31 on the frozen fe819360 source, preserving version floors, features and numerical kernels. Qualified through the zencodec PR201 spatial consumer; no standalone full-workspace claim.
