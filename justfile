@@ -230,3 +230,16 @@ spline-spacing-check:
 # Caller holds heavy.lock and run-heavy; use a uniform cpuset on hybrid CPUs.
 spline-spacing-cost:
     cargo bench --locked --manifest-path perf/spline-precision/Cargo.toml --bench spline_precision
+
+# Caller holds heavy.lock and run-heavy; current limits and structural errors remain.
+layout-contract-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- codestream_layout large_compressible_icc layout_memory failed_or_nested_parse failed_log_reservation hf_table_budget_tests --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- codestream_layout large_compressible_icc layout_memory failed_or_nested_parse failed_log_reservation hf_table_budget_tests --test-threads=1
+
+# Paired zenbench comparison against pinned runtime main; no pixels are decoded.
+layout-disabled-cost:
+    cargo bench --manifest-path perf/layout-overhead/Cargo.toml --bench layout_overhead -- --format=llm
+
+# Caller holds heavy.lock and run-heavy. Profiling reuses the paired scanners.
+layout-scan-profile binary arm fixture iterations output:
+    perf record --call-graph dwarf -o {{quote(output)}} {{quote(binary)}} --profile={{quote(arm)}} --case={{quote(fixture)}} --iterations={{quote(iterations)}}
