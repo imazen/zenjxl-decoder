@@ -1,0 +1,58 @@
+{
+  "source_revision": "8e46766863c566e6d72c82bc1ff946ee7a763ff4",
+  "source_rust_sha256": "882f0e9403273db67a3a1a652ae7177f5a032b060531a7fafb72b4a56796c89e",
+  "oracle_sha256": "7b0ee3289fd6f1d04cc57d0575b5ca6aaf5b497f686f04594d1a8ef994935dce",
+  "results": [
+    {
+      "case": "unchanged",
+      "fixtures": [
+        {
+          "fixture": "multiple_layers_noise_spline.jxl",
+          "sha256": "1912b0df8917c26f6f9a7a0fc07e5dda8b712b101be0194264e19fabd169ddbf",
+          "samples": 18874368,
+          "different_float_bits": 2265542,
+          "max_absolute_error": 0.0003052426764043048
+        },
+        {
+          "fixture": "conformance_test_images/cmyk_layers.jxl",
+          "sha256": "d732c8836bf1abeadf310d2e07387a32813ed4690d32650c1c25e541b80eed4a",
+          "samples": 1587120,
+          "different_float_bits": 0,
+          "max_absolute_error": 0.0
+        }
+      ]
+    },
+    {
+      "case": "high-precision",
+      "fixtures": [
+        {
+          "fixture": "multiple_layers_noise_spline.jxl",
+          "sha256": "1912b0df8917c26f6f9a7a0fc07e5dda8b712b101be0194264e19fabd169ddbf",
+          "samples": 18874368,
+          "different_float_bits": 2195471,
+          "max_absolute_error": 1.0728836059570312e-06
+        },
+        {
+          "fixture": "conformance_test_images/cmyk_layers.jxl",
+          "sha256": "d732c8836bf1abeadf310d2e07387a32813ed4690d32650c1c25e541b80eed4a",
+          "samples": 1587120,
+          "different_float_bits": 0,
+          "max_absolute_error": 0.0
+        }
+      ]
+    }
+  ],
+  "reference_runtime": {
+    "source": "a7a9c787341cf703dede03c2009fa460cae5e5df",
+    "highway": "457c891775a7397bdb0376bb1031e6e027af1c48",
+    "files": {
+      "libjxl.so.0.12": "9852cf71f083fe04a3d37be44a2eec88e726f69e48c5aaa95f55f8dcd8276422",
+      "raw-oracle-v012": "7b0ee3289fd6f1d04cc57d0575b5ca6aaf5b497f686f04594d1a8ef994935dce",
+      "libjxl_threads.so.0.12": "6ea29365693ce048d8b94b03d7fa217206a338734526e87f7bf676131c6ce890",
+      "libjxl_cms.so.0.12": "d24c43363c2e43e0e76e4fb499e67dae7988e09af93a7fbaa7285fb784945448"
+    }
+  },
+  "precision_policy": "Native default high_precision=false uses spline cutoff exponent3; existing true uses5, matching pinned reference JXL_HIGH_PRECISION=1. No default or threshold changed.",
+  "coverage": "5 RGB/alpha local layers and4 CMYK/alpha layers; packed RGBA/BGRA/CMYK and separate black/extra channels, padding, chunking and both renderers. Not every blend/reference, negative origin, preview/reference combination, raw seeking/progressive/non-F32 mode.",
+  "gate": "Unchanged1/256 bound for RGB; strict exact CMYK/RGB-alpha and metadata; negative control rejects exactly one CMYK bit."
+}

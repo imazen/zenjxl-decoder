@@ -1,0 +1,33 @@
+{
+  "base_main": "43d3069ecd9ae878fd0eaee2ab880a2daa8fe95d",
+  "metadata_base": "5b18bca0d7668299ab8a89a9fc95bb288db2bcc0",
+  "oracle_source": "a7a9c787341cf703dede03c2009fa460cae5e5df",
+  "qualification": "public F32 local layers, independent C API reader; no missing-corpus bypass",
+  "threshold": 0.00390625,
+  "fixtures": [
+    {
+      "fixture": "multiple_layers_noise_spline.jxl",
+      "sha256": "1912b0df8917c26f6f9a7a0fc07e5dda8b712b101be0194264e19fabd169ddbf",
+      "libjxl": 12000,
+      "layers": 5,
+      "samples": 18874368,
+      "different_float_bits": 2265549,
+      "max_absolute_error": 0.00036650896072387695,
+      "over_threshold": 0
+    },
+    {
+      "fixture": "conformance_test_images/cmyk_layers.jxl",
+      "sha256": "d732c8836bf1abeadf310d2e07387a32813ed4690d32650c1c25e541b80eed4a",
+      "libjxl": 12000,
+      "layers": 4,
+      "samples": 1587120,
+      "different_float_bits": 0,
+      "max_absolute_error": 0.0,
+      "over_threshold": 0
+    }
+  ],
+  "negative_control": "one changed CMYK mantissa bit rejected; originals unchanged",
+  "native_gate": "simple/low-memory renderer and input chunkings require identical float bits; strided padding unchanged",
+  "full_suite": "workspace all features passed; six frozen RGBA frames exact",
+  "resource_wrapper": "run-heavy: done rc=0 567s | peak-RSS 7.29GiB | min-avail 36471MiB | peak-load 7.03 (combined raw/layout full suites, frozen gate and layout benchmark)"
+}
