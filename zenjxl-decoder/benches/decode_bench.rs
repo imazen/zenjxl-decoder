@@ -59,35 +59,50 @@ macro_rules! bench_image {
 // no page-touch pass is included. Whole-decode groups below measure actual use.
 fn bench_zeroed_allocation(suite: &mut Suite) {
     for len in [64usize, 4096, 4 << 20, 64 << 20] {
-        suite.compare(format!("zeroed_allocation/{len}"), |group| {
-            group
-                .config()
-                .max_rounds(30)
-                .min_rounds(30)
-                .auto_rounds(false);
-            group.bench("vec_zeroed", move |b| {
-                b.iter(|| vec![0u8; zenbench::black_box(len)])
+        // Keep two arms per group: zenbench chooses the lower-median iteration
+        // estimate. Three arms would let the two lazy-zero allocators force
+        // excessive repetitions of the much slower large reserve/resize arm.
+        for legacy in [false, true] {
+            let label = if legacy { "reserve_resize" } else { "bytemuck" };
+            suite.compare(format!("zeroed_allocation/{len}/{label}"), |group| {
+                group
+                    .config()
+                    .max_rounds(30)
+                    .min_rounds(30)
+                    .auto_rounds(false);
+                group.bench("vec_zeroed", move |b| {
+                    b.iter(|| vec![0u8; zenbench::black_box(len)])
+                });
+                if legacy {
+                    group.bench("reserve_resize", move |b| {
+                        b.iter(|| {
+                            let len = zenbench::black_box(len);
+                            let mut bytes = Vec::<u8>::new();
+                            bytes.try_reserve(len).unwrap();
+                            bytes.resize(len, 0);
+                            bytes
+                        })
+                    });
+                } else {
+                    group.bench("bytemuck_fallible", move |b| {
+                        b.iter(|| {
+                            bytemuck::allocation::try_zeroed_vec::<u8>(zenbench::black_box(len))
+                                .unwrap()
+                        })
+                    });
+                }
             });
-            group.bench("bytemuck_fallible", move |b| {
-                b.iter(|| {
-                    bytemuck::allocation::try_zeroed_vec::<u8>(zenbench::black_box(len)).unwrap()
-                })
-            });
-            group.bench("reserve_resize", move |b| {
-                b.iter(|| {
-                    let len = zenbench::black_box(len);
-                    let mut bytes = Vec::<u8>::new();
-                    bytes.try_reserve(len).unwrap();
-                    bytes.resize(len, 0);
-                    bytes
-                })
-            });
-        });
+        }
     }
 }
 
 fn bench_decode(suite: &mut Suite) {
-    bench_zeroed_allocation(suite);
+    // Run allocation comparisons separately so their allocator/page-fault
+    // history does not affect before/after whole-decoder measurements.
+    if std::env::args().any(|arg| arg == "--group=zeroed_allocation") {
+        bench_zeroed_allocation(suite);
+        return;
+    }
     #[cfg(target_arch = "aarch64")]
     for name in [
         "cafe_web_q80.jxl",

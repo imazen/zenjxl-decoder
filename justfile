@@ -253,3 +253,6 @@ allocation-status:
         tail -n 4 "$log"
     done
     df -h "$HOME/tmp"
+
+allocation-summary logs:
+    python3 scripts/perf/allocation_summary.py {{quote(logs)}}
