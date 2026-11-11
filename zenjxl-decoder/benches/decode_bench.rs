@@ -55,7 +55,39 @@ macro_rules! bench_image {
     }};
 }
 
+// Allocation-only comparison: returned vectors are consumed by the harness;
+// no page-touch pass is included. Whole-decode groups below measure actual use.
+fn bench_zeroed_allocation(suite: &mut Suite) {
+    for len in [64usize, 4096, 4 << 20, 64 << 20] {
+        suite.compare(format!("zeroed_allocation/{len}"), |group| {
+            group
+                .config()
+                .max_rounds(30)
+                .min_rounds(30)
+                .auto_rounds(false);
+            group.bench("vec_zeroed", move |b| {
+                b.iter(|| vec![0u8; zenbench::black_box(len)])
+            });
+            group.bench("bytemuck_fallible", move |b| {
+                b.iter(|| {
+                    bytemuck::allocation::try_zeroed_vec::<u8>(zenbench::black_box(len)).unwrap()
+                })
+            });
+            group.bench("reserve_resize", move |b| {
+                b.iter(|| {
+                    let len = zenbench::black_box(len);
+                    let mut bytes = Vec::<u8>::new();
+                    bytes.try_reserve(len).unwrap();
+                    bytes.resize(len, 0);
+                    bytes
+                })
+            });
+        });
+    }
+}
+
 fn bench_decode(suite: &mut Suite) {
+    bench_zeroed_allocation(suite);
     #[cfg(target_arch = "aarch64")]
     for name in [
         "cafe_web_q80.jxl",

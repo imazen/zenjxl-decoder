@@ -109,13 +109,10 @@ impl<T: ImageDataType> Image<T> {
         Self::new_with_padding(size, (0, 0), (0, 0))
     }
 
-    /// Allocates an uninitialized image buffer.
+    /// Allocates a zeroed image buffer using fallible allocator-provided zeroing.
     ///
-    /// With the `allow-unsafe` feature, the memory is left truly uninitialized
-    /// (saving page-fault and zeroing costs). Without it, the buffer is zeroed.
-    ///
-    /// # Safety contract
-    /// The caller MUST write every pixel before reading it.
+    /// The historical name is retained for compatibility; the buffer is always
+    /// initialized, including with `allow-unsafe`.
     pub fn new_uninit(size: (usize, usize)) -> Result<Image<T>> {
         let s = T::DATA_TYPE_ID.size();
         let img = OwnedRawImage::new_uninit((size.0 * s, size.1))?;

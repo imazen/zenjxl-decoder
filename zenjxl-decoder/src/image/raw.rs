@@ -29,21 +29,17 @@ impl OwnedRawImage {
         Self::new_zeroed_with_padding(byte_size, (0, 0), (0, 0))
     }
 
-    /// Allocate an output buffer without zeroing.
+    /// Allocate a zeroed output buffer using fallible allocator-provided zeroing.
     ///
-    /// # Safety contract
-    /// The caller must ensure every byte is written before being read.
-    /// This is appropriate for output buffers that the decoder will fully populate.
+    /// The historical name is retained for compatibility; all bytes, including
+    /// padding, are initialized even with `allow-unsafe`.
     pub fn new_uninit(byte_size: (usize, usize)) -> Result<Self> {
         let mut padding = (0usize, 0usize);
         if !(padding.0 + byte_size.0).is_multiple_of(CACHE_LINE_BYTE_SIZE) {
             padding.0 += CACHE_LINE_BYTE_SIZE - (padding.0 + byte_size.0) % CACHE_LINE_BYTE_SIZE;
         }
         Ok(Self {
-            data: RawImageBuffer::try_allocate(
-                (byte_size.0 + padding.0, byte_size.1 + padding.1),
-                true,
-            )?,
+            data: RawImageBuffer::try_allocate((byte_size.0 + padding.0, byte_size.1 + padding.1))?,
             offset: (0, 0),
             padding,
             tracker: None,
@@ -92,10 +88,7 @@ impl OwnedRawImage {
             padding.0 += CACHE_LINE_BYTE_SIZE - (padding.0 + byte_size.0) % CACHE_LINE_BYTE_SIZE;
         }
         Ok(Self {
-            data: RawImageBuffer::try_allocate(
-                (byte_size.0 + padding.0, byte_size.1 + padding.1),
-                false,
-            )?,
+            data: RawImageBuffer::try_allocate((byte_size.0 + padding.0, byte_size.1 + padding.1))?,
             offset,
             padding,
             tracker: None,
@@ -486,6 +479,12 @@ mod tracked_output_tests {
     use super::OwnedRawImage;
     use crate::error::Error;
     use crate::util::MemoryTracker;
+
+    #[test]
+    fn output_constructor_initializes_pixels_and_padding() {
+        let image = OwnedRawImage::new_uninit((3, 7)).unwrap();
+        assert!(image.data.data_slice().iter().all(|&byte| byte == 0));
+    }
 
     /// A 3-byte row pads to 64 bytes; 1000 rows plus the alignment slack is
     /// 999 * 64 + 64 + 63 = 64063 bytes, and that is what the budget must see.

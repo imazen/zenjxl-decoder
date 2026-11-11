@@ -545,3 +545,17 @@ was loaded (Spotlight indexing, load 12-24), so treat MT figures as +-5%.
 - d3 1T: per decode djxl 146M cycles / 710M instructions, zen 152M / 900M.
   Our EPF1 and EPF2 kernels take ~2x djxl's share each; the sRGB transfer
   (`linear_to_srgb_simd`, 9% here) is the same algorithm as libjxl's.
+
+## Known Bugs: output-buffer initialization (resolved 2026-11-11)
+
+`RawImageBuffer::try_allocate` previously used `Vec::set_len` on uninitialized
+storage under `allow-unsafe`, contradicting the initialized-byte invariant of
+`OwnedRawImage`. Image allocations now use
+`bytemuck::allocation::try_zeroed_vec` with `extern_crate_alloc`, mapping allocation
+and layout failures to the existing `ImageOutOfMemory` error. The historical
+`new_uninit` names remain compatible but always return initialized storage.
+Alignment, padded footprint accounting and parallel prefaulting are unchanged.
+The `allow-unsafe` feature still controls typed-row casts; this correction does
+not remove that feature. `just allocation-check` exercises initialization, OOM,
+memory accounting and existing exact-pixel regressions in release mode, with
+all-feature and minimal-feature Clippy checks.

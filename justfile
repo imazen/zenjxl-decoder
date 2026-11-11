@@ -230,3 +230,26 @@ spline-spacing-check:
 # Caller holds heavy.lock and run-heavy; use a uniform cpuset on hybrid CPUs.
 spline-spacing-cost:
     cargo bench --locked --manifest-path perf/spline-precision/Cargo.toml --bench spline_precision
+
+# Retained before/after benchmark binaries; invoke through run-heavy on an idle host.
+allocation-decode-measure binary label threads:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$HOME/tmp/decoder-issue18/logs"
+    RAYON_NUM_THREADS={{threads}} {{quote(binary)}} --format=json > "$HOME/tmp/decoder-issue18/logs/{{label}}-t{{threads}}.json" 2> "$HOME/tmp/decoder-issue18/logs/{{label}}-t{{threads}}.log"
+
+allocation-check:
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+    cargo test --locked --release -p zenjxl-decoder --all-features --lib image::
+    cargo test --locked --release -p zenjxl-decoder --no-default-features --lib image::
+    cargo test --locked --release -p zenjxl-decoder --all-features --test cross_tier_determinism --test modular_buffer_recycling --test output_buffer_limit
+
+allocation-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for log in "$HOME/tmp/decoder-issue18/logs/"*.log; do
+        echo "$log"
+        tail -n 4 "$log"
+    done
+    df -h "$HOME/tmp"

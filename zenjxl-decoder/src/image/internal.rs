@@ -13,21 +13,15 @@ use crate::{
 
 /// Allocates zeroed memory, returning an error instead of aborting on OOM.
 ///
-/// Always uses `try_reserve` to ensure proper error handling for all allocation
-/// sizes. The `vec!` macro calls the global allocator which aborts on failure,
-/// so we avoid it for any size that could plausibly fail. After `try_reserve`
-/// succeeds, `resize` is guaranteed not to re-allocate.
+/// Uses the allocator's zeroed-allocation path, allowing lazy zero pages without
+/// an explicit full-buffer initialization pass.
 fn alloc_zeroed_fallible(
     total_len: usize,
     bytes_per_row: usize,
     num_rows: usize,
 ) -> Result<Vec<u8>> {
-    let mut storage = Vec::new();
-    storage
-        .try_reserve(total_len)
-        .map_err(|_| Error::ImageOutOfMemory(bytes_per_row, num_rows))?;
-    storage.resize(total_len, 0);
-    Ok(storage)
+    bytemuck::allocation::try_zeroed_vec(total_len)
+        .map_err(|_| at!(Error::ImageOutOfMemory(bytes_per_row, num_rows)))
 }
 
 /// Safe image buffer backed by `Vec<u8>` with cache-line alignment via offset.
@@ -175,7 +169,7 @@ impl RawImageBuffer {
 
     /// Returns zeroed memory. The returned buffer is aligned to
     /// CACHE_LINE_BYTE_SIZE bytes via offset.
-    pub(super) fn try_allocate(byte_size: (usize, usize), uninit: bool) -> Result<RawImageBuffer> {
+    pub(super) fn try_allocate(byte_size: (usize, usize)) -> Result<RawImageBuffer> {
         let (bytes_per_row, num_rows) = byte_size;
         if bytes_per_row == 0 || num_rows == 0 {
             return Ok(RawImageBuffer {
@@ -202,28 +196,7 @@ impl RawImageBuffer {
         let total_len = data_len
             .checked_add(CACHE_LINE_BYTE_SIZE - 1)
             .ok_or(Error::ImageSizeTooLarge(bytes_per_row, num_rows))?;
-        let storage = if uninit {
-            #[cfg(feature = "allow-unsafe")]
-            {
-                // Skip zeroing entirely: pages fault on first write.
-                let mut v = Vec::new();
-                v.try_reserve(total_len)
-                    .map_err(|_| Error::ImageOutOfMemory(bytes_per_row, num_rows))?;
-                #[allow(unsafe_code)]
-                // SAFETY: try_reserve succeeded so capacity >= total_len.
-                // Caller guarantees all bytes will be written before being read.
-                unsafe {
-                    v.set_len(total_len);
-                }
-                v
-            }
-            #[cfg(not(feature = "allow-unsafe"))]
-            {
-                alloc_zeroed_fallible(total_len, bytes_per_row, num_rows)?
-            }
-        } else {
-            alloc_zeroed_fallible(total_len, bytes_per_row, num_rows)?
-        };
+        let storage = alloc_zeroed_fallible(total_len, bytes_per_row, num_rows)?;
 
         // Compute offset to first cache-line-aligned byte
         let base_ptr = storage.as_ptr() as usize;
@@ -241,7 +214,7 @@ impl RawImageBuffer {
 
     /// Returns a copy of the current buffer contents in a new buffer.
     pub(super) fn try_clone(&self) -> Result<Self> {
-        let out = RawImageBuffer::try_allocate(self.byte_size(), true)?;
+        let out = RawImageBuffer::try_allocate(self.byte_size())?;
         assert_eq!(self.bytes_per_row, out.bytes_per_row);
         assert_eq!(self.bytes_between_rows, out.bytes_between_rows);
         assert_eq!(self.num_rows, out.num_rows);
@@ -430,7 +403,7 @@ mod allocation_len_tests {
             (200, 3),
             (1, 4096),
         ] {
-            let buf = RawImageBuffer::try_allocate(byte_size, false).unwrap();
+            let buf = RawImageBuffer::try_allocate(byte_size).unwrap();
             assert_eq!(
                 buf.storage.len(),
                 RawImageBuffer::allocation_len(byte_size).unwrap(),
@@ -451,5 +424,34 @@ mod allocation_len_tests {
             ),
         }
         assert!(RawImageBuffer::allocation_len((usize::MAX / 2, 2)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod zeroed_allocation_tests {
+    use super::{RawImageBuffer, alloc_zeroed_fallible};
+    use crate::error::Error;
+
+    #[test]
+    fn output_and_padding_are_initialized() {
+        for size in [(1, 1), (65, 7), (4097, 3), (0, 1), (1, 0)] {
+            let image = RawImageBuffer::try_allocate(size).unwrap();
+            assert!(image.storage.iter().all(|&b| b == 0));
+            assert!(
+                image
+                    .data_ptr_addr()
+                    .is_multiple_of(crate::util::CACHE_LINE_BYTE_SIZE)
+            );
+            for y in 0..image.num_rows {
+                assert_eq!(image.row(y), vec![0; size.0]);
+            }
+        }
+    }
+
+    #[test]
+    fn impossible_allocation_returns_image_oom() {
+        let error = alloc_zeroed_fallible(usize::MAX, 123, 456).unwrap_err();
+        assert!(matches!(error.error(), Error::ImageOutOfMemory(123, 456)));
+        assert!(alloc_zeroed_fallible(0, 0, 0).unwrap().is_empty());
     }
 }
