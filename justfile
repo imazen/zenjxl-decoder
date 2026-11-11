@@ -232,11 +232,16 @@ spline-spacing-cost:
     cargo bench --locked --manifest-path perf/spline-precision/Cargo.toml --bench spline_precision
 
 # Retained before/after benchmark binaries; invoke through run-heavy on an idle host.
-allocation-decode-measure binary label threads:
+allocation-decode-measure binary label threads group="":
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "$HOME/tmp/decoder-issue18/logs"
-    RAYON_NUM_THREADS={{threads}} {{quote(binary)}} --format=json > "$HOME/tmp/decoder-issue18/logs/{{label}}-t{{threads}}.json" 2> "$HOME/tmp/decoder-issue18/logs/{{label}}-t{{threads}}.log"
+    run_label={{quote(label)}}
+    thread_count={{quote(threads)}}
+    group_filter={{quote(group)}}
+    args=()
+    if [[ -n "$group_filter" ]]; then args+=("--group=$group_filter"); fi
+    RAYON_NUM_THREADS="$thread_count" {{quote(binary)}} "${args[@]}" --format=json > "$HOME/tmp/decoder-issue18/logs/${run_label}-t${thread_count}.json" 2> "$HOME/tmp/decoder-issue18/logs/${run_label}-t${thread_count}.log"
 
 allocation-check:
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

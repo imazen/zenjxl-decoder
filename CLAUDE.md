@@ -559,3 +559,11 @@ The `allow-unsafe` feature still controls typed-row casts; this correction does
 not remove that feature. `just allocation-check` exercises initialization, OOM,
 memory accounting and existing exact-pixel regressions in release mode, with
 all-feature and minimal-feature Clippy checks.
+
+The issue-18 measurements are retained in
+[`benchmarks/fallible_zeroed_allocation_2026-11-11.md`](benchmarks/fallible_zeroed_allocation_2026-11-11.md).
+On Ryzen 9 5900XT, 64 MiB bytemuck allocation measured 7.923 µs versus
+7.865 µs for its infallible zeroed control. Whole-decode results were mixed:
+the eight-thread café A–B–A witness measured 17.617 / 18.691 / 17.711 ms,
+while both 4K cases improved in the exploratory sweep. Do not treat allocator
+parity as a guarantee of matching the former uninitialized path's throughput.

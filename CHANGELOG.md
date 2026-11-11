@@ -15,7 +15,7 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 ### Fixed
 
 - Allocate initialized image storage through bytemuck's fallible zeroed allocator,
-  including with `allow-unsafe`; preserve output prefaulting, alignment and memory accounting (#18).
+  including with `allow-unsafe`; preserve output prefaulting, alignment and memory accounting (#18, `1cb97733`).
 
 - The CLI's LCMS backend returns reflectance for a CMYK destination, and converts both sides of an in-place CMYK transform. Its output and in-place paths used LCMS's ink percentages, so no ink read as the maximum amount of ink.
 

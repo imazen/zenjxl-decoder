@@ -1,0 +1,3 @@
+fixture	before_mean_ms	candidate_mean_ms	after_mean_ms	candidate_vs_before_pct	candidate_vs_after_pct
+vardct_web/cafe_web_q80.jxl	17.616737	18.690749	17.710594	6.097	5.534
+vardct_web/bicycles_web_q85.jxl	5.369281	5.892681	5.802393	9.748	1.556
