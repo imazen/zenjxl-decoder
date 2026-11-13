@@ -440,6 +440,8 @@ impl Frame {
 
     #[instrument(level = "debug", skip(self, br))]
     pub fn decode_lf_group(&mut self, group: usize, br: &mut BitReader) -> Result<()> {
+        let stop: &dyn enough::Stop = &*self.decoder_state.stop;
+        stop.check().map_err(Error::from)?;
         debug!(section_size = br.total_bits_available());
         let lf_global = self.lf_global.as_mut().unwrap();
         if self.header.encoding == Encoding::VarDCT && !self.header.has_lf_frame() {
@@ -1343,6 +1345,8 @@ impl Frame {
         buffer_splitter: &mut BufferSplitter,
         force_render: bool,
     ) -> Result<bool> {
+        let stop: &dyn enough::Stop = &*self.decoder_state.stop;
+        stop.check().map_err(Error::from)?;
         if passes.is_empty() {
             assert!(force_render);
         }
