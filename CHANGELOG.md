@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Reject an unbounded non-codestream box before the first codestream box;
+  preserve valid trailing unbounded metadata and empty ordered/reordered parts.
+
 - Widen the VarDCT nonzero-count bound before adding, rejecting oversized coded
   counts without a 32-bit overflow; retain upstream's exact error regression.
 

@@ -444,3 +444,54 @@ fn short_spliced_ooo_jxlp_followed_by_more_boxes() {
     }
     assert_eq!(cases, 12);
 }
+
+fn upstream_november_input(name: &str) -> Vec<u8> {
+    std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/testdata")
+            .join(name),
+    )
+    .unwrap()
+}
+
+/// Upstream empty_jxlp: both ordered and reordered empty parts are legal and
+/// must preserve the control image's exact pixels.
+#[test]
+fn empty_jxlp() {
+    let expected = crate::api::decode_with(
+        &crate::util::test::fixture_bytes("basic.jxl"),
+        Default::default(),
+    )
+    .unwrap();
+    for name in ["empty_jxlp.jxl", "empty_ooo_jxlp.jxl"] {
+        let got =
+            crate::api::decode_with(&upstream_november_input(name), Default::default()).unwrap();
+        assert_eq!(
+            (got.width, got.height),
+            (expected.width, expected.height),
+            "{name}"
+        );
+        assert_eq!(got.data, expected.data, "{name}");
+    }
+}
+
+/// Upstream unbounded_box_order: an unbounded metadata box cannot precede the
+/// codestream, but an unbounded trailing Exif box is legal.
+#[test]
+fn unbounded_box_order() {
+    let result = crate::api::decode_with(
+        &upstream_november_input("unbounded_box_before_codestream.jxl"),
+        Default::default(),
+    );
+    assert!(
+        matches!(&result, Err(e) if matches!(e.error(), crate::error::Error::InvalidBox)),
+        "expected InvalidBox, got {:?}",
+        result.as_ref().err()
+    );
+    let image = crate::api::decode_with(
+        &upstream_november_input("exif_trailing_infinite.jxl"),
+        crate::api::JxlDecoderOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(image.exif.unwrap().len(), 166);
+}

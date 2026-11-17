@@ -700,6 +700,16 @@ impl BoxParser {
                     if self.ooo_jxlp.ftyp_seen == (&ty == b"ftyp") {
                         return Err(at!(Error::InvalidBox));
                     }
+                    // An unbounded non-codestream box consumes the rest of the
+                    // file, so no first codestream box can follow it. Trailing
+                    // unbounded metadata after the codestream remains legal.
+                    if content_len == u64::MAX
+                        && matches!(self.box_type, CodestreamBoxType::None)
+                        && &ty != b"jxlc"
+                        && &ty != b"jxlp"
+                    {
+                        return Err(at!(Error::InvalidBox));
+                    }
                     match &ty {
                         b"ftyp" => {
                             // payload: major brand 'jxl ' + minor version, then

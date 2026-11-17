@@ -21,6 +21,13 @@ bound returns the required error. The fixture is byte-identical to upstream
 `f370be423933628eb7f783f1b61d4c765eca5f79`. This is an executed 32-bit
 regression, not an extrapolation from an x86_64 result.
 
+The upstream `empty_jxlp` and `unbounded_box_order` assertions now live in
+`src/tests/container_boxes.rs`, with all three original inputs retained.
+Both empty-part variants preserve the exact control pixels. Before the order
+check, the unbounded-before-codestream case returned `OutOfBounds(0)`;
+it now returns `InvalidBox`, while the trailing unbounded Exif control still
+recovers its 166-byte payload. All 18 container tests execute and pass.
+
 ## Fork PR extractions — 2026-11-05
 
 The [five-PR triage](PR_TRIAGE_2026-11-05.md) distinguishes existing changes,
