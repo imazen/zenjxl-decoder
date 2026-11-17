@@ -25,6 +25,20 @@ use crate::{
 use num_traits::AsPrimitive;
 use thiserror::Error;
 
+/// Pack explicitly specified wire fields for small header regressions.
+pub(crate) fn pack_bits(fields: &[(u64, usize)]) -> Vec<u8> {
+    let mut bytes = vec![0; fields.iter().map(|&(_, n)| n).sum::<usize>().div_ceil(8)];
+    let mut offset = 0;
+    for &(value, count) in fields {
+        assert!(count <= 64 && (count == 64 || value < 1u64 << count));
+        for bit in 0..count {
+            bytes[offset / 8] |= (((value >> bit) & 1) as u8) << (offset % 8);
+            offset += 1;
+        }
+    }
+    bytes
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Invalid PFM: {0}")]

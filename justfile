@@ -36,6 +36,12 @@ upstream-followup-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- alphabet_allocation_guard frame_header_budget_counts_low_frequency_frames tests::hdr:: hlg_ootf_arb fuzzer_context_map_num_histograms_overflow modular_rle_fast_path_matches_without_lz77 --test-threads=1
 
 # Read a completed job while the rest of its workflow is still running.
+review-validation-check filter="conformance_limit_tests":
+    cargo test --locked -p zenjxl-decoder --all-features --lib '{{filter}}' -- --test-threads=1
+
+review-level-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- conformance_limit_tests icc_output_limit --test-threads=1
+
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
 

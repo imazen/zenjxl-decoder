@@ -12,6 +12,19 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Selected-level checks now cover image/frame dimensions and area, channel
+precision, the Level 5 modular-buffer flag, and reconstructed ICC output size.
+The dimension regression first accepted a dimension above the selected limit;
+it now rejects it with caller resource caps disabled. A header-only wire control
+accepts a Level 10 image of area 2^31, above the former fixed 2^30 parser cap,
+while Level 5 and a smaller caller pixel budget reject it. No pixel allocation
+is attempted by that control. ICC output limits are checked from the predictor
+preamble before allocating the reconstructed profile; encoded-stream limits
+remain separate. Exact limit/limit-plus-one, extra-channel precision and existing
+frame-duration controls pass (`just review-level-check`). This does not yet
+cover cumulative frame area, all level-dependent entropy bounds or metadata
+consistency rules.
+
 The HLG OOTF property control previously compared each fast function with
 itself. It now calls the precise reference and retains the 7.2e-7 bound.
 Its luminance weights use upstream's positive range; the old generator could

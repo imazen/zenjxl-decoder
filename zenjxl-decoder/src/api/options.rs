@@ -36,6 +36,34 @@ pub enum JxlCodestreamLevel {
 }
 
 impl JxlCodestreamLevel {
+    pub(crate) fn max_dimension(self) -> u64 {
+        match self {
+            Self::Level5 => 1 << 18,
+            Self::Level10 => 1 << 30,
+        }
+    }
+
+    pub(crate) fn max_area(self) -> u64 {
+        match self {
+            Self::Level5 => 1 << 28,
+            Self::Level10 => 1 << 40,
+        }
+    }
+
+    pub(crate) fn max_icc_output_size(self) -> usize {
+        match self {
+            Self::Level5 => 1 << 22,
+            Self::Level10 => 1 << 28,
+        }
+    }
+
+    pub(crate) fn max_bits_per_sample(self) -> u32 {
+        match self {
+            Self::Level5 => 16,
+            Self::Level10 => 32,
+        }
+    }
+
     /// Upper bound on the spline area estimate for an image of
     /// `image_area` pixels.
     pub(crate) fn spline_area_limit(self, image_area: u64) -> u64 {

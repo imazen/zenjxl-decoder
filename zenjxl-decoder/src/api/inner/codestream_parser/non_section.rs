@@ -107,6 +107,7 @@ fn check_size_limit(
     (xs, ys): (usize, usize),
     num_ec: usize,
 ) -> Result<()> {
+    check_level_size(limits.max_codestream_level, (xs, ys))?;
     // Check max_pixels from new limits API
     let total_pixels = xs.saturating_mul(ys);
     if let Some(limit) = limits.max_pixels
@@ -139,6 +140,44 @@ fn check_size_limit(
     Ok(())
 }
 
+fn check_level_size(level: crate::api::JxlCodestreamLevel, (xs, ys): (usize, usize)) -> Result<()> {
+    for dimension in [xs, ys] {
+        if dimension as u64 > level.max_dimension() {
+            return Err(at!(Error::ImageDimensionTooLarge(dimension as u64)));
+        }
+    }
+    if (xs as u64) * (ys as u64) > level.max_area() {
+        return Err(at!(Error::ImageSizeTooLarge(xs, ys)));
+    }
+    Ok(())
+}
+
+fn check_sample_precision(
+    limits: &crate::api::JxlDecoderLimits,
+    metadata: &crate::headers::ImageMetadata,
+) -> Result<()> {
+    let level = limits.max_codestream_level;
+    for depth in std::iter::once(metadata.bit_depth)
+        .chain(metadata.extra_channel_info.iter().map(|ec| ec.bit_depth()))
+    {
+        if depth.bits_per_sample() > level.max_bits_per_sample() {
+            return Err(at!(Error::LimitExceeded {
+                resource: "bits_per_sample",
+                actual: depth.bits_per_sample() as u64,
+                limit: level.max_bits_per_sample() as u64,
+            }));
+        }
+    }
+    if level == crate::api::JxlCodestreamLevel::Level5 && !metadata.modular_16bit_sufficient {
+        return Err(at!(Error::LimitExceeded {
+            resource: "modular buffer bits",
+            actual: 32,
+            limit: 16,
+        }));
+    }
+    Ok(())
+}
+
 impl CodestreamParser {
     #[cold]
     pub(super) fn process_non_section(&mut self, decode_options: &JxlDecoderOptions) -> Result<()> {
@@ -147,6 +186,7 @@ impl CodestreamParser {
             let mut br = BitReader::new(&self.non_section_buf);
             br.skip_bits(self.non_section_bit_offset as usize)?;
             let file_header = FileHeader::read(&mut br)?;
+            check_sample_precision(&decode_options.limits, &file_header.image_metadata)?;
             let xsize = file_header.size.xsize() as usize;
             let ysize = file_header.size.ysize() as usize;
             check_size_limit(
@@ -250,9 +290,15 @@ impl CodestreamParser {
             br.skip_bits(self.non_section_bit_offset as usize)?;
             let embedded_color_profile = if file_header.image_metadata.color_encoding.want_icc {
                 if self.icc_parser.is_none() {
-                    self.icc_parser = Some(IncrementalIccReader::new(
+                    let output_limit = decode_options
+                        .limits
+                        .max_codestream_level
+                        .max_icc_output_size();
+                    self.icc_parser = Some(IncrementalIccReader::new_with_output_limit(
                         &mut br,
                         decode_options.limits.max_icc_size,
+                        output_limit
+                            .min(decode_options.limits.max_icc_size.unwrap_or(output_limit)),
                     )?);
                 }
                 let icc_parser = self.icc_parser.as_mut().unwrap();
@@ -381,6 +427,10 @@ impl CodestreamParser {
             frame_header.postprocess(&nonserialized);
             // The frame is rendered at its upsampled size (up to 8x per axis),
             // so that is what the pixel limit must bound. Upstream jxl-rs c07c7d5.
+            check_level_size(
+                decode_options.limits.max_codestream_level,
+                (frame_header.width as usize, frame_header.height as usize),
+            )?;
             check_size_limit(
                 &decode_options.limits,
                 frame_header.size_upsampled(),
@@ -567,6 +617,110 @@ impl CodestreamParser {
 mod conformance_limit_tests {
     use super::*;
     use crate::api::{JxlCodestreamLevel, JxlDecoderLimits};
+
+    #[test]
+    fn large_level10_wire_header_needs_no_pixel_allocation() {
+        let (width, height) = (1u64 << 20, 2048u64); // area 2^31, above the old fixed 2^30 cap
+        let bytes = crate::util::test::pack_bits(&[
+            (0x0aff, 16),
+            (0, 1), // signature, small=false
+            (3, 2),
+            (height - 1, 30),
+            (0, 3), // height, explicit aspect ratio
+            (3, 2),
+            (width - 1, 30), // width
+            (1, 1),
+            (1, 1), // default metadata and transform data
+        ]);
+        let header = crate::api::read_header_with(&bytes, JxlDecoderLimits::unlimited()).unwrap();
+        assert_eq!(header.info.size, (width as usize, height as usize));
+        let error = crate::api::read_header_with(
+            &bytes,
+            JxlDecoderLimits::unlimited().with_max_codestream_level(JxlCodestreamLevel::Level5),
+        )
+        .err()
+        .expect("header must be rejected");
+        assert!(matches!(
+            error.error(),
+            Error::ImageDimensionTooLarge(1_048_576)
+        ));
+        assert!(matches!(
+                crate::api::read_header_with(
+                    &bytes,
+                    JxlDecoderLimits::unlimited().with_max_pixels(10),
+                )
+                .err().expect("header must be rejected")
+                .error(),
+                Error::LimitExceeded {
+                    resource: "pixels",
+                    ..
+                }
+            ));
+    }
+
+    #[test]
+    fn level_precision_checks_include_extra_channels() {
+        use crate::headers::bit_depth::BitDepth;
+        let (header, _, _) =
+            crate::util::test::read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl"))
+                .unwrap();
+        let mut metadata = header.image_metadata;
+        let level5 =
+            JxlDecoderLimits::unlimited().with_max_codestream_level(JxlCodestreamLevel::Level5);
+        let level10 = JxlDecoderLimits::unlimited();
+        for bits in [16, 17, 24, 31] {
+            metadata.bit_depth = BitDepth::integer_samples(bits);
+            assert_eq!(
+                check_sample_precision(&level5, &metadata).is_ok(),
+                bits <= 16
+            );
+            assert!(check_sample_precision(&level10, &metadata).is_ok());
+        }
+        metadata.bit_depth = BitDepth::integer_samples(8);
+        metadata.modular_16bit_sufficient = false;
+        assert!(check_sample_precision(&level5, &metadata).is_err());
+        assert!(check_sample_precision(&level10, &metadata).is_ok());
+        metadata.modular_16bit_sufficient = true;
+        metadata
+            .extra_channel_info
+            .push(crate::headers::extra_channels::ExtraChannelInfo::new(
+                false,
+                crate::headers::extra_channels::ExtraChannel::Alpha,
+                BitDepth::f32(),
+                0,
+                String::new(),
+                false,
+                None,
+                None,
+            ));
+        assert!(check_sample_precision(&level5, &metadata).is_err());
+        assert!(check_sample_precision(&level10, &metadata).is_ok());
+    }
+
+    #[test]
+    fn image_and_frame_level_dimension_boundaries() {
+        for (level, dimension, area) in [
+            (JxlCodestreamLevel::Level5, 1usize << 18, 1u64 << 28),
+            (JxlCodestreamLevel::Level10, 1usize << 30, 1u64 << 40),
+        ] {
+            let limits = JxlDecoderLimits::unlimited().with_max_codestream_level(level);
+            assert!(check_size_limit(&limits, (dimension, 1), 0).is_ok());
+            assert!(check_size_limit(&limits, (dimension + 1, 1), 0).is_err());
+            let height = (area / dimension as u64) as usize;
+            assert!(check_size_limit(&limits, (dimension, height), 0).is_ok());
+            assert!(check_size_limit(&limits, (dimension, height + 1), 0).is_err());
+            assert!(check_size_limit(&limits, (height + 1, dimension), 0).is_err());
+        }
+        let limits = JxlDecoderLimits::unlimited().with_max_pixels(10);
+        assert!(matches!(
+            check_size_limit(&limits, (11, 1), 0).unwrap_err().error(),
+            Error::LimitExceeded {
+                resource: "pixels",
+                actual: 11,
+                limit: 10
+            }
+        ));
+    }
 
     #[test]
     fn frame_duration_level_boundaries() {

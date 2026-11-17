@@ -14,6 +14,11 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Enforce selected-level image/frame dimensions, area, sample precision,
+  modular-buffer precision and reconstructed ICC size independently of caller
+  resource caps. Accept globally valid Level 10 header sizes above the former
+  fixed area ceiling.
+
 - Check rectangle-to-byte multiplication in release mode and saturate rectangle
   ends for clipping, retaining upstream's overflow boundary controls.
 

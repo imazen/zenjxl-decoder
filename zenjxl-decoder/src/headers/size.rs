@@ -82,11 +82,10 @@ impl Size {
     /// before any allocations. This catches crafted headers that claim absurd
     /// dimensions. Callers can set a lower limit via `JxlDecoderLimits::max_pixels`.
     ///
-    /// 2^30 pixels (~1 billion) is the JXL spec limit. At 4 bytes/channel and
-    /// 3+ channels, this allows images up to ~12 GB of pixel data per channel
-    /// plane, so the memory tracker / `max_memory_bytes` provides the real defense.
-    /// This limit prevents overflow in downstream size arithmetic.
-    const MAX_TOTAL_PIXELS: u64 = 1 << 30;
+    /// These are the global Level 10 bounds. The selected level and caller
+    /// resource limits are checked before decoder setup, independently of
+    /// this syntax-level validation.
+    const MAX_TOTAL_PIXELS: u64 = 1 << 40;
 
     pub fn ysize(&self) -> u32 {
         if self.small {
@@ -110,6 +109,9 @@ impl Size {
     fn check(&self, _: &encodings::Empty) -> Result<(), Error> {
         let xsize = self.compute_xsize()?;
         let ysize = self.ysize();
+        if xsize > 1 << 30 || ysize > 1 << 30 {
+            return Err(Error::ImageDimensionTooLarge(xsize.max(ysize) as u64));
+        }
         let total = xsize as u64 * ysize as u64;
         if total > Self::MAX_TOTAL_PIXELS {
             return Err(Error::ImageSizeTooLarge(xsize as usize, ysize as usize));

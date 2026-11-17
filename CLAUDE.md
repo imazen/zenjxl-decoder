@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Resolved: selected-level header bounds — 2026-11-17
+
+The parser previously applied a fixed 2^30 image-area cap but did not enforce
+selected-level image/frame dimensions, area, sample precision or reconstructed
+ICC size. Header-local global limits now permit Level 10 sizes, with separate
+selected-level and caller resource checks before setup. Level 5 also requires
+the modular 16-bit-sufficient flag. The ICC predictor preamble checks its output
+limit before allocating the profile; its encoded-stream cap remains separate.
+`just review-level-check` exercises exact boundaries, extra-channel precision
+and an accepted header-only 2^31-area Level 10 image without allocating pixels.
+The new dimension rejection failed before the repair. These controls do not
+establish exhaustive level conformance or cumulative frame accounting.
+
 ## Upstream regression import validation — 2026-11-17
 
 The integrated release all-feature workspace passes: the decoder library

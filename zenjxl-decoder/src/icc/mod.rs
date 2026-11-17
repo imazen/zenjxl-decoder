@@ -149,10 +149,19 @@ pub struct IncrementalIccReader {
     /// used to compute per-call delta (since BitReader is recreated per chunk
     /// in incremental mode).
     last_br_bits_read: usize,
+    max_output_size: usize,
 }
 
 impl IncrementalIccReader {
     pub fn new(br: &mut BitReader, max_icc_size: Option<usize>) -> Result<Self> {
+        Self::new_with_output_limit(br, max_icc_size, max_icc_size.unwrap_or(1 << 28))
+    }
+
+    pub(crate) fn new_with_output_limit(
+        br: &mut BitReader,
+        max_icc_size: Option<usize>,
+        max_output_size: usize,
+    ) -> Result<Self> {
         let len = u64::read_unconditional(&(), br, &Empty {})?;
         // Use provided limit or fall back to default 256MB
         let limit = max_icc_size.unwrap_or(1 << 28) as u64;
@@ -177,6 +186,7 @@ impl IncrementalIccReader {
             prev_bytes: [0, 0],
             total_bits_consumed: 0,
             last_br_bits_read,
+            max_output_size,
         })
     }
 
@@ -231,6 +241,13 @@ impl IncrementalIccReader {
             read_varint_from_reader(&mut cursor).map_err(|_| at!(Error::InvalidIccStream))?;
         let commands_size =
             read_varint_from_reader(&mut cursor).map_err(|_| at!(Error::InvalidIccStream))?;
+        if output_size > self.max_output_size as u64 {
+            return Err(at!(Error::LimitExceeded {
+                resource: "icc_size",
+                actual: output_size,
+                limit: self.max_output_size as u64,
+            }));
+        }
         let bytes_read = (self.out_buf.len() - cursor.len()) as u64;
         check_preamble(output_size, commands_size, bytes_read, self.len as u64)
     }
@@ -299,6 +316,7 @@ impl IncrementalIccReader {
 
     pub fn finalize(self, br: &mut BitReader) -> Result<Vec<u8>> {
         assert_eq!(self.num_coded_bytes(), self.out_buf.len());
+        self.check_preamble()?;
         self.reader.check_final_state(&self.histograms, br)?;
         let mut stream = IccStream::new(self.out_buf);
         let profile = read_icc_inner(&mut stream)?;
@@ -324,6 +342,44 @@ mod preamble_tests {
 #[cfg(test)]
 mod incremental_error_tests {
     use super::*;
+
+    #[test]
+    fn icc_output_limit_precedes_profile_allocation() {
+        for limit in [1usize << 22, 1 << 28, 1024] {
+            for output_size in [limit, limit + 1] {
+                let mut out_buf = Vec::new();
+                let mut value = output_size as u64;
+                while value >= 128 {
+                    out_buf.push(value as u8 | 128);
+                    value >>= 7;
+                }
+                out_buf.push(value as u8);
+                out_buf.push(0); // no commands
+                out_buf.resize(PREAMBLE_SIZE, 0);
+                let histograms = Histograms::lz77_byte_histogram();
+                let mut br = BitReader::new(&[0; 8]);
+                let reader = SymbolReader::new(&histograms, &mut br, None).unwrap();
+                let icc = IncrementalIccReader {
+                    histograms,
+                    reader,
+                    out_buf,
+                    len: output_size.div_ceil(1024).max(PREAMBLE_SIZE),
+                    prev_bytes: [0, 0],
+                    total_bits_consumed: 0,
+                    last_br_bits_read: 0,
+                    max_output_size: limit,
+                };
+                let result = icc.check_preamble();
+                if output_size == limit {
+                    result.unwrap();
+                } else {
+                    assert!(matches!(result.unwrap_err().error(), Error::LimitExceeded {
+                        resource: "icc_size", actual, limit: bound,
+                    } if *actual == output_size as u64 && *bound == limit as u64));
+                }
+            }
+        }
+    }
     #[test]
     fn read_one_rejects_before_appending_corrupt_symbol() {
         let histograms = Histograms::lz77_byte_histogram();
@@ -338,6 +394,7 @@ mod incremental_error_tests {
             prev_bytes: [0, 0],
             total_bits_consumed: 0,
             last_br_bits_read: 0,
+            max_output_size: 1 << 28,
         };
         let result = icc.read_one(&mut br);
         assert!(
