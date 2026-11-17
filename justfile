@@ -1,5 +1,13 @@
 # zenjxl-decoder dev commands
 
+# Caller holds the shared heavy lock and run-heavy; optional target exercises i686.
+upstream-regression-check target="" filter="upstream_2026_11":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [[ -n '{{target}}' ]]; then args+=(--target '{{target}}'); fi
+    cargo test --locked -p zenjxl-decoder --all-features --lib "${args[@]}" '{{filter}}' -- --test-threads=1
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test` or any CI job.

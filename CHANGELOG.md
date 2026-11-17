@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Widen the VarDCT nonzero-count bound before adding, rejecting oversized coded
+  counts without a 32-bit overflow; retain upstream's exact error regression.
+
 - Iterate bounded slices in spline, render and JPEG-table code for Rust 1.100
   strict lint, preserving operation order and existing pixel/reconstruction checks.
 

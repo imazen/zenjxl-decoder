@@ -747,7 +747,9 @@ pub fn decode_vardct_group(
                        nzeros: {nonzeros}",
                         sbx[c], sby[c]
                     );
-                    if nonzeros + num_blocks > num_coeffs {
+                    // The coded count can be u32::MAX. Widen before adding so
+                    // this validation also rejects it without overflow on i686.
+                    if nonzeros as u64 + num_blocks as u64 > num_coeffs as u64 {
                         return Err(at!(Error::InvalidNumNonZeros(nonzeros, num_blocks)));
                     }
                     for iy in 0..cy {

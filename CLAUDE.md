@@ -1,5 +1,13 @@
 # Decoder investigation notes
 
+## Resolved: VarDCT nonzero-count overflow — 2026-11-17
+
+The imported upstream `08bb971` regression reproduces an addition-overflow
+panic on native i686 before rejecting a u32::MAX coded nonzero count.
+Widening the bound to u64 returns the existing `InvalidNumNonZeros` error.
+The original 182-byte fixture and exact error assertion are retained in
+`src/tests/upstream_2026_11.rs`; the i686 before/after control executed.
+
 ## RESOLVED: global inverse-squeeze grid transition — 2026-11-17
 
 [Encoder issue 144](https://github.com/imazen/jxl-encoder/issues/144) retains

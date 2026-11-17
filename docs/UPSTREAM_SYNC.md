@@ -10,6 +10,17 @@ results) for the 2026-08-22 audit lives in
 [`upstream-audit-2026-08-22.md`](upstream-audit-2026-08-22.md). The tools
 used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
+## Regression delta — 2026-11-17
+
+Upstream `08bb971ff493cbd77642a7f3de3398a2744c4405` widens the VarDCT
+nonzero-count bound to u64 before adding. Its 182-byte
+`vardct_num_nonzeros_overflow.jxl` and specific `InvalidNumNonZeros` assertion
+are retained in `src/tests/upstream_2026_11.rs`. On native i686, the imported
+test first reproduced an addition-overflow panic in the old bound; the repaired
+bound returns the required error. The fixture is byte-identical to upstream
+`f370be423933628eb7f783f1b61d4c765eca5f79`. This is an executed 32-bit
+regression, not an extrapolation from an x86_64 result.
+
 ## Fork PR extractions — 2026-11-05
 
 The [five-PR triage](PR_TRIAGE_2026-11-05.md) distinguishes existing changes,
