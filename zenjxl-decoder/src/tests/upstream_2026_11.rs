@@ -31,3 +31,31 @@ fn vardct_num_nonzeros_overflow() {
         result.as_ref().err()
     );
 }
+
+/// Preserve upstream's chroma-separation assertions at the LF-group boundary.
+#[test]
+fn subsampled_chroma() {
+    use crate::{api::decoder::tests::decode, image::Rect};
+    let data = crate::util::test::fixture_bytes("multiple_lf_420.jxl");
+    let (_, mut frames) = decode(&data, usize::MAX, false, false, None).unwrap();
+    let frame = frames.pop().unwrap();
+    let [image]: [_; 1] = frame.try_into().unwrap();
+    for rect in [
+        Rect {
+            origin: (2048 * 3, 0),
+            size: (16 * 3, 16),
+        },
+        Rect {
+            origin: (0, 2048),
+            size: (16 * 3, 16),
+        },
+    ] {
+        let view = image.get_rect(rect);
+        for y in 0..view.size().1 {
+            for pixel in view.row(y).chunks_exact(3) {
+                let [r, g, b]: [f32; 3] = pixel.try_into().unwrap();
+                assert!(r.max(g).max(b) - r.min(g).min(b) > 0.5);
+            }
+        }
+    }
+}

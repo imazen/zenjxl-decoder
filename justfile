@@ -15,9 +15,32 @@ upstream-foundation-check:
     just upstream-regression-check '' util::float16
     just upstream-regression-check '' test_frame_dimension_checks
 
+# Caller supplies CODEC_CORPUS_PATH, heavy.lock and the resource wrapper.
+upstream-import-workspace-check:
+    python3 scripts/upstream-audit/prepare_feature_references.py --check
+    cargo test --locked --release --workspace --all-features -- --test-threads=1
+
+# Exact upstream coordinate regressions; use debug for checked-arithmetic control.
+upstream-boundary-check profile="release":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [[ '{{profile}}' == release ]]; then args+=(--release); fi
+    cargo test --locked -p zenjxl-decoder --all-features --lib "${args[@]}" -- rect_byte_width_overflow rect_large_coord_clip test_apply_patch_delta_bounds --test-threads=1
+
+upstream-followup-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- alphabet_allocation_guard frame_header_budget_counts_low_frequency_frames tests::hdr:: hlg_ootf_arb fuzzer_context_map_num_histograms_overflow modular_rle_fast_path_matches_without_lz77 --test-threads=1
+
 # Read a completed job while the rest of its workflow is still running.
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
+
+upstream-test-inventory upstream:
+    python3 scripts/upstream-audit/inventory_tests.py {{quote(upstream)}}
+
+# Caller supplies the heavy-job lock/resource wrapper and a fresh output path.
+upstream-frozen-oracle output reference djxl:
+    python3 scripts/upstream-audit/verify_downstream.py --output {{quote(output)}} --reference-directory {{quote(reference)}} --djxl {{quote(djxl)}}
 
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it

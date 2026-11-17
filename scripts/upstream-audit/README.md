@@ -12,6 +12,13 @@ procedure and the current ledger.
 | `prepare_feature_references.py` | prepare the two required codec-corpus diagnostic PNGs with pinned v0.12; input cache remains unchanged |
 | `verify_downstream.py` | strict v0.12 decoder byte comparison; requires Pillow and a caller-provided fresh output directory |
 | `groupdiff.py`      | per-256px-group map of where two decodes differ (for thread-count / tile bugs) |
+| `inventory_tests.py` | locate ordinary upstream tests and named instruction-set macros; unmatched names require manual review, and name matches do not prove equivalent assertions |
+
+`python3 scripts/upstream-audit/inventory_tests.py /path/to/pinned/jxl-rs`
+prints the source census. Add `--unmatched` for source links and missing names.
+The revision used for links must match the supplied source tree. This does not
+expand macros or claim exhaustive test coverage. Current adaptations and
+implementation-specific exclusions are recorded in `docs/UPSTREAM_SYNC.md`.
 
 The upstream CLI is built from a throwaway clone (never inside this repo):
 

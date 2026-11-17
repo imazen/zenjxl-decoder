@@ -134,6 +134,55 @@ before. Upstream's exact cached-seek frame-cost assertions are not claimed:
 this implementation rebuilds its decoder state rather than retaining the
 upstream reference cache. The imported fixture manifest records byte hashes.
 
+### Import coverage and explicit adaptations
+
+All fifteen missing upstream inputs are retained and hash-checked: nine core
+JXL inputs, five gain-map bundles and one RGB16 integration input, 3,676 bytes
+in total. The 128 already-identical core inputs are reused. The original LF
+chroma-separation assertions now run in `src/tests/upstream_2026_11.rs`.
+Context-map and non-LZ77 RLE controls retain the upstream chunked-flush paths.
+
+The source-navigation census recognizes 318 ordinary test functions and 52
+named instruction-set macro calls across the six inspected upstream crates.
+These are source inventory counts, not executed cases or proof of equivalent
+assertions. `scripts/upstream-audit/inventory_tests.py` reproduces the census
+and preserves links when listing unmatched names. Important dispositions:
+
+| Upstream family | Downstream disposition |
+|---|---|
+| Scan/seek/reset, corruption fixtures, orientation, header/profile ordering and ICC rewind | Adapted to typestate and located errors. Existing ports live in `api/decoder.rs`, `tests/jxlrs_testdata_ports.rs`, `tests/jxlrs_regressions.rs`, `tests/orientation_preserve.rs`, `tests/basic_info_profile_guard.rs`, `icc/mod.rs` and `tests/regression_deadlines.rs`. Named seek inputs have explicit reused/fresh/continuation controls. |
+| Cached seek frame costs | Pixel and continuation assertions retained; exact upstream cache costs are excluded because this decoder rebuilds state. Conservative replay can decode more frames. |
+| Auxiliary-box callbacks, AlphaMode::Unpremultiplied, configurable sample limits and progressive-status milestones | Those public APIs are absent here. Existing Exif/container, alpha, frame-header-budget and flush checks are retained; they are not claimed as equivalent tests of the absent APIs. Adding public APIs is separate work. |
+| image-rs adapter registration | No adapter crate exists in this workspace. Retain the new input and exact unaligned decoder-level RGB16 assertion; do not add an integration API merely to compile its tests. |
+| i16 modular storage/conversion and i16/i32 dequant comparisons | The fork's modular storage is i32. Upstream storage-specific tests are not drop-in assertions for this implementation. |
+| Custom SmallVec, SharedSnapshot, BufferSplitter and ChannelsView/for_each_chunk helpers | Those upstream implementations are absent. Keep tests of the fork's existing containers and render stages; do not import unrelated production helpers solely to run their unit tests. |
+| Smooth-squeeze/Jinc preview filters and their fast-math helper | Those implementations are absent; their normalization/accuracy tests need the corresponding feature, rather than an artificial substitute. |
+| Rect::intersects and upstream assertion-helper macros | The APIs/helpers differ. Rectangle clipping and byte-overflow controls are retained; an absent intersection method is not created just for the test. Existing exact image assertions remain intact. |
+| HDR LUT macro | Explicitly imported, with stricter exact table equality at two intensity targets. Unsupported CPU wrappers are not execution coverage. |
+| Crop/prefix/progressive comparison harnesses | Existing pipeline, chunk, seek and parallel sweeps retain their assertions. This import does not claim every upstream crop API or intermediate progressive milestone has an equivalent downstream test. |
+
+This is a bounded regression import with documented implementation/API
+differences, not a complete upstream assertion-equivalence or conformance claim.
+
+### Remaining source-review queue
+
+The small verified color and parser repairs above do not close all source-review
+questions. Before-color-transform extra-channel blending needs a valid encoded
+positive control and reference geometry checks. Unknown/XYB descriptors need
+valid-wire controls and a faithful representation/management policy. Explicit
+squeeze group validation and the dated implicit-default-prefix rule need frame
+context and targeted controls; keep legitimate empty-channel compaction.
+Selected-level and cumulative animation/metadata/container rules remain
+independent validation tasks beyond the global frame bounds added here.
+
+Wide squeeze remains a reachability question. This fork's scalar tail uses the
+same I32 kernel as SIMD bodies, so agreement is not an independent width oracle.
+The arithmetic model has no complete conformant encoded-stream witness. A
+candidate must establish declared precision/level, `modular_16bit_sufficient`
+constraints, legal transforms/group geometry and entropy values, then actual
+dispatch into the distinguishing calculation. No squeeze arithmetic repair or
+claim that all valid encoders avoid these widths is made by this import.
+
 ## Fork PR extractions — 2026-11-05
 
 The [five-PR triage](PR_TRIAGE_2026-11-05.md) distinguishes existing changes,

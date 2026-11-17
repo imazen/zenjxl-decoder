@@ -43,11 +43,12 @@ fn testdata(name: &str) -> Vec<u8> {
 }
 
 /// Upstream `test_fuzzer_context_map_num_histograms_overflow`: must not panic
-/// in either pipeline; an error is fine.
+/// in normal and chunked flushing paths; an error is fine.
 #[test]
 fn fuzzer_context_map_num_histograms_overflow_does_not_panic() {
     let data = testdata("context_map_num_histograms_overflow.jxl");
     let _ = decode_with(&data, JxlDecoderOptions::default());
+    let _ = decode_partial_with_flush(&data, 1024);
 }
 
 /// Upstream `test_fuzzer_modular_palette_empty_meta_channel`: must fail, not
@@ -73,6 +74,7 @@ fn modular_rle_fast_path_matches_without_lz77() {
         &no_lz77_frames[0],
     )
     .unwrap();
+    decode_partial_with_flush(&no_lz77, 1).unwrap();
 }
 
 /// Upstream `test_fuzzer_vardct_grayscale_unused_channel`: a grayscale
