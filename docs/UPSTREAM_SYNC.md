@@ -12,6 +12,23 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+### Consolidated implementation status
+
+| Work | Status and evidence | Remaining limit or decision |
+|---|---|---|
+| Upstream regression delta | 15 of 15 missing inputs imported and hash-checked; 128 identical core inputs reused. Applicable assertion ports and portable SIMD controls are retained. | Architecture/API-specific exclusions are listed below; this is not a complete assertion-equivalence audit. |
+| Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size and cumulative zero-duration area checks landed. | Complete selected-level entropy/tree/Black-channel admission is still queued. |
+| Before-transform EC references | Qualified full-canvas references now work; procedural encoded control matches all 36 v0.12 RGBA8 bytes. | Displaced/undersized planes still reject. |
+| Structured color and HDR CMS | XYB implicit descriptor, white-point/determinant checks, DCI ICC tagging and private MoxCMS HDR controls landed. Approved external ICC method and LCMS correction merged through [PR79](https://github.com/imazen/zenjxl-decoder/pull/79). | XYB control establishes header/representation behavior, not whole-image source-XYB accuracy. |
+| Seek and progressive input | Live reference replay, stable incremental rendering and upstream's end-only prefix flush schedule are retained. Exact scheduled sequential/parallel previews have separate controls. | Cached-seek frame-cost optimization is not implemented; streaming throughput is unmeasured. |
+| Metadata and JPEG reconstruction | ICC channel-model/Black consistency, gain-map cardinality with seek replay, and missing external JPEG metadata checks landed. | Timecode ordering and spot-color solidity still need valid-wire controls and accurate diagnostics. |
+| Squeeze | Incoming shift-at-most-30 check landed; existing empty-tile compaction and partial-recovery controls remain. | Released-versus-draft default/grid policy remains open. The wide arithmetic model has no conformant-stream witness. |
+| Unknown source color | API proposal retains truthful source flags and recommends opt-in unmanaged handling. | Needs a policy/signature decision and valid-wire controls. |
+| Raw/local layer output | Existing source layer geometry is available; local F32 is the proposed first output contract. | `coalescing(false)` still lacks runtime behavior; output extent/CT-state/EC semantics need agreement. |
+
+Add cropping remains an API-contract question. Progressive coefficient omission
+may be valid syntax; a decoder cannot recover unrepresented encoder intent.
+
 Cumulative Level 5 zero-duration frame area now has independent stream state.
 The exact 2^28/2^28+1 helper controls, duration reset, seek snapshot restoration
 and rewind checks pass, along with the existing seek and work-budget controls.
@@ -227,6 +244,29 @@ this implementation rebuilds its decoder state rather than retaining the
 upstream reference cache. The imported fixture manifest records byte hashes.
 
 ### Import coverage and explicit adaptations
+
+The final merged API source (`e0061b70`) passes the native release all-feature
+workspace: 1,107 decoder library cases, 29 existing ignores, integrations, CLI,
+SIMD and doctests. Rust 1.99.1 executes that gate. The separate Rust 1.100.0
+controls pass all 44 selected minimal-feature regressions, the new profile API
+checks with and without default features, both ten-case CLI suites, strict
+workspace Clippy, scoped formatting and the generated API snapshot check.
+The API baseline comparison identifies exactly one added public method.
+
+Six frozen v0.12 RGBA frames retain zero differing bytes, with input/reference
+hashes checked. The procedural before-transform EC control separately matches
+all 36 RGBA8 bytes. These are finite regression/oracle gates; they do not prove
+all ignored conformance cases, every upstream assertion or unavailable CPU
+tiers. The full external conformance corpus was not rerun for this bounded
+review; its two observed Level 5 admission failures led to the explicit Level 10
+pixel-runner setting described above.
+
+The final workspace resource receipt is `run-heavy --mem 14G --jobs 4`:
+`rc=0 340s | peak-RSS 8.05GiB | min-avail 14171MiB | peak-load 4.23`.
+`just upstream-import-workspace-check`, `just upstream-import-minimal-check`,
+`just review-intensity-check`, `just api-doc-check` and
+`just upstream-frozen-oracle` reproduce the component gates with the caller's
+corpus, reference directory and heavy-job wrapper.
 
 The initial import at `dcf145e2` passes the release all-feature workspace, including 1,088 library
 passes and 29 existing ignores, integrations, CLI, SIMD and doctests. Strict
