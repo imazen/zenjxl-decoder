@@ -174,6 +174,16 @@ pub struct PatchesDictionary {
 }
 
 impl PatchesDictionary {
+    fn apply_patch_delta(axis: &str, prev: usize, delta: i32, limit: usize) -> Result<usize> {
+        prev.checked_add_signed(delta as isize).ok_or_else(|| {
+            at!(if delta < 0 {
+                Error::PatchesInvalidDelta(axis.to_string(), prev, delta)
+            } else {
+                Error::PatchesOutOfBounds(axis.to_string(), prev, delta as usize, limit)
+            })
+        })
+    }
+
     #[cfg(test)]
     pub fn random<R: rand::Rng>(
         size: (usize, usize),
@@ -475,7 +485,10 @@ impl PatchesDictionary {
                     if !reference.saved_before_color_transform {
                         return Err(at!(Error::PatchesPostColorTransform()));
                     }
-                    if x0 + ref_pos_xsize > reference.frame[0].size().0 {
+                    if x0
+                        .checked_add(ref_pos_xsize)
+                        .is_none_or(|end| end > reference.frame[0].size().0)
+                    {
                         return Err(at!(Error::PatchesInvalidPosition(
                             "x".to_string(),
                             x0,
@@ -483,7 +496,10 @@ impl PatchesDictionary {
                             reference.frame[0].size().0,
                         )));
                     }
-                    if y0 + ref_pos_ysize > reference.frame[0].size().1 {
+                    if y0
+                        .checked_add(ref_pos_ysize)
+                        .is_none_or(|end| end > reference.frame[0].size().1)
+                    {
                         return Err(at!(Error::PatchesInvalidPosition(
                             "y".to_string(),
                             y0,
@@ -494,12 +510,12 @@ impl PatchesDictionary {
                 }
             }
 
-            let id_count = patches_reader.read_unsigned(
+            let id_count = (patches_reader.read_unsigned(
                 &patches_histograms,
                 br,
                 PatchContext::PatchCount as usize,
-            ) as usize
-                + 1;
+            ) as usize)
+                .saturating_add(1);
             if id_count > max_patches + 1 {
                 return Err(at!(Error::PatchesTooMany(
                     "patches".to_string(),
@@ -574,31 +590,23 @@ impl PatchesDictionary {
                         br,
                         PatchContext::PatchOffset as usize,
                     );
-                    if delta_x < 0 && (-delta_x as usize) > positions.last().unwrap().x {
-                        return Err(at!(Error::PatchesInvalidDelta(
-                            "x".to_string(),
-                            positions.last().unwrap().x,
-                            delta_x,
-                        )));
-                    }
-                    pos.x = (positions.last().unwrap().x as i32 + delta_x) as usize;
+                    pos.x =
+                        Self::apply_patch_delta("x", positions.last().unwrap().x, delta_x, xsize)?;
 
                     let delta_y = patches_reader.read_signed(
                         &patches_histograms,
                         br,
                         PatchContext::PatchOffset as usize,
                     );
-                    if delta_y < 0 && (-delta_y as usize) > positions.last().unwrap().y {
-                        return Err(at!(Error::PatchesInvalidDelta(
-                            "y".to_string(),
-                            positions.last().unwrap().y,
-                            delta_y,
-                        )));
-                    }
-                    pos.y = (positions.last().unwrap().y as i32 + delta_y) as usize;
+                    pos.y =
+                        Self::apply_patch_delta("y", positions.last().unwrap().y, delta_y, ysize)?;
                 }
 
-                if pos.x + ref_pos_xsize > xsize {
+                if pos
+                    .x
+                    .checked_add(ref_pos_xsize)
+                    .is_none_or(|end| end > xsize)
+                {
                     return Err(at!(Error::PatchesOutOfBounds(
                         "x".to_string(),
                         pos.x,
@@ -606,7 +614,11 @@ impl PatchesDictionary {
                         xsize,
                     )));
                 }
-                if pos.y + ref_pos_ysize > ysize {
+                if pos
+                    .y
+                    .checked_add(ref_pos_ysize)
+                    .is_none_or(|end| end > ysize)
+                {
                     return Err(at!(Error::PatchesOutOfBounds(
                         "y".to_string(),
                         pos.y,
@@ -815,6 +827,35 @@ impl PatchesDictionary {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_apply_patch_delta_bounds() {
+        use super::*;
+        assert_eq!(
+            PatchesDictionary::apply_patch_delta("x", 10, -4, 16).unwrap(),
+            6
+        );
+        assert_eq!(
+            PatchesDictionary::apply_patch_delta("x", 10, 5, 16).unwrap(),
+            15
+        );
+        assert!(
+            matches!(PatchesDictionary::apply_patch_delta("x", 0, i32::MIN, 8), Err(ref e) if matches!(e.error(), Error::PatchesInvalidDelta(_, 0, i32::MIN)))
+        );
+        assert!(
+            matches!(PatchesDictionary::apply_patch_delta("x", usize::MAX, 1, 8), Err(ref e) if matches!(e.error(), Error::PatchesOutOfBounds(_, usize::MAX, 1, 8)))
+        );
+    }
+
+    #[test]
+    fn test_patch_area_limit() {
+        use crate::api::JxlCodestreamLevel::{Level5, Level10};
+        assert_eq!(Level5.patch_area_limit(0), 1 << 20);
+        assert_eq!(Level5.patch_area_limit(100), 1 << 20);
+        assert_eq!(Level5.patch_area_limit(1 << 20), 8 * (1 << 20));
+        assert_eq!(Level10.patch_area_limit(0), 1 << 20);
+        assert_eq!(Level10.patch_area_limit(100), 1 << 20);
+        assert_eq!(Level10.patch_area_limit(1 << 20), 1024 * (1 << 20));
+    }
 
     mod read_patches_tests {
         use super::super::*;

@@ -12,6 +12,14 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Upstream's patch-delta helper assertions reproduce debug negation overflow
+and a release-mode positive-bound failure in the old arithmetic. Checked
+signed addition and checked reference/destination ends retain exact valid
+deltas and reject both extremes. The direct debug controls pass; the
+usize::MAX test is a helper boundary, not a demonstrated encoded-stream value.
+The upstream Level 5/10 patch-area controls are adapted to this fork's
+existing `JxlCodestreamLevel::patch_area_limit` helper.
+
 Byte-accurate refill exposed a separate incremental-prefix assumption in this
 fork's Huffman allocation guard. An alphabet of 520 with only two table bits
 buffered produced fatal `AlphabetTooLargeHuff(520)`. The guard now asks for the

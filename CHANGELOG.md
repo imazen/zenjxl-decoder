@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Check patch-coordinate deltas and rectangle ends without signed narrowing,
+  including i32::MIN and positive-overflow rejection controls from upstream.
+
 - Retry a short Huffman-table prefix when its buffered-input allocation cap
   needs another byte, while preserving the allocation and hard alphabet limits.
 

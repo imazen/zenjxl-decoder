@@ -1,5 +1,15 @@
 # Decoder investigation notes
 
+## Resolved: patch-coordinate arithmetic bounds — 2026-11-17
+
+The imported upstream delta-bound test reproduces negation overflow for
+i32::MIN in the former arithmetic, and its usize::MAX positive-bound control
+fails in release mode. Patch positions now use checked signed addition;
+reference/destination rectangle ends also use checked addition. Both valid
+delta controls retain their exact results. The debug regression passes after
+the repair. These are direct helper/coordinate controls; no complete encoded
+stream reaching the artificial usize::MAX helper input is claimed.
+
 ## Resolved: Huffman allocation guard on an incomplete prefix — 2026-11-17
 
 The full suite after byte-accurate refill reproduced
