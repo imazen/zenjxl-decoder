@@ -2938,8 +2938,10 @@ mod test {
         let data = std::fs::read(crate::util::test::fixture_path("hdr_pq_test.jxl"))
             .expect("Failed to read hdr_pq_test.jxl - run from jxl crate directory");
 
-        let options = JxlDecoderOptions::default()
-            .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
+        let options = JxlDecoderOptions::default().with_limits(
+            crate::api::JxlDecoderLimits::default()
+                .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+        );
         let decoder = JxlDecoder::new(options);
         let mut input: &[u8] = &data;
 

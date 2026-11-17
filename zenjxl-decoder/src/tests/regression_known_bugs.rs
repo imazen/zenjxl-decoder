@@ -180,8 +180,10 @@ mod tests {
 
         // Public u8 API: 0.25198 * 255 = 64.25 -> 64, or 65 once output
         // dithering is applied. Alpha is synthesized opaque.
-        let options = JxlDecoderOptions::default()
-            .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
+        let options = JxlDecoderOptions::default().with_limits(
+            crate::api::JxlDecoderLimits::default()
+                .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+        );
         let img = crate::decode_with(&data, options).unwrap();
         assert_eq!((img.width, img.height, img.channels), (8, 8, 4));
         for px in img.data.chunks_exact(4) {

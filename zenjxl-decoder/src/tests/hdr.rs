@@ -26,7 +26,8 @@ fn decode_header_with_options(
     options: JxlDecoderOptions,
 ) -> (JxlBasicInfo, JxlDecoder<states::WithImageInfo>) {
     // These HDR fixtures require 32-bit Modular buffers (Level 10).
-    let options = options.with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
+    let mut options = options;
+    options.limits.max_codestream_level = crate::api::JxlCodestreamLevel::Level10;
     let decoder: JxlDecoder<states::Initialized> = JxlDecoder::new(options);
     let mut input: &[u8] = data;
     let decoder: JxlDecoder<states::WithImageInfo> = match decoder.process(&mut input).unwrap() {

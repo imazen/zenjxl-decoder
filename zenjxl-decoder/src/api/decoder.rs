@@ -1845,8 +1845,10 @@ pub(crate) mod tests {
     /// Decode `data` fully (feeding at most `chunk` bytes at a time) and
     /// return `file_length()` from the final decoder.
     fn decode_and_get_file_length(data: &[u8], chunk: usize) -> Option<u64> {
-        let mut options = JxlDecoderOptions::default()
-            .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
+        let mut options = JxlDecoderOptions::default().with_limits(
+            crate::api::JxlDecoderLimits::default()
+                .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+        );
         options.limits.max_memory_bytes = None;
         let mut initialized = JxlDecoder::<states::Initialized>::new(options);
 
@@ -1933,8 +1935,10 @@ pub(crate) mod tests {
     fn file_length_after_skipping_last_frame() {
         for fixture in ["green_queen_vardct_e3.jxl", "candle.jxl"] {
             let data = crate::util::test::fixture_bytes(fixture);
-            let mut options = JxlDecoderOptions::default()
-                .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
+            let mut options = JxlDecoderOptions::default().with_limits(
+                crate::api::JxlDecoderLimits::default()
+                    .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+            );
             options.limits.max_memory_bytes = None;
             let mut input: &[u8] = &data;
             let mut decoder = match JxlDecoder::<states::Initialized>::new(options)
@@ -2472,8 +2476,10 @@ pub(crate) mod tests {
     ) -> Result<(Vec<Image<T>>, usize, usize)> {
         let options = JxlDecoderOptions {
             premultiply_output: premultiply,
-            ..JxlDecoderOptions::default()
-                .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10)
+            ..JxlDecoderOptions::default().with_limits(
+                crate::api::JxlDecoderLimits::default()
+                    .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+            )
         };
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
         let mut input = file;
