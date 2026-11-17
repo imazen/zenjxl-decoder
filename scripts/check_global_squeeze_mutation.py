@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
 """Replay the original grid choice in the owned checkout, preserving the original binary."""
 import argparse
 import hashlib

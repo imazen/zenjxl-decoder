@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! A valid global-to-HF inverse-squeeze transition must retain its full inputs.
 //! Stream from [encoder issue 144](https://github.com/imazen/jxl-encoder/issues/144),
 //! with native v0.12 transform metadata checked.

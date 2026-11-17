@@ -388,3 +388,7 @@ ci-iterator-check:
 ci-iterator-toolchain:
     rustup component add --toolchain 1.100.0 rustfmt clippy
     just ci-iterator-check
+
+# The PR source/license checks, without compiling.
+source-check:
+    ./ci/pull_request_checks.sh
