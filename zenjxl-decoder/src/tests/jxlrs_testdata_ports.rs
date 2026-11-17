@@ -156,7 +156,7 @@ fn exif_brob_box_payload_sizes() {
 /// Returns how many times it flushed, so callers can prove the partial-render
 /// path actually ran rather than the file bailing out before the frame body.
 fn decode_partial_with_flush(data: &[u8], chunk_size: usize) -> crate::error::Result<usize> {
-    super::partial_decode::decode_partial(data, chunk_size, false, |_, _, _| {})
+    super::partial_decode::decode_partial(data, chunk_size, false, true, |_, _, _| {})
         .map(|result| result.flushes)
 }
 

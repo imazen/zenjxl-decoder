@@ -39,6 +39,7 @@ pub(super) fn decode_partial(
     data: &[u8],
     chunk: usize,
     parallel: bool,
+    flush_intermediate: bool,
     mut on_flush: impl FnMut(usize, usize, &[Image<f32>]),
 ) -> Result<PartialFrames> {
     assert!(chunk > 0);
@@ -107,9 +108,11 @@ pub(super) fn decode_partial(
             match process!(info) {
                 ProcessingResult::Complete { result } => break result,
                 ProcessingResult::NeedsMoreInput { mut fallback, .. } => {
-                    let changed = fallback.flush_pixels(&mut output_buffers(&mut buffers))?;
-                    if changed {
-                        on_flush(data.len() - remaining.len(), result.frames.len(), &buffers);
+                    if flush_intermediate || exhausted!() {
+                        let changed = fallback.flush_pixels(&mut output_buffers(&mut buffers))?;
+                        if changed {
+                            on_flush(data.len() - remaining.len(), result.frames.len(), &buffers);
+                        }
                     }
                     if exhausted!() {
                         result.frames.push(buffers);
@@ -123,10 +126,12 @@ pub(super) fn decode_partial(
             match process!(frame, &mut output_buffers(&mut buffers)) {
                 ProcessingResult::Complete { result } => break result,
                 ProcessingResult::NeedsMoreInput { mut fallback, .. } => {
-                    let changed = fallback.flush_pixels(&mut output_buffers(&mut buffers))?;
-                    result.flushes += 1;
-                    if changed {
-                        on_flush(data.len() - remaining.len(), result.frames.len(), &buffers);
+                    if flush_intermediate || exhausted!() {
+                        let changed = fallback.flush_pixels(&mut output_buffers(&mut buffers))?;
+                        result.flushes += 1;
+                        if changed {
+                            on_flush(data.len() - remaining.len(), result.frames.len(), &buffers);
+                        }
                     }
                     if exhausted!() {
                         result.frames.push(buffers);
@@ -195,12 +200,14 @@ fn upstream_partial_prefix_sweep() {
             let context = format!("{} prefix={prefix} chunk={chunk}", path.display());
             let data = &data[..prefix];
             let reference =
-                decode_partial(data, usize::MAX, false, |_, _, _| {}).unwrap_or_default();
-            let candidate = decode_partial(data, chunk, false, |_, _, _| {}).unwrap_or_default();
+                decode_partial(data, usize::MAX, false, false, |_, _, _| {}).unwrap_or_default();
+            let candidate =
+                decode_partial(data, chunk, false, false, |_, _, _| {}).unwrap_or_default();
             compare_prefix_frames(&context, &reference.frames, &candidate.frames);
             #[cfg(feature = "threads")]
             {
-                let candidate = decode_partial(data, chunk, true, |_, _, _| {}).unwrap_or_default();
+                let candidate =
+                    decode_partial(data, chunk, true, false, |_, _, _| {}).unwrap_or_default();
                 compare_prefix_frames(&context, &reference.frames, &candidate.frames);
             }
             Ok(())
@@ -212,13 +219,54 @@ fn upstream_partial_prefix_sweep() {
 fn upstream_bicycle_prefix_regression() {
     let data = crate::util::test::fixture_bytes("bicycles_web_q85.jxl");
     let data = &data[..29_726];
-    let reference = decode_partial(data, usize::MAX, false, |_, _, _| {}).unwrap();
-    let candidate = decode_partial(data, 2675, false, |_, _, _| {}).unwrap();
+    let reference = decode_partial(data, usize::MAX, false, false, |_, _, _| {}).unwrap();
+    let candidate = decode_partial(data, 2675, false, false, |_, _, _| {}).unwrap();
     compare_prefix_frames("sequential", &reference.frames, &candidate.frames);
     #[cfg(feature = "threads")]
     {
-        let candidate = decode_partial(data, 2675, true, |_, _, _| {}).unwrap();
+        let candidate = decode_partial(data, 2675, true, false, |_, _, _| {}).unwrap();
         compare_prefix_frames("parallel", &reference.frames, &candidate.frames);
+    }
+}
+
+#[test]
+fn upstream_prefix_flush_schedule_regressions() {
+    // Upstream's prefix comparison flushes only at the supplied prefix end.
+    // Retain the exact two ARM CI cases that exposed the first adaptation's
+    // extra intermediate flushes.
+    for (name, prefix, chunk) in [
+        ("squeeze_empty_residual.jxl", 470, 217),
+        (
+            "conformance_test_images/grayscale_public_university.jxl",
+            58_255,
+            3115,
+        ),
+    ] {
+        let data = crate::util::test::fixture_bytes(name);
+        let data = &data[..prefix];
+        let reference = decode_partial(data, usize::MAX, false, false, |_, _, _| {}).unwrap();
+        let candidate = decode_partial(data, chunk, false, false, |_, _, _| {}).unwrap();
+        compare_prefix_frames(name, &reference.frames, &candidate.frames);
+        #[cfg(feature = "threads")]
+        {
+            let candidate = decode_partial(data, chunk, true, false, |_, _, _| {}).unwrap();
+            compare_prefix_frames(name, &reference.frames, &candidate.frames);
+        }
+    }
+    let data = crate::util::test::fixture_bytes("squeeze_empty_residual.jxl");
+    let data = &data[..470];
+    // Retain a separate positive preview control with the same intermediate
+    // flush schedule on both decoders.
+    let preview = decode_partial(data, 217, false, true, |_, _, _| {}).unwrap();
+    assert!(has_pixels(&preview.frames));
+    #[cfg(feature = "threads")]
+    {
+        let parallel_preview = decode_partial(data, 217, true, true, |_, _, _| {}).unwrap();
+        compare_prefix_frames(
+            "squeeze progressive preview",
+            &preview.frames,
+            &parallel_preview.frames,
+        );
     }
 }
 
@@ -255,13 +303,13 @@ fn upstream_parallel_progressive_flushes() {
                 (bytes, frame, samples)
             };
             let mut sequential = Vec::new();
-            let complete = decode_partial(&data, chunk, false, |bytes, frame, buffers| {
+            let complete = decode_partial(&data, chunk, false, true, |bytes, frame, buffers| {
                 sequential.push(capture(bytes, frame, buffers));
             })
             .unwrap();
             assert!(has_pixels(&complete.frames), "{name}: no final pixels");
             let mut count = 0;
-            let parallel = decode_partial(&data, chunk, true, |bytes, frame, buffers| {
+            let parallel = decode_partial(&data, chunk, true, true, |bytes, frame, buffers| {
                 let actual = capture(bytes, frame, buffers);
                 let expected = sequential.get(count).expect("extra parallel flush");
                 assert_eq!(

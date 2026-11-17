@@ -1,5 +1,16 @@
 # Decoder investigation notes
 
+## Resolved: upstream prefix-test flush schedule — 2026-11-17
+
+The prefix comparison's first adaptation flushed after every chunk, while
+upstream's DecodeParams defaults flush only at the supplied prefix end. ARM CI
+exposed a retained LF preview at squeeze_empty_residual prefix 470/chunk 217;
+the same case reproduces on x86. The test helper now selects its flush schedule
+explicitly. Prefix comparisons retain the upstream 5e-3 and pixel-recovery
+assertions; existing truncated-input tests retain intermediate flushes. A
+separate positive preview comparison uses matching schedules. Production
+rendering is unchanged by this test correction.
+
 ## Known bug: external LCMS intensity target — 2026-11-17
 
 The CLI LCMS provider accepts an intensity argument but generates structured

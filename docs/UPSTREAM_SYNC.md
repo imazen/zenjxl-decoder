@@ -63,6 +63,17 @@ The former EC rejection test injected blending information into an unrelated
 header and asserted the over-rejection. It is replaced by valid EC geometry
 controls; the color rejection control explicitly uses Add so it reads its source.
 
+The prefix helper follows upstream's `DecodeParams` defaults: no intermediate
+flushes, followed by a flush at the supplied prefix end. The first adaptation
+incorrectly flushed after every input chunk. CI exposed that mismatch at
+`squeeze_empty_residual.jxl`, prefix 470, chunk 217: an earlier LF preview
+persisted in the chunked buffer. The corrected harness retains the original
+5e-3 bound and recovered-pixel assertions. A deterministic prefix control and
+a separate positive preview comparison with matching flush schedules cover
+that distinction. The other ARM CI control, grayscale_public_university prefix
+58,255/chunk 3,115, is retained under the same end-only schedule. Existing imported flush regressions still request intermediate
+flushes explicitly; no production rendering change or relaxed bound is included.
+
 Upstream's partial-prefix comparison now runs over the ordinary fixture sweep,
 retaining its frame-count, recovered-pixel and 5e-3 intermediate-pixel bounds.
 The existing final-pixel exact comparisons are unchanged. Four named fixtures
