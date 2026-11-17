@@ -1,5 +1,15 @@
 # Decoder investigation notes
 
+## Resolved: structured XYB descriptor parsing — 2026-11-17
+
+The ten-bit XYB/perceptual ColorEncoding bundle previously returned
+InvalidColorEncoding and left have_gamma false. Its transfer-function bundle
+now consumes no bits and initializes have_gamma=true, gamma=3333333. The valid
+wire control reaches the existing public XYB variant; Relative intent remains
+an error. This establishes header parsing and representation, not exhaustive
+whole-image color accuracy. Unknown color/transfer handling still needs a
+truthful source API and management policy.
+
 ## Resolved: before-transform extra-channel references — 2026-11-17
 
 A procedural stream saves a full-canvas before-transform reference and adds

@@ -118,9 +118,9 @@ pub struct CustomTransferFunctionNonserialized {
 #[validate]
 pub struct CustomTransferFunction {
     #[condition(nonserialized.color_space != ColorSpace::XYB)]
-    #[default(false)]
+    #[default(nonserialized.color_space == ColorSpace::XYB)]
     pub have_gamma: bool,
-    #[condition(have_gamma)]
+    #[condition(have_gamma && nonserialized.color_space != ColorSpace::XYB)]
     #[default(3333333)] // XYB gamma
     #[coder(Bits(24))]
     pub gamma: u32,
@@ -193,10 +193,17 @@ pub struct ColorEncoding {
 impl ColorEncoding {
     pub fn check(&self, _: &Empty) -> Result<(), Error> {
         if self.color_space == ColorSpace::Unknown
-            || self.tf.transfer_function == TransferFunction::Unknown
-            || self.color_space == ColorSpace::XYB
+            || (!self.want_icc
+                && !self.tf.have_gamma
+                && self.tf.transfer_function == TransferFunction::Unknown)
         {
             return Err(Error::InvalidColorEncoding);
+        }
+        if !self.want_icc
+            && self.color_space == ColorSpace::XYB
+            && self.rendering_intent != RenderingIntent::Perceptual
+        {
+            return Err(Error::InvalidRenderingIntent);
         }
         // A custom white point or custom primaries that cannot produce an ICC
         // profile (degenerate chromaticities, or matrices outside s15Fixed16)
@@ -230,6 +237,30 @@ impl ColorEncoding {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn xyb_wire_uses_implicit_gamma_and_perceptual_intent() {
+        // all_default=false, want_icc=false, Enum(XYB)=2, intent=Perceptual.
+        // Neither a transfer-function bit nor gamma bits are present.
+        let bytes = [0x08, 0];
+        let mut reader = BitReader::new(&bytes);
+        let encoding = ColorEncoding::read_unconditional(&(), &mut reader, &Empty {}).unwrap();
+        assert_eq!(reader.total_bits_read(), 10);
+        assert_eq!(encoding.color_space, ColorSpace::XYB);
+        assert!(encoding.tf.have_gamma);
+        assert_eq!(encoding.tf.gamma, 3_333_333);
+        assert!(matches!(
+            crate::api::JxlColorEncoding::from_internal(&encoding).unwrap(),
+            crate::api::JxlColorEncoding::XYB {
+                rendering_intent: RenderingIntent::Perceptual
+            }
+        ));
+        let mut reader = BitReader::new(&[0x08, 1]); // Relative intent is invalid for XYB
+        assert!(matches!(
+            ColorEncoding::read_unconditional(&(), &mut reader, &Empty {}),
+            Err(Error::InvalidRenderingIntent)
+        ));
+    }
 
     #[test]
     fn review_color_gray_white_point_bounds() {

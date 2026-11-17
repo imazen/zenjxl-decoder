@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Parse structured XYB descriptors with their implicit gamma and required
+  perceptual intent, using the existing public XYB representation.
+
 - Allow extra-channel blending from qualifying before-color-transform
   references, retaining private origins and checking reference plane geometry.
   Keep rejection when color blending reads a before-transform source.

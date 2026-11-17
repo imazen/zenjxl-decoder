@@ -12,6 +12,15 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+The structured XYB wire descriptor now initializes its implicit gamma
+(`have_gamma=true`, gamma 3333333) without consuming transfer-function bits.
+Its ten-bit perceptual-intent control previously returned InvalidColorEncoding;
+it now parses into the existing public XYB representation. Relative intent is
+still rejected. The optional-ICC and explicit-gamma paths no longer validate
+an unused transfer-function sentinel. This is a header/representation regression,
+not a whole-image XYB-source color accuracy claim. Unknown source descriptions
+remain a separate API proposal in `DECODER_API_PROPOSALS.md`.
+
 Before-color-transform extra-channel Add now accepts a full-canvas reference
 at origin zero. A procedural two-frame stream reuses the unchanged entropy
 payload of upstream's 3x3 RGBA fixture: v0.12 accepts it, while the old fork
