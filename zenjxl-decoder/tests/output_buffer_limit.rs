@@ -11,13 +11,18 @@
 //! the allocation is attempted — on an overcommitting kernel the allocation
 //! otherwise "succeeds" and the prefault OOM-kills the process.
 
-use zenjxl_decoder::api::Error;
+use zenjxl_decoder::api::{Error, JxlCodestreamLevel, JxlDecoderLimits, JxlDecoderOptions};
 
 const SEED: &[u8] = include_bytes!("../../fuzz/regression/oom-15gb-container-issue55");
 
 #[test]
 fn issue55_padded_output_buffer_is_charged_against_max_memory_bytes() {
-    let err = match zenjxl_decoder::decode(SEED) {
+    let err = match zenjxl_decoder::decode_with(
+        SEED,
+        JxlDecoderOptions::default().with_limits(
+            JxlDecoderLimits::default().with_max_codestream_level(JxlCodestreamLevel::Level10),
+        ),
+    ) {
         Ok(image) => panic!(
             "a 15 GB output buffer must be refused, but decoded {}x{}",
             image.width, image.height
