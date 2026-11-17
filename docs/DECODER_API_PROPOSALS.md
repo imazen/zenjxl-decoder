@@ -1,16 +1,17 @@
 # Remaining decoder API decisions
 
-These are proposals, not implemented interfaces. Existing public signatures
-remain unchanged. New public interfaces require owner approval and a PR.
+The intensity-aware profile method below is approved and implemented in this
+change. The other sections remain proposals. Existing public signatures and
+no-argument conversion defaults remain unchanged.
 
-## Intensity-aware ICC conversion
+## Approved intensity-aware ICC conversion
 
 The bundled MoxCMS path can use the decoder's private intensity-aware profile
 builder. An external CMS provider, including the separate CLI's LCMS provider,
 receives the intensity argument but can only call the public no-argument ICC
 conversion, whose generated-profile default is 10000 nits.
 
-Proposed additive entry point:
+Approved additive entry point:
 
 ```rust,ignore
 impl JxlColorProfile {
@@ -31,14 +32,18 @@ Gate: port the upstream 1000-nit PQ-to-linear BT.2100 control to LCMS, retaining
 the original nine expected values and 0.01 absolute bounds. Test both CLI
 feature configurations and the existing exact CMYK whole-image golden.
 
-Executed provider control: `just review-lcms-intensity` returns
-`[0.8704195, 0.8705389, 0.87049097]` for the 1000-nit white, against the
-unchanged expected `[1, 1, 1]` within 0.01. Supplying 10000 instead returns the
-same nine float values. `just review-lcms-intensity --check` is the explicit
-failing reproduction; it is not a silently passing regression test.
+Before correction, the LCMS control returned
+`[0.8704195, 0.8705389, 0.87049097]` for 1000-nit white, with the same nine
+values at target 10000. The approved method now gives
+`[0.9999189, 1.000056, 1.0000011]` at target 1000 and preserves the previous
+10000-nit output. All nine unchanged upstream expected values pass their 0.01
+bounds in both CLI feature configurations. The exact CMYK whole-image golden
+also passes in both. `just review-intensity-check` reproduces the gates;
+`just review-lcms-intensity --check` now passes.
 
-Recommendation: approve this single profile-level method. A second public
-method on `JxlColorEncoding` is unnecessary to fix the provider boundary.
+Existing ICC bytes are borrowed unchanged, independently of the supplied target.
+For structured profiles, invalid nonpositive/nonfinite targets and generation
+errors are propagated. No second public method on `JxlColorEncoding` is added.
 
 ## Unknown source color information
 

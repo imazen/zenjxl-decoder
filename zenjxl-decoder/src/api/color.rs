@@ -1247,6 +1247,33 @@ impl JxlColorProfile {
         }
     }
 
+    /// Generates an ICC profile using the source intensity target in nits.
+    ///
+    /// Existing ICC bytes are borrowed unchanged and do not use the target.
+    /// Structured encodings use it when generating HDR tone-mapping tables.
+    /// The existing [`Self::try_as_icc`] and [`Self::as_icc`] methods retain
+    /// their 10000-nit generated-profile default.
+    ///
+    /// Returns `Ok(None)` if a profile is unavailable, or an error if generation
+    /// fails. For structured encodings, the target must be finite and positive.
+    pub fn try_as_icc_with_intensity_target(
+        &self,
+        intensity_target: f32,
+    ) -> Result<Option<Cow<'_, Vec<u8>>>> {
+        match self {
+            Self::Icc(bytes) => Ok(Some(Cow::Borrowed(bytes))),
+            Self::Simple(encoding) => {
+                if !intensity_target.is_finite() || intensity_target <= 0.0 {
+                    return Err(at!(Error::InvalidIntensityTarget(intensity_target)));
+                }
+                encoding
+                    .maybe_create_profile_with_intensity_target(intensity_target)
+                    .map(|profile| profile.map(Cow::Owned))
+                    .map_err(|error| at!(error))
+            }
+        }
+    }
+
     /// Returns true if both profiles represent the same color encoding.
     ///
     /// Two profiles are the same if they are both simple color encodings
@@ -2540,6 +2567,56 @@ fn create_icc_noop_btoa_tag(tags: &mut Vec<u8>) -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn intensity_profile_conversion_borrows_icc_and_preserves_default() {
+        let icc = JxlColorProfile::Icc(vec![1, 2, 3]);
+        let Some(Cow::Borrowed(borrowed)) = icc.try_as_icc_with_intensity_target(f32::NAN).unwrap()
+        else {
+            panic!("an existing ICC must stay borrowed");
+        };
+        let JxlColorProfile::Icc(original) = &icc else {
+            unreachable!()
+        };
+        assert!(std::ptr::eq(borrowed, original));
+
+        let pq = JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+            white_point: JxlWhitePoint::D65,
+            primaries: JxlPrimaries::BT2100,
+            transfer_function: JxlTransferFunction::PQ,
+            rendering_intent: RenderingIntent::Relative,
+        });
+        let explicit_default = pq.try_as_icc_with_intensity_target(10000.0).unwrap();
+        assert_eq!(pq.try_as_icc(), explicit_default);
+        assert_eq!(Some(pq.as_icc()), explicit_default);
+        assert_ne!(
+            pq.try_as_icc_with_intensity_target(1000.0).unwrap(),
+            explicit_default
+        );
+    }
+
+    #[test]
+    fn intensity_profile_conversion_preserves_generation_errors() {
+        let srgb = JxlColorProfile::Simple(JxlColorEncoding::srgb(false));
+        for target in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(matches!(
+                srgb.try_as_icc_with_intensity_target(target)
+                    .unwrap_err()
+                    .error(),
+                Error::InvalidIntensityTarget(_)
+            ));
+        }
+        let invalid = JxlColorProfile::Simple(JxlColorEncoding::XYB {
+            rendering_intent: RenderingIntent::Relative,
+        });
+        assert!(matches!(
+            invalid
+                .try_as_icc_with_intensity_target(1000.0)
+                .unwrap_err()
+                .error(),
+            Error::InvalidRenderingIntent
+        ));
+    }
 
     #[test]
     fn review_color_s15_fixed_16_endpoints() {

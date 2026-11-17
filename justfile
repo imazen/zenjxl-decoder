@@ -67,6 +67,16 @@ review-metadata-check:
 review-lcms-intensity *args:
     cargo run --locked -p zenjxl-decoder-cli --example hdr_intensity_probe -- {{args}}
 
+# Approved public profile method, external HDR control and exact CMYK goldens.
+review-intensity-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib intensity_profile_conversion -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib intensity_profile_conversion -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder-cli --all-features --lib -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder-cli --no-default-features --lib -- --test-threads=1
+    cargo run --locked -p zenjxl-decoder-cli --example hdr_intensity_probe -- --check
+    cargo run --locked -p zenjxl-decoder-cli --no-default-features --example hdr_intensity_probe -- --check
+    cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
 

@@ -273,15 +273,19 @@ Remaining admission work includes timecode ordering, spot-color solidity and
 the rest of the level-specific rules (including Level 5 Black-channel admission
 and entropy/tree bounds). These are not claimed complete by the size/precision
 checks. Timecode and solidity diagnostics, Unknown source-color preservation,
-intensity-aware external CMS conversion and local-layer output are described in
-[`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). No proposed public API is
-implemented by this tranche.
+local-layer output are described in
+[`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). The separately approved
+intensity-aware profile method is the one implemented API addition.
 
-The external LCMS control is an executed remaining bug: target 1000 white is
-`[0.8704195, 0.8705389, 0.87049097]`, outside upstream's unchanged 0.01 bound
-around `[1, 1, 1]`. Target 10000 returns the same nine values. The diagnostic
-`just review-lcms-intensity --check` fails explicitly; ordinary measurement mode
-prints the values. This differs from the repaired private MoxCMS path.
+The approved `JxlColorProfile::try_as_icc_with_intensity_target` method exposes
+the existing private builder to external CMS providers. Existing ICCs remain
+borrowed, and no-argument conversion keeps its 10000-nit default. LCMS now uses
+the supplied target for both profiles. Its 1000-nit white changes from
+`[0.8704195, 0.8705389, 0.87049097]` to
+`[0.9999189, 1.000056, 1.0000011]`. All nine original HDR bounds and the existing
+exact CMYK whole-image golden pass in both CLI feature configurations.
+`just review-intensity-check` includes both configurations, explicit default/
+borrowing/error controls, the former failing diagnostic and strict Clippy.
 
 The alpha documentation now states the implemented contract: the default
 preserves source association, and `premultiply_output` associates straight
