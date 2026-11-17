@@ -85,9 +85,9 @@ while Level 5 and a smaller caller pixel budget reject it. No pixel allocation
 is attempted by that control. ICC output limits are checked from the predictor
 preamble before allocating the reconstructed profile; encoded-stream limits
 remain separate. Exact limit/limit-plus-one, extra-channel precision and existing
-frame-duration controls pass (`just review-level-check`). This does not yet
-cover cumulative frame area, all level-dependent entropy bounds or metadata
-consistency rules.
+frame-duration controls pass (`just review-level-check`). Cumulative area and
+the selected metadata rules are covered separately above; level-dependent
+entropy bounds and the complete selected-level admission rules are not covered.
 
 The HLG OOTF property control previously compared each fast function with
 itself. It now calls the precise reference and retains the 7.2e-7 bound.
@@ -213,7 +213,7 @@ upstream reference cache. The imported fixture manifest records byte hashes.
 
 ### Import coverage and explicit adaptations
 
-The integrated release all-feature workspace passes, including 1,088 library
+The initial import at `dcf145e2` passes the release all-feature workspace, including 1,088 library
 passes and 29 existing ignores, integrations, CLI, SIMD and doctests. Strict
 all-feature/all-target Clippy and scoped formatting pass. The minimal-feature
 Clippy gate and all 41 selected regressions pass. Six frozen v0.12 RGBA frames
@@ -243,21 +243,43 @@ and preserves links when listing unmatched names. Important dispositions:
 | Smooth-squeeze/Jinc preview filters and their fast-math helper | Those implementations are absent; their normalization/accuracy tests need the corresponding feature, rather than an artificial substitute. |
 | Rect::intersects and upstream assertion-helper macros | The APIs/helpers differ. Rectangle clipping and byte-overflow controls are retained; an absent intersection method is not created just for the test. Existing exact image assertions remain intact. |
 | HDR LUT macro | Explicitly imported, with stricter exact table equality at two intensity targets. Unsupported CPU wrappers are not execution coverage. |
-| Crop/prefix/progressive comparison harnesses | Existing pipeline, chunk, seek and parallel sweeps retain their assertions. This import does not claim every upstream crop API or intermediate progressive milestone has an equivalent downstream test. |
+| Partial-prefix and progressive comparisons | Upstream's ordinary-fixture prefix sweep now runs with the original intermediate bounds and recovery assertions. Four additional inputs require exact sequential/parallel flush agreement. Existing final-pixel gates remain exact. |
+| Display crop/region of interest | Upstream's `crop_region` API is absent. Encoded cropped-frame regressions do not substitute for its API assertions. |
+| Portable SIMD byte/f16 operations | Eight upstream test bodies are retained in `zenjxl-decoder-simd/src/upstream_2026_11.rs`: byte stores, half-float loads/stores, special values, underflow and scalar comparisons. Their original assertions are unchanged. Thirty-two native wrappers pass; unavailable instruction sets are not execution coverage. |
+| I16/U64 SIMD and i16/u16 loading or integer interleaved stores | The corresponding vector types/methods are absent. Do not add unused production APIs solely to compile upstream tests. |
+| Entropy maximum-bit and row-run helpers | The corresponding helpers/row API are absent; this fork reads samples through its existing decoder. Those helper assertions are excluded, rather than represented by unrelated tests. |
+| HLG vector and Xorshift u64-vector helpers | Those entry points are absent. Existing scalar HLG fast/precise controls and scalar64-vector noise goldens remain; they do not establish coverage of absent implementations. |
+| Group scheduler boundary assertions | Renamed downstream scheduler controls retain the relevant boundaries and add empty/edge/strip cases. |
 
 This is a bounded regression import with documented implementation/API
 differences, not a complete upstream assertion-equivalence or conformance claim.
 
 ### Remaining source-review queue
 
-The small verified color and parser repairs above do not close all source-review
-questions. Before-color-transform extra-channel blending needs a valid encoded
-positive control and reference geometry checks. Unknown/XYB descriptors need
-valid-wire controls and a faithful representation/management policy. Explicit
-squeeze group validation and the dated implicit-default-prefix rule need frame
-context and targeted controls; keep legitimate empty-channel compaction.
-Selected-level and cumulative animation/metadata/container rules remain
-independent validation tasks beyond the global frame bounds added here.
+The private fixes above include the encoded before-transform EC control,
+implicit XYB descriptor, cumulative animation area and selected metadata rules.
+Remaining admission work includes timecode ordering, spot-color solidity and
+the rest of the level-specific rules (including Level 5 Black-channel admission
+and entropy/tree bounds). These are not claimed complete by the size/precision
+checks. Timecode and solidity diagnostics, Unknown source-color preservation,
+intensity-aware external CMS conversion and local-layer output are described in
+[`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). No proposed public API is
+implemented by this tranche.
+
+The external LCMS control is an executed remaining bug: target 1000 white is
+`[0.8704195, 0.8705389, 0.87049097]`, outside upstream's unchanged 0.01 bound
+around `[1, 1, 1]`. Target 10000 returns the same nine values. The diagnostic
+`just review-lcms-intensity --check` fails explicitly; ordinary measurement mode
+prints the values. This differs from the repaired private MoxCMS path.
+
+The alpha documentation now states the implemented contract: the default
+preserves source association, and `premultiply_output` associates straight
+input. There is no explicit unpremultiply-output option. The upstream AlphaMode
+test is an API gap, not covered by the existing premultiplication tests.
+
+The explicit squeeze-grid and implicit-default-prefix questions require a
+released-versus-draft compatibility contract. Preserve legitimate empty-channel
+compaction and the existing partial-recovery control while that remains open.
 
 Wide squeeze remains a reachability question. This fork's scalar tail uses the
 same I32 kernel as SIMD bodies, so agreement is not an independent width oracle.

@@ -1,5 +1,23 @@
 # Decoder investigation notes
 
+## Known bug: external LCMS intensity target — 2026-11-17
+
+The CLI LCMS provider accepts an intensity argument but generates structured
+ICC profiles through the public no-argument conversion. The executed upstream
+1000-nit PQ control returns white [0.8704195, 0.8705389, 0.87049097], outside
+its unchanged 0.01 bound around [1, 1, 1]. Target 10000 returns the same nine
+values. `just review-lcms-intensity --check` reproduces the failure explicitly;
+measurement mode prints both targets. The private MoxCMS path is already
+corrected. The proposed additive public profile method and unchanged-default
+contract are in docs/DECODER_API_PROPOSALS.md; it is not implemented yet.
+
+The combined level-validation run also identified 29 positive fixture tests
+using Level 5 for streams declaring 32-bit Modular buffers. Released libjxl's
+VerifyLevelSettings identifies that flag as requiring Level 10. Feature/pixel
+helpers now select Level 10 explicitly; their existing numerical, file-length
+and pixel assertions remain unchanged. The independent Level 5 rejection and
+boundary controls remain active.
+
 ## Resolved: cumulative frame and metadata consistency — 2026-11-17
 
 The Level 5 zero-duration area counter is separate from the frame-header work
