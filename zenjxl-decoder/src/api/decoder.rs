@@ -3011,8 +3011,12 @@ pub(crate) mod tests {
             else {
                 panic!("incomplete frame header");
             };
-            let mut storage = vec![0xa5; 13];
-            let mut buffers = [JxlOutputBuffer::new(&mut storage[1..], 1, 12)];
+            // Starting from u16 storage guarantees the one-byte offset is
+            // unaligned, independently of this target's stack placement.
+            let mut aligned = [0xa5a5_u16; 7];
+            let storage: &mut [u8] = bytemuck::cast_slice_mut(&mut aligned);
+            assert_eq!(storage[1..].as_ptr().addr() % 2, 1);
+            let mut buffers = [JxlOutputBuffer::new(&mut storage[1..13], 1, 12)];
             assert!(matches!(
                 frame.process(&mut input, &mut buffers).unwrap(),
                 ProcessingResult::Complete { .. }
@@ -3021,8 +3025,9 @@ pub(crate) mod tests {
                 .into_iter()
                 .flat_map(u16::to_ne_bytes)
                 .collect();
-            assert_eq!(&storage[1..], expected);
+            assert_eq!(&storage[1..13], expected);
             assert_eq!(storage[0], 0xa5);
+            assert_eq!(storage[13], 0xa5);
         }
     }
 
