@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Retry a short Huffman-table prefix when its buffered-input allocation cap
+  needs another byte, while preserving the allocation and hard alphabet limits.
+
 - Reject zero or oversized frame dimensions before setup, retaining upstream's
   dimension regression and exact global-limit boundary controls.
 

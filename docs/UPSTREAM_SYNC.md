@@ -12,6 +12,13 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Byte-accurate refill exposed a separate incremental-prefix assumption in this
+fork's Huffman allocation guard. An alphabet of 520 with only two table bits
+buffered produced fatal `AlphabetTooLargeHuff(520)`. The guard now asks for the
+one additional byte its allocation policy requires, then retries. Allocation
+caps and the hard alphabet error remain intact. A direct prefix regression
+and the formerly failing progressive LF header-budget control pass.
+
 Upstream's `test_out_of_bounds_reports_bytes` reproduced a unit mismatch in
 `BitReader::skip_bits`: nine missing bits were reported as nine bytes instead
 of two. Skip and optimistic-error paths now ceil-divide missing bits by eight,

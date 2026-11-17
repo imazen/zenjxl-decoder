@@ -1,5 +1,16 @@
 # Decoder investigation notes
 
+## Resolved: Huffman allocation guard on an incomplete prefix — 2026-11-17
+
+The full suite after byte-accurate refill reproduced
+`AlphabetTooLargeHuff(520)` in chunked fixture decoding and the progressive LF
+header-budget test. The input-proportional allocation guard treated a short
+prefix as a fatal alphabet error. It now requests enough buffered bytes to
+satisfy the same cap before allocating. The two-byte header-fragment test
+requires a one-byte refill and retains a fatal hard-alphabet-limit control.
+The formerly failing LF header-budget control passes. No allocation cap was
+removed or raised.
+
 ## Resolved: frame-header dimension validation — 2026-11-17
 
 Upstream's frame-dimension regression first accepted a zero width in the

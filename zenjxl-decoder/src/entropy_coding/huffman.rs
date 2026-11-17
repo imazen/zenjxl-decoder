@@ -522,19 +522,16 @@ impl HuffmanCodes {
         if total_alphabet > Self::MAX_TOTAL_ALPHABET_SIZE {
             return Err(at!(Error::AlphabetTooLargeHuff(total_alphabet)));
         }
-        // Bound per-table allocation relative to remaining input.
-        // A Huffman code-length stream needs at least ~1 bit per symbol
-        // (repeat codes can batch, but the code-length-code overhead
-        // consumes the savings). With only K bits remaining, an al_size
-        // of K * RATIO entries is the maximum that could plausibly be
-        // encoded; anything beyond that will fail with OutOfBounds during
-        // decode_huffman_code_lengths anyway, so reject early to avoid
-        // the allocation.
+        // Bound per-table allocation relative to buffered input. A short
+        // incremental prefix is not proof that the alphabet is invalid:
+        // request enough bytes to satisfy this allocation policy and retry.
+        // The hard format/total-alphabet limits above remain fatal errors.
         let available = br.total_bits_available();
         let input_cap = available.saturating_mul(Self::ALPHABET_BITS_RATIO);
         for &sz in &alphabet_sizes {
             if sz > 1 && sz > input_cap {
-                return Err(at!(Error::AlphabetTooLargeHuff(sz)));
+                let missing_bits = sz.div_ceil(Self::ALPHABET_BITS_RATIO) - available;
+                return Err(at!(Error::OutOfBounds(missing_bits.div_ceil(8))));
             }
         }
         let tables = alphabet_sizes
@@ -603,6 +600,21 @@ impl HuffmanCodes {
 mod test {
     use super::*;
     use test_log::test;
+
+    #[test]
+    fn alphabet_allocation_guard_requests_more_prefix_bytes() {
+        // varint16(519) declares alphabet 520 and leaves two input bits.
+        // The allocation cap needs three bits before decoding this table.
+        let mut reader = BitReader::new(&[0xf3, 0x00]);
+        let result = HuffmanCodes::decode(1, &mut reader);
+        assert!(matches!(result, Err(ref e) if matches!(e.error(), Error::OutOfBounds(1))));
+        // The format's hard alphabet limit remains a fatal error.
+        let mut reader = BitReader::new(&[0xff, 0xff, 0x0f]);
+        let result = HuffmanCodes::decode(1, &mut reader);
+        assert!(
+            matches!(result, Err(ref e) if matches!(e.error(), Error::AlphabetTooLargeHuff(_)))
+        );
+    }
 
     #[test]
     fn byte_histogram() {
