@@ -19,6 +19,12 @@ matching ordinary reads and the refill API. All seven bit-reader-filtered
 checks pass. Both upstream f16 denormal tests are also retained; all eighteen
 local f16 checks pass, including this fork's independent IEEE controls.
 
+Upstream's frame-dimension regression exposed missing header-local checks.
+Zero dimensions, dimensions above 2^30 and area above 2^40 are now rejected
+before frame setup. The original negatives and exact positive boundaries
+pass without allocating those image sizes. These are global frame bounds;
+they do not establish every selected-level or cumulative animation limit.
+
 All four `jxl_cms::moxcms` tests are adapted by changing only their crate path.
 The HDR PQ test first produced 0.86840016 for 1000-nit white, against its
 unchanged 0.01 bound around 1.0. The CMS now passes intensity through a private

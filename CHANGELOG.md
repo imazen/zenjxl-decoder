@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Reject zero or oversized frame dimensions before setup, retaining upstream's
+  dimension regression and exact global-limit boundary controls.
+
 - Report bit-reader skip and optimistic-read refill deficits in bytes, matching
   ordinary reads; retain upstream's exact unit regression.
 

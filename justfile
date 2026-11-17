@@ -9,6 +9,16 @@ upstream-regression-check target="" filter="upstream_2026_11" profile="":
     if [[ '{{profile}}' == release ]]; then args+=(--release); fi
     cargo test --locked -p zenjxl-decoder --all-features --lib "${args[@]}" '{{filter}}' -- --test-threads=1
 
+# Caller holds the heavy-job lock and resource wrapper.
+upstream-foundation-check:
+    just upstream-regression-check '' bit_reader
+    just upstream-regression-check '' util::float16
+    just upstream-regression-check '' test_frame_dimension_checks
+
+# Read a completed job while the rest of its workflow is still running.
+ci-job-log job output:
+    gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test` or any CI job.

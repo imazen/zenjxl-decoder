@@ -1,5 +1,14 @@
 # Decoder investigation notes
 
+## Resolved: frame-header dimension validation — 2026-11-17
+
+Upstream's frame-dimension regression first accepted a zero width in the
+header check. The guard now rejects zero dimensions, either dimension above
+2^30 and area above 2^40 before frame setup. The original negative cases and
+positive exact global boundaries pass without allocating those images.
+Selected-level dimensions and cumulative animation bounds remain distinct
+validation work; this change does not claim those complete.
+
 ## Resolved: bit-reader refill deficit units — 2026-11-17
 
 The upstream byte-deficit regression fails before the repair: skipping 17

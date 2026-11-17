@@ -716,6 +716,20 @@ impl FrameHeader {
     }
 
     fn check(&self, nonserialized: &FrameHeaderNonserialized) -> Result<(), Error> {
+        if self.width == 0 || self.height == 0 {
+            return Err(Error::InvalidImageSize(
+                self.width as usize,
+                self.height as usize,
+            ));
+        }
+        if self.width > (1 << 30)
+            || self.height > (1 << 30)
+            || u64::from(self.width) * u64::from(self.height) > (1 << 40)
+        {
+            return Err(Error::ImageDimensionTooLarge(u64::from(
+                self.width.max(self.height),
+            )));
+        }
         if let Some((dim_shift, effective_upsampling)) = nonserialized
             .extra_channel_info
             .iter()
@@ -924,6 +938,34 @@ mod test_frame_header {
         assert_eq!(frame_header.name, String::from(""));
         assert_eq!(frame_header.restoration_filter.epf_iters, 0);
         assert!(!frame_header.restoration_filter.gab);
+    }
+
+    #[test]
+    fn test_frame_dimension_checks() {
+        let (file_header, mut frame, _) =
+            read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
+        let context = file_header.frame_header_nonserialized();
+        for (width, height) in [(0, 8), (8, 0)] {
+            frame.width = width;
+            frame.height = height;
+            assert!(matches!(
+                frame.check(&context),
+                Err(Error::InvalidImageSize(..))
+            ));
+        }
+        for (width, height) in [((1 << 30) + 1, 1), (1, (1 << 30) + 1), (1 << 21, 1 << 20)] {
+            frame.width = width;
+            frame.height = height;
+            assert!(matches!(
+                frame.check(&context),
+                Err(Error::ImageDimensionTooLarge(_))
+            ));
+        }
+        for (width, height) in [(1 << 30, 1), (1, 1 << 30), (1 << 20, 1 << 20)] {
+            frame.width = width;
+            frame.height = height;
+            frame.check(&context).unwrap();
+        }
     }
 
     #[test]

@@ -272,6 +272,29 @@ mod tests {
         assert!(tiny.is_finite());
     }
 
+    // jxl-rs f370be42: exact subnormal values and ties-to-even boundaries.
+    #[test]
+    fn test_denormal_values() {
+        for bits in 1u16..0x0400 {
+            let expected = bits as f32 * 2f32.powi(-24);
+            assert_eq!(f16::from_bits(bits).to_f32(), expected, "bits {bits:#06x}");
+            assert_eq!(f16::from_bits(bits | 0x8000).to_f32(), -expected);
+            assert_eq!(f16::from_f32(expected).to_bits(), bits);
+            assert_eq!(f16::from_f32(-expected).to_bits(), bits | 0x8000);
+        }
+        assert_eq!(f16::from_bits(0x03ff).to_f32(), 1023.0 * 2f32.powi(-24));
+        assert_eq!(f16::from_bits(0x0400).to_f32(), 2f32.powi(-14));
+    }
+
+    #[test]
+    fn test_denormal_rounding() {
+        let ulp = 2f32.powi(-24);
+        assert_eq!(f16::from_f32(1.5 * ulp).to_bits(), 0x0002);
+        assert_eq!(f16::from_f32(2.5 * ulp).to_bits(), 0x0002);
+        assert_eq!(f16::from_f32(2.75 * ulp).to_bits(), 0x0003);
+        assert_eq!(f16::from_f32(1023.75 * ulp).to_bits(), 0x0400);
+    }
+
     #[test]
     fn test_roundtrip_normal() {
         let test_values: [f32; 8] = [0.5, 1.0, 2.0, 100.0, 0.001, -0.5, -1.0, -100.0];
