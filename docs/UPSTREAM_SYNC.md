@@ -96,7 +96,11 @@ while Level 5 and a smaller caller pixel budget reject it. No pixel allocation
 is attempted by that control. ICC output limits are checked from the predictor
 preamble before allocating the reconstructed profile; encoded-stream limits
 remain separate. Exact limit/limit-plus-one, extra-channel precision and existing
-frame-duration controls pass (`just review-level-check`). Cumulative area and
+frame-duration controls pass (`just review-level-check`). The PR pixel runner
+also explicitly allows Level 10: its `mul_no_extra_channels` and `spot` inputs
+otherwise stop at their 32-bit Modular declarations. The corpus selection and
+pixel-comparison bounds are unchanged; this is not a selected-level admission
+gate. Cumulative area and
 the selected metadata rules are covered separately above; level-dependent
 entropy bounds and the complete selected-level admission rules are not covered.
 
