@@ -8,11 +8,18 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Added
 
+- Add `JxlColorProfile::try_as_icc_with_intensity_target` for fallible
+  intensity-aware profile generation by external CMS providers, retaining
+  borrowed ICC bytes and existing no-argument defaults.
+
 - Operational API: preserve timeout/future stop reasons with `Error::Stopped` and `stop_reason()`, while keeping the coarse cancellation class. Add an opt-in frame-header count cap covering hidden frames and replay; existing defaults remain unchanged.
 
 - Source-metadata API: extra-channel precision/spot/CFA details, frame timecodes, fallible source layer facts, and fallible frame selection. Existing Eq structs, fields and pixel-output behavior remain unchanged.
 
 ### Fixed
+
+- Honor the supplied intensity target in the CLI LCMS provider; retain
+  upstream's nine-sample HDR control and exact CMYK golden in both feature modes.
 
 - Track cumulative Level 5 zero-duration frame area separately from decoder
   work budgets, restoring stream state on seek and clearing it on rewind.

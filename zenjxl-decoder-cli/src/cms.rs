@@ -22,14 +22,14 @@ impl JxlCms for Lcms2Cms {
         _max_pixels_per_transform: usize,
         input: JxlColorProfile,
         output: JxlColorProfile,
-        _intensity_target: f32,
+        intensity_target: f32,
     ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send + Sync>>)> {
         // Convert profiles to ICC
         let input_icc = input
-            .try_as_icc()
+            .try_as_icc_with_intensity_target(intensity_target)?
             .ok_or_else(|| Error::CmsError("Cannot create ICC for input profile".into()))?;
         let output_icc = output
-            .try_as_icc()
+            .try_as_icc_with_intensity_target(intensity_target)?
             .ok_or_else(|| Error::CmsError("Cannot create ICC for output profile".into()))?;
 
         // Parse profiles once to determine channel counts
@@ -200,6 +200,49 @@ mod tests {
             transfer_function: JxlTransferFunction::Linear,
             rendering_intent: RenderingIntent::Relative,
         })
+    }
+
+    /// Upstream's unchanged nine-sample HDR control, through LCMS.
+    #[test]
+    fn hdr_pq_intensity_target_matches_upstream_control() {
+        let profile = |transfer_function| {
+            JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+                white_point: JxlWhitePoint::D65,
+                primaries: JxlPrimaries::BT2100,
+                transfer_function,
+                rendering_intent: RenderingIntent::Relative,
+            })
+        };
+        let (_, mut transforms) = Lcms2Cms
+            .initialize_transforms(
+                1,
+                1024,
+                profile(JxlTransferFunction::PQ),
+                profile(JxlTransferFunction::Linear),
+                1000.0,
+            )
+            .unwrap();
+        let pq_1000 = 0.7518271f32;
+        let input = [
+            pq_1000,
+            pq_1000,
+            pq_1000,
+            0.0,
+            0.0,
+            151.0 / 255.0,
+            0.0,
+            0.0,
+            pq_1000,
+        ];
+        let mut output = [0.0f32; 9];
+        transforms[0].do_transform(&input, &mut output).unwrap();
+        let expected = [1.0, 1.0, 1.0, 0.0, 0.0, 0.9072, 0.0697, 0.0697, 1.0];
+        for (index, (&actual, expected)) in output.iter().zip(expected).enumerate() {
+            assert!(
+                (actual - expected).abs() < 0.01,
+                "Output {index} = {actual}, expected {expected} within 0.01"
+            );
+        }
     }
 
     /// The embedded profile of the committed `cmyk_layers.jxl` conformance image.

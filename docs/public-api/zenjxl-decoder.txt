@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenjxl-decoder.txt 739 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 113 lines (125 hidden + 0 excluded-feature)
+# files: zenjxl-decoder.txt 740 lines (supported surface) | zenjxl-decoder.features.txt 13 added (features: all-simd,allow-unsafe,avx,avx512,cms,jpeg,moxcms,neon,profiling,rayon,sse42,threads,tracing,wasm128) | zenjxl-decoder.internal.txt 113 lines (125 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,7 +15,7 @@
 #   pub consts/statics                          4
 #   pub macros                                  1
 #   free functions                             10
-#   inherent methods                          214
+#   inherent methods                          215
 #   struct fields                             152
 #   enum variants                             227
 #   re-exports                                  3
@@ -25,9 +25,9 @@
 #
 # per-module pub lines:
 #   (root)                            9
-#   api                             663
+#   api                             664
 
-## items (668 lines)
+## items (669 lines)
 
 pub mod zenjxl_decoder
 pub mod api
@@ -274,6 +274,7 @@ pub fn api::JxlColorProfile::is_cmyk(&self) -> bool
 pub fn api::JxlColorProfile::same_color_encoding(&self, &Self) -> bool
 pub fn api::JxlColorProfile::transfer_function(&self) -> core::option::Option<&api::JxlTransferFunction>
 pub fn api::JxlColorProfile::try_as_icc(&self) -> core::option::Option<alloc::borrow::Cow<'_, alloc::vec::Vec<u8>>>
+pub fn api::JxlColorProfile::try_as_icc_with_intensity_target(&self, f32) -> api::Result<core::option::Option<alloc::borrow::Cow<'_, alloc::vec::Vec<u8>>>>
 pub fn api::JxlColorProfile::with_linear_tf(&self) -> core::option::Option<Self>
 pub enum api::JxlColorType
 pub api::JxlColorType::Bgr

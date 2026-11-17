@@ -11,16 +11,17 @@ assertions; existing truncated-input tests retain intermediate flushes. A
 separate positive preview comparison uses matching schedules. Production
 rendering is unchanged by this test correction.
 
-## Known bug: external LCMS intensity target — 2026-11-17
+## Resolved: external LCMS intensity target — 2026-11-17
 
-The CLI LCMS provider accepts an intensity argument but generates structured
-ICC profiles through the public no-argument conversion. The executed upstream
-1000-nit PQ control returns white [0.8704195, 0.8705389, 0.87049097], outside
-its unchanged 0.01 bound around [1, 1, 1]. Target 10000 returns the same nine
-values. `just review-lcms-intensity --check` reproduces the failure explicitly;
-measurement mode prints both targets. The private MoxCMS path is already
-corrected. The proposed additive public profile method and unchanged-default
-contract are in docs/DECODER_API_PROPOSALS.md; it is not implemented yet.
+The CLI LCMS provider accepted an intensity argument but generated structured
+ICC profiles through no-argument conversion. The 1000-nit PQ control returned
+white [0.8704195, 0.8705389, 0.87049097], outside the unchanged 0.01 bound around
+[1, 1, 1]. The owner-approved additive profile method now exposes intensity-aware
+conversion, retaining borrowed ICC bytes and existing no-argument defaults.
+LCMS white is now [0.9999189, 1.000056, 1.0000011]. All nine original HDR bounds
+and the exact CMYK golden pass in both CLI feature configurations. The API
+addition follows the required PR path. `just review-intensity-check` reproduces
+the profile, HDR, CMYK and strict Clippy gates.
 
 The combined level-validation run also identified 29 positive fixture tests
 using Level 5 for streams declaring 32-bit Modular buffers. Released libjxl's
