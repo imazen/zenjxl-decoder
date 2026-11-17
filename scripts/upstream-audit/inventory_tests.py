@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# Copyright (c) Imazen LLC. BSD-3-Clause.
+# Copyright (c) Imazen LLC.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
 """Locate upstream tests for manual assertion review; names do not prove coverage.
 
 Scans ordinary #[test] functions and named test_all_instruction_sets! calls.

@@ -1,3 +1,8 @@
+// Copyright (c) Imazen LLC.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //! Transposed source/stream from encoder issue 144.
 //! JXL SHA256: 151c0ea84bc7cbc633655e771ac8a632fdb6930ea79aa674d8c8932bf15356d3.
 pub(super) const STREAM_HEX: &str = concat!(
