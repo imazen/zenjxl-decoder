@@ -1,5 +1,26 @@
 # Decoder investigation notes
 
+## Upstream regression import validation — 2026-11-17
+
+The integrated release all-feature workspace passes: the decoder library
+reports 1,088 passes with 29 existing ignores; integration, CLI, SIMD and
+doctest gates also pass. Caller-provided codec-corpus inputs and the two
+required PNG references were present, with those reference/input hashes
+verified. This is regular-suite coverage, not all ignored conformance tests.
+Strict all-feature/all-target workspace Clippy and scoped formatting pass.
+The no-default-feature library Clippy gate and all 41 selected import/boundary
+regressions pass. The native i686 overflow reproduction remains its separately
+executed before/after control; final platform CI is tracked independently.
+
+Six frozen libjxl v0.12 RGBA frames have zero differing bytes: both crop
+animation frames, extra-channel shift, squeeze corner patch and both reordered
+multiframe frames. The comparison verifies input/reference SHA-256 and keeps
+both renderers and chunk controls exact. Reproduce with the `upstream-import-*`
+and `upstream-frozen-oracle` justfile targets. Fifteen imported fixture files
+retain upstream blob and SHA-256 identities; the sync ledger records test
+adaptations, absent APIs and remaining validation questions. No new ignore,
+silent missing-file skip or relaxed numerical/pixel tolerance was added.
+
 ## Resolved: rectangle byte offsets and clipping overflow — 2026-11-17
 
 The upstream byte-offset regression does not panic in the old release build:

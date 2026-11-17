@@ -41,7 +41,7 @@ for crate in ("jxl", "jxl_cms", "jxl_simd", "jxl_transforms", "jxl-gainmap", "jx
                 line = source.count("\n", 0, match.start()) + 1
                 cases.append({
                     "kind": kind,
-                    "upstream": f"https://github.com/libjxl/jxl-rs/blob/{args.revision}/{relative}#L{line}",
+                    "upstream": f"https://github.com/libjxl/jxl-rs/blob/{args.revision}/{relative.as_posix()}#L{line}",
                     "name": name,
                     "same_name_locations": sorted(names.get(name, ())),
                 })

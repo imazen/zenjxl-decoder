@@ -136,6 +136,13 @@ upstream reference cache. The imported fixture manifest records byte hashes.
 
 ### Import coverage and explicit adaptations
 
+The integrated release all-feature workspace passes, including 1,088 library
+passes and 29 existing ignores, integrations, CLI, SIMD and doctests. Strict
+all-feature/all-target Clippy and scoped formatting pass. The minimal-feature
+Clippy gate and all 41 selected regressions pass. Six frozen v0.12 RGBA frames
+retain zero differing bytes with verified input/reference hashes. These finite
+gates do not imply all ignored conformance tests or unavailable CPU tiers ran.
+
 All fifteen missing upstream inputs are retained and hash-checked: nine core
 JXL inputs, five gain-map bundles and one RGB16 integration input, 3,676 bytes
 in total. The 128 already-identical core inputs are reused. The original LF

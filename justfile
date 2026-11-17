@@ -20,6 +20,10 @@ upstream-import-workspace-check:
     python3 scripts/upstream-audit/prepare_feature_references.py --check
     cargo test --locked --release --workspace --all-features -- --test-threads=1
 
+upstream-import-minimal-check:
+    cargo clippy --locked -p zenjxl-decoder --no-default-features --lib -- -D warnings
+    cargo test --locked --release -p zenjxl-decoder --no-default-features --lib -- upstream_ container::gain_map review_color_ review_dci test_out_of_bounds_reports_bytes test_apply_patch_delta_bounds test_patch_area_limit rect_byte_width_overflow rect_large_coord_clip hlg_ootf test_frame_dimension_checks alphabet_allocation_guard --test-threads=1
+
 # Exact upstream coordinate regressions; use debug for checked-arithmetic control.
 upstream-boundary-check profile="release":
     #!/usr/bin/env bash
