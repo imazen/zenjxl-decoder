@@ -261,3 +261,28 @@ allocation-status:
 
 allocation-summary logs:
     python3 scripts/perf/allocation_summary.py {{quote(logs)}}
+
+# Exact embedded issue-144 source/stream; no external corpus is needed.
+global-squeeze-regression:
+    cargo clippy --locked -p zenjxl-decoder --lib -- -D warnings
+    cargo test --locked -p zenjxl-decoder --test global_squeeze_grid -- --nocapture --test-threads=1
+
+global-squeeze-mutation revision output:
+    python3 scripts/check_global_squeeze_mutation.py {{quote(revision)}} {{quote(output)}}
+
+# Frozen feature inputs and the two pinned-reference PNGs must be supplied.
+global-squeeze-integrated:
+    python3 scripts/upstream-audit/prepare_feature_references.py --check
+    cargo fmt -p zenjxl-decoder -p zenjxl-decoder-cli -p zenjxl-decoder-macros -p zenjxl-decoder-simd -- --check
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+    cargo test --locked --release --workspace --all-features -- --test-threads=1
+    cargo test --locked --release --workspace --no-default-features -- --test-threads=1
+    cargo test --locked --release --workspace --no-default-features --features threads,all-simd -- --test-threads=1
+
+# Retain the target and profiles for selected make_grids region inspection.
+global-squeeze-coverage:
+    cargo llvm-cov --locked --no-report -p zenjxl-decoder --features threads --test global_squeeze_grid -- --test-threads=1
+
+global-squeeze-regions llvm_directory executable profile output:
+    python3 scripts/export_global_squeeze_coverage.py {{quote(llvm_directory)}} {{quote(executable)}} {{quote(profile)}} {{quote(output)}}

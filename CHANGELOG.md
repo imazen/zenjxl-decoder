@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Keep inverse-squeeze intermediates global while both inputs are global,
+  avoiding empty group views for valid deeply squeezed grayscale channels.
+  Exact source regressions cover both orientations and dither modes.
+
 - Allocate initialized image storage through bytemuck's fallible zeroed allocator,
   including with `allow-unsafe`; preserve output prefaulting, alignment and memory accounting (#18, `1cb97733`).
 

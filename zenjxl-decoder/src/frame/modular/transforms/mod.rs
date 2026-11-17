@@ -88,16 +88,13 @@ pub fn make_grids(
             }
             TransformStep::HSqueeze { buf_in, buf_out }
             | TransformStep::VSqueeze { buf_in, buf_out } => {
-                let mut grid_kind = buffer_info[buf_in[0]]
+                // Global inputs remain a whole channel while inverse squeeze
+                // grows the intermediate output. Splitting that output early
+                // can give its more-shifted inputs zero-sized group views.
+                // A coded LF/HF residual introduces its grid when it is used.
+                let grid_kind = buffer_info[buf_in[0]]
                     .grid_kind
                     .max(buffer_info[buf_in[1]].grid_kind);
-                if grid_kind == ModularGridKind::None
-                    && !buffer_info[*buf_out]
-                        .info
-                        .is_meta_or_small(frame_header.group_dim())
-                {
-                    grid_kind = ModularGridKind::Hf;
-                }
                 buffer_info[*buf_out].grid_kind = grid_kind;
             }
         }

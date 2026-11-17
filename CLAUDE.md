@@ -1,5 +1,26 @@
 # Decoder investigation notes
 
+## RESOLVED: global inverse-squeeze grid transition — 2026-11-17
+
+[Encoder issue 144](https://github.com/imazen/jxl-encoder/issues/144) retains
+valid tall and transposed Gray8 streams whose deeply squeezed small bands are
+coded globally. The original scheduler forced an HF grid when an intermediate
+inverse output grew past group size, even when both inputs remained global.
+The resulting zero-sized group view panicked at the row bound. Intermediates
+now retain the maximum input grid; a coded LF/HF residual introduces its grid.
+
+Both text fixtures recover every source grayscale and opaque-alpha code under
+both dithering modes. Original-source mutation replay reproduces both panics.
+Pinned v0.12 native metadata and exact djxl samples supply independent controls.
+All-feature, scalar and parallel/SIMD release workspace suites and both strict
+Clippy permutations pass with existing expectations/ignores unchanged. The
+integrated run took 975 seconds, run-heavy peak RSS 8.56 GiB, minimum available
+13,917 MiB. The exact instrumented object/profile covers 4/4 mapped regions in the changed
+squeeze propagation expressions without LLVM mapping diagnostics. Other
+transform arms and allocation scheduling are outside that fraction. Remote
+CI retains a separate verdict.
+[Mechanism, reproductions and limits](docs/GLOBAL_SQUEEZE_GRIDS.md).
+
 ## Spline point spacing investigation — 2026-11-05
 
 The former point walker precomputed a unit direction with hypot and advanced
