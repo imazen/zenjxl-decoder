@@ -35,6 +35,11 @@ Need only the dimensions? [`read_header(&data)`](https://docs.rs/zenjxl-decoder/
 
 ## Decoding untrusted input
 
+The default enforces Level 5. Some 16-bit and HDR streams declare that they
+need 32-bit Modular buffers and require Level 10. Select it explicitly with
+`JxlDecoderOptions::default().with_max_codestream_level(JxlCodestreamLevel::Level10)`
+(or CLI `--allow-level10`); caller memory and pixel limits still apply.
+
 `decode()` already enforces the default limits (≈256 MP, 4 GB memory on 64-bit / 2 GB on 32-bit, plus capped channel / tree / spline / patch counts). Allocations derived from header fields are checked *before* they happen, so a malicious file is rejected with an `Err`, not OOM'd or panicked.
 
 For a web frontend, tighten further with the `restrictive()` preset and pass a cancellation handle so a slow decode can be aborted. `JxlDecoderOptions` is `#[non_exhaustive]`, so build it from `default()` and chain the `with_*` setters (a struct literal won't compile from another crate):

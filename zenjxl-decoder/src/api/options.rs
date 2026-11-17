@@ -11,14 +11,18 @@ use std::sync::Arc;
 /// feature use the decoder enforces; see
 /// [`JxlDecoderLimits::max_codestream_level`].
 ///
-/// Level 5 is what encoders produce for ordinary images; Level 10 allows far
-/// heavier use of splines, patches and modular channels. A file may declare
+/// Level 10 permits larger images, higher precision, 32-bit Modular buffers
+/// and heavier use of splines, patches and modular channels. Some 16-bit and
+/// HDR inputs require Level 10 because of their Modular buffer declaration.
+/// A file may declare
 /// Level 10 in a `jxll` box, but that declaration is not trusted: the level
 /// is the caller's choice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum JxlCodestreamLevel {
     /// Level 5 bounds:
+    /// - dimensions at most 2^18, area at most 2^28, precision at most 16 bits;
+    /// - 16-bit Modular buffers sufficient and reconstructed ICC at most 2^22 bytes;
     /// - total spline area estimate at most `min(8 · pixels + 2^25, 2^30)`;
     /// - total patch area at most `max(8 · pixels, 2^20)`;
     /// - at most 256 modular channels after transforms;
@@ -27,6 +31,8 @@ pub enum JxlCodestreamLevel {
     #[default]
     Level5,
     /// Level 10 bounds:
+    /// - dimensions at most 2^30, area at most 2^40, precision at most 32 bits;
+    /// - reconstructed ICC at most 2^28 bytes;
     /// - total spline area estimate at most `min(1024 · pixels + 2^32, 2^42)`;
     /// - total patch area at most `max(1024 · pixels, 2^20)`;
     /// - at most 65,536 modular channels after transforms;

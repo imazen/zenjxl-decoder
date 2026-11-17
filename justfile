@@ -24,6 +24,15 @@ upstream-import-minimal-check:
     cargo clippy --locked -p zenjxl-decoder --no-default-features --lib -- -D warnings
     cargo test --locked --release -p zenjxl-decoder --no-default-features --lib -- upstream_ container::gain_map review_color_ review_dci test_out_of_bounds_reports_bytes test_apply_patch_delta_bounds test_patch_area_limit rect_byte_width_overflow rect_large_coord_clip hlg_ootf test_frame_dimension_checks alphabet_allocation_guard --test-threads=1
 
+# Caller supplies CODEC_CORPUS_PATH, heavy.lock and run-heavy (14G / four jobs).
+review-final-check output reference djxl:
+    just upstream-import-workspace-check
+    just upstream-import-minimal-check
+    cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+    cargo test --locked -p zenjxl-decoder-cli --no-default-features --lib -- --test-threads=1
+    cargo run --locked -p zenjxl-decoder-cli --no-default-features --example hdr_intensity_probe
+    just upstream-frozen-oracle {{quote(output)}} {{quote(reference)}} {{quote(djxl)}}
+
 # Exact upstream coordinate regressions; use debug for checked-arithmetic control.
 upstream-boundary-check profile="release":
     #!/usr/bin/env bash
