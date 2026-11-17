@@ -1,5 +1,14 @@
 # Decoder investigation notes
 
+## Resolved: rectangle byte offsets and clipping overflow — 2026-11-17
+
+The upstream byte-offset regression does not panic in the old release build:
+an out-of-range f32 rectangle wraps back into the image. The large-coordinate
+clip test returns width 0 instead of 90, and panics with debug overflow checks.
+Byte conversion now checks multiplication in every build, and rectangle ends
+saturate for clipping. Debug controls pass after the repair. These are direct
+rectangle API tests, not a demonstrated conformant encoded-stream exploit.
+
 ## Resolved: patch-coordinate arithmetic bounds — 2026-11-17
 
 The imported upstream delta-bound test reproduces negation overflow for

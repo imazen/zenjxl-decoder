@@ -32,8 +32,8 @@ impl Rect {
     #[inline]
     pub fn to_byte_rect_sz(&self, sz: usize) -> Rect {
         Rect {
-            origin: (self.origin.0 * sz, self.origin.1),
-            size: (self.size.0 * sz, self.size.1),
+            origin: (self.origin.0.checked_mul(sz).unwrap(), self.origin.1),
+            size: (self.size.0.checked_mul(sz).unwrap(), self.size.1),
         }
     }
 
@@ -45,7 +45,10 @@ impl Rect {
     }
 
     pub fn end(&self) -> (usize, usize) {
-        (self.origin.0 + self.size.0, self.origin.1 + self.size.1)
+        (
+            self.origin.0.saturating_add(self.size.0),
+            self.origin.1.saturating_add(self.size.1),
+        )
     }
 
     pub fn clip(&self, size: (usize, usize)) -> Rect {

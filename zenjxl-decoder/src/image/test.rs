@@ -38,6 +38,27 @@ fn huge_image() {
 }
 
 #[test]
+#[should_panic]
+fn rect_byte_width_overflow() {
+    let image = Image::<f32>::new((4, 1)).unwrap();
+    let _ = image.get_rect(Rect {
+        origin: (usize::MAX / size_of::<f32>() + 1, 0),
+        size: (1, 1),
+    });
+}
+
+/// The clipping part of upstream's large-coordinate Rect regression.
+/// This fork has no production Rect::intersects API.
+#[test]
+fn rect_large_coord_clip() {
+    let rect = Rect {
+        origin: (10, 0),
+        size: (usize::MAX - 5, 1),
+    };
+    assert_eq!(rect.clip((100, 1)).size, (90, 1));
+}
+
+#[test]
 fn rect_basic() -> Result<()> {
     let mut image = Image::<u8>::new((32, 42))?;
     assert_eq!(

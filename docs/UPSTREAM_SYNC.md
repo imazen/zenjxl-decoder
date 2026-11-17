@@ -12,6 +12,13 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Upstream's rectangle byte-offset and large-coordinate clipping assertions
+are retained. The old release build accepted a wrapped out-of-bounds byte
+offset and returned width 0 instead of 90 when clipping the large rectangle.
+Checked byte multiplication and saturating ends pass the debug controls.
+The `Rect::intersects` assertions are not imported: that production API is
+absent here. No new rectangle API is added solely to run an upstream test.
+
 Upstream's patch-delta helper assertions reproduce debug negation overflow
 and a release-mode positive-bound failure in the old arithmetic. Checked
 signed addition and checked reference/destination ends retain exact valid

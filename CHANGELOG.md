@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Check rectangle-to-byte multiplication in release mode and saturate rectangle
+  ends for clipping, retaining upstream's overflow boundary controls.
+
 - Check patch-coordinate deltas and rectangle ends without signed narrowing,
   including i32::MIN and positive-overflow rejection controls from upstream.
 
