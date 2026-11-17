@@ -112,13 +112,18 @@ impl JxlCmsTransformer for MoxCmsTransformer {
 }
 
 /// Convert a JxlColorProfile to a moxcms ColorProfile.
-fn to_moxcms_profile(profile: &JxlColorProfile) -> Result<moxcms::ColorProfile> {
+fn to_moxcms_profile(
+    profile: &JxlColorProfile,
+    intensity_target: f32,
+) -> Result<moxcms::ColorProfile> {
     match profile {
         JxlColorProfile::Icc(icc_data) => moxcms::ColorProfile::new_from_slice(icc_data)
             .map_err(|e| at!(Error::CmsError(format!("moxcms ICC parse error: {:?}", e)))),
         JxlColorProfile::Simple(encoding) => {
             // For simple encodings, generate an ICC profile and parse it
-            if let Some(icc_data) = encoding.maybe_create_profile()? {
+            if let Some(icc_data) =
+                encoding.maybe_create_profile_with_intensity_target(intensity_target)?
+            {
                 moxcms::ColorProfile::new_from_slice(&icc_data)
                     .map_err(|e| at!(Error::CmsError(format!("moxcms ICC parse error: {:?}", e))))
             } else {
@@ -257,10 +262,10 @@ impl JxlCms for MoxCms {
         _max_pixels_per_transform: usize,
         input: JxlColorProfile,
         output: JxlColorProfile,
-        _intensity_target: f32,
+        intensity_target: f32,
     ) -> Result<(usize, Vec<Box<dyn JxlCmsTransformer + Send + Sync>>)> {
-        let src_profile = to_moxcms_profile(&input)?;
-        let mut dst_profile = to_moxcms_profile(&output)?;
+        let src_profile = to_moxcms_profile(&input, intensity_target)?;
+        let mut dst_profile = to_moxcms_profile(&output, intensity_target)?;
 
         let src_layout = get_layout(&input);
         let dst_layout = get_layout(&output);
@@ -490,5 +495,137 @@ mod tests {
         assert!(p3_output[2] > 0.0); // Some blue
 
         Ok(())
+    }
+}
+
+// Regression tests from jxl-rs f370be42, with only the crate path adapted.
+#[cfg(test)]
+mod upstream_tests {
+    use crate::api::{
+        JxlColorEncoding, JxlPrimaries, JxlTransferFunction, JxlWhitePoint, RenderingIntent,
+    };
+
+    use super::*;
+
+    fn srgb_profile() -> JxlColorProfile {
+        JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+            white_point: JxlWhitePoint::D65,
+            primaries: JxlPrimaries::SRGB,
+            transfer_function: JxlTransferFunction::SRGB,
+            rendering_intent: RenderingIntent::Relative,
+        })
+    }
+
+    fn linear_srgb_profile() -> JxlColorProfile {
+        JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+            white_point: JxlWhitePoint::D65,
+            primaries: JxlPrimaries::SRGB,
+            transfer_function: JxlTransferFunction::Linear,
+            rendering_intent: RenderingIntent::Relative,
+        })
+    }
+
+    #[test]
+    fn test_create_transform() {
+        let cms = MoxCms;
+        let result =
+            cms.initialize_transforms(1, 1024, srgb_profile(), linear_srgb_profile(), 255.0);
+        assert!(result.is_ok());
+        let (output_channels, transforms) = result.unwrap();
+        assert_eq!(output_channels, 3);
+        assert_eq!(transforms.len(), 1);
+    }
+
+    #[test]
+    fn test_transform_identity() {
+        let cms = MoxCms;
+        let (_, mut transforms) = cms
+            .initialize_transforms(1, 1024, srgb_profile(), srgb_profile(), 255.0)
+            .unwrap();
+
+        let input = [0.5f32; 3]; // Gray
+        let mut output = [0.0f32; 3];
+
+        transforms[0].do_transform(&input, &mut output).unwrap();
+
+        // Should be approximately the same (identity transform)
+        for i in 0..3 {
+            assert!(
+                (input[i] - output[i]).abs() < 0.001,
+                "Mismatch at {i}: {} vs {}",
+                input[i],
+                output[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_transform_srgb_to_linear() {
+        let cms = MoxCms;
+        let (_, mut transforms) = cms
+            .initialize_transforms(1, 1024, srgb_profile(), linear_srgb_profile(), 255.0)
+            .unwrap();
+
+        // sRGB mid-gray (0.5) should map to approximately 0.214 in linear
+        let input = [0.5f32; 3];
+        let mut output = [0.0f32; 3];
+
+        transforms[0].do_transform(&input, &mut output).unwrap();
+
+        // Linear value for sRGB 0.5 is approximately 0.214
+        for (i, element) in output.into_iter().enumerate() {
+            assert!(
+                (element - 0.214).abs() < 0.01,
+                "Output {i} = {element}, expected ~0.214",
+            );
+        }
+    }
+
+    #[test]
+    fn test_transform_hdr_pq_tonemap() {
+        let cms = MoxCms;
+        let pq_bt2100 = JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+            white_point: JxlWhitePoint::D65,
+            primaries: JxlPrimaries::BT2100,
+            transfer_function: JxlTransferFunction::PQ,
+            rendering_intent: RenderingIntent::Relative,
+        });
+        let linear_bt2100 = JxlColorProfile::Simple(JxlColorEncoding::RgbColorSpace {
+            white_point: JxlWhitePoint::D65,
+            primaries: JxlPrimaries::BT2100,
+            transfer_function: JxlTransferFunction::Linear,
+            rendering_intent: RenderingIntent::Relative,
+        });
+        let (_, mut transforms) = cms
+            .initialize_transforms(1, 1024, pq_bt2100, linear_bt2100, 1000.0)
+            .unwrap();
+
+        // 1000-nit white, ~227-nit pure blue (151/255, near midpoint of 17-grid), and 1000-nit pure blue.
+        let pq_1000 = 0.7518271f32;
+        let input = [
+            pq_1000,
+            pq_1000,
+            pq_1000, // 1000-nit white
+            0.0,
+            0.0,
+            151.0 / 255.0, // ~227-nit pure blue
+            0.0,
+            0.0,
+            pq_1000, // 1000-nit pure blue
+        ];
+        let mut output = [0.0f32; 9];
+        transforms[0].do_transform(&input, &mut output).unwrap();
+
+        let expected = [
+            1.0, 1.0, 1.0, // white
+            0.0, 0.0, 0.9072, // ~227-nit blue (old mft1 gave ~0.825)
+            0.0697, 0.0697, 1.0, // 1000-nit blue
+        ];
+        for (i, (&actual, expected)) in output.iter().zip(expected).enumerate() {
+            assert!(
+                (actual - expected).abs() < 0.01,
+                "Output {i} = {actual}, expected ~{expected}",
+            );
+        }
     }
 }

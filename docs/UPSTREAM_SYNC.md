@@ -12,6 +12,22 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+All four `jxl_cms::moxcms` tests are adapted by changing only their crate path.
+The HDR PQ test first produced 0.86840016 for 1000-nit white, against its
+unchanged 0.01 bound around 1.0. The CMS now passes intensity through a private
+profile-generation method; the public no-argument method retains its 10000-nit
+default. The upstream mAB/XYZ HDR builder, input shaping, CLUT and vector helpers
+replace the older coarse Lab/mft1 profile builder. All four CMS assertions pass.
+
+The upstream `test_hdr_icc_lut` macro control is retained and strengthened from
+one-code agreement to exact scalar equality, at both 1000 and 10000 nits.
+Native scalar, SSE4.2 and AVX2 pass, including upstream's exact reference points.
+AVX512 execution is unavailable on this host. The 27 color/profile checks pass;
+the format-specific assertions now require mAB/XYZ. Existing numerical bounds
+and the older scalar numerical controls are retained. Strict all-feature,
+all-target workspace Clippy passes. This establishes the specified numerical
+controls and dispatch consistency, not exhaustive HDR color accuracy.
+
 Additional color controls reproduce three gaps beyond upstream's existing
 header tests: invalid grayscale white points, raw custom-primary determinants
 below 1e-10, and rejected valid s15Fixed16 endpoints. Header validation uses

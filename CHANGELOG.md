@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Honor the CMS intensity target for generated HDR profiles and use upstream's
+  mAB/XYZ tone-mapping LUT with shaped input curves. Retain the original CMS
+  numeric regressions and require exact LUT bytes across available SIMD tiers.
+
 - Validate grayscale white-point bounds and the encoded custom-primary
   determinant; accept the full representable s15Fixed16 range. Keep relative
   DCI ICC curves without an incompatible CICP17 tag.

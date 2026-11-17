@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Resolved: CMS HDR profile intensity and interpolation — 2026-11-17
+
+The imported upstream 1000-nit PQ test reproduced white 0.86840016 where its
+unchanged tolerance requires 1.0 within 0.01. MoxCMS ignored intensity_target,
+and profile generation used the older coarse Lab LUT. The upstream mAB/XYZ
+builder and private intensity plumbing pass all four original CMS tests.
+The public no-argument profile generator retains its 10000-nit default.
+The upstream CLUT macro test now requires exact scalar/SSE4.2/AVX2 table bytes
+at 1000 and 10000 nits, retaining its fixed black/gray/white controls. AVX512
+execution is not claimed. All 27 color/profile checks and strict all-feature
+workspace Clippy pass. Existing numerical expectations remain unchanged;
+profile-shape expectations follow the new mAB/XYZ representation.
+
 ## Resolved: color descriptor boundaries and DCI ICC tagging — 2026-11-17
 
 Three direct before/after regressions reject invalid grayscale white points,

@@ -534,6 +534,41 @@ pub fn hlg_to_scene(samples: &mut [f32]) {
     }
 }
 
+// Internal HDR-profile helpers from jxl-rs f370be42.
+#[inline(always)]
+pub(crate) fn pq_to_linear_simd_vec<D: SimdDescriptor>(
+    d: D,
+    y_mult: D::F32Vec,
+    s: D::F32Vec,
+) -> D::F32Vec {
+    let a = s.abs();
+    // a + a * a
+    let x = a.mul_add(a, a);
+    let y = eval_rational_poly_simd(d, x, PQ_EOTF_P, PQ_EOTF_Q);
+    (y * y_mult).copysign(s)
+}
+
+#[inline(always)]
+pub(crate) fn linear_to_pq_simd_vec<D: SimdDescriptor>(
+    d: D,
+    y_mult: D::F32Vec,
+    threshold: D::F32Vec,
+    s: D::F32Vec,
+) -> D::F32Vec {
+    let a = s.abs();
+    let a_scaled = a * y_mult;
+    let a_1_4 = a_scaled.sqrt().sqrt();
+
+    // Use small polynomial for a < 1e-4, regular polynomial otherwise
+    let y_small = eval_rational_poly_simd(d, a_1_4, PQ_INV_EOTF_P_SMALL, PQ_INV_EOTF_Q_SMALL);
+    let y_large = eval_rational_poly_simd(d, a_1_4, PQ_INV_EOTF_P, PQ_INV_EOTF_Q);
+    let y = threshold.gt(a).if_then_else_f32(y_small, y_large);
+
+    y.copysign(s)
+        .max(D::F32Vec::splat(d, 0.0))
+        .min(D::F32Vec::splat(d, 1.0))
+}
+
 #[cfg(test)]
 mod test {
     use test_log::test;
