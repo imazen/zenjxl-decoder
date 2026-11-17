@@ -38,7 +38,8 @@ fn spot_color_low_memory_decode_does_not_panic() {
     let mut input = bytes.as_slice();
     decode_frames(
         &mut input,
-        JxlDecoderOptions::default(),
+        JxlDecoderOptions::default()
+            .with_max_codestream_level(jxl::api::JxlCodestreamLevel::Level10),
         None,
         None,
         &[
