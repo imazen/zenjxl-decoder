@@ -503,10 +503,11 @@ impl CodestreamParser {
             // a codestream that opens with a patch/blend dictionary frame is not
             // rejected for that frame — the gate catches the main frame that
             // follows it.
-            if decode_options.reject_progressive {
-                if !is_preview_frame && frame_is_progressive(&frame_header) {
-                    return Err(at!(Error::ProgressiveRejected));
-                }
+            if decode_options.reject_progressive
+                && !is_preview_frame
+                && frame_is_progressive(&frame_header)
+            {
+                return Err(at!(Error::ProgressiveRejected));
             }
 
             // Initialize storage buffers for available sections.
