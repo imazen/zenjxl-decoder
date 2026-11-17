@@ -12,6 +12,16 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Squeeze validation now rejects a step whose incoming horizontal or vertical
+shift exceeds 30, matching released v0.12 `MetaSqueeze`. Exact 30/31 controls
+and the existing three truncated-squeeze flush regressions pass. A separate
+candidate zero-group-grid rejection was not landed: it rejects the retained
+explicit-squeeze partial-render input (119x33 channel, shifts 2/8, 128-pixel
+groups). Released decoding omits zero-sized group rectangles. The existing
+partial-render expectation remains intact; a draft-strict admission/default
+policy is documented in `DECODER_API_PROPOSALS.md`. This does not prove a
+conformant stream reaching the wide-arithmetic squeeze counterexample.
+
 The structured XYB wire descriptor now initializes its implicit gamma
 (`have_gamma=true`, gamma 3333333) without consuming transfer-function bits.
 Its ten-bit perceptual-intent control previously returned InvalidColorEncoding;

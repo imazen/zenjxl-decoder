@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Reject squeeze steps whose incoming channel shifts exceed 30, retaining
+  released decoding's empty group-tile and partial-render behavior.
+
 - Parse structured XYB descriptors with their implicit gamma and required
   perceptual intent, using the existing public XYB representation.
 

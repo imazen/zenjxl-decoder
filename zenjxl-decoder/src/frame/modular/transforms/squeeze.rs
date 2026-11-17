@@ -41,7 +41,7 @@ pub fn check_squeeze_params(
     // Squeezing an empty channel is how repeated squeezes run out of pixels;
     // downstream it divides by zero. Reject it here. Upstream jxl-rs f809cce.
     for c in &channels[params.begin_channel as usize..end_channel] {
-        if c.1.size.0 == 0 || c.1.size.1 == 0 {
+        if c.1.size.0 == 0 || c.1.size.1 == 0 || c.1.shift.is_some_and(|(h, v)| h > 30 || v > 30) {
             return Err(at!(Error::TooManySqueezes));
         }
     }
@@ -805,5 +805,25 @@ mod empty_channel_tests {
             );
         }
         assert!(check_squeeze_params(&[chan(8, 8)], &params).is_ok());
+    }
+
+    #[test]
+    fn squeeze_shift_boundary() {
+        let params = SqueezeParams {
+            horizontal: true,
+            in_place: true,
+            begin_channel: 0,
+            num_channels: 1,
+        };
+        for horizontal in [true, false] {
+            let mut channel = chan(8, 8);
+            for shift in [30, 31] {
+                channel.1.shift = Some(if horizontal { (shift, 0) } else { (0, shift) });
+                assert_eq!(
+                    check_squeeze_params(&[channel], &params).is_ok(),
+                    shift == 30
+                );
+            }
+        }
     }
 }

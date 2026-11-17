@@ -207,6 +207,12 @@ fn flush_truncated_squeeze_missing_avg() {
 #[test]
 fn flush_truncated_squeeze_small_tiles() {
     let data = testdata("truncated_squeeze_flush_small_tiles.jxl");
+    let (_, header, _) = crate::util::test::read_headers_and_toc(&data).unwrap();
+    assert_eq!(header.group_dim(), 128);
+    // Its explicit squeezes include a 119x33 channel at shifts (2,8).
+    // Released decoding omits its zero-height group tiles. Blanket rejection
+    // would prevent the partial render this regression requires; draft-only
+    // group-grid admission needs a separately selected compatibility policy.
     for chunk_size in [1, 7, 64, 256, usize::MAX] {
         let flushes = decode_partial_with_flush(&data, chunk_size)
             .unwrap_or_else(|e| panic!("chunk_size {chunk_size}: {e:?}"));

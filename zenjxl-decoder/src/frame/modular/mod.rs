@@ -585,8 +585,9 @@ impl FullModularImage {
                         .is_meta_or_small(frame_header.group_dim())
                 })
                 .filter(|x| {
-                    // A channel whose LF grid collapses to zero width or height
-                    // has no LF-group data; assigning it one misreads the stream.
+                    // Match released decoding: channels with zero group-tile
+                    // dimensions carry no group samples. See the explicit
+                    // compatibility control in jxlrs_testdata_ports.
                     let info = &buffer_info[x.1].info;
                     info.is_shift_in_range(3, usize::MAX) && {
                         let shift = info.shift.unwrap();
