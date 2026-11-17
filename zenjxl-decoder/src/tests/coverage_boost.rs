@@ -40,7 +40,9 @@ fn get_test_file(category: &str, name: &str) -> Option<PathBuf> {
 
 fn decode_file(path: &PathBuf) -> Result<(usize, usize), String> {
     let data = std::fs::read(path).map_err(|e| e.to_string())?;
-    let options = JxlDecoderOptions::default();
+    // Feature fixtures include streams requiring Level 10 Modular buffers.
+    let options = JxlDecoderOptions::default()
+        .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = data.as_slice();
 

@@ -62,6 +62,8 @@ mod tests {
             ..JxlDecoderOptions::default()
         };
 
+        // Exercise pixel parity for both Level 5 and Level 10 fixtures.
+        let options = options.with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
 
         // Advance to image info

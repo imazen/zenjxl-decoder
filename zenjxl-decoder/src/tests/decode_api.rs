@@ -16,7 +16,9 @@ use whereat::at;
 
 /// Helper to process decoder to WithImageInfo state
 fn process_to_image_info(data: &[u8]) -> Result<crate::api::JxlDecoder<states::WithImageInfo>> {
-    let options = JxlDecoderOptions::default();
+    // Feature fixtures include streams requiring Level 10 Modular buffers.
+    let options = JxlDecoderOptions::default()
+        .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = data;
 
