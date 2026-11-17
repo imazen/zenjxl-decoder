@@ -14,6 +14,12 @@
 //! to parse (e.g., via ultrahdr-core).
 
 use crate::error::{Error, Result};
+use crate::{
+    api::JxlColorEncoding,
+    bit_reader::BitReader,
+    headers::{JxlHeader, color_encoding::ColorEncoding},
+    icc::IncrementalIccReader,
+};
 use whereat::at;
 
 /// Current version of the gain map bundle format.
@@ -22,15 +28,15 @@ const JHGM_VERSION: u8 = 0x00;
 /// Parsed JXL gain map bundle from a `jhgm` container box.
 ///
 /// The bundle contains the ISO 21496-1 metadata, an optional JXL
-/// ColorEncoding, an optional Brotli-compressed ICC profile for the
+/// ColorEncoding, an optional JPEG XL compressed ICC profile for the
 /// alternate rendition, and the bare JXL codestream of the gain map image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GainMapBundle {
     /// ISO 21496-1 binary metadata blob (unparsed — caller parses with ultrahdr-core).
     pub metadata: Vec<u8>,
-    /// JXL ColorEncoding for the gain map (optional, raw bytes — JXL-native bit-packed).
+    /// JXL ColorEncoding for the alternate rendition (optional, raw bit-packed bytes).
     pub color_encoding: Option<Vec<u8>>,
-    /// Brotli-compressed ICC profile for alternate rendition (optional, not decompressed).
+    /// JPEG XL compressed ICC profile for the alternate rendition (optional, retained encoded).
     pub alt_icc_compressed: Option<Vec<u8>>,
     /// Bare JXL codestream of the gain map image (no container wrapper).
     pub gain_map_codestream: Vec<u8>,
@@ -46,8 +52,8 @@ impl GainMapBundle {
     /// gain_map_metadata:       [u8; N]  // ISO 21496-1 binary metadata
     /// color_encoding_size:     u8       // 0 = absent; else byte count
     /// color_encoding:          [u8; M]  // JXL ColorEncoding (optional)
-    /// alt_icc_size:            u32 BE   // size of Brotli-compressed ICC
-    /// alt_icc:                 [u8; K]  // Brotli-compressed ICC (optional)
+    /// alt_icc_size:            u32 BE   // size of JPEG XL compressed ICC
+    /// alt_icc:                 [u8; K]  // compressed ICC (optional)
     /// gain_map:                [u8; *]  // remaining bytes = bare JXL codestream
     /// ```
     pub fn parse(data: &[u8]) -> Result<Self> {
@@ -119,7 +125,7 @@ impl GainMapBundle {
         let alt_icc_compressed = if alt_icc_size == 0 {
             None
         } else {
-            if pos + alt_icc_size > data.len() {
+            if alt_icc_size > data.len() - pos {
                 return Err(at!(Error::InvalidGainMap(format!(
                     "truncated: alt_icc size {alt_icc_size} exceeds remaining {} bytes",
                     data.len() - pos
@@ -129,6 +135,22 @@ impl GainMapBundle {
             pos += alt_icc_size;
             Some(icc)
         };
+
+        // Both fields are complete here. A truncated profile is an invalid
+        // bundle, not a request to read beyond this box into the next box.
+        validate_color_profile(
+            color_encoding.as_deref().unwrap_or_default(),
+            alt_icc_compressed.as_deref().unwrap_or_default(),
+        )
+        .map_err(|e| {
+            if matches!(e.error(), Error::OutOfBounds(_)) {
+                at!(Error::InvalidGainMap(
+                    "truncated alternate color profile".into()
+                ))
+            } else {
+                e
+            }
+        })?;
 
         // --- gain_map codestream (remainder) ---
         let gain_map_codestream = data[pos..].to_vec();
@@ -192,9 +214,107 @@ impl GainMapBundle {
     }
 }
 
+/// Validate the two alternate-profile fields without changing their public raw
+/// representation. Mirrors jxl-rs f370be42's `JxlColorProfile::from_raw_bytes`.
+fn validate_color_profile(color_encoding: &[u8], encoded_icc: &[u8]) -> Result<()> {
+    if color_encoding.is_empty() && encoded_icc.is_empty() {
+        return Ok(());
+    }
+    if !color_encoding.is_empty() {
+        let mut reader = BitReader::new(color_encoding);
+        let encoding = ColorEncoding::read(&mut reader)?;
+        reader.jump_to_byte_boundary()?;
+        if reader.total_bits_available() != 0 {
+            return Err(at!(Error::InvalidColorEncoding));
+        }
+        if !encoding.want_icc {
+            if !encoded_icc.is_empty() {
+                return Err(at!(Error::InvalidColorEncoding));
+            }
+            JxlColorEncoding::from_internal(&encoding)?;
+            return Ok(());
+        }
+    }
+    let mut reader = BitReader::new(encoded_icc);
+    let mut icc = IncrementalIccReader::new(&mut reader, Some(1 << 28))?;
+    while icc.remaining() != 0 {
+        icc.read_one(&mut reader)?;
+    }
+    icc.finalize(&mut reader)?;
+    reader.jump_to_byte_boundary()?;
+    if reader.total_bits_available() != 0 {
+        return Err(at!(Error::InvalidIccStream));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn upstream_bundle(name: &str) -> GainMapBundle {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/testdata/gain-map")
+            .join(name);
+        GainMapBundle::parse(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    /// Adapt jxl-rs gain_map::color_encoding to the retained raw-byte fields.
+    #[test]
+    fn upstream_color_encoding() {
+        use crate::{
+            api::{JxlColorEncoding, JxlColorProfile},
+            bit_reader::BitReader,
+            headers::{JxlHeader, color_encoding::ColorEncoding},
+        };
+        let structured = upstream_bundle("structured.jhgm");
+        let mut reader = BitReader::new(structured.color_encoding.as_deref().unwrap());
+        let encoding = ColorEncoding::read(&mut reader).unwrap();
+        assert_eq!(
+            JxlColorProfile::Simple(JxlColorEncoding::from_internal(&encoding).unwrap()),
+            JxlColorProfile::Simple(JxlColorEncoding::linear_srgb(false)),
+        );
+        assert!(structured.alt_icc_compressed.is_none());
+        for name in ["icc.jhgm", "want_icc.jhgm"] {
+            assert!(!upstream_bundle(name).alt_icc_compressed.unwrap().is_empty());
+        }
+    }
+
+    /// Both original malformed inputs must fail, rather than become raw fields.
+    #[test]
+    fn upstream_invalid_color_encoding() {
+        for name in ["malformed_color.jhgm", "missing_icc.jhgm"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/testdata/gain-map")
+                .join(name);
+            assert!(
+                GainMapBundle::parse(&std::fs::read(path).unwrap()).is_err(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn alternate_profile_fields_must_be_complete_and_consistent() {
+        let structured = upstream_bundle("structured.jhgm");
+        let icc = upstream_bundle("icc.jhgm");
+        let want_icc = upstream_bundle("want_icc.jhgm");
+        let mut trailing_color = structured.clone();
+        trailing_color.color_encoding.as_mut().unwrap().push(0);
+        let mut trailing_icc = icc.clone();
+        trailing_icc.alt_icc_compressed.as_mut().unwrap().push(0);
+        let mut unexpected_icc = structured;
+        unexpected_icc.alt_icc_compressed = icc.alt_icc_compressed;
+        let mut missing_icc = want_icc;
+        missing_icc.alt_icc_compressed = None;
+        for invalid in [trailing_color, trailing_icc, unexpected_icc, missing_icc] {
+            let error = GainMapBundle::parse(&invalid.serialize()).unwrap_err();
+            assert!(!matches!(error.error(), Error::OutOfBounds(_)));
+        }
+        // A complete four-byte length cannot overflow usize on i686 before
+        // the parser rejects its missing payload.
+        assert!(GainMapBundle::parse(&[0, 0, 0, 0, 255, 255, 255, 255]).is_err());
+    }
 
     /// Build a minimal valid jhgm bundle by hand.
     fn build_minimal_bundle(
@@ -246,22 +366,17 @@ mod tests {
     #[test]
     fn test_parse_full_bundle() {
         let metadata = b"ISO21496-1 test metadata blob";
-        let color_encoding = b"\xAA\xBB\xCC\xDD";
-        let alt_icc = b"brotli-compressed-icc-data-here";
+        let source = upstream_bundle("want_icc.jhgm");
+        let color_encoding = source.color_encoding.as_deref().unwrap();
+        let alt_icc = source.alt_icc_compressed.as_deref().unwrap();
         let gain_map = b"\xff\x0a\x00\x01\x02\x03\x04\x05";
 
         let data = build_minimal_bundle(metadata, Some(color_encoding), Some(alt_icc), gain_map);
 
         let bundle = GainMapBundle::parse(&data).unwrap();
         assert_eq!(bundle.metadata.as_slice(), metadata.as_slice());
-        assert_eq!(
-            bundle.color_encoding.as_deref(),
-            Some(color_encoding.as_slice())
-        );
-        assert_eq!(
-            bundle.alt_icc_compressed.as_deref(),
-            Some(alt_icc.as_slice())
-        );
+        assert_eq!(bundle.color_encoding.as_deref(), Some(color_encoding));
+        assert_eq!(bundle.alt_icc_compressed.as_deref(), Some(alt_icc));
         assert_eq!(bundle.gain_map_codestream.as_slice(), gain_map.as_slice());
     }
 
@@ -280,10 +395,11 @@ mod tests {
 
     #[test]
     fn test_roundtrip_full() {
+        let source = upstream_bundle("want_icc.jhgm");
         let original = GainMapBundle {
             metadata: vec![0x01; 100],
-            color_encoding: Some(vec![0xAA, 0xBB, 0xCC]),
-            alt_icc_compressed: Some(vec![0xDD; 256]),
+            color_encoding: source.color_encoding,
+            alt_icc_compressed: source.alt_icc_compressed,
             gain_map_codestream: vec![0xFF, 0x0A, 0x00, 0x01, 0x02],
         };
         let serialized = original.serialize();
@@ -407,8 +523,9 @@ mod tests {
     }
 
     #[test]
-    fn test_large_alt_icc() {
-        // Large ICC profile
+    fn test_large_invalid_alt_icc() {
+        // Preserve the large field's length/serialization check, but arbitrary
+        // repeated bytes are not a valid compressed ICC stream.
         let alt_icc = vec![0xDD; 100_000];
         let original = GainMapBundle {
             metadata: vec![0x01],
@@ -417,18 +534,19 @@ mod tests {
             gain_map_codestream: vec![0xFF, 0x0A],
         };
         let serialized = original.serialize();
-        let parsed = GainMapBundle::parse(&serialized).unwrap();
-        assert_eq!(original, parsed);
+        assert_eq!(serialized.len(), 1 + 2 + 1 + 1 + 4 + 100_000 + 2);
+        assert!(GainMapBundle::parse(&serialized).is_err());
     }
 
     /// Test that building a jhgm box (header + payload) and extracting the payload
     /// round-trips correctly. This simulates what the container parser does.
     #[test]
     fn test_box_level_roundtrip() {
+        let source = upstream_bundle("want_icc.jhgm");
         let bundle = GainMapBundle {
             metadata: vec![0x01, 0x02],
-            color_encoding: Some(vec![0xAA]),
-            alt_icc_compressed: Some(vec![0xBB, 0xCC]),
+            color_encoding: source.color_encoding,
+            alt_icc_compressed: source.alt_icc_compressed,
             gain_map_codestream: vec![0xFF, 0x0A, 0x00],
         };
 

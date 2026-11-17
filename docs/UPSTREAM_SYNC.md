@@ -12,6 +12,16 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+The two upstream gain-map tests and all five original `.jhgm` inputs now
+exercise this fork's retained raw-byte fields. Parsing validates the complete
+ColorEncoding/ICC pair: structured linear sRGB, ICC-only and want-ICC controls
+pass; malformed color and missing required ICC fail. Additional controls reject
+trailing and contradictory fields without requesting bytes beyond the box.
+All 19 gain-map tests pass. Previous round-trip tests used arbitrary bytes as
+valid profiles; they now use the real want-ICC fixture and retain exact field
+comparisons. The 100,000-byte repeated-byte ICC remains a serialization-size
+test and is correctly rejected on parse.
+
 Upstream `08bb971ff493cbd77642a7f3de3398a2744c4405` widens the VarDCT
 nonzero-count bound to u64 before adding. Its 182-byte
 `vardct_num_nonzeros_overflow.jxl` and specific `InvalidNumNonZeros` assertion

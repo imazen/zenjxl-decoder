@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Validate gain-map alternate ColorEncoding and compressed ICC fields, rejecting
+  missing, malformed, inconsistent or trailing profile data while preserving the
+  public raw-byte representation.
+
 - Reject an unbounded non-codestream box before the first codestream box;
   preserve valid trailing unbounded metadata and empty ordered/reordered parts.
 

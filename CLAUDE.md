@@ -1,5 +1,16 @@
 # Decoder investigation notes
 
+## Resolved: gain-map alternate profile validation — 2026-11-17
+
+`GainMapBundle::parse` previously retained malformed ColorEncoding bytes and
+accepted a missing required ICC. It now validates both complete fields using
+the existing header and ICC readers, retaining the public encoded-byte fields.
+Upstream's five profile fixtures and two semantic tests are adapted without
+new public API. Real-profile round trips replace arbitrary invalid profile
+bytes in old tests; 19 focused checks pass, including consistency, trailing
+data and fatal truncation controls. This does not validate the gain-map image
+codestream or ISO 21496-1 metadata contents.
+
 ## Resolved: VarDCT nonzero-count overflow — 2026-11-17
 
 The imported upstream `08bb971` regression reproduces an addition-overflow
