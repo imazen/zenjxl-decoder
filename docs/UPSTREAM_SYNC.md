@@ -12,6 +12,13 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Upstream's `test_out_of_bounds_reports_bytes` reproduced a unit mismatch in
+`BitReader::skip_bits`: nine missing bits were reported as nine bytes instead
+of two. Skip and optimistic-error paths now ceil-divide missing bits by eight,
+matching ordinary reads and the refill API. All seven bit-reader-filtered
+checks pass. Both upstream f16 denormal tests are also retained; all eighteen
+local f16 checks pass, including this fork's independent IEEE controls.
+
 All four `jxl_cms::moxcms` tests are adapted by changing only their crate path.
 The HDR PQ test first produced 0.86840016 for 1000-nit white, against its
 unchanged 0.01 bound around 1.0. The CMS now passes intensity through a private

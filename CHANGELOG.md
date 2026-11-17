@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Report bit-reader skip and optimistic-read refill deficits in bytes, matching
+  ordinary reads; retain upstream's exact unit regression.
+
 - Honor the CMS intensity target for generated HDR profiles and use upstream's
   mAB/XYZ tone-mapping LUT with shaped input curves. Retain the original CMS
   numeric regressions and require exact LUT bytes across available SIMD tiers.

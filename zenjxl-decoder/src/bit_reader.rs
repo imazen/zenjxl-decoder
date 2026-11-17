@@ -223,7 +223,9 @@ impl<'a> BitReader<'a> {
 
     pub fn check_for_error(&self) -> Result<(), Error> {
         if self.total_bits_read > self.initial_bits {
-            Err(Error::OutOfBounds(self.total_bits_read - self.initial_bits))
+            Err(Error::OutOfBounds(
+                (self.total_bits_read - self.initial_bits).div_ceil(8),
+            ))
         } else {
             Ok(())
         }
@@ -268,7 +270,7 @@ impl<'a> BitReader<'a> {
         let bits_available = self.data.len() * 8;
         if n > bits_available {
             self.total_bits_read += bits_available;
-            return Err(Error::OutOfBounds(n - bits_available));
+            return Err(Error::OutOfBounds((n - bits_available).div_ceil(8)));
         }
 
         // Skip bytes directly in `data`, then handle leftover bits
@@ -288,7 +290,7 @@ impl<'a> BitReader<'a> {
         self.bit_buf >>= to_consume;
         self.bits_in_buf -= to_consume;
         if n > 0 {
-            Err(Error::OutOfBounds(n))
+            Err(Error::OutOfBounds(n.div_ceil(8)))
         } else {
             Ok(())
         }
@@ -377,6 +379,27 @@ impl<'a> BitReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // jxl-rs f370be42: refill deficits are bytes, including optimistic reads.
+    #[test]
+    fn test_out_of_bounds_reports_bytes() {
+        let data = [0xaa];
+        assert!(matches!(
+            BitReader::new(&data).skip_bits(9),
+            Err(Error::OutOfBounds(1))
+        ));
+        assert!(matches!(
+            BitReader::new(&data).skip_bits(17),
+            Err(Error::OutOfBounds(2))
+        ));
+        let mut reader = BitReader::new(&data);
+        let _ = reader.peek(17);
+        reader.consume_optimistic(17);
+        assert!(matches!(
+            reader.check_for_error(),
+            Err(Error::OutOfBounds(2))
+        ));
+    }
 
     /// Reads through `FastBits` (with refills) must leave the reader in the
     /// same state, including `total_bits_read`, as the same reads through

@@ -1,5 +1,14 @@
 # Decoder investigation notes
 
+## Resolved: bit-reader refill deficit units — 2026-11-17
+
+The upstream byte-deficit regression fails before the repair: skipping 17
+bits from a one-byte input returns a deficit of 9 rather than 2. Both skip
+error paths and optimistic read-error reporting now convert missing bits to
+bytes, matching ordinary reads and the caller's refill contract. All seven
+bit-reader-filtered controls pass. This direct reader test does not by itself
+establish a separate full-stream failure.
+
 ## Resolved: CMS HDR profile intensity and interpolation — 2026-11-17
 
 The imported upstream 1000-nit PQ test reproduced white 0.86840016 where its
