@@ -39,7 +39,9 @@ fn decode_oneshot(data: &[u8]) -> Result<JxlDecoder<states::WithImageInfo>> {
 
 /// Helper to decode with chunked input, returning basic info
 fn decode_chunked(data: &[u8], chunk_size: usize) -> Result<JxlDecoder<states::WithImageInfo>> {
-    let options = JxlDecoderOptions::default();
+    // Includes HDR fixtures requiring Level 10 Modular buffers.
+    let options = JxlDecoderOptions::default()
+        .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10);
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut offset = 0;
 
