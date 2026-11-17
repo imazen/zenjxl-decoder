@@ -2210,10 +2210,8 @@ impl Frame {
                 && alpha_in_color.is_some()
                 && !source_alpha_associated;
 
-            // Note: We don't unpremultiply by default because djxl also doesn't by default.
-            // When source has alpha_associated=true (premultiplied), we output premultiplied
-            // unless explicitly requested otherwise via premultiply_output=false + cms option.
-            // This matches libjxl's JxlDecoderSetUnpremultiplyAlpha default of false.
+            // A false premultiply_output preserves the source association;
+            // neither this writer nor the CMS option requests unpremultiplication.
 
             // For CMYK output, interleave the Black extra channel as the
             // fourth channel. This requires a color image with a Black extra

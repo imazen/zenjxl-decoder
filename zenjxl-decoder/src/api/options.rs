@@ -395,7 +395,8 @@ pub struct JxlDecoderOptions {
     pub high_precision: bool,
     /// If true, multiply RGB by alpha before writing to output buffer.
     /// This produces premultiplied alpha output, which is useful for compositing.
-    /// Default: false (output straight alpha)
+    /// Default: false (preserve the source alpha association). Associated
+    /// source samples remain premultiplied; this does not unpremultiply them.
     pub premultiply_output: bool,
     /// Security limits to prevent resource exhaustion attacks.
     /// Use `JxlDecoderLimits::restrictive()` for untrusted input.
