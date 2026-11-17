@@ -207,6 +207,19 @@ impl ColorEncoding {
         if !self.want_icc
             && (self.white_point == WhitePoint::Custom || self.primaries == Primaries::Custom)
         {
+            if self.primaries == Primaries::Custom
+                && matches!(self.color_space, ColorSpace::RGB | ColorSpace::Unknown)
+            {
+                let [r, g, b] = &self.custom_primaries;
+                // The determinant of the XYZ columns (x, y, 1-x-y) equals
+                // this signed xy area. Use encoded millionth coordinates
+                // exactly: 100 / 10^12 is the inclusive 1e-10 boundary.
+                let det = (r.x as i128 - b.x as i128) * (g.y as i128 - b.y as i128)
+                    - (g.x as i128 - b.x as i128) * (r.y as i128 - b.y as i128);
+                if det.abs() < 100 {
+                    return Err(Error::MatrixInversionFailed(det.abs() as f64 / 1e12));
+                }
+            }
             crate::api::JxlColorEncoding::from_internal(self)
                 .map_err(|e| e.decompose().0)?
                 .validate_icc_matrix()?;
@@ -217,6 +230,70 @@ impl ColorEncoding {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn review_color_gray_white_point_bounds() {
+        let mut encoding = ColorEncoding::default(&Empty {});
+        encoding.color_space = ColorSpace::Gray;
+        encoding.white_point = WhitePoint::Custom;
+        for (x, y) in [
+            (-1, 500_000),
+            (1_000_001, 500_000),
+            (300_000, 0),
+            (300_000, -1),
+            (300_000, 1_000_001),
+        ] {
+            encoding.white = CustomXY { x, y };
+            assert!(encoding.check(&Empty {}).is_err(), "white ({x}, {y})");
+        }
+        for (x, y) in [(0, 1_000_000), (1_000_000, 1_000_000), (312_700, 329_000)] {
+            encoding.white = CustomXY { x, y };
+            encoding.check(&Empty {}).unwrap();
+        }
+    }
+
+    #[test]
+    fn review_color_quantized_primary_determinant() {
+        let mut encoding = ColorEncoding::default(&Empty {});
+        encoding.white_point = WhitePoint::Custom;
+        encoding.primaries = Primaries::Custom;
+        encoding.white = CustomXY {
+            x: 100_001,
+            y: 100_001,
+        };
+        encoding.custom_primaries = [
+            CustomXY {
+                x: 100_000,
+                y: 100_000,
+            },
+            CustomXY {
+                x: 100_002,
+                y: 100_000,
+            },
+            CustomXY {
+                x: 100_000,
+                y: 100_002,
+            },
+        ];
+        // The unscaled XYZ-column determinant is 4e-12, below 1e-10.
+        assert!(encoding.check(&Empty {}).is_err());
+        encoding.white = CustomXY {
+            x: 100_003,
+            y: 100_003,
+        };
+        encoding.custom_primaries[1].x = 100_010;
+        encoding.custom_primaries[2].y = 100_010;
+        // Exactly 1e-10 in the encoded millionth coordinates is allowed.
+        encoding.check(&Empty {}).unwrap();
+        encoding.white_point = WhitePoint::D65;
+        encoding.custom_primaries = [
+            CustomXY { x: 1_000_000, y: 0 },
+            CustomXY { x: 0, y: 1_000_000 },
+            CustomXY { x: 0, y: 0 },
+        ];
+        // Imaginary XYZ primaries, including y=0, remain representable.
+        encoding.check(&Empty {}).unwrap();
+    }
 
     #[test]
     fn test_custom_primaries_with_standard_white_point() {

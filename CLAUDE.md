@@ -1,5 +1,17 @@
 # Decoder investigation notes
 
+## Resolved: color descriptor boundaries and DCI ICC tagging — 2026-11-17
+
+Three direct before/after regressions reject invalid grayscale white points,
+reject encoded primary determinants below 1e-10, and accept the actual
+s15Fixed16 endpoints. Exact integer-coordinate determinant checks preserve
+the inclusive boundary and imaginary XYZ primaries. The generic matrix
+inverse threshold is unchanged. Relative DCI ICC export omits CICP17 because
+that code point's extra scaling contradicts the retained relative TRC.
+The tag-table regression retains positive sRGB/PQ/HLG controls. These are
+header-check and generated-profile controls; they do not establish a
+conformant encoded-stream witness for every boundary.
+
 ## Resolved: playback after seeking past a live dictionary — 2026-11-17
 
 Upstream's mixed reverse/forward seek test failed with

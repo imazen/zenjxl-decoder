@@ -122,6 +122,17 @@ pub fn compute_md5(data: &[u8]) -> [u8; 16] {
     sum
 }
 
+fn validate_white_point(wx: f32, wy: f32) -> Result<(), Error> {
+    if !((0.0..=1.0).contains(&wx) && wy > 0.0 && wy <= 1.0) {
+        return Err(Error::IccInvalidWhitePoint(
+            wx,
+            wy,
+            "White point coordinates out of range ([0,1] for x, (0,1] for y)".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn primaries_to_xyz(
     rx: f32,
@@ -133,14 +144,7 @@ pub(crate) fn primaries_to_xyz(
     wx: f32,
     wy: f32,
 ) -> Result<Matrix3x3<f64>, Error> {
-    // Validate white point coordinates
-    if !((0.0..=1.0).contains(&wx) && (wy > 0.0 && wy <= 1.0)) {
-        return Err(Error::IccInvalidWhitePoint(
-            wx,
-            wy,
-            "White point coordinates out of range ([0,1] for x, (0,1] for y)".to_string(),
-        ));
-    }
+    validate_white_point(wx, wy)?;
     // Comment from libjxl:
     // TODO(lode): also require rx, ry, gx, gy, bx, to be in range 0-1? ICC
     // profiles in theory forbid negative XYZ values, but in practice the ACES P0
@@ -193,13 +197,7 @@ pub(crate) fn primaries_to_xyz(
 }
 
 pub(crate) fn adapt_to_xyz_d50(wx: f32, wy: f32) -> Result<Matrix3x3<f64>, Error> {
-    if !((0.0..=1.0).contains(&wx) && (wy > 0.0 && wy <= 1.0)) {
-        return Err(Error::IccInvalidWhitePoint(
-            wx,
-            wy,
-            "White point coordinates out of range ([0,1] for x, (0,1] for y)".to_string(),
-        ));
-    }
+    validate_white_point(wx, wy)?;
 
     // Convert white point (wx, wy) to XYZ with Y=1
     let x_over_y = wx as f64 / wy as f64;
@@ -453,13 +451,7 @@ impl JxlColorEncoding {
     /// well-conditioned chromatic adaptation and RGB-to-XYZ matrix whose
     /// entries fit ICC s15Fixed16.
     pub(crate) fn validate_icc_matrix(&self) -> Result<(), Error> {
-        let check = |value: f32| {
-            if (-32767.995..=32767.995).contains(&value) {
-                Ok(())
-            } else {
-                Err(Error::IccValueOutOfRangeS15Fixed16(value))
-            }
-        };
+        let check = validate_s15_fixed_16;
         match self {
             JxlColorEncoding::GrayscaleColorSpace { white_point, .. } => {
                 let (wx, wy) = white_point.to_xy_coords();
@@ -588,10 +580,11 @@ impl JxlColorEncoding {
             JxlTransferFunction::Linear => 8,
             JxlTransferFunction::SRGB => 13,
             JxlTransferFunction::PQ => 16,
-            JxlTransferFunction::DCI => 17,
             JxlTransferFunction::HLG => 18,
-            // Custom gamma cannot be represented.
-            JxlTransferFunction::Gamma(_) => return Ok(None),
+            // JXL DCI is a relative power-2.6 curve. CICP17 also specifies
+            // the 48/52.37 scale, so it would contradict our relative TRC.
+            // Custom gamma likewise has no equivalent CICP code point.
+            JxlTransferFunction::DCI | JxlTransferFunction::Gamma(_) => return Ok(None),
         };
 
         let signature = b"cicp";
@@ -1523,18 +1516,22 @@ fn pad_to_4_byte_boundary(data: &mut Vec<u8>) {
 /// s15Fixed16 is a signed 32-bit number with 1 sign bit, 15 integer bits,
 /// and 16 fractional bits.
 fn append_s15_fixed_16(tags_data: &mut Vec<u8>, value: f32) -> Result<(), Error> {
-    // In libjxl, the following specific range check is used: (-32767.995f <= value) && (value <= 32767.995f)
-    // This is slightly tighter than the theoretical max positive s15.16 value.
-    // We replicate this for consistency.
-    if !(value.is_finite() && (-32767.995..=32767.995).contains(&value)) {
-        return Err(Error::IccValueOutOfRangeS15Fixed16(value));
-    }
+    validate_s15_fixed_16(value)?;
 
     // Multiply by 2^16 and round to nearest integer
     let scaled_value = (value * 65536.0).round();
     // Cast to i32 for correct two's complement representation
     let int_value = scaled_value as i32;
     tags_data.extend_from_slice(&int_value.to_be_bytes());
+    Ok(())
+}
+
+fn validate_s15_fixed_16(value: f32) -> Result<(), Error> {
+    // Compare in f64: the positive s15Fixed16 endpoint rounds to 32768 in
+    // f32, which itself is out of range. Both exact endpoints are inclusive.
+    if !(-32768.0..=32767.0 + 65535.0 / 65536.0).contains(&(value as f64)) {
+        return Err(Error::IccValueOutOfRangeS15Fixed16(value));
+    }
     Ok(())
 }
 
@@ -1589,6 +1586,7 @@ fn create_icc_chad_tag(
 
 /// Converts CIE xy white point coordinates to CIE XYZ values (Y is normalized to 1.0).
 fn cie_xyz_from_white_cie_xy(wx: f32, wy: f32) -> Result<[f32; 3], Error> {
+    validate_white_point(wx, wy)?;
     // Check for wy being too close to zero to prevent division by zero or extreme values.
     if wy.abs() < 1e-12 {
         return Err(Error::IccInvalidWhitePointY(wy));
@@ -2279,6 +2277,69 @@ fn create_icc_noop_btoa_tag(tags: &mut Vec<u8>) -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn review_color_s15_fixed_16_endpoints() {
+        for (value, expected) in [
+            (-32768.0_f32, i32::MIN),
+            (f32::from_bits(32768.0_f32.to_bits() - 1), 2_147_483_520),
+        ] {
+            let mut bytes = Vec::new();
+            append_s15_fixed_16(&mut bytes, value).unwrap();
+            assert_eq!(bytes, expected.to_be_bytes());
+        }
+        for value in [
+            32768.0,
+            f32::from_bits((-32768.0_f32).to_bits() + 1),
+            f32::NAN,
+            f32::INFINITY,
+        ] {
+            assert!(append_s15_fixed_16(&mut Vec::new(), value).is_err());
+        }
+    }
+
+    fn icc_tag<'a>(profile: &'a [u8], signature: &[u8; 4]) -> Option<&'a [u8]> {
+        let count = u32::from_be_bytes(profile[128..132].try_into().unwrap()) as usize;
+        for entry in profile[132..].chunks_exact(12).take(count) {
+            if &entry[..4] == signature {
+                let offset = u32::from_be_bytes(entry[4..8].try_into().unwrap()) as usize;
+                let size = u32::from_be_bytes(entry[8..12].try_into().unwrap()) as usize;
+                return Some(&profile[offset..offset + size]);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn review_dci_profile_keeps_relative_trc_without_cicp17() {
+        for (transfer_function, expected_cicp) in [
+            (JxlTransferFunction::DCI, None),
+            (JxlTransferFunction::SRGB, Some(13)),
+            (JxlTransferFunction::PQ, Some(16)),
+            (JxlTransferFunction::HLG, Some(18)),
+        ] {
+            let encoding = JxlColorEncoding::RgbColorSpace {
+                white_point: if transfer_function == JxlTransferFunction::DCI {
+                    JxlWhitePoint::DCI
+                } else {
+                    JxlWhitePoint::D65
+                },
+                primaries: JxlPrimaries::P3,
+                transfer_function,
+                rendering_intent: RenderingIntent::Relative,
+            };
+            let profile = encoding.maybe_create_profile().unwrap().unwrap();
+            assert_eq!(icc_tag(&profile, b"cicp").map(|tag| tag[9]), expected_cicp);
+            if expected_cicp.is_none() {
+                let trc = icc_tag(&profile, b"rTRC").unwrap();
+                assert_eq!(&trc[..4], b"para");
+                let gamma = i32::from_be_bytes(trc[12..16].try_into().unwrap()) as f64 / 65536.0;
+                assert!((gamma - 2.6).abs() <= 1.0 / 65536.0);
+                assert_eq!(icc_tag(&profile, b"gTRC"), Some(trc));
+                assert_eq!(icc_tag(&profile, b"bTRC"), Some(trc));
+            }
+        }
+    }
 
     #[test]
     fn test_md5() {

@@ -12,6 +12,20 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Additional color controls reproduce three gaps beyond upstream's existing
+header tests: invalid grayscale white points, raw custom-primary determinants
+below 1e-10, and rejected valid s15Fixed16 endpoints. Header validation uses
+the encoded integer coordinates for the determinant, including its inclusive
+boundary; the generic matrix inversion epsilon is unchanged. Imaginary XYZ
+primaries remain accepted. The API/profile tests and color-header tests pass.
+
+Generated relative DCI profiles now omit their optional CICP tag while keeping
+the power-2.6 TRC. [H.273 Table 3](https://www.itu.int/rec/dologin_pub.asp?id=T-REC-H.273-202407-I%21%21PDF-E&lang=e&type=items)
+defines CICP17 with an additional 48/52.37 scale. The new tag-table test first
+reproduced the contradictory code point, then verifies its omission and the
+retained TRC; sRGB/PQ/HLG controls retain their supported CICP values. This is
+profile-structure validation, not a measured whole-image color difference.
+
 The two upstream gain-map tests and all five original `.jhgm` inputs now
 exercise this fork's retained raw-byte fields. Parsing validates the complete
 ColorEncoding/ICC pair: structured linear sRGB, ICC-only and want-ICC controls

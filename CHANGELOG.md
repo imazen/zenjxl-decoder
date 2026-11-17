@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Validate grayscale white-point bounds and the encoded custom-primary
+  determinant; accept the full representable s15Fixed16 range. Keep relative
+  DCI ICC curves without an incompatible CICP17 tag.
+
 - Restore all live reference and LF slots during seek replay so later playback
   can use dictionaries that the sought frame itself does not read. Retain the
   upstream seek animations and exact reverse/forward/continuation regressions.
