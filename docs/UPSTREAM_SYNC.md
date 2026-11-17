@@ -12,6 +12,15 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+The HLG OOTF property control previously compared each fast function with
+itself. It now calls the precise reference and retains the 7.2e-7 bound.
+Its luminance weights use upstream's positive range; the old generator could
+produce a negative power base and a NaN reference, outside this comparison's
+real-power domain. The precise black reference now takes the same zero limit
+as upstream, with forward/inverse fast/reference black controls. All four
+HLG-OOTF-filtered checks pass. Negative-luminance semantics are not established
+by this positive-domain comparison.
+
 Upstream's rectangle byte-offset and large-coordinate clipping assertions
 are retained. The old release build accepted a wrapped out-of-bounds byte
 offset and returned width 0 instead of 90 when clipping the large rectangle.

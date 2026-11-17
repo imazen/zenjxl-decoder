@@ -379,7 +379,7 @@ fn hlg_ootf_inner_precise(exp: f64, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut 
         let dg = *g as f64;
         let db = *b as f64;
         let mixed = dr.mul_add(lr, dg.mul_add(lg, db * lb));
-        let mult = mixed.powf(exp);
+        let mult = if mixed == 0.0 { mixed } else { mixed.powf(exp) };
         *r = (dr * mult) as f32;
         *g = (dg * mult) as f32;
         *b = (db * mult) as f32;
@@ -800,8 +800,10 @@ mod test {
         arbtest::arbtest(|u| {
             let intensity_target = u.int_in_range(900..=1100)? as f32;
 
-            let lr = 0.2 + u.int_in_range(0..=255)? as f32 / 255.0;
-            let lb = 0.2 + u.int_in_range(0..=255)? as f32 / 255.0;
+            // Match upstream's positive luminance weights. The old range
+            // made lg negative and fed negative bases to the power oracle.
+            let lr = 0.2 + u.int_in_range(0..=255)? as f32 / 255.0 * 0.2;
+            let lb = 0.2 + u.int_in_range(0..=255)? as f32 / 255.0 * 0.2;
             let lg = 1.0 - lr - lb;
             let luminance_rgb = [lr, lg, lb];
 
@@ -827,7 +829,7 @@ mod test {
                 std::slice::from_mut(&mut precise_g),
                 std::slice::from_mut(&mut precise_b),
             ];
-            hlg_display_to_scene(intensity_target, luminance_rgb, precise);
+            hlg_display_to_scene_precise(intensity_target, luminance_rgb, precise);
 
             assert_all_almost_abs_eq(
                 &[fast_r, fast_g, fast_b],
@@ -853,7 +855,7 @@ mod test {
                 std::slice::from_mut(&mut precise_g),
                 std::slice::from_mut(&mut precise_b),
             ];
-            hlg_scene_to_display(intensity_target, luminance_rgb, precise);
+            hlg_scene_to_display_precise(intensity_target, luminance_rgb, precise);
 
             assert_all_almost_abs_eq(
                 &[fast_r, fast_g, fast_b],
@@ -863,6 +865,26 @@ mod test {
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn hlg_ootf_black_reference_is_zero() {
+        for (inverse, precise) in [(false, false), (false, true), (true, false), (true, true)] {
+            let (mut r, mut g, mut b) = (0.0, 0.0, 0.0);
+            let rows = [
+                std::slice::from_mut(&mut r),
+                std::slice::from_mut(&mut g),
+                std::slice::from_mut(&mut b),
+            ];
+            let weights = [0.2627, 0.6780, 0.0593];
+            match (inverse, precise) {
+                (false, false) => hlg_scene_to_display(1000.0, weights, rows),
+                (false, true) => hlg_scene_to_display_precise(1000.0, weights, rows),
+                (true, false) => hlg_display_to_scene(1000.0, weights, rows),
+                (true, true) => hlg_display_to_scene_precise(1000.0, weights, rows),
+            }
+            assert_eq!([r, g, b], [0.0; 3]);
+        }
     }
 
     #[test]
