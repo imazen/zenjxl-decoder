@@ -12,6 +12,19 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Before-color-transform extra-channel Add now accepts a full-canvas reference
+at origin zero. A procedural two-frame stream reuses the unchanged entropy
+payload of upstream's 3x3 RGBA fixture: v0.12 accepts it, while the old fork
+returns `BlendingPreColorTransform(1)`. Both renderers now produce exactly
+twice the reference alpha with whole-file, one-byte and seven-byte input.
+The generated 36-byte RGBA8 output also matches v0.12 exactly. Reference origin
+is retained privately; undersized, displaced or missing planes return an error
+instead of asserting. Color blending still rejects a before-transform source
+when it reads that source; full-canvas color Replace does not read it.
+The former EC rejection test injected blending information into an unrelated
+header and asserted the over-rejection. It is replaced by valid EC geometry
+controls; the color rejection control explicitly uses Add so it reads its source.
+
 Upstream's partial-prefix comparison now runs over the ordinary fixture sweep,
 retaining its frame-count, recovered-pixel and 5e-3 intermediate-pixel bounds.
 The existing final-pixel exact comparisons are unchanged. Four named fixtures

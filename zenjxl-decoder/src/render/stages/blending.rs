@@ -65,17 +65,45 @@ impl BlendingStage {
             file_header.size.xsize() as usize,
             file_header.size.ysize() as usize,
         );
-        for info in
-            std::iter::once(&frame_header.blending_info).chain(frame_header.ec_blending_info.iter())
+        for (index, info) in std::iter::once(&frame_header.blending_info)
+            .chain(frame_header.ec_blending_info.iter())
+            .enumerate()
         {
+            if index == 0
+                && info.mode == BlendingMode::Replace
+                && frame_header.x0 <= 0
+                && frame_header.y0 <= 0
+                && frame_header.x0 as i64 + frame_header.width as i64 >= image_size.0 as i64
+                && frame_header.y0 as i64 + frame_header.height as i64 >= image_size.1 as i64
+            {
+                // Full-canvas Replace does not read color from a reference.
+                continue;
+            }
             let source = info.source as usize;
             let Some(frame) = reference_frames[source].as_ref() else {
                 continue;
             };
-            if frame.saved_before_color_transform {
+            if index == 0 && frame.saved_before_color_transform {
                 return Err(at!(Error::BlendingPreColorTransform(source)));
             }
-            assert_eq!(frame.frame[0].size(), image_size);
+            // EC samples do not undergo the color transform. A before-CT
+            // reference may supply them, provided it covers the canvas at
+            // origin zero. Check every plane we can read instead of asserting
+            // only the color-plane size on untrusted input.
+            let channels = if index == 0 {
+                0..3
+            } else {
+                index + 2..index + 3
+            };
+            if frame.origin != (0, 0)
+                || channels.into_iter().any(|channel| {
+                    frame.frame.get(channel).is_none_or(|image| {
+                        image.size().0 < image_size.0 || image.size().1 < image_size.1
+                    })
+                })
+            {
+                return Err(at!(Error::NonPatchReferenceWithCrop));
+            }
         }
 
         let ec_patch_blending = frame_header
@@ -154,7 +182,9 @@ impl RenderPipelineInPlaceStage for BlendingStage {
         let mut fg: SmallVec<[&[f32]; 8]> = smallvec::smallvec![self.zeros.as_slice(); 3 + num_ec];
 
         for (c, fg_ptr) in fg.iter_mut().enumerate().take(3) {
-            if self.reference_frames[self.blending_info.source as usize].is_some() {
+            if self.blending_info.mode != BlendingMode::Replace
+                && self.reference_frames[self.blending_info.source as usize].is_some()
+            {
                 *fg_ptr = &(self.reference_frames[self.blending_info.source as usize]
                     .as_ref()
                     .unwrap()
@@ -233,6 +263,7 @@ mod test {
         let (file_header, mut frame_header, _) =
             read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
         frame_header.blending_info.source = 3;
+        frame_header.blending_info.mode = BlendingMode::Add;
         let image_size = (
             file_header.size.xsize() as usize,
             file_header.size.ysize() as usize,
@@ -253,28 +284,54 @@ mod test {
     }
 
     #[test]
-    fn reject_extra_channel_blending_with_pre_color_transform_reference() -> Result<()> {
-        let (file_header, mut frame_header, _) =
+    fn extra_channel_before_ct_reference_geometry_is_checked() -> Result<()> {
+        use crate::headers::{bit_depth::BitDepth, extra_channels::ExtraChannel};
+        let (mut file_header, mut frame_header, _) =
             read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl")).unwrap();
+        file_header
+            .image_metadata
+            .extra_channel_info
+            .push(ExtraChannelInfo::new(
+                false,
+                ExtraChannel::Alpha,
+                BitDepth::integer_samples(8),
+                0,
+                String::new(),
+                false,
+                None,
+                None,
+            ));
         let mut ec_blending_info = frame_header.blending_info.clone();
+        ec_blending_info.mode = BlendingMode::Add;
         ec_blending_info.source = 2;
-        frame_header.ec_blending_info.push(ec_blending_info);
+        frame_header.ec_blending_info = vec![ec_blending_info];
         let image_size = (
             file_header.size.xsize() as usize,
             file_header.size.ysize() as usize,
         );
-        let reference_frames = Arc::new([
-            None,
-            None,
-            Some(ReferenceFrame::blank(image_size.0, image_size.1, 4, true)?),
-            None,
-        ]);
-
-        let result = BlendingStage::new(&frame_header, &file_header, reference_frames);
-        assert!(
-            matches!(&result, Err(e) if matches!(e.error(), Error::BlendingPreColorTransform(2))),
-            "expected BlendingPreColorTransform(2)"
-        );
+        for (size, origin, channels, allowed) in [
+            (image_size, (0, 0), 4, true),
+            ((image_size.0 + 1, image_size.1 + 1), (0, 0), 4, true),
+            ((image_size.0 - 1, image_size.1), (0, 0), 4, false),
+            (image_size, (1, 0), 4, false),
+            (image_size, (0, -1), 4, false),
+            (image_size, (0, 0), 3, false),
+        ] {
+            let mut reference = ReferenceFrame::blank(size.0, size.1, channels, true)?;
+            reference.origin = origin;
+            let result = BlendingStage::new(
+                &frame_header,
+                &file_header,
+                Arc::new([None, None, Some(reference), None]),
+            );
+            if allowed {
+                assert!(result.is_ok());
+            } else {
+                assert!(
+                    matches!(&result, Err(e) if matches!(e.error(), Error::NonPatchReferenceWithCrop))
+                );
+            }
+        }
         Ok(())
     }
 }

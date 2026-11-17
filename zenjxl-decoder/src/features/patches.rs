@@ -1587,6 +1587,7 @@ mod tests {
             Ok(Some(ReferenceFrame {
                 frame: frame_channels,
                 saved_before_color_transform: true,
+                origin: (0, 0),
             }))
         }
 
@@ -1602,6 +1603,7 @@ mod tests {
             Ok(Some(ReferenceFrame {
                 frame: frame_channels,
                 saved_before_color_transform: true,
+                origin: (0, 0),
             }))
         }
 

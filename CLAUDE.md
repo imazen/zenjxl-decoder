@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Resolved: before-transform extra-channel references — 2026-11-17
+
+A procedural stream saves a full-canvas before-transform reference and adds
+its alpha to the next frame. Pinned djxl v0.12 accepts it; the former shared
+guard rejects it with BlendingPreColorTransform(1). Extra-channel references
+now retain private origin metadata and validate covering geometry and planes.
+Color reads remain protected; full-canvas color Replace does not read a source.
+Both renderers and whole-file/1/7-byte input pass the exact doubled-alpha check.
+The 36 RGBA8 output bytes match the independent decoder exactly. The old EC
+rejection expectation described the over-rejection and is replaced with valid
+EC/header geometry controls; the unchanged color-rejection contract now has
+an explicit Add operation in its test.
+
 ## Resolved: parallel partial-prefix rendering — 2026-11-17
 
 The adapted upstream partial-prefix regression renders the 29,726-byte bicycle

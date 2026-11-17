@@ -77,6 +77,7 @@ pub struct HfGlobalState {
 pub struct ReferenceFrame {
     pub frame: Vec<Image<f32>>,
     pub saved_before_color_transform: bool,
+    pub origin: (i32, i32),
 }
 
 impl ReferenceFrame {
@@ -93,6 +94,7 @@ impl ReferenceFrame {
         Ok(Self {
             frame,
             saved_before_color_transform,
+            origin: (0, 0),
         })
     }
     #[cfg(test)]
@@ -109,6 +111,7 @@ impl ReferenceFrame {
         Ok(Self {
             frame,
             saved_before_color_transform,
+            origin: (0, 0),
         })
     }
 }
@@ -375,6 +378,11 @@ impl Frame {
             rf[slot] = Some(ReferenceFrame {
                 frame: frame_data,
                 saved_before_color_transform: self.header.save_before_ct,
+                origin: if self.header.save_before_ct {
+                    (self.header.x0, self.header.y0)
+                } else {
+                    (0, 0)
+                },
             });
         }
 

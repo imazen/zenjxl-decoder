@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Allow extra-channel blending from qualifying before-color-transform
+  references, retaining private origins and checking reference plane geometry.
+  Keep rejection when color blending reads a before-transform source.
+
 - Preserve sequential progressive previews with parallel decoding enabled by
   keeping a stable incremental rendering strategy for partial frames. Retain
   upstream partial-prefix and exact progressive-flush comparisons.

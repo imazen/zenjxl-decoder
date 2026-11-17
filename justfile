@@ -45,6 +45,9 @@ review-level-check:
 review-prefix-check:
     cargo test --locked --release -p zenjxl-decoder --all-features --lib -- partial_decode jxlrs_testdata_ports --test-threads=1
 
+review-reference-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- before_ct_extra stages::blending --test-threads=1
+
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
 
