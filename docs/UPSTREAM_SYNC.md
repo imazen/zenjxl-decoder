@@ -12,6 +12,19 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Upstream's partial-prefix comparison now runs over the ordinary fixture sweep,
+retaining its frame-count, recovered-pixel and 5e-3 intermediate-pixel bounds.
+The existing final-pixel exact comparisons are unchanged. Four named fixtures
+also compare sequential/parallel progressive flush counts, consumed offsets,
+frame indices and exact f32 bits. The old parallel renderer leaves NaNs in the
+29,726-byte bicycle prefix (2,675-byte chunks) where sequential decoding renders
+pixels, and differs in intermediate flushes. A frame now selects its rendering
+strategy before decoding HF groups: partial input uses the incremental renderer,
+while fully buffered input can use the parallel batch renderer. The choice
+cannot change after groups have been stored. Modular transforms can still run
+in parallel. All thirteen selected prefix/flush and imported corruption controls
+pass in release mode. Streaming throughput has not been measured.
+
 Selected-level checks now cover image/frame dimensions and area, channel
 precision, the Level 5 modular-buffer flag, and reconstructed ICC output size.
 The dimension regression first accepted a dimension above the selected limit;

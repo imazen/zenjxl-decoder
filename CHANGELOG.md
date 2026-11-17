@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Preserve sequential progressive previews with parallel decoding enabled by
+  keeping a stable incremental rendering strategy for partial frames. Retain
+  upstream partial-prefix and exact progressive-flush comparisons.
+
 - Enforce selected-level image/frame dimensions, area, sample precision,
   modular-buffer precision and reconstructed ICC size independently of caller
   resource caps. Accept globally valid Level 10 header sizes above the former

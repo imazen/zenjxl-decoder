@@ -276,6 +276,9 @@ pub struct Frame {
     reference_frame_data: Option<Vec<Image<f32>>>,
     lf_frame_data: Option<[Image<f32>; 3]>,
     was_flushed_once: bool,
+    /// Rendering strategy is fixed before the first HF decode/flush. Partial
+    /// frames use the incremental renderer so flushes match sequential output.
+    parallel_full_frame: Option<bool>,
     /// Reusable buffers for VarDCT group decoding.
     vardct_buffers: Option<group::VarDctBuffers>,
     /// JPEG coefficient storage for JPEG reconstruction.

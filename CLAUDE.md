@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Resolved: parallel partial-prefix rendering — 2026-11-17
+
+The adapted upstream partial-prefix regression renders the 29,726-byte bicycle
+prefix sequentially but leaves NaNs with parallel decoding and 2,675-byte input
+chunks. Parallel progressive flushes also differ from sequential snapshots.
+The batch renderer previously omitted intermediate flush work. Frames now pick
+one rendering strategy before the first HF decode/flush: partial frames use
+the incremental renderer and complete buffered frames can retain batch rendering.
+The strategy stays fixed after groups are stored. Thirteen selected release
+controls pass, including the ordinary-fixture prefix sweep and exact flush
+offset/frame/sample comparisons on four fixtures. Final pixel gates remain
+exact. Streaming throughput is unmeasured.
+
 ## Resolved: selected-level header bounds — 2026-11-17
 
 The parser previously applied a fixed 2^30 image-area cap but did not enforce

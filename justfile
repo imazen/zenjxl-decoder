@@ -42,6 +42,9 @@ review-validation-check filter="conformance_limit_tests":
 review-level-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- conformance_limit_tests icc_output_limit --test-threads=1
 
+review-prefix-check:
+    cargo test --locked --release -p zenjxl-decoder --all-features --lib -- partial_decode jxlrs_testdata_ports --test-threads=1
+
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
 

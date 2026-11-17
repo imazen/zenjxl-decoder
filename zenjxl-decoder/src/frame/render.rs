@@ -227,16 +227,12 @@ impl Frame {
         #[cfg(feature = "threads")]
         modular_global.set_parallel(self.decoder_state.parallel);
 
-        // Determine parallel vs sequential early — affects flush strategy.
-        //
-        // Decided per *frame* (does the frame have more than one group?),
-        // not per call (did *this* call bring more than one group?). The
-        // two paths keep different pipeline state -- the sequential one
-        // renders as groups arrive and recycles their buffers, the parallel
-        // one stores a batch and asserts a group's pixels are stored once --
-        // and a streamed decode whose calls alternate between one and
-        // several new groups used to switch paths mid-frame and trip that
-        // assert (tirr_photo.jxl in 30000-byte chunks with flushes).
+        // The parallel renderer emits complete batches and cannot reproduce
+        // partially filled sequential previews. Select it only when all HF
+        // groups/passes are present before the first decode. Keep that choice
+        // for the frame: switching after storing groups violates pipeline
+        // ownership and recycling invariants. Modular transforms can still
+        // run in parallel with the incremental renderer.
         #[cfg(all(feature = "threads", not(test)))]
         let use_parallel = self.decoder_state.parallel && self.header.num_groups() > 1;
         #[cfg(all(feature = "threads", test))]
@@ -245,6 +241,16 @@ impl Frame {
             && !self.use_simple_pipeline;
         #[cfg(not(feature = "threads"))]
         let use_parallel = false;
+        if self.parallel_full_frame.is_none() && (do_flush || !groups.is_empty()) {
+            let complete = groups.len() == self.header.num_groups()
+                && groups.iter().all(|(_, passes)| {
+                    passes.last().is_some_and(|(pass, _)| {
+                        *pass + 1 == self.header.passes.num_passes as usize
+                    })
+                });
+            self.parallel_full_frame = Some(use_parallel && complete && !do_flush);
+        }
+        let use_parallel = self.parallel_full_frame.unwrap_or(false);
 
         // STEP 1: if we are requesting a flush, and did not flush before, mark modular channels
         // as having been decoded as 0.

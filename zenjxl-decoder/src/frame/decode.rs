@@ -270,6 +270,7 @@ impl Frame {
             reference_frame_data,
             lf_frame_data,
             was_flushed_once: false,
+            parallel_full_frame: None,
             vardct_buffers: None,
             #[cfg(feature = "jpeg")]
             jpeg_coeffs: None,
