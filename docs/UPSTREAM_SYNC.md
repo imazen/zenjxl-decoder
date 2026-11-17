@@ -101,7 +101,7 @@ pixels, and differs in intermediate flushes. A frame now selects its rendering
 strategy before decoding HF groups: partial input uses the incremental renderer,
 while fully buffered input can use the parallel batch renderer. The choice
 cannot change after groups have been stored. Modular transforms can still run
-in parallel. All thirteen selected prefix/flush and imported corruption controls
+in parallel. All fourteen selected prefix/flush and imported corruption controls
 pass in release mode. Streaming throughput has not been measured.
 
 Selected-level checks now cover image/frame dimensions and area, channel
@@ -316,8 +316,8 @@ implicit XYB descriptor, cumulative animation area and selected metadata rules.
 Remaining admission work includes timecode ordering, spot-color solidity and
 the rest of the level-specific rules (including Level 5 Black-channel admission
 and entropy/tree bounds). These are not claimed complete by the size/precision
-checks. Timecode and solidity diagnostics, Unknown source-color preservation,
-local-layer output are described in
+checks. Timecode and solidity diagnostics, Unknown source-color preservation
+and local-layer output are described in
 [`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). The separately approved
 intensity-aware profile method is the one implemented API addition.
 

@@ -1,15 +1,15 @@
 # Remaining decoder API decisions
 
-The intensity-aware profile method below is approved and implemented in this
-change. The other sections remain proposals. Existing public signatures and
+The intensity-aware profile method below is implemented through
+[PR79](https://github.com/imazen/zenjxl-decoder/pull/79). The other sections
+remain proposals. Existing public signatures and
 no-argument conversion defaults remain unchanged.
 
 ## Approved intensity-aware ICC conversion
 
-The bundled MoxCMS path can use the decoder's private intensity-aware profile
-builder. An external CMS provider, including the separate CLI's LCMS provider,
-receives the intensity argument but can only call the public no-argument ICC
-conversion, whose generated-profile default is 10000 nits.
+The public profile method exposes the existing intensity-aware builder to
+external CMS providers. The CLI's LCMS provider uses it for both profiles;
+MoxCMS continues using the private builder.
 
 Approved additive entry point:
 
@@ -25,12 +25,12 @@ impl JxlColorProfile {
 An existing ICC returns borrowed bytes unchanged. A structured profile uses
 the existing private builder with the supplied target. Errors are preserved;
 an unsupported profile remains `Ok(None)`. The existing `try_as_icc()` and
-`as_icc()` retain their present signatures and defaults. The CLI can then use
-the new method for both profiles without duplicating profile generation.
+`as_icc()` retain their present signatures and defaults. The CLI uses the new
+method for both profiles without duplicating profile generation.
 
-Gate: port the upstream 1000-nit PQ-to-linear BT.2100 control to LCMS, retaining
-the original nine expected values and 0.01 absolute bounds. Test both CLI
-feature configurations and the existing exact CMYK whole-image golden.
+Validation retains upstream's 1000-nit PQ-to-linear BT.2100 control with its
+original nine expected values and 0.01 absolute bounds, both CLI feature
+configurations and the exact CMYK whole-image golden.
 
 Before correction, the LCMS control returned
 `[0.8704195, 0.8705389, 0.87049097]` for 1000-nit white, with the same nine
