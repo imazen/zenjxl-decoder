@@ -22,6 +22,11 @@ valid profiles; they now use the real want-ICC fixture and retain exact field
 comparisons. The 100,000-byte repeated-byte ICC remains a serialization-size
 test and is correctly rejected on parse.
 
+CI also exposed two container-positive convenience tests using 64 repeated
+0xCC bytes as an ICC. Their exact metadata and pixel assertions now use the
+real ICC-only fixture. A separate negative control keeps rejection of those
+same invalid bytes before and after the codestream.
+
 Upstream `08bb971ff493cbd77642a7f3de3398a2744c4405` widens the VarDCT
 nonzero-count bound to u64 before adding. Its 182-byte
 `vardct_num_nonzeros_overflow.jxl` and specific `InvalidNumNonZeros` assertion

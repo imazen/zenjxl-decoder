@@ -127,16 +127,40 @@ mod tests {
     }
 
     fn test_gain_map_bundle(codestream: &[u8]) -> crate::container::gain_map::GainMapBundle {
+        // Retain a real encoded alternate ICC: repeated 0xCC bytes are not a
+        // valid profile and must not be used as this metadata-positive control.
+        let source = crate::container::gain_map::GainMapBundle::parse(include_bytes!(
+            "../../tests/testdata/gain-map/icc.jhgm"
+        ))
+        .unwrap();
         crate::container::gain_map::GainMapBundle {
             metadata: b"ISO21496-1 metadata blob".to_vec(),
             color_encoding: None,
-            alt_icc_compressed: Some(vec![0xCC; 64]),
+            alt_icc_compressed: source.alt_icc_compressed,
             gain_map_codestream: codestream.to_vec(),
         }
     }
 
     const TEST_EXIF_TIFF: &[u8] = b"II*\x00test-exif-payload";
     const TEST_XMP: &[u8] = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>";
+
+    #[test]
+    fn decode_rejects_malformed_gain_map_profile_in_either_box_position() {
+        let codestream = crate::util::test::fixture_bytes("3x3_srgb_lossless.jxl");
+        let mut bundle = test_gain_map_bundle(&codestream);
+        bundle.alt_icc_compressed = Some(vec![0xcc; 64]);
+        let payload = bundle.serialize();
+        for file in [
+            build_container(&codestream, &[(b"jhgm", &payload)], &[]),
+            build_container(&codestream, &[], &[(b"jhgm", &payload)]),
+        ] {
+            let error = decode(&file).err().expect("invalid alternate ICC accepted");
+            assert!(!matches!(
+                error.error(),
+                crate::error::Error::OutOfBounds(_)
+            ));
+        }
+    }
 
     /// Exif box payload: 4-byte TIFF header offset prefix + TIFF data.
     fn test_exif_payload() -> Vec<u8> {
