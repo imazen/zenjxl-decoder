@@ -172,28 +172,18 @@ fn unsqueeze_impl<D: SimdDescriptor>(
 /// The scalar tail of `hsqueeze`/`vsqueeze`, delegating to the same
 /// [`unsqueeze_impl`] the vector body uses, instantiated at `LEN == 1`.
 ///
-/// This used to be a second, independent implementation that widened to i64,
-/// did the arithmetic there, and narrowed back with `as i32`. It agreed with
-/// the vector body exactly as long as nothing overflowed i32 — which is why no
-/// fixture ever caught it — and disagreed as soon as something did, because
-/// `diff / 2` does not commute with wrapping: halving a value that wrapped is
-/// not the wrap of the halved value. For
-/// `(avg, res, next_avg, prev) = (0, i32::MAX, i32::MIN, i32::MAX)` the two
-/// returned `(1700091220, -1700091221)` and `(1073741823, -1073741824)`.
+/// The former separate tail widened to i64 before narrowing to i32. Low-level
+/// arithmetic controls can distinguish that calculation from the vector body:
+/// halving an overflowing value does not commute with wrapping. Sharing this
+/// kernel establishes agreement between scalar, SIMD bodies and tails.
 ///
-/// That mattered because `hsqueeze`/`vsqueeze` split at `h & !(lanes - 1)`,
-/// sending the leading rows through the vector body and the remainder through
-/// this tail. The split point is the CPU's lane count, so a single *lossless*
-/// image decoded to different pixels on different CPUs — and lossless is exact
-/// by definition.
-///
-/// Rather than reconcile two implementations, there is now only one, so they
-/// cannot drift apart again. Wrapping i32 is the semantics that survives,
-/// matching the crate's existing precedent for this class of bug (#54, where
-/// the scalar tier's `abs` was changed to `wrapping_abs` so it would agree with
-/// every vector tier's `abs` on `i32::MIN` instead of panicking). Streams that
-/// do not overflow — every stream a valid encoder produces — decode to exactly
-/// the same bytes as before.
+/// Agreement does not establish the specified intermediate width. No complete
+/// conformant encoded stream reaching a distinguishing wide value has been
+/// established by the current review. That requires separate bit-depth and
+/// `modular_16bit_sufficient` constraints, legal transform/group geometry,
+/// representable entropy data and actual dispatch into this calculation.
+/// These controls must not be described as a reproduced lossless-image defect
+/// or proof that every valid encoder avoids overflow.
 #[inline(always)]
 fn unsqueeze_scalar(avg: i32, res: i32, next_avg: i32, prev: i32) -> (i32, i32) {
     let d = jxl_simd::ScalarDescriptor::new().expect("the scalar descriptor is always available");
