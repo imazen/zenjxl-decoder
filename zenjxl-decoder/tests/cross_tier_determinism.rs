@@ -107,7 +107,11 @@ fn grid() -> Vec<(&'static str, &'static str, JxlDecoderOptions)> {
     for name in EXACT_FIXTURES.iter().chain(FLOAT_FIXTURES.iter()) {
         let base = || {
             JxlDecoderOptions::default()
-                .with_max_codestream_level(zenjxl_decoder::api::JxlCodestreamLevel::Level10)
+                .with_limits(
+                    zenjxl_decoder::api::JxlDecoderLimits::default().with_max_codestream_level(
+                        zenjxl_decoder::api::JxlCodestreamLevel::Level10,
+                    ),
+                )
                 .with_parallel(false)
         };
         out.push((*name, "dither_u8=false", base().with_dither_u8(false)));
@@ -374,14 +378,22 @@ fn decode_is_deterministic_when_parallel() {
         let first = zenjxl_decoder::decode_with(
             &data,
             JxlDecoderOptions::default()
-                .with_max_codestream_level(zenjxl_decoder::api::JxlCodestreamLevel::Level10)
+                .with_limits(
+                    zenjxl_decoder::api::JxlDecoderLimits::default().with_max_codestream_level(
+                        zenjxl_decoder::api::JxlCodestreamLevel::Level10,
+                    ),
+                )
                 .with_parallel(true),
         );
         for round in 1..4 {
             let again = zenjxl_decoder::decode_with(
                 &data,
                 JxlDecoderOptions::default()
-                    .with_max_codestream_level(zenjxl_decoder::api::JxlCodestreamLevel::Level10)
+                    .with_limits(
+                        zenjxl_decoder::api::JxlDecoderLimits::default().with_max_codestream_level(
+                            zenjxl_decoder::api::JxlCodestreamLevel::Level10,
+                        ),
+                    )
                     .with_parallel(true),
             );
             match (&first, &again) {
