@@ -1,11 +1,12 @@
 # zenjxl-decoder dev commands
 
 # Caller holds the shared heavy lock and run-heavy; optional target exercises i686.
-upstream-regression-check target="" filter="upstream_2026_11":
+upstream-regression-check target="" filter="upstream_2026_11" profile="":
     #!/usr/bin/env bash
     set -euo pipefail
     args=()
     if [[ -n '{{target}}' ]]; then args+=(--target '{{target}}'); fi
+    if [[ '{{profile}}' == release ]]; then args+=(--release); fi
     cargo test --locked -p zenjxl-decoder --all-features --lib "${args[@]}" '{{filter}}' -- --test-threads=1
 
 # Format + regenerate the public-API surface snapshots (docs/public-api/).

@@ -408,31 +408,16 @@ impl CodestreamParser {
         };
         let header = frame.header();
 
-        // Dependencies: blending reads exactly the slots named in the
-        // header; patches may read any slot, so assume all of them.
-        let mut used_reference_slots = [false; DecoderState::MAX_STORED_FRAMES];
-        if header.needs_blending() {
-            for info in header
-                .ec_blending_info
-                .iter()
-                .chain(std::iter::once(&header.blending_info))
-            {
-                if let Some(slot) = used_reference_slots.get_mut(info.source as usize) {
-                    *slot = true;
-                }
-            }
-        }
-        if header.has_patches() {
-            used_reference_slots.fill(true);
-        }
+        // A seek rebuilds an empty decoder state and permits playback after
+        // the requested frame. Even a frame that reads no slots can be
+        // followed by patches using an older dictionary. Replay must restore
+        // every live reference, including references unused by this header.
         let mut decode_start_offset = start.file_offset;
-        for (slot, used) in used_reference_slots.iter().enumerate() {
-            if *used && let Some(dep) = self.reference_slot_decode_start[slot] {
-                decode_start_offset = decode_start_offset.min(dep);
-            }
-        }
-        if header.has_lf_frame()
-            && let Some(Some(dep)) = self.lf_slot_decode_start.get(header.lf_level as usize)
+        for dep in self
+            .reference_slot_decode_start
+            .iter()
+            .chain(&self.lf_slot_decode_start)
+            .flatten()
         {
             decode_start_offset = decode_start_offset.min(*dep);
         }

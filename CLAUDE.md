@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Resolved: playback after seeking past a live dictionary — 2026-11-17
+
+Upstream's mixed reverse/forward seek test failed with
+`PatchesInvalidReference(1)` on `animation_seek_noise_references.jxl`.
+The fork rebuilt empty decoder state and replayed only dependencies read by
+the target header. Later frames can still need older saved dictionaries.
+Seek starts now restore every live reference and LF slot, preserving exact
+continuation pixels. This can increase replay work; cached/minimal seek costs
+are not implemented or claimed. The nine-fixture reused/fresh seek control,
+interrupted seek, reset, scan-only and unaligned RGB16 checks pass, as do all
+eleven existing start-new-frame tests in release mode. No pixel tolerance
+or established expectation changed.
+
 ## Resolved: gain-map alternate profile validation — 2026-11-17
 
 `GainMapBundle::parse` previously retained malformed ColorEncoding bytes and

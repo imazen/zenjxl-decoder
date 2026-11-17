@@ -43,6 +43,23 @@ check, the unbounded-before-codestream case returned `OutOfBounds(0)`;
 it now returns `InvalidBox`, while the trailing unbounded Exif control still
 recovers its 166-byte payload. All 18 container tests execute and pass.
 
+All five upstream seek-animation inputs are retained. The nine-fixture
+`upstream_seek_matches_sequential` adapts reverse and forward seeks on reused
+and fresh decoders, followed by sequential playback, with exact samples.
+Interrupted seeks, reset after partial input, and scan-only issue 502853162
+also have explicit tests. The 85-byte image-integration RGB16 input checks
+the original six u16 samples in an unaligned output buffer in both renderers;
+the separate image-rs registration API is absent from this workspace.
+
+The seek test first failed with `PatchesInvalidReference(1)` in the noise and
+reference animation. Seek replay now restores all live reference and LF
+slots, including dictionaries unused by the target but needed by subsequent
+frames. Eight `upstream_` checks and eleven existing `test_start_new_frame`
+checks pass in release mode. This conservative replay may start earlier than
+before. Upstream's exact cached-seek frame-cost assertions are not claimed:
+this implementation rebuilds its decoder state rather than retaining the
+upstream reference cache. The imported fixture manifest records byte hashes.
+
 ## Fork PR extractions — 2026-11-05
 
 The [five-PR triage](PR_TRIAGE_2026-11-05.md) distinguishes existing changes,

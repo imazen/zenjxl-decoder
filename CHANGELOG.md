@@ -14,6 +14,10 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Restore all live reference and LF slots during seek replay so later playback
+  can use dictionaries that the sought frame itself does not read. Retain the
+  upstream seek animations and exact reverse/forward/continuation regressions.
+
 - Validate gain-map alternate ColorEncoding and compressed ICC fields, rejecting
   missing, malformed, inconsistent or trailing profile data while preserving the
   public raw-byte representation.
