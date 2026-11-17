@@ -1826,3 +1826,6 @@ mod soundness_tests {
     }
     test_all_instruction_sets!(round_store_u16_contract);
 }
+
+#[cfg(test)]
+mod upstream_2026_11;
