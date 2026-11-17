@@ -618,7 +618,7 @@ mod upstream_tests {
 
         let expected = [
             1.0, 1.0, 1.0, // white
-            0.0, 0.0, 0.9072, // ~227-nit blue (old mft1 gave ~0.825)
+            0.0, 0.0, 0.9072, // ~227-nit blue
             0.0697, 0.0697, 1.0, // 1000-nit blue
         ];
         for (i, (&actual, expected)) in output.iter().zip(expected).enumerate() {

@@ -403,14 +403,14 @@ fn hlg_decode_to_u16_rgba() {
 // ============================================================================
 
 #[test]
-fn pq_icc_profile_has_lab_pcs_and_a2b0() {
+fn pq_icc_profile_has_xyz_pcs_and_a2b0() {
     let data = load_test_file("hdr_pq_test.jxl");
     let (_info, decoder) = decode_header(&data);
     let profile = decoder.output_color_profile();
     let icc = profile.try_as_icc().expect("PQ should produce ICC profile");
 
-    // HDR PQ with standard primaries should use Lab PCS
-    assert_eq!(&icc[20..24], b"Lab ", "PCS should be Lab for PQ HDR");
+    assert_eq!(&icc[20..24], b"XYZ ", "PCS should be XYZ for PQ HDR");
+    assert!(icc.windows(4).any(|w| w == b"mAB "));
 
     // Must have A2B0 tag for tone mapping LUT
     assert!(
@@ -432,7 +432,7 @@ fn pq_icc_profile_has_lab_pcs_and_a2b0() {
 }
 
 #[test]
-fn hlg_icc_profile_has_lab_pcs_and_a2b0() {
+fn hlg_icc_profile_has_xyz_pcs_and_a2b0() {
     let data = load_test_file("hdr_hlg_test.jxl");
     let (_info, decoder) = decode_header(&data);
     let profile = decoder.output_color_profile();
@@ -440,7 +440,8 @@ fn hlg_icc_profile_has_lab_pcs_and_a2b0() {
         .try_as_icc()
         .expect("HLG should produce ICC profile");
 
-    assert_eq!(&icc[20..24], b"Lab ", "PCS should be Lab for HLG HDR");
+    assert_eq!(&icc[20..24], b"XYZ ", "PCS should be XYZ for HLG HDR");
+    assert!(icc.windows(4).any(|w| w == b"mAB "));
     assert!(
         icc.windows(4).any(|w| w == b"A2B0"),
         "Missing A2B0 tag in HLG ICC profile"

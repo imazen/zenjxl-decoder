@@ -1975,7 +1975,7 @@ fn gamut_map(rgb: &mut [f32; 3], luminances: &[f32; 3], preserve_saturation: f32
     }
 }
 
-/// Tone map a single pixel and convert to PCS Lab for ICC profile.
+/// Historical scalar Lab reference retained for numerical test controls.
 #[cfg(test)]
 fn tone_map_pixel(
     transfer_function: &JxlTransferFunction,
@@ -2789,7 +2789,7 @@ mod test {
         // Profile should be a valid ICC profile (starts with profile size, then signature)
         assert!(profile.len() > 128, "Profile should have header + tags");
 
-        // Verify header has XYZ PCS (bytes 20-23 should be "Lab ")
+        // Verify header has XYZ PCS (bytes 20-23 should be "XYZ ")
         assert_eq!(
             &profile[20..24],
             b"XYZ ",
