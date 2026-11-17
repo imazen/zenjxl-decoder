@@ -21,6 +21,18 @@ transform arms and allocation scheduling are outside that fraction. Remote
 CI retains a separate verdict.
 [Mechanism, reproductions and limits](docs/GLOBAL_SQUEEZE_GRIDS.md).
 
+## RESOLVED locally: Rust 1.100 CI iterator diagnostics — 2026-11-17
+
+The squeeze repair's CI run 44007706069 fails strict Clippy on five existing
+index-only loops in spline area estimation, extra-channel output, pipeline
+pruning and JPEG table emission. The local integrated pass used Rust 1.99.1;
+CI uses 1.100.0. The scoped iterator conversion preserves source order,
+checked slice bounds and every arithmetic operation. Matching-compiler strict
+all-feature/minimal Clippy and full all-feature workspace validation pass:
+236 seconds, run-heavy peak RSS 8.14 GiB, minimum available 15,168 MiB.
+Remote CI remains separate. No lint allowance, threshold or existing
+expected value changes.
+
 ## Spline point spacing investigation — 2026-11-05
 
 The former point walker precomputed a unit direction with hypot and advanced

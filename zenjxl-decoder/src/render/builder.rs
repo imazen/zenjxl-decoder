@@ -148,9 +148,12 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                     }
                 }
             }
-            for c in 0..num_channels {
+            for (c, &channel_is_used) in self.shared.channel_is_used[..num_channels]
+                .iter()
+                .enumerate()
+            {
                 if stage.uses_channel(c) {
-                    stage_is_used[i] |= self.shared.channel_is_used[c];
+                    stage_is_used[i] |= channel_is_used;
                 }
             }
             // Stages with non-zero shift modify channel dimensions; pruning

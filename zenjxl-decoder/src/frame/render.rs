@@ -2316,8 +2316,12 @@ impl Frame {
                 );
                 output_buffer_index += 1;
             }
-            for i in 0..frame_header.num_extra_channels as usize {
-                if let Some(df) = &pixel_format.extra_channel_format[i] {
+            for (i, format) in pixel_format.extra_channel_format
+                [..frame_header.num_extra_channels as usize]
+                .iter()
+                .enumerate()
+            {
+                if let Some(df) = format {
                     // Add conversion stages for non-float output formats
                     pipeline = Self::add_conversion_stages(pipeline, &[3 + i], *df, None, dither);
                     pipeline = pipeline.add_save_stage(

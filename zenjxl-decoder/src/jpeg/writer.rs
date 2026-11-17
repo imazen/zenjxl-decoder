@@ -207,8 +207,7 @@ impl<'a> JpegWriter<'a> {
         let length = (total_payload + 2) as u16;
         self.out.extend_from_slice(&length.to_be_bytes());
 
-        for i in start..*idx {
-            let qt = &jpeg.quant[i];
+        for qt in &jpeg.quant[start..*idx] {
             let pq_tq = ((qt.precision as u8) << 4) | (qt.index as u8);
             self.out.push(pq_tq);
             if qt.precision == 0 {
@@ -258,8 +257,7 @@ impl<'a> JpegWriter<'a> {
         let length = (total_payload + 2) as u16;
         self.out.extend_from_slice(&length.to_be_bytes());
 
-        for i in start..*idx {
-            let hc = &jpeg.huffman_code[i];
+        for hc in &jpeg.huffman_code[start..*idx] {
             let tc_th = if hc.is_ac { 0x10 } else { 0x00 } | (hc.id as u8);
             self.out.push(tc_th);
             for &count in &hc.counts {

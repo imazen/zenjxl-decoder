@@ -286,3 +286,14 @@ global-squeeze-coverage:
 
 global-squeeze-regions llvm_directory executable profile output:
     python3 scripts/export_global_squeeze_coverage.py {{quote(llvm_directory)}} {{quote(executable)}} {{quote(profile)}} {{quote(output)}}
+
+# Match the compiler that diagnosed the post-squeeze CI lint failures.
+ci-iterator-check:
+    cargo +1.100.0 fmt -p zenjxl-decoder -p zenjxl-decoder-cli -p zenjxl-decoder-macros -p zenjxl-decoder-simd
+    cargo +1.100.0 clippy --locked --release --workspace --all-targets --all-features -- -D warnings
+    cargo +1.100.0 clippy --locked --release --workspace --all-targets --no-default-features -- -D warnings
+    cargo +1.100.0 test --locked --release --workspace --all-features -- --test-threads=1
+
+ci-iterator-toolchain:
+    rustup component add --toolchain 1.100.0 rustfmt clippy
+    just ci-iterator-check

@@ -14,6 +14,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Iterate bounded slices in spline, render and JPEG-table code for Rust 1.100
+  strict lint, preserving operation order and existing pixel/reconstruction checks.
+
 - Keep inverse-squeeze intermediates global while both inputs are global,
   avoiding empty group views for valid deeply squeezed grayscale channels.
   Exact source regressions cover both orientations and dither modes.
