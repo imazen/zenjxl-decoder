@@ -327,13 +327,13 @@ impl JxlDecoderInner {
             Some(JxlColorProfile::Icc(bytes)) => Some(bytes.clone()),
             _ => None,
         };
-        crate::jpeg::fill_metadata(
+        let filled = crate::jpeg::fill_metadata(
             &mut jpeg,
             self.box_parser.exif.clone(),
             self.box_parser.xmp.clone(),
             icc.as_deref(),
         );
-        match crate::jpeg::write_jpeg(&jpeg) {
+        match filled.and_then(|()| crate::jpeg::write_jpeg(&jpeg)) {
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 // A jbrd box was present but its serialization failed —

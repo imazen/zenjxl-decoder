@@ -51,6 +51,30 @@ fn plain_container_decodes() {
     decodes(&container(&[], &[]));
 }
 
+#[test]
+fn gain_map_box_cardinality() {
+    let payload = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/gain-map/structured.jhgm"
+    ))
+    .unwrap();
+    let gain = box_(b"jhgm", &payload);
+    for (before, after) in [(vec![gain.clone()], vec![]), (vec![], vec![gain.clone()])] {
+        decodes(&container(&before, &after));
+    }
+    for (before, after) in [
+        (vec![gain.clone(), gain.clone()], vec![]),
+        (vec![gain.clone()], vec![gain.clone()]),
+        (vec![], vec![gain.clone(), gain]),
+    ] {
+        let result = crate::decode(&container(&before, &after));
+        assert!(matches!(
+            result.err().expect("duplicate gain map must fail").error(),
+            crate::error::Error::InvalidBox
+        ));
+    }
+}
+
 /// An 8-byte box (size == header size, no payload) is legal ISOBMFF and
 /// libjxl accepts it (`decode.cc` only rejects `box_size < header_size`).
 /// The fork used to return `InvalidBox`. (jxl-rs #828, item 1)

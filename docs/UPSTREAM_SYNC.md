@@ -12,6 +12,25 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 
 ## Regression delta — 2026-11-17
 
+Cumulative Level 5 zero-duration frame area now has independent stream state.
+The exact 2^28/2^28+1 helper controls, duration reset, seek snapshot restoration
+and rewind checks pass, along with the existing seek and work-budget controls.
+Preview frames do not contribute; Level 10 has no artificial cumulative u64 cap.
+The boundary control does not allocate or decode a 2^28-pixel frame sequence.
+
+Core ICC admission now checks grayscale descriptor/profile correspondence and
+Black-channel/CMYK-profile correspondence. A header-only Black-without-ICC wire
+control returns InvalidColorEncoding; real CMYK and generated RGB/gray profiles
+exercise the paired positive/negative controls. This checks channel models,
+not every semantic requirement of an ICC profile.
+
+Duplicate gain-map boxes now return InvalidBox before, across or after the
+codestream. Tracking uses the box's file position so seeking back to the same
+box remains valid even after its payload was taken. JPEG reconstruction now
+returns its existing InvalidJbrd error when required external Exif, XMP or ICC
+data is absent, preserving present and inline payload bytes. The five focused
+metadata controls pass (`just review-metadata-check`).
+
 Squeeze validation now rejects a step whose incoming horizontal or vertical
 shift exceeds 30, matching released v0.12 `MetaSqueeze`. Exact 30/31 controls
 and the existing three truncated-squeeze flush regressions pass. A separate

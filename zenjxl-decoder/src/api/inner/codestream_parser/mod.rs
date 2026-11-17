@@ -62,6 +62,9 @@ pub(crate) struct SeekPoint {
     pub(crate) visible_counter: usize,
     /// `DecoderState::nonvisible_frame_index` before this frame was parsed.
     pub(crate) nonvisible_counter: usize,
+    /// Normative stream state before this header, restored rather than
+    /// charged again when seek replays an earlier part of the stream.
+    pub(crate) zero_duration_pixels_before: u64,
     /// `false` when `file_offset` is not a real file position (out-of-order
     /// `jxlp` boxes were spliced in before this frame), so it cannot be used
     /// as a seek target.
@@ -134,6 +137,7 @@ pub(super) struct CodestreamParser {
     /// Completed header parses in this operation, including hidden frames and
     /// replays. Rewind/seek preserve the charge; full reset starts a new one.
     parsed_frame_headers: u64,
+    zero_duration_pixels: u64,
     toc_parser: Option<IncrementalTocReader>,
     pub(super) frame: Option<Frame>,
 
@@ -284,6 +288,7 @@ impl CodestreamParser {
             output_color_profile_set_by_user: false,
             frame_header: None,
             parsed_frame_headers: 0,
+            zero_duration_pixels: 0,
             toc_parser: None,
             frame: None,
             first_vardct_quantizer: None,
@@ -389,6 +394,7 @@ impl CodestreamParser {
             visible_count_before: self.visible_frame_index,
             visible_counter: state.visible_frame_index,
             nonvisible_counter: state.nonvisible_frame_index,
+            zero_duration_pixels_before: self.zero_duration_pixels,
             seekable,
         });
         true
@@ -526,6 +532,7 @@ impl CodestreamParser {
         );
         state.visible_frame_index = target.point.visible_counter;
         state.nonvisible_frame_index = target.point.nonvisible_counter;
+        self.zero_duration_pixels = target.point.zero_duration_pixels_before;
         #[cfg(test)]
         if let Some(old) = self.decoder_state.as_ref() {
             state.use_simple_pipeline = old.use_simple_pipeline;

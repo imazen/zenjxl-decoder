@@ -102,6 +102,27 @@ fn check_frame_duration(
     Ok(())
 }
 
+fn next_zero_duration_pixels(
+    previous: u64,
+    area: u64,
+    duration: u32,
+    level: crate::api::JxlCodestreamLevel,
+) -> Result<u64> {
+    // Level 10 has no cumulative cap; avoid creating an accidental u64 cap.
+    if duration != 0 || level == crate::api::JxlCodestreamLevel::Level10 {
+        return Ok(0);
+    }
+    let next = previous.saturating_add(area);
+    if next > 1 << 28 {
+        return Err(at!(Error::LimitExceeded {
+            resource: "zero-duration frame pixels",
+            actual: next,
+            limit: 1 << 28,
+        }));
+    }
+    Ok(next)
+}
+
 fn check_size_limit(
     limits: &crate::api::JxlDecoderLimits,
     (xs, ys): (usize, usize),
@@ -174,6 +195,23 @@ fn check_sample_precision(
             actual: 32,
             limit: 16,
         }));
+    }
+    Ok(())
+}
+
+fn check_profile_channels(
+    metadata: &crate::headers::ImageMetadata,
+    profile: &JxlColorProfile,
+) -> Result<()> {
+    if metadata.color_encoding.want_icc {
+        let gray = metadata.color_encoding.color_space == ColorSpace::Gray;
+        let black = metadata
+            .extra_channel_info
+            .iter()
+            .any(|ec| ec.ec_type == crate::headers::extra_channels::ExtraChannel::Black);
+        if gray != (profile.channels() == 1) || black != profile.is_cmyk() {
+            return Err(at!(Error::InvalidColorEncoding));
+        }
     }
     Ok(())
 }
@@ -330,6 +368,7 @@ impl CodestreamParser {
                     &file_header.image_metadata.color_encoding,
                 )?)
             };
+            check_profile_channels(&file_header.image_metadata, &embedded_color_profile)?;
             self.embedded_color_profile = Some(embedded_color_profile.clone());
 
             let xyb_encoded = file_header.image_metadata.xyb_encoded;
@@ -441,6 +480,19 @@ impl CodestreamParser {
                 self.animation.as_ref(),
                 frame_header.duration,
             )?;
+            let is_preview_frame = !self.preview_done
+                && self
+                    .basic_info
+                    .as_ref()
+                    .is_some_and(|info| info.preview_size.is_some());
+            if !is_preview_frame {
+                self.zero_duration_pixels = next_zero_duration_pixels(
+                    self.zero_duration_pixels,
+                    frame_header.width as u64 * frame_header.height as u64,
+                    frame_header.duration,
+                    decode_options.limits.max_codestream_level,
+                )?;
+            }
 
             // Reject progressive content before decoding any of its passes, when
             // the caller's policy forbids it. The preview frame (parsed while
@@ -452,11 +504,6 @@ impl CodestreamParser {
             // rejected for that frame — the gate catches the main frame that
             // follows it.
             if decode_options.reject_progressive {
-                let is_preview_frame = !self.preview_done
-                    && self
-                        .basic_info
-                        .as_ref()
-                        .is_some_and(|info| info.preview_size.is_some());
                 if !is_preview_frame && frame_is_progressive(&frame_header) {
                     return Err(at!(Error::ProgressiveRejected));
                 }
@@ -617,6 +664,128 @@ impl CodestreamParser {
 mod conformance_limit_tests {
     use super::*;
     use crate::api::{JxlCodestreamLevel, JxlDecoderLimits};
+
+    #[test]
+    fn black_channel_requires_cmyk_icc_and_gray_flag_matches_profile() {
+        use crate::headers::color_encoding::ColorSpace;
+        let data = crate::util::test::fixture_bytes("conformance_test_images/cmyk_layers.jxl");
+        let header = crate::api::read_header_with(&data, JxlDecoderLimits::unlimited()).unwrap();
+        let codestream = crate::container::ContainerParser::collect_codestream(&data).unwrap();
+        let file = FileHeader::read(&mut BitReader::new(&codestream)).unwrap();
+        let mut metadata = file.image_metadata;
+        check_profile_channels(&metadata, &header.embedded_profile).unwrap();
+        let rgb = JxlColorProfile::Icc(
+            JxlColorEncoding::srgb(false)
+                .maybe_create_profile()
+                .unwrap()
+                .unwrap(),
+        );
+        assert!(check_profile_channels(&metadata, &rgb).is_err());
+        metadata.extra_channel_info.clear();
+        assert!(check_profile_channels(&metadata, &header.embedded_profile).is_err());
+        check_profile_channels(&metadata, &rgb).unwrap();
+        let gray = JxlColorProfile::Icc(
+            JxlColorEncoding::srgb(true)
+                .maybe_create_profile()
+                .unwrap()
+                .unwrap(),
+        );
+        assert!(check_profile_channels(&metadata, &gray).is_err());
+        metadata.color_encoding.color_space = ColorSpace::Gray;
+        check_profile_channels(&metadata, &gray).unwrap();
+        assert!(check_profile_channels(&metadata, &rgb).is_err());
+    }
+
+    #[test]
+    fn wire_black_without_icc_is_rejected_at_header() {
+        let bytes = crate::util::test::pack_bits(&[
+            (0x0aff, 16),
+            (0, 1),
+            (0, 2),
+            (0, 9),
+            (1, 3), // 1x1
+            (0, 1),
+            (0, 1), // explicit metadata, no extra fields
+            (0, 1),
+            (0, 2),
+            (1, 1), // u8, 16-bit modular buffers
+            (1, 2), // one extra channel
+            (0, 1),
+            (2, 2),
+            (2, 4), // explicit EC, Enum(Black)=4
+            (0, 1),
+            (0, 2),
+            (0, 2),
+            (0, 2), // u8, dim_shift=0, empty name
+            (0, 1),
+            (1, 1),
+            (0, 2),
+            (1, 1), // non-XYB, sRGB/no ICC, extensions, transform
+        ]);
+        let error = crate::api::read_header_with(&bytes, JxlDecoderLimits::unlimited())
+            .err()
+            .expect("Black without ICC must fail");
+        assert!(
+            matches!(error.error(), Error::InvalidColorEncoding),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn cumulative_zero_duration_pixels_and_rewind() {
+        let level = JxlCodestreamLevel::Level5;
+        let mut total = 0;
+        for _ in 0..256 {
+            total = next_zero_duration_pixels(total, 1024 * 1024, 0, level).unwrap();
+        }
+        assert_eq!(total, 1 << 28);
+        assert!(matches!(
+            next_zero_duration_pixels(total, 1, 0, level)
+                .unwrap_err()
+                .error(),
+            Error::LimitExceeded {
+                resource: "zero-duration frame pixels",
+                actual: 268_435_457,
+                limit: 268_435_456
+            }
+        ));
+        assert_eq!(next_zero_duration_pixels(total, 1, 1, level).unwrap(), 0);
+        assert_eq!(
+            next_zero_duration_pixels(u64::MAX, 1, 0, JxlCodestreamLevel::Level10).unwrap(),
+            0
+        );
+        let mut parser = CodestreamParser::new();
+        parser.zero_duration_pixels = total;
+        parser.parsed_frame_headers = 257;
+        let (header, _, _) =
+            crate::util::test::read_headers_and_toc(&crate::util::test::fixture_bytes("basic.jxl"))
+                .unwrap();
+        parser.image_file_header = Some(header);
+        let target = crate::api::VisibleFrameSeekTarget {
+            decode_start_file_offset: 0,
+            visible_frames_to_skip: 0,
+            point: super::super::SeekPoint {
+                file_offset: 0,
+                remaining_in_box: u64::MAX,
+                box_type: crate::api::inner::box_parser::CodestreamBoxType::None,
+                visible_count_before: 0,
+                visible_counter: 0,
+                nonvisible_counter: 0,
+                zero_duration_pixels_before: 9,
+                seekable: true,
+            },
+            reference_slots: [None; 4],
+            lf_slots: [None; 4],
+        };
+        parser
+            .start_new_frame(&JxlDecoderOptions::default(), &target)
+            .unwrap();
+        assert_eq!(parser.zero_duration_pixels, 9);
+        assert_eq!(parser.parsed_frame_headers, 257);
+        parser.rewind();
+        assert_eq!(parser.zero_duration_pixels, 0);
+        assert_eq!(parser.parsed_frame_headers, 257); // work budget is independent
+    }
 
     #[test]
     fn large_level10_wire_header_needs_no_pixel_allocation() {

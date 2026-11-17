@@ -14,6 +14,13 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Track cumulative Level 5 zero-duration frame area separately from decoder
+  work budgets, restoring stream state on seek and clearing it on rewind.
+- Validate ICC grayscale/CMYK channel correspondence and required Black-channel
+  ICC presence. Reject duplicate gain-map boxes while permitting seek replay.
+- Reject missing external JPEG reconstruction metadata instead of writing
+  empty APP marker payloads.
+
 - Reject squeeze steps whose incoming channel shifts exceed 30, retaining
   released decoding's empty group-tile and partial-render behavior.
 

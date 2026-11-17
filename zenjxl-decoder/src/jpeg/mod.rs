@@ -39,8 +39,13 @@ pub(crate) fn fill_metadata(
     exif: Option<Vec<u8>>,
     xmp: Option<Vec<u8>>,
     icc: Option<&[u8]>,
-) {
+) -> std::result::Result<(), crate::error::Error> {
     use data::AppMarkerType;
+    if jpeg.app_data.len() != jpeg.app_marker_type.len() {
+        return Err(crate::error::Error::InvalidJbrd(
+            "APP metadata count mismatch".into(),
+        ));
+    }
     // total_chunks for ICC = the number of empty Icc placeholders.
     let icc_total = jpeg
         .app_marker_type
@@ -91,5 +96,65 @@ pub(crate) fn fill_metadata(
             }
             _ => {}
         }
+        if jpeg.app_data[i].is_empty() && jpeg.app_marker_type[i] != AppMarkerType::Unknown {
+            return Err(crate::error::Error::InvalidJbrd(format!(
+                "missing external {:?} metadata",
+                jpeg.app_marker_type[i]
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+    use data::{AppMarkerType, JpegComponentType, JpegData};
+
+    fn jpeg(kind: AppMarkerType) -> JpegData {
+        JpegData {
+            width: 1,
+            height: 1,
+            restart_interval: 0,
+            app_data: vec![vec![]],
+            app_marker_type: vec![kind],
+            com_data: vec![],
+            quant: vec![],
+            huffman_code: vec![],
+            components: vec![],
+            scan_info: vec![],
+            marker_order: vec![],
+            inter_marker_data: vec![],
+            tail_data: vec![],
+            has_zero_padding_bit: false,
+            padding_bits: vec![],
+            component_type: JpegComponentType::Gray,
+        }
+    }
+
+    #[test]
+    fn required_external_jpeg_metadata_is_not_synthesized_empty() {
+        for kind in [AppMarkerType::Exif, AppMarkerType::Xmp, AppMarkerType::Icc] {
+            assert!(matches!(
+                fill_metadata(&mut jpeg(kind), None, None, None),
+                Err(crate::error::Error::InvalidJbrd(_))
+            ));
+        }
+        let mut exif = jpeg(AppMarkerType::Exif);
+        fill_metadata(&mut exif, Some(b"II\x2a\0".to_vec()), None, None).unwrap();
+        assert_eq!(exif.app_data[0], b"Exif\0\0II\x2a\0");
+        let mut xmp = jpeg(AppMarkerType::Xmp);
+        fill_metadata(&mut xmp, None, Some(b"<x/>".to_vec()), None).unwrap();
+        assert_eq!(xmp.app_data[0], b"http://ns.adobe.com/xap/1.0/\0<x/>");
+        let mut icc = jpeg(AppMarkerType::Icc);
+        fill_metadata(&mut icc, None, None, Some(b"retained profile bytes")).unwrap();
+        assert_eq!(
+            icc.app_data[0],
+            b"ICC_PROFILE\0\x01\x01retained profile bytes"
+        );
+        let mut inline = jpeg(AppMarkerType::Exif);
+        inline.app_data[0] = b"already present".to_vec();
+        fill_metadata(&mut inline, None, None, None).unwrap();
+        assert_eq!(inline.app_data[0], b"already present");
     }
 }

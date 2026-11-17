@@ -169,6 +169,7 @@ pub(super) struct BoxParser {
     pub(super) frame_index: Option<FrameIndexBox>,
     /// Parsed gain map bundle, if present in the file.
     pub(super) gain_map: Option<GainMapBundle>,
+    gain_map_box_offset: Option<u64>,
     /// Raw EXIF data from the `Exif` container box (without the 4-byte TIFF offset prefix).
     pub(super) exif: Option<Vec<u8>>,
     /// Raw XMP data from the `xml ` container box.
@@ -190,6 +191,7 @@ impl BoxParser {
             jbrd_data: None,
             frame_index: None,
             gain_map: None,
+            gain_map_box_offset: None,
             exif: None,
             xmp: None,
             ooo_jxlp: OooJxlp::default(),
@@ -369,7 +371,7 @@ impl BoxParser {
                 .sum::<u64>()
     }
 
-    fn get_more_codestream_impl(&mut self, input: &mut dyn JxlBitstreamInput) -> Result<u64> {
+    fn get_more_codestream_impl(&mut self, input: &mut CountingInput<'_>) -> Result<u64> {
         loop {
             match self.state.clone() {
                 ParseState::SignatureNeeded => {
@@ -782,6 +784,17 @@ impl BoxParser {
                             self.state = ParseState::JbrdBox(content_len);
                         }
                         b"jhgm" => {
+                            let offset =
+                                self.total_file_read + input.count - self.box_buffer.len() as u64;
+                            if self
+                                .gain_map_box_offset
+                                .is_some_and(|previous| previous != offset)
+                            {
+                                return Err(at!(Error::InvalidBox));
+                            }
+                            // The same box may be replayed after a seek. Taking
+                            // its payload does not permit a second box.
+                            self.gain_map_box_offset = Some(offset);
                             if content_len == u64::MAX {
                                 return Err(at!(Error::InvalidBox));
                             }
@@ -1003,6 +1016,45 @@ fn brotli_decompress_box(compressed: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::BoxParser;
+
+    #[test]
+    fn gain_map_replay_uses_box_position_after_payload_is_taken() {
+        let payload = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/testdata/gain-map/structured.jhgm"
+        ))
+        .unwrap();
+        let mut boxed = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        boxed.extend(b"jhgm");
+        boxed.extend(payload);
+        let mut parser = BoxParser::new();
+        parser.state = super::ParseState::BoxNeeded;
+        parser.ooo_jxlp.ftyp_seen = true;
+        parser.box_type = super::CodestreamBoxType::Jxlc;
+        parser.total_file_read = 42;
+        assert_eq!(
+            parser.get_more_codestream(&mut boxed.as_slice()).unwrap(),
+            0
+        );
+        assert_eq!(parser.gain_map_box_offset, Some(42));
+        assert!(parser.gain_map.take().is_some());
+        // Seeking back can revisit the same box without inventing a duplicate.
+        parser.reset_for_codestream_seek(42, 0, super::CodestreamBoxType::Jxlc);
+        parser.consume_codestream(0);
+        assert_eq!(
+            parser.get_more_codestream(&mut boxed.as_slice()).unwrap(),
+            0
+        );
+        parser.reset_for_codestream_seek(43, 0, super::CodestreamBoxType::Jxlc);
+        parser.consume_codestream(0);
+        assert!(matches!(
+            parser
+                .get_more_codestream(&mut boxed.as_slice())
+                .unwrap_err()
+                .error(),
+            crate::error::Error::InvalidBox
+        ));
+    }
 
     /// Ported from upstream jxl-rs `zero_length_skippable_box_does_not_hang`.
     ///

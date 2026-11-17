@@ -1,5 +1,20 @@
 # Decoder investigation notes
 
+## Resolved: cumulative frame and metadata consistency — 2026-11-17
+
+The Level 5 zero-duration area counter is separate from the frame-header work
+budget. Boundary/reset controls and the existing seek/work-budget suite pass;
+seek restores the counter snapshot and rewind clears stream state. Preview
+frames are excluded, and Level 10 has no cumulative cap. The boundary control
+does not decode a full-size frame sequence.
+
+The core parser validates grayscale ICC correspondence and Black/CMYK profile
+correspondence, including an encoded Black-without-ICC negative control.
+Container admission rejects a second gain-map box but permits rereading the
+same box position after seeking. Required external JPEG Exif/XMP/ICC data now
+fails through the existing reconstruction error path when absent; present and
+inline payloads retain their bytes. Five focused metadata controls pass.
+
 ## Resolved: structured XYB descriptor parsing — 2026-11-17
 
 The ten-bit XYB/perceptual ColorEncoding bundle previously returned

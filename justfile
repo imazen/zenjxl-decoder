@@ -48,6 +48,16 @@ review-prefix-check:
 review-reference-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- before_ct_extra stages::blending --test-threads=1
 
+review-state-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- cumulative_zero_duration upstream_seek_matches_sequential test_start_new_frame frame_header_budget --test-threads=1
+
+review-metadata-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- gain_map_box_cardinality gain_map_replay required_external_jpeg black_channel_requires wire_black --test-threads=1
+
+# Diagnostic defaults to measurements; --check retains upstream's HDR assertions.
+review-lcms-intensity *args:
+    cargo run --locked -p zenjxl-decoder-cli --example hdr_intensity_probe -- {{args}}
+
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
 

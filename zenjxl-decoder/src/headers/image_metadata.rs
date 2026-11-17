@@ -242,6 +242,14 @@ impl ImageMetadata {
         if self.extra_channel_info.len() > 256 {
             return Err(Error::TooManyExtraChannels(self.extra_channel_info.len()));
         }
+        if self
+            .extra_channel_info
+            .iter()
+            .any(|ec| ec.ec_type == ExtraChannel::Black)
+            && (!self.color_encoding.want_icc || self.color_encoding.color_space != ColorSpace::RGB)
+        {
+            return Err(Error::InvalidColorEncoding);
+        }
         Ok(())
     }
 }
