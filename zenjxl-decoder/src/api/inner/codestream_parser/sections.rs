@@ -412,9 +412,11 @@ impl CodestreamParser {
         #[cfg(feature = "jpeg")]
         if let Some(jbrd_data) = &self.jbrd_data
             && let Some(frame) = &self.frame
-            && let Ok(jpeg_data) = frame.jpeg_reconstruct(jbrd_data)
         {
-            self.jpeg_recon = Some(jpeg_data);
+            match frame.jpeg_reconstruct(jbrd_data) {
+                Ok(jpeg_data) => self.jpeg_recon = Some(jpeg_data),
+                Err(error) => self.jpeg_recon_error = Some(error.decompose().0),
+            }
         }
 
         let decoder_state = self.frame.take().unwrap().finalize()?;

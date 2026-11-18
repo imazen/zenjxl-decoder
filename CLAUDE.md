@@ -1,5 +1,18 @@
 # Decoder investigation notes
 
+## Repaired: JPEG empty DHT and lost reconstruction errors — 2026-11-18
+
+Native v0.12 empty-DHT streams render but fail public reconstruction because
+the JBRD reader rejects the legal all-zero record. A zero-symbol DC3 table is
+a distinct, passing control. A truncated optional JBRD is also silently treated
+as absent by checked reconstruction. Fresh committed-source before evidence
+and candidate controls are retained in [the DHT contract](docs/JPEG_DHT_CONTRACT.md).
+The repair passes the broad Rust 1.100 feature/scalar/threaded and strict lint
+gates, selected native DC/AC reconstruction, malformed-record/error-boundary
+controls, five deliberate faults and the changed production-region windows.
+The encoder pin update remains separate work.
+
+
 ## Resolved: upstream prefix-test flush schedule — 2026-11-17
 
 The prefix comparison's first adaptation flushed after every chunk, while

@@ -320,6 +320,10 @@ impl JxlDecoderInner {
     /// whole container has been parsed.
     #[cfg(feature = "jpeg")]
     pub fn take_jpeg_reconstruction(&mut self) -> Option<Vec<u8>> {
+        if let Some(error) = self.codestream_parser.jpeg_recon_error.take() {
+            self.jpeg_reconstruction_error = Some(error);
+            return None;
+        }
         let mut jpeg = self.codestream_parser.jpeg_recon.take()?;
         // The original ICC profile (if any) was lifted into the codestream color
         // encoding; recover it to re-chunk the ICC_PROFILE APP2 markers.

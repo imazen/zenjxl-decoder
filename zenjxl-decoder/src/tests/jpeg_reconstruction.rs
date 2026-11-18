@@ -300,3 +300,33 @@ fn failed_jpeg_rebuild_is_an_error_not_none() {
     let basic = std::fs::read(crate::util::test::fixture_path("basic.jxl")).unwrap();
     assert!(crate::reconstruct_jpeg(&basic).unwrap().is_none());
 }
+
+/// Optional malformed JBRD remains observable after an unchecked take.
+#[test]
+fn malformed_native_jbrd_error_survives_unchecked_take() {
+    let text = include_str!("../../tests/testdata/jpeg_dht_v012_zero_dc3.jxl.hex");
+    let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let original: Vec<u8> = compact
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect();
+    let mut offset = 0;
+    loop {
+        let size = u32::from_be_bytes(original[offset..offset + 4].try_into().unwrap()) as usize;
+        assert!(size >= 8 && offset + size <= original.len());
+        if &original[offset + 4..offset + 8] == b"jbrd" {
+            let mut corrupted = original[..offset].to_vec();
+            corrupted.extend(9_u32.to_be_bytes());
+            corrupted.extend(b"jbrd");
+            corrupted.push(0);
+            corrupted.extend_from_slice(&original[offset + size..]);
+            let mut decoder = decoded(&corrupted);
+            assert!(decoder.take_jpeg_reconstruction().is_none());
+            assert!(decoder.take_jpeg_reconstruction_checked().is_err());
+            break;
+        }
+        offset += size;
+        assert!(offset < original.len(), "native fixture retains JBRD");
+    }
+}

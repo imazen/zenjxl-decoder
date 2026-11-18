@@ -18,8 +18,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
-- Reconstruct native empty DHT segments without replacing active Huffman tables
-  and distinguish real zero-symbol DC/AC table definitions.
+- Reconstruct native empty DHT segments without replacing active Huffman tables,
+  distinguish real zero-symbol table definitions, and retain optional JBRD
+  failures for checked reconstruction while allowing ordinary pixel decoding.
 
 - Honor the supplied intensity target in the CLI LCMS provider; retain
   upstream's nine-sample HDR control and exact CMYK golden in both feature modes.

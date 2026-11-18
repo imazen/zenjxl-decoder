@@ -229,6 +229,8 @@ pub(super) struct CodestreamParser {
     /// `take_jpeg_reconstruction` — after the trailing container boxes parse.
     #[cfg(feature = "jpeg")]
     pub(super) jpeg_recon: Option<crate::jpeg::data::JpegData>,
+    #[cfg(feature = "jpeg")]
+    pub(super) jpeg_recon_error: Option<crate::error::Error>,
 }
 
 impl CodestreamParser {
@@ -329,6 +331,8 @@ impl CodestreamParser {
             jbrd_data: None,
             #[cfg(feature = "jpeg")]
             jpeg_recon: None,
+            #[cfg(feature = "jpeg")]
+            jpeg_recon_error: None,
         }
     }
 

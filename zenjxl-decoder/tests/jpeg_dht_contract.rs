@@ -60,3 +60,31 @@ fn native_empty_dht_and_zero_symbol_table_reconstruct_exactly() {
         }
     }
 }
+
+#[test]
+fn malformed_jbrd_is_an_error_without_changing_pixel_decode() {
+    let original = bytes(include_str!("testdata/jpeg_dht_v012_zero_dc3.jxl.hex"));
+    let baseline = zenjxl_decoder::decode(&original).unwrap();
+    let mut offset = 0;
+    let mut corrupted = None;
+    while offset < original.len() {
+        let size = u32::from_be_bytes(original[offset..offset + 4].try_into().unwrap()) as usize;
+        assert!(size >= 8 && offset + size <= original.len());
+        if &original[offset + 4..offset + 8] == b"jbrd" {
+            let mut output = original[..offset].to_vec();
+            output.extend(9_u32.to_be_bytes());
+            output.extend(b"jbrd");
+            output.push(0); // truncated reconstruction header, within a legal box
+            output.extend_from_slice(&original[offset + size..]);
+            corrupted = Some(output);
+            break;
+        }
+        offset += size;
+    }
+    let corrupted = corrupted.expect("native fixture retains JBRD");
+    assert_eq!(
+        zenjxl_decoder::decode(&corrupted).unwrap().data,
+        baseline.data
+    );
+    assert!(zenjxl_decoder::reconstruct_jpeg(&corrupted).is_err());
+}
