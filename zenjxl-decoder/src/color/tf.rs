@@ -367,7 +367,8 @@ const HLG_C: f64 = 0.5599107295;
 
 #[allow(dead_code)] // used by integration tests
 fn hlg_ootf_inner_precise(exp: f64, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut [f32]; 3]) {
-    if exp.abs() < 0.1 {
+    // v0.12 HlgOOTF_Base keeps only this closed interval at unity.
+    if exp.abs() <= 0.01 {
         return;
     }
 
@@ -387,7 +388,8 @@ fn hlg_ootf_inner_precise(exp: f64, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut 
 }
 
 fn hlg_ootf_inner(exp: f32, [lr, lg, lb]: [f32; 3], [sr, sg, sb]: [&mut [f32]; 3]) {
-    if exp.abs() < 0.1 {
+    // v0.12 HlgOOTF_Base keeps only this closed interval at unity.
+    if exp.abs() <= 0.01 {
         return;
     }
 
@@ -913,3 +915,7 @@ mod test {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "hlg_near_unity_tests.rs"]
+mod hlg_near_unity_tests;

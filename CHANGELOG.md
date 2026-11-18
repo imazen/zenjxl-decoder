@@ -18,6 +18,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Apply HLG OOTF outside the pinned v0.12 closed unity deadband, retaining
+  native component and complete original-profile pixel controls.
+
 - Select JPEG reconstruction coefficient plane order from the frame color
   transform, retaining RGB/custom component identifiers independently.
 

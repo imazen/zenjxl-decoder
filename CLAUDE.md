@@ -857,3 +857,25 @@ the frame do_ycbcr flag determines coefficient plane order. The verified repair
 uses that flag, retaining the grayscale route. Native asymmetric fixtures in
 `jpeg_scan_contract` cover both channel mappings independently of identifiers.
 See `docs/JPEG_SCAN_CONTRACT.md` for verification and remaining limits.
+
+## Resolved: near-unity HLG OOTF — 2026-11-19
+
+The former 0.1 cutoff suppresses nontrivial OOTF corrections. Unmodified v0.12
+vectors independently reject it in both fast and precise paths. The candidate
+uses the reference's closed 0.01 deadband. Kernel controls pass; corrected
+Level 10/strided full-file, restored-fault, region and broad checks remain in
+progress. [Contract](docs/HLG_OOTF_CONTRACT.md).
+
+### Known Bugs: post-header output-profile admission — 2026-11-19
+
+The public profile setter accepted an unsupported non-XYB encoding change
+without a CMS after image info, bypassing the parser's existing refusal.
+The retained 9x3 lossless HLG source returns its original signal for a requested
+linear profile before repair. The new refusal regression reproduces this;
+shared existing admission semantics are under qualification. No CMS-free
+forward conversion is claimed.
+
+The native component/full-file controls now pass in default/minimal builds;
+restoring the old cutoff fails both. Color/stage/HDR, strict lint and scoped
+formatting pass. The owning contract records exact mapped regions and the
+unmounted forward-production route; platform checks retain separate verdicts.

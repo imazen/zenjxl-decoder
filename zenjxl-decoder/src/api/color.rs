@@ -1947,7 +1947,7 @@ fn apply_hlg_ootf(rgb: &mut [f32; 3], target_luminance: f32, luminances: [f32; 3
     let system_gamma = 1.2_f32 * 1.111_f32.powf((target_luminance / 1e3).log2());
     let exp = system_gamma - 1.0;
 
-    if exp.abs() < 0.1 {
+    if exp.abs() <= 0.01 {
         return;
     }
 

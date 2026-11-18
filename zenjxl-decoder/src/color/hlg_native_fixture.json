@@ -1,0 +1,20 @@
+{
+  "source": "retained issue144 request-typed-queue14-gates-v1 producer ELF c672e78f5a42bdfaccad2551fcb0feebfea8eed12549fdf47efe9b287831ad3c; zero controller iterations, effort3 Libjxl, RGB HLG F32 [0.125,0.25,0.5], explicit 255-nit white",
+  "dimensions": [
+    9,
+    3
+  ],
+  "stream_sha256": "d973d00101a209b8c26448a898b0fd3fc0ca813e6506dcd0f9127c2ec8e68ee8",
+  "native_original_profile_pfm_sha256": "cce071bcb7643c47ccf25c8f95337c9e1d25cad1f7eb223fdf2e15320f77c42b",
+  "native_version": "libjxl v0.12.0 a7a9c78",
+  "native_samples_uniform": [
+    0.12495632469654083,
+    0.24998974800109863,
+    0.4999362528324127
+  ],
+  "native_uniform_bits": [
+    "0x3dffe91a",
+    "0x3e7ffd50",
+    "0x3efff7a5"
+  ]
+}
