@@ -43,6 +43,8 @@ pub struct JpegQuantTable {
 /// JPEG Huffman code table.
 #[derive(Debug, Clone)]
 pub struct JpegHuffmanCode {
+    /// All seventeen wire counts were zero: an empty DHT segment, without a sentinel.
+    pub(crate) empty_segment: bool,
     /// Whether this is an AC table (true) or DC table (false).
     pub is_ac: bool,
     /// Table ID (0-3).

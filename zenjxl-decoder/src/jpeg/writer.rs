@@ -245,6 +245,16 @@ impl<'a> JpegWriter<'a> {
                 return Err(Error::InvalidJbrd("too many DHT tables".into()));
             }
             let hc = &jpeg.huffman_code[*idx];
+            if hc.empty_segment {
+                if *idx != start || !hc.is_last {
+                    return Err(Error::InvalidJbrd(
+                        "empty DHT record must occupy its own segment".into(),
+                    ));
+                }
+                *idx += 1;
+                self.out.extend_from_slice(&2_u16.to_be_bytes());
+                return Ok(());
+            }
             let num_values: u32 = hc.counts.iter().sum();
             total_payload += 1 + 16 + num_values as usize;
             let is_last = hc.is_last;

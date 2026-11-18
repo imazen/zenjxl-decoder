@@ -159,14 +159,16 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
             }
         }
 
-        // Remove sentinel symbol from max depth
-        if counts[max_depth_idx] == 0 {
-            return Err(Error::InvalidJbrd("huffman table has no symbols".into()));
+        // Part 2 A.2 reserves seventeen zero counts for an empty DHT
+        // segment. It has no sentinel or values. A zero-symbol table
+        // definition instead carries one sentinel in its wire counts.
+        let empty_segment = counts.iter().all(|&count| count == 0);
+        if !empty_segment {
+            counts[max_depth_idx] -= 1;
         }
-        counts[max_depth_idx] -= 1;
 
         // Read symbol values (original count + 1 for sentinel)
-        let num_symbols: u32 = counts.iter().sum::<u32>() + 1; // +1 for sentinel
+        let num_symbols: u32 = counts.iter().sum::<u32>() + u32::from(!empty_segment);
         let mut values = Vec::<u8>::new_with_capacity(num_symbols as usize)?;
         for _ in 0..num_symbols {
             let val = read_u32_jbrd(&mut reader, &[], &[(2, 0), (2, 4), (4, 8), (8, 1)])?;
@@ -177,6 +179,7 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
         }
 
         huffman_code.push(JpegHuffmanCode {
+            empty_segment,
             is_ac,
             id,
             is_last,
@@ -459,6 +462,92 @@ fn brotli_decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 mod fallible_alloc_tests {
     use super::decode_jbrd;
     use crate::error::Error;
+
+    fn native_metadata(text: &str) -> super::JpegData {
+        let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes: Vec<u8> = compact
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect();
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let size = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+            assert!(size >= 8 && offset + size <= bytes.len());
+            if &bytes[offset + 4..offset + 8] == b"jbrd" {
+                return decode_jbrd(&bytes[offset + 8..offset + size], 67, 53).unwrap();
+            }
+            offset += size;
+        }
+        panic!("native fixture retains JBRD");
+    }
+
+    #[test]
+    fn native_dht_metadata_reader_controls() {
+        let empty = native_metadata(include_str!(
+            "../../tests/testdata/jpeg_dht_v012_empty.jxl.hex"
+        ));
+        assert_eq!(
+            empty
+                .huffman_code
+                .iter()
+                .filter(|h| h.empty_segment)
+                .count(),
+            1
+        );
+        let zero = native_metadata(include_str!(
+            "../../tests/testdata/jpeg_dht_v012_zero_dc3.jxl.hex"
+        ));
+        assert!(zero.huffman_code.iter().all(|h| !h.empty_segment));
+        assert!(
+            zero.huffman_code
+                .iter()
+                .any(|h| !h.is_ac && h.id == 3 && h.values.is_empty())
+        );
+    }
+
+    #[test]
+    fn native_dht_zero_symbol_ac_control() {
+        let zero = native_metadata(include_str!(
+            "../../tests/testdata/jpeg_dht_v012_zero_ac3.jxl.hex"
+        ));
+        assert!(zero.huffman_code.iter().all(|h| !h.empty_segment));
+        assert!(
+            zero.huffman_code
+                .iter()
+                .any(|h| h.is_ac && h.id == 3 && h.values.is_empty())
+        );
+    }
+
+    #[test]
+    fn native_dht_empty_record_must_occupy_its_own_segment() {
+        for merge_previous in [false, true] {
+            let mut jpeg = native_metadata(include_str!(
+                "../../tests/testdata/jpeg_dht_v012_empty.jxl.hex"
+            ));
+            let index = jpeg
+                .huffman_code
+                .iter()
+                .position(|h| h.empty_segment)
+                .unwrap();
+            if merge_previous {
+                // This native fixture puts the empty segment first. Move its
+                // actual record after the first real table, joining that segment.
+                assert_eq!(index, 0);
+                assert!(!jpeg.huffman_code[1].empty_segment);
+                jpeg.huffman_code.swap(0, 1);
+                jpeg.huffman_code[0].is_last = false;
+            } else {
+                jpeg.huffman_code[index].is_last = false;
+            }
+            let error = crate::jpeg::write_jpeg(&jpeg).unwrap_err();
+            assert!(
+                matches!(error, Error::InvalidJbrd(ref message)
+                if message == "empty DHT record must occupy its own segment"),
+                "{error:?}"
+            );
+        }
+    }
 
     /// Regression: `Vec::with_capacity(num_app)` etc. used the infallible
     /// allocator. A malformed JBRD box could have a marker order that leaves
