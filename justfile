@@ -482,3 +482,30 @@ jpeg-color-original-replay archive output:
 
 jpeg-color-fixture-text native:
     python3 scripts/jpeg_color_fixture_text.py {{quote(native)}}
+
+# Caller supplies run-heavy and immutable v0.12 source/build roots.
+hlg-ootf-native source build output binary:
+    python3 scripts/hlg_ootf_oracle.py --binary {{quote(binary)}} {{quote(source)}} {{quote(build)}} {{quote(output)}}
+
+hlg-near-unity-check:
+    cargo test --locked -p zenjxl-decoder --lib hlg_near_unity_ -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib hlg_near_unity_ -- --test-threads=1
+
+# Target color/stage callers without repeating unrelated extended prefix campaigns.
+hlg-near-unity-broad-check:
+    cargo test --locked -p zenjxl-decoder --lib -- color:: render::stages::from_linear render::stages::to_linear tests::hdr:: --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- color:: render::stages::from_linear render::stages::to_linear tests::hdr:: --test-threads=1
+    cargo clippy --locked -p zenjxl-decoder --all-features --lib --tests -- -D warnings
+    cargo fmt -p zenjxl-decoder --check
+
+hlg-forward-native source build output binary:
+    python3 scripts/hlg_forward_fixture.py {{quote(source)}} {{quote(build)}} {{quote(output)}} {{quote(binary)}}
+
+hlg-cutoff-fault output:
+    python3 scripts/hlg_ootf_mutation.py {{quote(output)}}
+
+profile-admission-fault output:
+    python3 scripts/profile_admission_mutation.py {{quote(output)}}
+
+decoder-regions llvm archive output kind:
+    python3 scripts/decoder_regions.py {{quote(llvm)}} {{quote(archive)}} {{quote(output)}} --kind {{quote(kind)}}

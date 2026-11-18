@@ -860,28 +860,19 @@ See `docs/JPEG_SCAN_CONTRACT.md` for verification and remaining limits.
 
 ## Resolved: near-unity HLG OOTF — 2026-11-19
 
-The former 0.1 cutoff suppresses nontrivial OOTF corrections. Unmodified v0.12
-vectors independently reject it in both fast and precise paths. The candidate
-uses the reference's closed 0.01 deadband. Kernel controls pass; corrected
-Level 10/strided full-file, restored-fault, region and broad checks remain in
-progress. [Contract](docs/HLG_OOTF_CONTRACT.md).
+The former 0.1 cutoff suppresses nontrivial OOTF corrections. Both kernels now
+use v0.12's closed 0.01 deadband. Native component and complete packed/padded
+pixel controls pass in default/minimal builds; restoring the old cutoff fails.
+Color/stage/HDR, strict all-feature library/test lint and scoped formatting
+pass. [Exact mapped regions and limits](docs/HLG_OOTF_CONTRACT.md) distinguish
+direct wrapper tests from the unmounted forward production route. Platform
+verdicts remain separate.
 
 ### Resolved: post-header output-profile admission — 2026-11-19
 
-The public profile setter accepted an unsupported non-XYB encoding change
-without a CMS after image info, bypassing the parser's existing refusal.
-The retained 9x3 lossless HLG source returns its original signal for a requested
-linear profile before repair. The new refusal regression reproduces this;
-shared existing admission semantics are under qualification. No CMS-free
-forward conversion is claimed.
-
-The native component/full-file controls now pass in default/minimal builds;
-restoring the old cutoff fails both. Color/stage/HDR, strict lint and scoped
-formatting pass. The owning contract records exact mapped regions and the
-unmounted forward-production route; platform checks retain separate verdicts.
-
-The post-header setter now enforces the parser's existing non-XYB/no-CMS
-restriction atomically. Default/minimal refusal, supported original-profile
-pixels and CMS admission pass; removing the guard fails. Exact 16/16 mapped
-setter regions are recorded in the owning contract. No forward conversion
-implementation or complete external-CMS qualification is claimed.
+The typed setter now enforces the parser's existing non-XYB/no-CMS restriction
+before changing state. The retained lossless HLG source exposed ignored
+conversion before repair. Refusal, exact original-profile pixels and a separate
+CMS admission observer pass; removing the guard fails. The owning contract
+records 16/16 mapped setter regions. No CMS-free forward implementation or
+complete external-CMS qualification is claimed.
