@@ -125,6 +125,7 @@ for name, indices in [('zenjxl_decoder', [0]), ('jpeg_scan_contract', [1])]:
         line + '\n' for line in diagnostic_text.splitlines() if line.startswith('warning:'))
     report['data'].extend(json.loads(target.read_text())['data'])
 windows = [
+    ('jpeg-channel-mapping', 'frame/mod.rs', 'let jpeg_to_jxl: Vec<usize> =', '// Fill quant table values'),
     ('baseline-visible-grid', 'jpeg/writer.rs', '// Non-interleaved scans code the visible component grid', 'let mut block_count:'),
     ('baseline-extra-run-handoff', 'jpeg/writer.rs', 'let mut trailing_zero_runs =', 'block_count += 1;'),
     ('baseline-ac-tokens', 'jpeg/writer.rs', 'fn encode_ac(', 'fn log2_floor_nz('),

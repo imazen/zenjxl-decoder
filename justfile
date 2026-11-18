@@ -461,3 +461,24 @@ jpeg-scan-integrated:
     just source-check
     just global-squeeze-integrated
     just jpeg-scan-focused
+
+jpeg-color-native-controls cjxl djxl output:
+    python3 scripts/jpeg_color_native_controls.py {{quote(cjxl)}} {{quote(djxl)}} {{quote(output)}}
+
+jpeg-color-retained-evidence manifest output:
+    python3 scripts/jpeg_color_evidence.py {{quote(manifest)}} {{quote(output)}}
+
+jpeg-color-integrated:
+    just source-check
+    python3 scripts/upstream-audit/prepare_feature_references.py --check
+    cargo test --locked --workspace --all-features -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --features jpeg --test jpeg_scan_contract --test jpeg_dht_contract -- --test-threads=1
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+    cargo fmt -p zenjxl-decoder -p zenjxl-decoder-cli -p zenjxl-decoder-macros -p zenjxl-decoder-simd --check
+
+jpeg-color-original-replay archive output:
+    python3 scripts/jpeg_color_original_replay.py {{quote(archive)}} {{quote(output)}}
+
+jpeg-color-fixture-text native:
+    python3 scripts/jpeg_color_fixture_text.py {{quote(native)}}
