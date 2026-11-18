@@ -866,7 +866,7 @@ uses the reference's closed 0.01 deadband. Kernel controls pass; corrected
 Level 10/strided full-file, restored-fault, region and broad checks remain in
 progress. [Contract](docs/HLG_OOTF_CONTRACT.md).
 
-### Known Bugs: post-header output-profile admission — 2026-11-19
+### Resolved: post-header output-profile admission — 2026-11-19
 
 The public profile setter accepted an unsupported non-XYB encoding change
 without a CMS after image info, bypassing the parser's existing refusal.
@@ -879,3 +879,9 @@ The native component/full-file controls now pass in default/minimal builds;
 restoring the old cutoff fails both. Color/stage/HDR, strict lint and scoped
 formatting pass. The owning contract records exact mapped regions and the
 unmounted forward-production route; platform checks retain separate verdicts.
+
+The post-header setter now enforces the parser's existing non-XYB/no-CMS
+restriction atomically. Default/minimal refusal, supported original-profile
+pixels and CMS admission pass; removing the guard fails. Exact 16/16 mapped
+setter regions are recorded in the owning contract. No forward conversion
+implementation or complete external-CMS qualification is claimed.

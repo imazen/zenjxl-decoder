@@ -163,6 +163,22 @@ impl JxlDecoderInner {
         if let (JxlColorProfile::Icc(_), None) = (&profile, &self.options.cms) {
             return Err(at!(Error::ICCOutputNoCMS));
         }
+        // The same restriction is checked while parsing a profile selected
+        // before the header. Typed callers normally choose it after image info.
+        if self.options.cms.is_none()
+            && self
+                .codestream_parser
+                .basic_info
+                .as_ref()
+                .is_some_and(|info| info.uses_original_profile)
+            && self
+                .codestream_parser
+                .embedded_color_profile
+                .as_ref()
+                .is_some_and(|embedded| *embedded != profile)
+        {
+            return Err(at!(Error::NonXybOutputNoCMS));
+        }
         self.codestream_parser.output_color_profile = Some(profile);
         self.codestream_parser.output_color_profile_set_by_user = true;
         Ok(())
@@ -428,3 +444,6 @@ impl JxlDecoderInner {
         self.codestream_parser.set_use_simple_pipeline(u);
     }
 }
+
+#[cfg(test)]
+mod profile_admission_tests;

@@ -18,6 +18,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Reject unsupported non-XYB output profile changes without CMS after image
+  info, matching existing header admission and retaining state on refusal.
+
 - Apply HLG OOTF outside the pinned v0.12 closed unity deadband, retaining
   native component and complete original-profile pixel controls.
 

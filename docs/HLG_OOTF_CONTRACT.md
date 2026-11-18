@@ -56,3 +56,27 @@ This is mapped source-region execution, not coverage of all inputs. Production
 inverse OOTF is mounted through `FromLinearStage`; `ToLinearStage` has no
 mounted production caller in this revision. A direct unit call does not add
 that missing CMS-free forward conversion route.
+
+## Non-XYB output profile admission
+
+A retained native-v0.12 lossless 9x3 HLG F32 file uses its original profile at
+255-nit white. Its stream SHA256 is
+`36c2102be7a6fe46aaacd1098773e1a76b846aefcfad8547f78b68940fa483fc`.
+Header parsing already rejects a different output encoding without CMS using
+`NonXybOutputNoCMS`. The normal post-header setter bypassed that check and
+returned unchanged [0.125, 0.25, 0.5] for a linear-output request. Independent
+native linear output is [0.0057269568, 0.022907827, 0.09163131].
+
+The setter now applies the same existing restriction before changing state.
+The refusal and ICC-without-CMS controls preserve the previous output selection;
+original-profile decoding afterward recovers every source float exactly.
+A separate admission-only CMS observer verifies that providing a CMS permits
+the requested profile; that observer never produces converted pixels.
+Restoring the old setter fails the refusal regression.
+
+The same completed instrumented ELF/profile named above covers 16/16 mapped
+setter regions without diagnostics. The typed public setter is available
+only after image info. Before-header validation remains in the parser; this
+control does not claim that arbitrary lower-level partial states are public
+entry points. Existing same-profile and XYB output routes remain exercised.
+This repair adds no CMS-free forward conversion implementation.
