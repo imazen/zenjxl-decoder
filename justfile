@@ -431,3 +431,6 @@ jpeg-dht-coverage output:
 
 jpeg-dht-mutations output:
     python3 scripts/jpeg_dht_mutations.py {{quote(output)}}
+
+jpeg-scan-contract-check:
+    cargo test --locked -p zenjxl-decoder --features jpeg --test jpeg_scan_contract -- --test-threads=1
