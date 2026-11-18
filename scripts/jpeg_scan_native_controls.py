@@ -31,16 +31,17 @@ def source(layout,long_code,selected,runs,nonzero_position,zero_padding,restart)
  def marker(kind,payload):out.extend(bytes([255,kind])+(len(payload)+2).to_bytes(2,'big')+bytes(payload))
  marker(0xdb,[0]+[1]*64)
  marker(0xc0,[8,*height.to_bytes(2,'big'),*width.to_bytes(2,'big'),len(factors),*sum(([c+1,f,0]for c,f in enumerate(factors)),[])])
- dc=[0]*16;dc[9 if long_code else 0]=1
+ code_length = (10 if long_code is True else long_code) if long_code else 1
+ dc=[0]*16;dc[code_length-1]=1
  ac=[0]*16
- if long_code:ac[9]=4
+ if long_code:ac[code_length-1]=4
  else:ac[:4]=[1,1,1,1]
  marker(0xc4,[0,*dc,0,0x10,*ac,0,0xf0,1,0xe1])
  if restart:marker(0xdd,[0,1])
  marker(0xda,[len(factors),*sum(([c+1,0]for c in range(len(factors))),[]),0,63,0])
  bits=[]
  def code(symbol):
-  value,length=(symbol,10)if long_code else[(0,1),(2,2),(6,3),(14,4)][symbol]
+  value,length=(symbol,code_length)if long_code else[(0,1),(2,2),(6,3),(14,4)][symbol]
   bits.extend((value>>i)&1 for i in range(length-1,-1,-1))
  def flush():
   for at in range(0,len(bits),8):
@@ -49,7 +50,7 @@ def source(layout,long_code,selected,runs,nonzero_position,zero_padding,restart)
   bits.clear()
  for index in range(total):
   if restart and index==blocks_per_mcu:flush();out.extend([255,0xd0])
-  bits.extend([0]*(10 if long_code else 1)) # category-zero DC.
+  bits.extend([0]*code_length) # category-zero DC.
   position=0
   if index==selected:
    if nonzero_position in ['before','at15']:
@@ -71,6 +72,8 @@ cases=[
  ('interleaved-first-long','444',True,0,1,'none',True,True),
  ('edge-padding-luma','420',False,7,1,'none',False,True),
  ('edge-visible-chroma-long','420',True,11,2,'before',True,True),
+ ('slow11-nonzero-before','gray',11,1,2,'before',True,True),
+ ('slow11-zrl-before-nonzero','gray',11,0,1,'after',False,True),
 ]
 rows=[]
 for label,*args in cases:
