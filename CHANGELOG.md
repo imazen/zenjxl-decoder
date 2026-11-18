@@ -18,6 +18,9 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Select JPEG reconstruction coefficient plane order from the frame color
+  transform, retaining RGB/custom component identifiers independently.
+
 - Preserve baseline JPEG trailing zero runs after the final nonzero AC value,
   omit EOB at an exact block finish, and reconstruct non-interleaved scans
   using their visible component grid while retaining padded coefficient strides

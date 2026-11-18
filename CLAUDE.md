@@ -846,3 +846,14 @@ Expanded native controls also reproduce baseline non-interleaved grid loss:
 16x8 grayscale with absolute 2x2 SOF sampling rebuilds 155 bytes instead of
 149 by walking padded coefficient rows. Baseline iteration now uses the
 visible component grid, retaining padded stride for coefficient access.
+
+
+## Known Bugs: JPEG reconstruction channel mapping (resolved 2026-11-18)
+
+Unmodified native v0.12 streams with RGB identifiers plus Adobe transform 1
+or JFIF, and custom YCbCr identifiers, render correctly but reconstruct different
+JPEG entropy bytes before repair. JBRD component_type is an identifier shortcut;
+the frame do_ycbcr flag determines coefficient plane order. The verified repair
+uses that flag, retaining the grayscale route. Native asymmetric fixtures in
+`jpeg_scan_contract` cover both channel mappings independently of identifiers.
+See `docs/JPEG_SCAN_CONTRACT.md` for verification and remaining limits.

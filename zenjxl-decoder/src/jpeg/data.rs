@@ -165,6 +165,4 @@ pub struct JpegData {
     pub has_zero_padding_bit: bool,
     /// Individual padding bits.
     pub padding_bits: Vec<u8>,
-    /// Component type classification.
-    pub component_type: JpegComponentType,
 }

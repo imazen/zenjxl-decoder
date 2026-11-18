@@ -64,3 +64,47 @@ The final restored source/strict lint/default/scalar check and fresh bound
 region capture pass with the RGB16 assertions included:
 `decoder-scan-final-pixels-v2.log`, 37 seconds, peak RSS 1.30 GiB, minimum
 available 18,832 MiB. The region windows retain 17/17, 35/35 and 44/45.
+
+## Frame color transform and component identifiers
+
+JPEG reconstruction uses the frame's `do_ycbcr` flag for plane order: YCbCr
+maps JPEG components to JXL channels `[1, 0, 2]`; an RGB frame retains order.
+Grayscale still reads channel 1. JBRD `component_type` only compresses the
+component identifiers (Part 2 Annex A); it does not define the frame transform.
+
+The prior mapping selected the swap only for the standard YCbCr identifier
+shortcut. Unmodified v0.12 streams with RGB identifiers and Adobe transform 1,
+RGB identifiers with JFIF, custom YCbCr identifiers, or standard YCbCr identifiers with Adobe transform 0
+reconstruct different
+JPEG bytes before repair. Complete native PNG16 samples match exactly in all
+nine controls, separating reconstruction from displayed pixels. The ordinary RGB/YCbCr controls retain exact JPEG reconstruction before repair.
+Source/stream/sample provenance is in
+[the native color fixtures](../zenjxl-decoder/tests/testdata/jpeg_color_v012.md).
+The retained original executable is `decoder-color-channel-original-v2`;
+its runtime returns 101 with those three independent reconstruction failures.
+
+The final control inventory also includes standard YCbCr identifiers with
+Adobe transform 0, and custom RGB identifiers with Adobe transform 0. The
+retained original-source replay detects four independent reconstruction
+mismatches; every tested native PNG16 sample still matches. All nine repaired
+sources reconstruct exactly. The replay restores all five overlaid production
+files byte for byte (`decoder-color-channel-original-complete`).
+
+`decoder-color-channel-final-coverage` retains the exact fixed source, objects
+and profiles. The selected channel-order block executes 9/9 mapped regions,
+including grayscale and both color transforms. Existing scan regions remain
+17/17 for the visible grid, 35/35 for the extra-run handoff and 44/45 for AC
+emission; the remaining AC region is the previously documented impossible
+zero-category alternative. These observations do not establish every JPEG
+coefficient value, scan schedule or complete decoder conformance.
+
+The final normal workspace all-feature tests/doctests, default-disabled JPEG
+controls, strict workspace all-target Clippy with all/default-disabled features,
+source checks and scoped formatting pass. The run requires the existing prepared
+feature corpus with its two native reference PNGs, verified before testing.
+`decoder-color-channel-integrated-prepared.log`: rc0, 226 seconds; run-heavy
+peak RSS 7.88 GiB, minimum available 12,811 MiB. Earlier broad attempts retained
+103 missing-corpus failures and then two missing-reference failures; neither is
+a passing full-suite verdict. No threshold, expected byte or ignore is changed.
+The removed identifier classification field was private, redundant after JBRD
+parsing, and is not a public API change. Remote CI remains a separate verdict.

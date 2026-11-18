@@ -109,7 +109,7 @@ pub(crate) fn fill_metadata(
 #[cfg(test)]
 mod metadata_tests {
     use super::*;
-    use data::{AppMarkerType, JpegComponentType, JpegData};
+    use data::{AppMarkerType, JpegData};
 
     fn jpeg(kind: AppMarkerType) -> JpegData {
         JpegData {
@@ -128,7 +128,6 @@ mod metadata_tests {
             tail_data: vec![],
             has_zero_padding_bit: false,
             padding_bits: vec![],
-            component_type: JpegComponentType::Gray,
         }
     }
 

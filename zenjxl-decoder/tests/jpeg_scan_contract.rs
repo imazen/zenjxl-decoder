@@ -228,3 +228,38 @@ fn assert_native_rgb16(stream: &[u8], width: usize, height: usize, label: &str, 
     println!("{label}: native PNG16 maximum sample difference {max_error}");
     assert_eq!(actual, expected, "{label}: complete native PNG16 samples");
 }
+
+#[test]
+fn native_color_transform_controls_reconstruct_channel_order_exactly() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata");
+    let mut failures = Vec::new();
+    for label in [
+        "rgb-ids",
+        "adobe-zero",
+        "adobe-one",
+        "malformed-adobe-rgb-ids",
+        "default-ids",
+        "jfif-over-adobe-zero",
+        "custom-ycbcr-ids",
+        "ycbcr-ids-adobe-zero",
+        "custom-rgb-adobe-zero",
+    ] {
+        let stream = bytes(
+            &std::fs::read_to_string(root.join(format!("jpeg_scan_v012_color-{label}.jxl.hex")))
+                .unwrap(),
+        );
+        let original = bytes(
+            &std::fs::read_to_string(root.join(format!("jpeg_scan_v012_color-{label}.jpg.hex")))
+                .unwrap(),
+        );
+        let expected =
+            std::fs::read_to_string(root.join(format!("jpeg_scan_v012_color-{label}.rgb16.txt")))
+                .unwrap();
+        assert_native_rgb16(&stream, 16, 8, label, &expected);
+        match zenjxl_decoder::reconstruct_jpeg(&stream) {
+            Ok(Some(output)) if output == original => {}
+            other => failures.push(format!("{label}: {other:?}")),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

@@ -1216,7 +1216,6 @@ mod tests {
             tail_data: Vec::new(),
             has_zero_padding_bit: false,
             padding_bits: Vec::new(),
-            component_type: JpegComponentType::Gray,
         };
         let mut dc_counts = [0; 16];
         dc_counts[0] = 1;
@@ -1273,7 +1272,6 @@ mod tests {
             tail_data: vec![0x12, 0x34],
             has_zero_padding_bit: false,
             padding_bits: Vec::new(),
-            component_type: JpegComponentType::Gray,
         };
         assert_eq!(
             write_jpeg(&jpeg).unwrap(),

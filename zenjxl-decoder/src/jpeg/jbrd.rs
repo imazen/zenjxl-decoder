@@ -368,7 +368,6 @@ pub fn decode_jbrd(jbrd_data: &[u8], width: u32, height: u32) -> Result<JpegData
         tail_data,
         has_zero_padding_bit,
         padding_bits,
-        component_type,
     })
 }
 

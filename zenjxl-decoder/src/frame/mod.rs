@@ -434,7 +434,6 @@ impl Frame {
         &self,
         jbrd_data: &[u8],
     ) -> crate::error::Result<crate::jpeg::data::JpegData> {
-        use crate::jpeg::data::JpegComponentType;
         use crate::jpeg::decode_jbrd;
 
         // kCFLFixedPointPrecision from libjxl — fixed-point precision for CfL
@@ -464,11 +463,13 @@ impl Frame {
             // encode.rs grayscale zero-fill). Reading channel 0 would yield an
             // all-zero plane → an all-zero (truncated) reconstruction.
             vec![1]
+        } else if self.header.do_ycbcr {
+            // The frame transform defines plane order. JBRD component_type
+            // only encodes component identifiers; RGB/custom identifiers can
+            // still describe a YCbCr frame (for example Adobe transform 1).
+            vec![1, 0, 2]
         } else {
-            match jpeg.component_type {
-                JpegComponentType::YCbCr => vec![1, 0, 2],
-                _ => (0..num_components).collect(),
-            }
+            (0..num_components).collect()
         };
 
         // Fill quant table values from raw_qtable (transpose JXL→JPEG natural order)
