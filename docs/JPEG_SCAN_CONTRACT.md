@@ -59,3 +59,8 @@ source and strict lint checks pass (`decoder-baseline-zrl-integrated-v2.log`,
 RGB16 assertions pass in `decoder-baseline-native-pixels-v2.log`. Production
 arithmetic, accepted fixtures and established thresholds are unchanged
 outside the documented baseline reconstruction correction.
+
+The final restored source/strict lint/default/scalar check and fresh bound
+region capture pass with the RGB16 assertions included:
+`decoder-scan-final-pixels-v2.log`, 37 seconds, peak RSS 1.30 GiB, minimum
+available 18,832 MiB. The region windows retain 17/17, 35/35 and 44/45.

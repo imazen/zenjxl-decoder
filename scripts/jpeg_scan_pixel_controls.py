@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Imazen LLC.
-# Use of this source code is governed by the BSD-style LICENSE file.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
 """Extract bound native PNG16 samples using the existing audit PNG reader."""
 import argparse
 import hashlib

@@ -20,7 +20,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 - Preserve baseline JPEG trailing zero runs after the final nonzero AC value,
   omit EOB at an exact block finish, and reconstruct non-interleaved scans
-  using their visible component grid while retaining padded coefficient strides.
+  using their visible component grid while retaining padded coefficient strides
+  (`f60b29fa`).
 
 - Reconstruct native empty DHT segments without replacing active Huffman tables,
   distinguish real zero-symbol table definitions, and retain optional JBRD
