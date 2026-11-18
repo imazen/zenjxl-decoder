@@ -380,27 +380,31 @@ impl<'a> JpegWriter<'a> {
         // interleaved components, MCU-based ordering
         let is_interleaved = scan.num_components > 1;
 
-        // Calculate MCU dimensions
+        // Non-interleaved scans code the visible component grid, while the
+        // coefficient backing store retains its MCU-padded stride.
+        let max_h = jpeg
+            .components
+            .iter()
+            .map(|c| c.h_samp_factor)
+            .max()
+            .unwrap_or(1);
+        let max_v = jpeg
+            .components
+            .iter()
+            .map(|c| c.v_samp_factor)
+            .max()
+            .unwrap_or(1);
         let (mcu_rows, mcu_cols) = if is_interleaved {
-            let max_h: u32 = jpeg
-                .components
-                .iter()
-                .map(|c| c.h_samp_factor)
-                .max()
-                .unwrap_or(1);
-            let max_v: u32 = jpeg
-                .components
-                .iter()
-                .map(|c| c.v_samp_factor)
-                .max()
-                .unwrap_or(1);
-            let mcu_cols = jpeg.width.div_ceil(max_h * 8);
-            let mcu_rows = jpeg.height.div_ceil(max_v * 8);
-            (mcu_rows, mcu_cols)
+            (
+                jpeg.height.div_ceil(max_v * 8),
+                jpeg.width.div_ceil(max_h * 8),
+            )
         } else {
-            let comp_idx = scan.component_indices[0] as usize;
-            let comp = &jpeg.components[comp_idx];
-            (comp.height_in_blocks, comp.width_in_blocks)
+            let comp = &jpeg.components[scan.component_indices[0] as usize];
+            (
+                (jpeg.height * comp.v_samp_factor).div_ceil(8 * max_v),
+                (jpeg.width * comp.h_samp_factor).div_ceil(8 * max_h),
+            )
         };
 
         let mut block_count: u32 = 0;
@@ -454,33 +458,33 @@ impl<'a> JpegWriter<'a> {
                                 (mcu_row, mcu_col)
                             };
 
+                            let mut trailing_zero_runs = 0_u32;
+                            while extra_zero_idx < scan.extra_zero_runs.len()
+                                && scan.extra_zero_runs[extra_zero_idx].0 == block_count
+                            {
+                                trailing_zero_runs = trailing_zero_runs
+                                    .checked_add(scan.extra_zero_runs[extra_zero_idx].1)
+                                    .ok_or_else(|| {
+                                        Error::InvalidJbrd(
+                                            "baseline extra zero runs overflow".into(),
+                                        )
+                                    })?;
+                                extra_zero_idx += 1;
+                            }
                             if by >= comp.height_in_blocks || bx >= comp.width_in_blocks {
-                                // Padding block — encode as zero
+                                // Padding blocks still carry their original trailing AC tokens.
                                 encode_dc(&mut bw, 0, &mut dc_pred[comp_idx], dc_table);
-                                encode_ac_eob(&mut bw, ac_table);
+                                encode_ac(&mut bw, &[0; 64], ac_table, trailing_zero_runs)?;
                             } else {
                                 let block_offset = (by * comp.width_in_blocks + bx) as usize * 64;
                                 let coeffs = &comp.coeffs[block_offset..block_offset + 64];
-
-                                // Check for extra zero runs before this block
-                                while extra_zero_idx < scan.extra_zero_runs.len()
-                                    && scan.extra_zero_runs[extra_zero_idx].0 == block_count
-                                {
-                                    let num_runs = scan.extra_zero_runs[extra_zero_idx].1;
-                                    for _ in 0..num_runs {
-                                        // Emit ZRL (15 zero run, zero amplitude)
-                                        bw.write_huffman(ac_table, 0xF0);
-                                    }
-                                    extra_zero_idx += 1;
-                                }
-
                                 encode_dc(
                                     &mut bw,
                                     coeffs[0] as i32,
                                     &mut dc_pred[comp_idx],
                                     dc_table,
                                 );
-                                encode_ac(&mut bw, coeffs, ac_table);
+                                encode_ac(&mut bw, coeffs, ac_table, trailing_zero_runs)?;
                             }
 
                             block_count += 1;
@@ -729,7 +733,12 @@ fn encode_dc(bw: &mut BitWriter, dc: i32, dc_pred: &mut i32, table: &HuffmanEnco
 
 /// Encode AC coefficients in zigzag order using run-length + Huffman.
 /// `block` is a 64-element block in natural (row-major) order.
-fn encode_ac(bw: &mut BitWriter, block: &[i16], table: &HuffmanEncodeTable) {
+fn encode_ac(
+    bw: &mut BitWriter,
+    block: &[i16],
+    table: &HuffmanEncodeTable,
+    trailing_zero_runs: u32,
+) -> Result<()> {
     let mut zero_run = 0u32;
     // Find last nonzero in zigzag order (zigzag positions 1-63)
     let mut last_nonzero_zi = 0usize; // zigzag index (1-based)
@@ -740,11 +749,11 @@ fn encode_ac(bw: &mut BitWriter, block: &[i16], table: &HuffmanEncodeTable) {
         }
     }
 
-    if last_nonzero_zi == 0 {
-        // All AC zeros — emit EOB
-        bw.write_huffman(table, 0x00);
-        return;
-    }
+    let trailing_end = trailing_zero_runs
+        .checked_mul(16)
+        .and_then(|count| count.checked_add(last_nonzero_zi as u32))
+        .filter(|&end| end <= 63)
+        .ok_or_else(|| Error::InvalidJbrd("baseline extra zero runs exceed the AC block".into()))?;
 
     for zi in 1..=last_nonzero_zi {
         let coeff = block[ZIGZAG[zi]];
@@ -766,15 +775,15 @@ fn encode_ac(bw: &mut BitWriter, block: &[i16], table: &HuffmanEncodeTable) {
         zero_run = 0;
     }
 
-    // EOB if not at the last zigzag position (63)
-    if last_nonzero_zi < 63 {
+    // Original trailing ZRL tokens follow the last nonzero AC value.
+    for _ in 0..trailing_zero_runs {
+        bw.write_huffman(table, 0xF0);
+    }
+    // A ZRL may finish the block exactly, in which case no EOB followed it.
+    if trailing_end < 63 {
         bw.write_huffman(table, 0x00);
     }
-}
-
-/// Encode AC EOB (for padding blocks).
-fn encode_ac_eob(bw: &mut BitWriter, table: &HuffmanEncodeTable) {
-    bw.write_huffman(table, 0x00);
+    Ok(())
 }
 
 /// `Log2FloorNonZero(x)` for x > 0 (== floor(log2(x))).
@@ -1131,6 +1140,118 @@ impl BitWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn baseline_trailing_zrl_bits_and_extent_errors() {
+        let mut counts = [0; 16];
+        counts[..4].copy_from_slice(&[1, 1, 1, 1]);
+        let table = HuffmanEncodeTable::from_counts_values(&counts, &[0, 0xF0, 1, 0xE1]).unwrap();
+        for (position, runs, expected) in [
+            (1, 1, vec![0xD9]),        // AC +1 (110,1), ZRL (10), EOB (0), padding 1.
+            (15, 3, vec![0xED, 0x5F]), // AC run14/+1, three ZRLs end at 63.
+        ] {
+            let mut block = [0; 64];
+            block[ZIGZAG[position]] = 1;
+            let mut bw = BitWriter::new();
+            encode_ac(&mut bw, &block, &table, runs).unwrap();
+            bw.pad_to_byte(&[], &mut 0);
+            bw.check_missing().unwrap();
+            assert_eq!(bw.finish(), expected);
+        }
+        for (position, runs) in [
+            (0, 4),
+            (0, u32::MAX),
+            (0, u32::MAX / 16 + 1),
+            (63, u32::MAX / 16),
+        ] {
+            let mut block = [0; 64];
+            if position != 0 {
+                block[ZIGZAG[position]] = 1;
+            }
+            let mut bw = BitWriter::new();
+            assert!(matches!(
+                encode_ac(&mut bw, &block, &table, runs),
+                Err(Error::InvalidJbrd(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn baseline_trailing_zrl_padding_and_internal_errors() {
+        // Deliberately undersized private backing grid exercises the padding fallback;
+        // this is separate from the native-produced public-input controls.
+        let mut jpeg = JpegData {
+            width: 16,
+            height: 8,
+            restart_interval: 0,
+            app_data: Vec::new(),
+            app_marker_type: Vec::new(),
+            com_data: Vec::new(),
+            quant: Vec::new(),
+            huffman_code: Vec::new(),
+            components: vec![JpegComponent {
+                id: 1,
+                h_samp_factor: 1,
+                v_samp_factor: 1,
+                quant_idx: 0,
+                width_in_blocks: 1,
+                height_in_blocks: 1,
+                coeffs: vec![0; 64],
+            }],
+            scan_info: vec![JpegScanInfo {
+                num_components: 1,
+                component_indices: vec![0],
+                dc_tbl_idx: vec![0],
+                ac_tbl_idx: vec![0],
+                ss: 0,
+                se: 63,
+                ah: 0,
+                al: 0,
+                reset_points: Vec::new(),
+                extra_zero_runs: vec![(1, 1)],
+                last_needed_pass: 0,
+            }],
+            marker_order: Vec::new(),
+            inter_marker_data: Vec::new(),
+            tail_data: Vec::new(),
+            has_zero_padding_bit: false,
+            padding_bits: Vec::new(),
+            component_type: JpegComponentType::Gray,
+        };
+        let mut dc_counts = [0; 16];
+        dc_counts[0] = 1;
+        let mut ac_counts = [0; 16];
+        ac_counts[..2].copy_from_slice(&[1, 1]);
+        let dc = [
+            Some(HuffmanEncodeTable::from_counts_values(&dc_counts, &[0]).unwrap()),
+            None,
+            None,
+            None,
+        ];
+        let ac = [
+            Some(HuffmanEncodeTable::from_counts_values(&ac_counts, &[0, 0xF0]).unwrap()),
+            None,
+            None,
+            None,
+        ];
+        let mut out = Vec::new();
+        JpegWriter::new(&mut out)
+            .write_scan_data(&jpeg, 0, &dc, &ac)
+            .unwrap();
+        assert_eq!(out, [0x13]); // visible DC/EOB 00, padding DC/ZRL/EOB 0100, then 11.
+        for extra in [vec![(0, 4)], vec![(1, 4)], vec![(0, u32::MAX), (0, 1)]] {
+            jpeg.scan_info[0].extra_zero_runs = extra;
+            let mut output = Vec::new();
+            assert!(matches!(
+                JpegWriter::new(&mut output).write_scan_data(&jpeg, 0, &dc, &ac),
+                Err(Error::InvalidJbrd(_))
+            ));
+            assert!(
+                output.is_empty(),
+                "failed scan must not append partial entropy bytes"
+            );
+        }
+    }
 
     #[test]
     fn standalone_restart_markers_keep_original_order() {

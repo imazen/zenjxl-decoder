@@ -833,3 +833,16 @@ On Ryzen 9 5900XT, 64 MiB bytemuck allocation measured 7.923 µs versus
 the eight-thread café A–B–A witness measured 17.617 / 18.691 / 17.711 ms,
 while both 4K cases improved in the exploratory sweep. Do not treat allocator
 parity as a guarantee of matching the former uninitialized path's throughput.
+
+## Known Bugs: baseline JPEG extra-zero-run placement
+
+Independent native v0.12 scan controls reconstruct exactly in native decoding
+but fail Rust reconstruction for a baseline ZRL before EOB. Pixel rendering
+is unchanged. The baseline writer emits the extra AC token before DC, rather
+than after the final nonzero AC coefficient. Progressive controls pass. See
+`zenjxl-decoder/tests/jpeg_scan_contract.rs` and its native fixture provenance.
+
+Expanded native controls also reproduce baseline non-interleaved grid loss:
+16x8 grayscale with absolute 2x2 SOF sampling rebuilds 155 bytes instead of
+149 by walking padded coefficient rows. Baseline iteration now uses the
+visible component grid, retaining padded stride for coefficient access.

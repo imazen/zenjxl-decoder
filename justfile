@@ -434,3 +434,30 @@ jpeg-dht-mutations output:
 
 jpeg-scan-contract-check:
     cargo test --locked -p zenjxl-decoder --features jpeg --test jpeg_scan_contract -- --test-threads=1
+
+jpeg-scan-pixel-controls native_run output:
+    python3 scripts/jpeg_scan_pixel_controls.py {{quote(native_run)}} {{quote(output)}}
+
+jpeg-scan-native-controls cjxl djxl output:
+    python3 scripts/jpeg_scan_native_controls.py {{quote(cjxl)}} {{quote(djxl)}} {{quote(output)}}
+
+jpeg-scan-focused:
+    cargo test --locked -p zenjxl-decoder --features jpeg --test jpeg_scan_contract --test jpeg_dht_contract -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --features jpeg --lib baseline_trailing_zrl_ -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --features jpeg --test jpeg_scan_contract -- --test-threads=1
+    cargo clippy --locked -p zenjxl-decoder --all-targets --all-features -- -D warnings
+    cargo fmt -p zenjxl-decoder --check
+
+jpeg-scan-coverage output:
+    python3 scripts/jpeg_scan_coverage.py {{quote(output)}}
+
+jpeg-scan-mutations output:
+    python3 scripts/jpeg_scan_mutations.py {{quote(output)}}
+
+jpeg-scan-regions output:
+    python3 scripts/jpeg_scan_coverage.py {{quote(output)}} --report-only
+
+jpeg-scan-integrated:
+    just source-check
+    just global-squeeze-integrated
+    just jpeg-scan-focused
