@@ -392,3 +392,42 @@ ci-iterator-toolchain:
 # The PR source/license checks, without compiling.
 source-check:
     ./ci/pull_request_checks.sh
+
+# Native v0.12 empty-DHT / zero-symbol distinction; caller uses run-heavy.
+jpeg-dht-contract-check:
+    cargo test --locked --release -p zenjxl-decoder --features jpeg --test jpeg_dht_contract -- --nocapture --test-threads=1
+
+jpeg-dht-reader-check:
+    cargo test --locked --release -p zenjxl-decoder --features jpeg --lib native_dht_ -- --nocapture --test-threads=1
+
+jpeg-dht-candidate-check:
+    cargo fmt -p zenjxl-decoder
+    just jpeg-dht-reader-check
+    just jpeg-dht-contract-check
+
+jpeg-dht-retained-evidence manifest output:
+    python3 scripts/jpeg_dht_evidence.py {{quote(manifest)}} {{quote(output)}}
+
+jpeg-dht-integrated output:
+    cargo fmt -p zenjxl-decoder
+    just jpeg-dht-retained-evidence Cargo.toml {{quote(output)}}
+    just global-squeeze-integrated
+    just source-check
+
+# Checked and unchecked reconstruction boundaries, plus explicit scalar JPEG.
+jpeg-dht-focused:
+    cargo fmt -p zenjxl-decoder
+    just jpeg-dht-reader-check
+    cargo test --locked --release -p zenjxl-decoder --features jpeg --lib malformed_native_jbrd_error_survives_unchecked_take -- --nocapture --test-threads=1
+    just jpeg-dht-contract-check
+    cargo test --locked --release -p zenjxl-decoder --no-default-features --features jpeg --test jpeg_dht_contract -- --nocapture --test-threads=1
+    cargo clippy --locked -p zenjxl-decoder --all-targets --all-features -- -D warnings
+    cargo clippy --locked -p zenjxl-decoder --all-targets --no-default-features --features jpeg -- -D warnings
+    just source-check
+
+# Use a distinct instrumented Cargo target; keep the JSON, objects and profiles.
+jpeg-dht-coverage output:
+    python3 scripts/jpeg_dht_coverage.py {{quote(output)}}
+
+jpeg-dht-mutations output:
+    python3 scripts/jpeg_dht_mutations.py {{quote(output)}}
