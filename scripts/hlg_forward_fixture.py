@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC. All rights reserved.
+# Use of this source code is governed by a BSD-style license in LICENSE.
+
 """Retain an unmodified v0.12 producer and its independent linear-float decode."""
 import argparse,hashlib,json,math,struct,subprocess,shutil
 from pathlib import Path

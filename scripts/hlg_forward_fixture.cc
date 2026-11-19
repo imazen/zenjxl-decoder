@@ -1,3 +1,6 @@
+// Copyright (c) Imazen LLC. All rights reserved.
+// Use of this source code is governed by a BSD-style license in LICENSE.
+
 // Native v0.12 lossless HLG source for the scene-to-display decoder path.
 #include <filesystem>
 #include <fstream>

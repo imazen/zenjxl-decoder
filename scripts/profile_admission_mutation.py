@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC. All rights reserved.
+# Use of this source code is governed by a BSD-style license in LICENSE.
+
 """Require the no-CMS post-header refusal to detect removal of its guard."""
 import argparse,hashlib,json,subprocess,sys
 from pathlib import Path

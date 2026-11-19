@@ -1,3 +1,6 @@
+// Copyright (c) Imazen LLC. All rights reserved.
+// Use of this source code is governed by a BSD-style license in LICENSE.
+
 //! Admission controls; the CMS observer does not produce converted pixels.
 #[test]
 fn hlg_near_unity_non_xyb_profile_change_requires_cms() {

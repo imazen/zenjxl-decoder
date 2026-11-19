@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC. All rights reserved.
+# Use of this source code is governed by a BSD-style license in LICENSE.
+
 """Build the pinned native HLG component observer and retain its identities."""
 import argparse, hashlib, json, shutil, subprocess
 from pathlib import Path

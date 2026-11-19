@@ -1,3 +1,6 @@
+// Copyright (c) Imazen LLC. All rights reserved.
+// Use of this source code is governed by a BSD-style license in LICENSE.
+
 //! Positive-luminance vectors from unmodified libjxl v0.12 HlgOOTF_Base.
 use super::*;
 #[test]

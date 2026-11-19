@@ -1,3 +1,6 @@
+// Copyright (c) Imazen LLC. All rights reserved.
+// Use of this source code is governed by a BSD-style license in LICENSE.
+
 // Observe unmodified libjxl v0.12 HLG OOTF around its unity deadband.
 #include <cstdio>
 #include "lib/jxl/cms/tone_mapping.h"

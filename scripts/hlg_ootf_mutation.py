@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Imazen LLC. All rights reserved.
+# Use of this source code is governed by a BSD-style license in LICENSE.
+
 """Require native kernel and full-pixel HLG controls to detect the old cutoff."""
 import argparse,hashlib,json,subprocess,sys
 from pathlib import Path
