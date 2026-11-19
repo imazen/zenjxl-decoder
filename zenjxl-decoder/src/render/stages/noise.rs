@@ -150,7 +150,9 @@ impl RenderPipelineInPlaceStage for AddNoiseStage {
         row: &mut [&mut [f32]],
         _state: Option<&mut (dyn std::any::Any + Send)>,
     ) {
-        let norm_const = 0.22;
+        let norm_const = 0.22f32;
+        let k_rg_corr = 0.9921875f32;
+        let k_rgn_corr = 0.0078125f32;
         let ytox = self.color_correlation.y_to_x_lf();
         let ytob = self.color_correlation.y_to_b_lf();
         for x in 0..xsize {
@@ -166,16 +168,18 @@ impl RenderPipelineInPlaceStage for AddNoiseStage {
             let addit_rnd_noise_red = row_rnd_r * norm_const;
             let addit_rnd_noise_green = row_rnd_g * norm_const;
             let addit_rnd_noise_correlated = row_rnd_c * norm_const;
-            let k_rg_corr = 0.9921875;
-            let k_rgn_corr = 0.0078125;
-            let red_noise = noise_strength_r
-                * (k_rgn_corr * addit_rnd_noise_red + k_rg_corr * addit_rnd_noise_correlated);
-            let green_noise = noise_strength_g
-                * (k_rgn_corr * addit_rnd_noise_green + k_rg_corr * addit_rnd_noise_correlated);
-            let rg_noise = red_noise + green_noise;
-            row[0][x] += ytox * rg_noise + red_noise - green_noise;
+            // Follow libjxl's fused correlation and channel update order.
+            let correlated = k_rg_corr * addit_rnd_noise_correlated;
+            let red_mix = k_rgn_corr.mul_add(addit_rnd_noise_red, correlated);
+            let green_noise =
+                noise_strength_g * k_rgn_corr.mul_add(addit_rnd_noise_green, correlated);
+            // The pinned AVX2 reference contracts the red product into
+            // both the sum and the difference, rounding the green first.
+            let rg_noise = noise_strength_r.mul_add(red_mix, green_noise);
+            let rg_difference = noise_strength_r.mul_add(red_mix, -green_noise);
+            row[0][x] += ytox.mul_add(rg_noise, rg_difference);
             row[1][x] += rg_noise;
-            row[2][x] += ytob * rg_noise;
+            row[2][x] = ytob.mul_add(rg_noise, row[2][x]);
         }
     }
 }

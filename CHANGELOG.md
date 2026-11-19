@@ -18,6 +18,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Reproduce the pinned libjxl AVX2 noise rounding and retain exact RGB F32
+  regressions for the complete sprite-sheet animation.
 - Accept the inclusive 32,768-symbol prefix alphabet limit, including compact
   simple tables, while retaining the complex-table allocation guard.
 - Shorten seek replay when a self-contained reference-only frame replaces a

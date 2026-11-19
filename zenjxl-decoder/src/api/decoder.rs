@@ -2975,6 +2975,53 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn native_remaining_sprite_noise_matches_exactly() {
+        let data = crate::util::test::fixture_bytes("animation_seek_sprite_sheets.jxl");
+        // Whole sequential RGB F32 frames from libjxl v0.12.0 a7a9c78
+        // (AVX2), captured by `just review-native-oracle`.
+        let expected = [
+            0x6b258968447c91f6,
+            0x80bd54cef6b9276a,
+            0xa2817b1e9f13028e,
+            0x85bc867ed0fa8b66,
+            0x8d1dcbf269bd3836,
+            0x34b6d0f4d21ba9e6,
+            0x0b5437d4c2818725,
+            0x123441531ab91f25,
+            0x22fff068c3609f25,
+            0x2d8d8352af4c6725,
+            0x8b3f965d55d8cf25,
+            0x865295dd257bef25,
+        ];
+        for simple in [false, true] {
+            for chunk in [1, 7, usize::MAX] {
+                let frames = decode_frames_with_options(
+                    &data,
+                    chunk,
+                    |_| 1,
+                    simple,
+                    JxlDecoderOptions::default(),
+                );
+                assert_eq!(frames.len(), expected.len());
+                for (frame, ((_, pixels), expected_hash)) in frames.iter().zip(expected).enumerate()
+                {
+                    assert_eq!(pixels.len(), 64 * 64 * 3 * 4);
+                    let hash = pixels
+                        .chunks_exact(4)
+                        .flat_map(|word| u32::from_ne_bytes(word.try_into().unwrap()).to_le_bytes())
+                        .fold(0xcbf29ce484222325u64, |h, b| {
+                            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+                        });
+                    assert_eq!(
+                        hash, expected_hash,
+                        "frame {frame}, simple={simple}, chunk={chunk}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn native_remaining_seek_target_and_continuation() {
         let data = crate::util::test::fixture_bytes("animation_seek_sprite_sheets.jxl");
         let scanned = scan_frames_with_decoder(&data, usize::MAX);

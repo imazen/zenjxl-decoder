@@ -100,6 +100,10 @@ review-prefix-alphabet-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib entropy_coding::huffman -- --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib entropy_coding::huffman -- --test-threads=1
 
+review-noise-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- native_remaining_sprite_noise noise_process_row_chunk --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- native_remaining_sprite_noise noise_process_row_chunk --test-threads=1
+
 review-seek-check:
     cargo test --locked --release -p zenjxl-decoder --all-features --lib seek -- --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib seek -- --test-threads=1

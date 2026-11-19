@@ -189,6 +189,19 @@ The buffered-input allocation guard retains its budget for complex tables,
 and the total alphabet cap still applies. See `docs/UPSTREAM_SYNC.md` and
 `just review-prefix-alphabet-check`.
 
+## Resolved: sprite-sheet F32 noise rounding — 2026-11-19
+
+The first six sequential frames of `animation_seek_sprite_sheets.jxl`
+differed from pinned libjxl v0.12 AVX2 at 207 RGB F32 samples. The first
+eight convolved noise samples matched exactly. Fusing the source's final
+noise update alone left every differing sample unchanged. The compiled
+reference also fuses the red product into the sum and difference after
+rounding the green product. Making that order explicit gives exact frame
+hashes for all 12 frames with both renderers, three chunk sizes and both
+feature configurations. `just review-noise-check` retains the previous noise
+kernel expectations and the independent animation regression. The golden is
+specific to the pinned reference build.
+
 ## Resolved: frame-header dimension validation — 2026-11-17
 
 Upstream's frame-dimension regression first accepted a zero width in the

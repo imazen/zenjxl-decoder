@@ -35,6 +35,6 @@ impl Noise {
         let floor_x_int = floor_x as usize;
         let low = self.lut[floor_x_int];
         let hi = self.lut[floor_x_int + 1];
-        ((hi - low) * frac_x + low).clamp(0.0, 1.0)
+        (hi - low).mul_add(frac_x, low).clamp(0.0, 1.0)
     }
 }

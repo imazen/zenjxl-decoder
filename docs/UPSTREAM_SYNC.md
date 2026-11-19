@@ -22,6 +22,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 | Before-transform EC references | Qualified full-canvas references now work; procedural encoded control matches all 36 v0.12 RGBA8 bytes. | Displaced/undersized planes still reject. |
 | Structured color and HDR CMS | XYB implicit descriptor, white-point/determinant checks, DCI ICC tagging and private MoxCMS HDR controls landed. Approved external ICC method and LCMS correction merged through [PR79](https://github.com/imazen/zenjxl-decoder/pull/79). | XYB control establishes header/representation behavior, not whole-image source-XYB accuracy. |
 | Seek and progressive input | Live reference replay, exact target/continuation checks and upstream's end-only prefix flush schedule are retained. Self-contained reference replacements shorten the sprite-sheet replay from three decoded frames to two. | Reusing an already decoded reference remains open. |
+| Synthesized noise | Fused interpolation and channel updates reproduce all 12 sprite-sheet RGB F32 frames of the pinned libjxl AVX2 build. | Reference coverage is specific to the retained animation and native build. |
 | Metadata and JPEG reconstruction | ICC channel-model/Black consistency, gain-map cardinality with seek replay, and missing external JPEG metadata checks landed. Native timecode and solidity controls are retained. | Timecode ordering and spot-color solidity diagnostics need approval. |
 | Squeeze | Incoming shift-at-most-30 check landed; existing empty-tile compaction and partial-recovery controls remain. | Released-versus-draft default/grid policy remains open. The wide arithmetic model has no conformant-stream witness. |
 | Unknown source color | API proposal retains truthful source flags and recommends opt-in unmanaged handling. Native fixed-payload controls cover each Unknown flag and their combination. | Needs a policy/signature decision. |
@@ -344,9 +345,19 @@ patches or LF source can replace a slot without inheriting its predecessor's
 replay origin. The qualified change reduces this cost to two for both cases
 and retains the other live-slot dependencies. `just review-seek-check` tests
 the native oracle, the cost cap and existing seek/rewind behavior.
-A sequential comparison of the same file shows 207
-F32 sample differences on frames 0–5, with maximum absolute error
-2.384185791015625e-7. Frames 6–11 agree exactly.
+Before the noise correction, sequential playback differed at 207 F32
+samples in frames 0–5, with a maximum absolute error of
+2.384185791015625e-7. Frames 6–11 already matched. The first noise convolution
+vector matched at all eight lanes. The remaining mismatch came from rounding
+in the noise addition stage. The pinned AVX2 build contracts the red-noise
+product into both the sum and the difference after rounding the green
+product. The Rust stage now makes those operations explicit, together with
+the fused LUT interpolation and channel updates in
+[libjxl's noise stage](https://github.com/libjxl/libjxl/blob/v0.12.0/lib/jxl/render_pipeline/stage_noise.cc).
+All 147,456 RGB F32 samples across the release-build CLI's 12 frames match the
+pinned native output byte for byte. The frame hashes also match with both Rust
+renderers and whole-file, 1-byte and 7-byte input. `just review-noise-check`
+exercises both feature configurations and the existing noise-stage expectations.
 
 The private fixes above include the encoded before-transform EC control,
 implicit XYB descriptor, cumulative animation area and selected metadata rules.
@@ -387,15 +398,23 @@ The explicit squeeze-grid and implicit-default-prefix questions require a
 released-versus-draft compatibility contract. Preserve legitimate empty-channel
 compaction and the existing partial-recovery control while that remains open.
 
-Wide squeeze remains a reachability question. A direct call to released
-libjxl's widened scalar `SmoothTendency` confirms the arithmetic result
-626349397 for the reviewed intermediate values. This fork's scalar tail uses the
-same I32 kernel as SIMD bodies, so agreement is not an independent width oracle.
-The arithmetic model has no complete conformant encoded-stream witness. A
-candidate must establish declared precision/level, `modular_16bit_sufficient`
-constraints, legal transforms/group geometry and entropy values, then actual
-dispatch into the distinguishing calculation. No squeeze arithmetic repair or
-claim that all valid encoders avoid these widths is made by this import.
+Calling released libjxl's widened scalar `SmoothTendency` directly with
+`(2^30, 0, -2^30)` yields 626349397. A zero residual reconstructs
+`(313174698, -313174699)`. The modeled wrapping I32 calculation yields
+`(-1073741824, 1073741824)`. Zenjxl uses the I32 kernel for both scalar tails
+and SIMD bodies. Libjxl uses the widened scalar function for its scalar target
+and tails. On its non-scalar targets the horizontal fast path requires a
+residual width above 16 and a full eight-row block. The vertical fast path
+uses complete eight-column blocks. These paths use 32-bit SIMD operations for
+the tendency. [Libjxl v0.12 inverse squeeze](https://github.com/libjxl/libjxl/blob/v0.12.0/lib/jxl/modular/transform/squeeze.cc)
+
+Encoded reachability is unproved. A witness needs Level 10 with
+`modular_16bit_sufficient` clear, a legal declared integer or float bit depth,
+and legal transform order and group geometry. Its entropy data must produce
+representable transform samples reaching the wide intermediates and the
+distinguishing dispatch. The pinned encoder rejects the previously proposed
+float32 source at its width check. The standalone arithmetic call establishes
+the difference at the kernel boundary.
 
 ## Fork PR extractions — 2026-11-05
 
