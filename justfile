@@ -96,6 +96,10 @@ review-native-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- native_remaining hf_coefficient_pass_and_sum_limits wire_black_channel_requires_level10 --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib -- native_remaining hf_coefficient_pass_and_sum_limits wire_black_channel_requires_level10 --test-threads=1
 
+review-seek-check:
+    cargo test --locked --release -p zenjxl-decoder --all-features --lib seek -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib seek -- --test-threads=1
+
 upstream-test-inventory upstream:
     python3 scripts/upstream-audit/inventory_tests.py {{quote(upstream)}}
 

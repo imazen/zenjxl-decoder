@@ -25,7 +25,11 @@ use crate::{
     },
     error::{Error, Result},
     frame::{DecoderState, Frame, Section},
-    headers::{Animation, FileHeader, frame_header::FrameHeader, toc::IncrementalTocReader},
+    headers::{
+        Animation, FileHeader,
+        frame_header::{FrameHeader, FrameType},
+        toc::IncrementalTocReader,
+    },
     icc::IncrementalIccReader,
 };
 
@@ -494,7 +498,19 @@ impl CodestreamParser {
                 .reference_slot_decode_start
                 .get_mut(header.save_as_reference as usize)
         {
-            *slot = Some(decode_start_offset);
+            // A before-transform reference-only frame without patches or an
+            // LF source reconstructs its saved pixels from its own sections.
+            // Replacing that slot need not inherit the former writer's replay
+            // start. Other live slots still participate in the target's start.
+            let self_contained = header.frame_type == FrameType::ReferenceOnly
+                && header.save_before_ct
+                && !header.has_patches()
+                && !header.has_lf_frame();
+            *slot = Some(if self_contained {
+                start.file_offset
+            } else {
+                decode_start_offset
+            });
         }
         if header.lf_level != 0
             && let Some(slot) = self

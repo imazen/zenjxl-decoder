@@ -20,7 +20,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 | Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size, cumulative zero-duration area, MA-tree limits, Black-channel admission and HF coefficient bounds are enforced. | HF range boundaries are exercised at the coefficient step. |
 | Before-transform EC references | Qualified full-canvas references now work; procedural encoded control matches all 36 v0.12 RGBA8 bytes. | Displaced/undersized planes still reject. |
 | Structured color and HDR CMS | XYB implicit descriptor, white-point/determinant checks, DCI ICC tagging and private MoxCMS HDR controls landed. Approved external ICC method and LCMS correction merged through [PR79](https://github.com/imazen/zenjxl-decoder/pull/79). | XYB control establishes header/representation behavior, not whole-image source-XYB accuracy. |
-| Seek and progressive input | Live reference replay, stable incremental rendering and upstream's end-only prefix flush schedule are retained. Exact scheduled sequential/parallel previews have separate controls. | Cached-seek frame-cost optimization is not implemented; streaming throughput is unmeasured. |
+| Seek and progressive input | Live reference replay, exact target/continuation checks and upstream's end-only prefix flush schedule are retained. Self-contained reference replacements shorten the sprite-sheet replay from three decoded frames to two. | Reusing an already decoded reference remains open. |
 | Metadata and JPEG reconstruction | ICC channel-model/Black consistency, gain-map cardinality with seek replay, and missing external JPEG metadata checks landed. Native timecode and solidity controls are retained. | Timecode ordering and spot-color solidity diagnostics need approval. |
 | Squeeze | Incoming shift-at-most-30 check landed; existing empty-tile compaction and partial-recovery controls remain. | Released-versus-draft default/grid policy remains open. The wide arithmetic model has no conformant-stream witness. |
 | Unknown source color | API proposal retains truthful source flags and recommends opt-in unmanaged handling. Native fixed-payload controls cover each Unknown flag and their combination. | Needs a policy/signature decision. |
@@ -290,7 +290,7 @@ and preserves links when listing unmatched names. Important dispositions:
 | Upstream family | Downstream disposition |
 |---|---|
 | Scan/seek/reset, corruption fixtures, orientation, header/profile ordering and ICC rewind | Adapted to typestate and located errors. Existing ports live in `api/decoder.rs`, `tests/jxlrs_testdata_ports.rs`, `tests/jxlrs_regressions.rs`, `tests/orientation_preserve.rs`, `tests/basic_info_profile_guard.rs`, `icc/mod.rs` and `tests/regression_deadlines.rs`. Named seek inputs have explicit reused/fresh/continuation controls. |
-| Cached seek frame costs | Pixel and continuation assertions retained; exact upstream cache costs are excluded because this decoder rebuilds state. Conservative replay can decode more frames. |
+| Cached seek frame costs | Pixel and continuation assertions retained. Self-contained dictionary replacement reaches the upstream fresh-seek cost on the sprite-sheet case. The decoder rebuilds reference state, so it still decodes two frames on the reused case where upstream decodes one. |
 | Auxiliary-box callbacks, AlphaMode::Unpremultiplied, configurable sample limits and progressive-status milestones | Those public APIs are absent here. Existing Exif/container, alpha, frame-header-budget and flush checks are retained; they are not claimed as equivalent tests of the absent APIs. Adding public APIs is separate work. |
 | image-rs adapter registration | No adapter crate exists in this workspace. Retain the new input and exact unaligned decoder-level RGB16 assertion; do not add an integration API merely to compile its tests. |
 | i16 modular storage/conversion and i16/i32 dequant comparisons | The fork's modular storage is i32. Upstream storage-specific tests are not drop-in assertions for this implementation. |
@@ -327,7 +327,12 @@ Libjxl `JxlDecoderRewind` plus `JxlDecoderSkipFrames(9)` reproduces the
 sequential pixels on frames 9–11 of the sprite-sheet fixture. The Rust
 regression checks the complete RGB F32 bytes via a hash for both fresh and
 reused decoders. The pre-optimization replay decodes three frames to get to
-frame 9 in either case. A sequential comparison of the same file shows 207
+frame 9 in either case. A before-transform, reference-only frame with no
+patches or LF source can replace a slot without inheriting its predecessor's
+replay origin. The qualified change reduces this cost to two for both cases
+and retains the other live-slot dependencies. `just review-seek-check` tests
+the native oracle, the cost cap and existing seek/rewind behavior.
+A sequential comparison of the same file shows 207
 F32 sample differences on frames 0–5, with maximum absolute error
 2.384185791015625e-7. Frames 6–11 agree exactly.
 

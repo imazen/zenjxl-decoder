@@ -3003,9 +3003,10 @@ pub(crate) mod tests {
             let before = decoder.decoded_frames();
             let (mut decoder, planes, mut input) = decode_after_seek(&data, decoder, target, 7);
             compare(&planes, 9);
-            eprintln!(
-                "sprite seek to 9, reused={reused}: {} frames decoded",
-                decoder.decoded_frames() - before
+            let cost = decoder.decoded_frames() - before;
+            assert!(
+                cost <= 2,
+                "sprite seek to 9, reused={reused}: {cost} frames decoded"
             );
             for frame in 10..=11 {
                 let (next, planes) = decode_next_frame(decoder, &mut input, 7);

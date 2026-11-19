@@ -18,6 +18,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Shorten seek replay when a self-contained reference-only frame replaces a
+  dictionary, preserving the decoded target and subsequent frames.
 - Check shifted VarDCT HF coefficients and their progressive sums against the
   selected level before converting to storage width.
 - Require Level 10 for CMYK streams with a Black extra channel.
