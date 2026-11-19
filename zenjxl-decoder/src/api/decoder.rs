@@ -2050,6 +2050,90 @@ pub(crate) mod tests {
         out
     }
 
+    fn native_control_bytes(hex: &str) -> Vec<u8> {
+        hex.as_bytes()
+            .chunks_exact(2)
+            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn native_remaining_coalesced_f32_is_bit_exact() {
+        // libjxl v0.12.0 a7a9c78, scripts/remaining_native.cc.
+        // Use raw float bits so a one-bit difference fails on every endian.
+        let controls: &[(&str, &[&str])] = &[
+            // spot-zero
+            (
+                "0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c20000000096a786c6c0a000000446a786c63ff0a10303002008006000740070040020800100098004b12c58285241671bb0730107e3bf65f400480f3e5fa31f1760f2527e3a2e8802a9b7b83796a",
+                &[
+                    "000000003f800000000000003f80000000000000000000000000000000000000000000003f8000003f800000000000000000000000000000000000003f8000000000000000000000000000003f800000000000003f80000000000000000000000000000000000000000000003f8000003f800000000000000000000000000000000000003f8000000000000000000000",
+                ],
+            ),
+            // spot-half
+            (
+                "0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c20000000096a786c6c0a000000446a786c63ff0a10303002008006000740070047020800100098004b12c58285241671bb0730107e3bf65f400480f3e5fa31f1760f2527e3a2e8802a9b7b83796a",
+                &[
+                    "000000003f800000000000003f2000003e8000003ec000000000000000000000000000003f2000003f4000003ec000000000000000000000000000003f2000003e8000003ec00000000000003f800000000000003f2000003e8000003ec000000000000000000000000000003f2000003f4000003ec000000000000000000000000000003f2000003e8000003ec00000",
+                ],
+            ),
+            // spot-one
+            (
+                "0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c20000000096a786c6c0a000000446a786c63ff0a10303002008006000740078047020800100098004b12c58285241671bb0730107e3bf65f400480f3e5fa31f1760f2527e3a2e8802a9b7b83796a",
+                &[
+                    "000000003f800000000000003e8000003f0000003f4000000000000000000000000000003e8000003f0000003f4000000000000000000000000000003e8000003f0000003f400000000000003f800000000000003e8000003f0000003f4000000000000000000000000000003e8000003f0000003f4000000000000000000000000000003e8000003f0000003f400000",
+                ],
+            ),
+            // time-increasing
+            (
+                "0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c20000000096a786c6c0a000000376a786c7000000000ff0a103041206202080005000000000064004b12c58285245283f3144800cb815f20008047acc3eeee020a0000002f6a786c7080000001080009000000040064004b12c58285245670bb80041135005f2000808778da41c1c915",
+                &[
+                    "000000003f800000000000003f80000000000000000000000000000000000000000000003f8000003f800000000000000000000000000000000000003f8000000000000000000000000000003f800000000000003f80000000000000000000000000000000000000000000003f8000003f800000000000000000000000000000000000003f8000000000000000000000",
+                    "3f800000000000003f80000000000000000000003f8000003f8000003f8000003f80000000000000000000003f8000003f800000000000003f800000000000003f8000003f8000003f800000000000003f80000000000000000000003f8000003f8000003f8000003f80000000000000000000003f8000003f800000000000003f800000000000003f8000003f800000",
+                ],
+            ),
+            // cropped-add
+            (
+                "0000000c4a584c200d0a870a00000014667479706a786c20000000006a786c20000000096a786c6c0a000000376a786c7000000000ff0a103041206202080005000000000064004b12c58285245283f3144800cb815f20008047acc3eeee020a000000316a786c70800000010820010830804024000000100058004b12c582852456808d03140032005f200080434c7401",
+                &[
+                    "000000003f800000000000003f80000000000000000000000000000000000000000000003f8000003f800000000000000000000000000000000000003f8000000000000000000000000000003f800000000000003f80000000000000000000000000000000000000000000003f8000003f800000000000000000000000000000000000003f8000000000000000000000",
+                    "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003f8000003f8000003f8000003f8000000000000000000000000000000000000000000000000000003f800000000000003f800000000000003f8000003f800000000000000000000000000000000000000000000000000000",
+                ],
+            ),
+        ];
+        let options = || {
+            JxlDecoderOptions::default().with_limits(
+                crate::api::JxlDecoderLimits::default()
+                    .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+            )
+        };
+        for (fixture, (input, expected)) in controls.iter().enumerate() {
+            let input = native_control_bytes(input);
+            for simple in [false, true] {
+                for chunk in [1, 7, usize::MAX] {
+                    let frames =
+                        decode_frames_with_options(&input, chunk, |_| 1, simple, options());
+                    assert_eq!(frames.len(), expected.len());
+                    for (frame, ((_, actual), expected)) in frames.iter().zip(*expected).enumerate()
+                    {
+                        let expected = native_control_bytes(expected);
+                        assert_eq!(actual.len(), expected.len());
+                        for (index, (a, e)) in actual
+                            .chunks_exact(4)
+                            .zip(expected.chunks_exact(4))
+                            .enumerate()
+                        {
+                            assert_eq!(
+                                u32::from_ne_bytes(a.try_into().unwrap()),
+                                u32::from_be_bytes(e.try_into().unwrap()),
+                                "fixture={fixture} frame={frame} sample={index} simple={simple} chunk={chunk}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn downstream_fixture_u8_pipelines_and_chunks_are_bit_exact() {
         for (name, frame_count) in [
@@ -2888,6 +2972,48 @@ pub(crate) mod tests {
 
     fn animation_fixture(name: &str) -> Vec<u8> {
         crate::util::test::fixture_bytes(&format!("conformance_test_images/{name}"))
+    }
+
+    #[test]
+    fn native_remaining_seek_target_and_continuation() {
+        let data = crate::util::test::fixture_bytes("animation_seek_sprite_sheets.jxl");
+        let scanned = scan_frames_with_decoder(&data, usize::MAX);
+        let target = scanned[9].seek_target.unwrap();
+        // RGB F32 LE bytes from libjxl v0.12's Rewind + SkipFrames(9).
+        let expected = [0x2d8d8352af4c6725, 0x8b3f965d55d8cf25, 0x865295dd257bef25];
+        let compare = |planes: &[Image<f32>], frame: usize| {
+            assert_eq!(planes.len(), 1);
+            assert_eq!(planes[0].size(), (64 * 3, 64));
+            let hash = (0..64)
+                .flat_map(|y| planes[0].row(y).iter())
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .fold(0xcbf29ce484222325u64, |h, b| {
+                    (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+                });
+            assert_eq!(hash, expected[frame - 9], "frame {frame}");
+        };
+        for reused in [false, true] {
+            let (mut decoder, mut input) = decoder_with_image_info(&data);
+            decoder.set_pixel_format(JxlPixelFormat::rgb_f32(0));
+            if reused {
+                while decoder.has_more_frames() {
+                    decoder = decode_next_frame(decoder, &mut input, 7).0;
+                }
+            }
+            let before = decoder.decoded_frames();
+            let (mut decoder, planes, mut input) = decode_after_seek(&data, decoder, target, 7);
+            compare(&planes, 9);
+            eprintln!(
+                "sprite seek to 9, reused={reused}: {} frames decoded",
+                decoder.decoded_frames() - before
+            );
+            for frame in 10..=11 {
+                let (next, planes) = decode_next_frame(decoder, &mut input, 7);
+                compare(&planes, frame);
+                decoder = next;
+            }
+            assert!(!decoder.has_more_frames());
+        }
     }
 
     /// Adapt upstream's reused/fresh reverse seeks and forward continuations.

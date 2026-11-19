@@ -84,6 +84,18 @@ ci-job-log job output:
 review-ma-tree-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib ma_tree_ -- --test-threads=1
 
+# Use an existing v0.12.0 source/build pair. Outputs are caller-owned evidence.
+review-native-build source build binary:
+    {{quote(build)}}/tools/cjxl --version | rg 'v0\.12\.0 a7a9c78'
+    c++ -std=c++17 -O2 -I{{quote(source)}}/lib/include -I{{quote(build)}}/lib/include scripts/remaining_native.cc -L{{quote(build)}}/lib -Wl,-rpath,{{quote(build)}}/lib -ljxl -o {{quote(binary)}}
+
+review-native-oracle binary output:
+    python3 scripts/remaining_native_cases.py {{quote(binary)}} {{quote(output)}}
+
+review-native-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib -- native_remaining hf_coefficient_pass_and_sum_limits wire_black_channel_requires_level10 --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib -- native_remaining hf_coefficient_pass_and_sum_limits wire_black_channel_requires_level10 --test-threads=1
+
 upstream-test-inventory upstream:
     python3 scripts/upstream-audit/inventory_tests.py {{quote(upstream)}}
 

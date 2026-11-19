@@ -17,13 +17,13 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 | Work | Status and evidence | Remaining limit or decision |
 |---|---|---|
 | Upstream regression delta | 15 of 15 missing inputs imported and hash-checked; 128 identical core inputs reused. Applicable assertion ports and portable SIMD controls are retained. | Architecture/API-specific exclusions are listed below; this is not a complete assertion-equivalence audit. |
-| Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size, cumulative zero-duration area, MA-tree limits and Black-channel admission are enforced. | HF coefficient bounds are tracked separately. |
+| Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size, cumulative zero-duration area, MA-tree limits, Black-channel admission and HF coefficient bounds are enforced. | HF range boundaries are exercised at the coefficient step. |
 | Before-transform EC references | Qualified full-canvas references now work; procedural encoded control matches all 36 v0.12 RGBA8 bytes. | Displaced/undersized planes still reject. |
 | Structured color and HDR CMS | XYB implicit descriptor, white-point/determinant checks, DCI ICC tagging and private MoxCMS HDR controls landed. Approved external ICC method and LCMS correction merged through [PR79](https://github.com/imazen/zenjxl-decoder/pull/79). | XYB control establishes header/representation behavior, not whole-image source-XYB accuracy. |
 | Seek and progressive input | Live reference replay, stable incremental rendering and upstream's end-only prefix flush schedule are retained. Exact scheduled sequential/parallel previews have separate controls. | Cached-seek frame-cost optimization is not implemented; streaming throughput is unmeasured. |
-| Metadata and JPEG reconstruction | ICC channel-model/Black consistency, gain-map cardinality with seek replay, and missing external JPEG metadata checks landed. | Timecode ordering and spot-color solidity still need valid-wire controls and accurate diagnostics. |
+| Metadata and JPEG reconstruction | ICC channel-model/Black consistency, gain-map cardinality with seek replay, and missing external JPEG metadata checks landed. Native timecode and solidity controls are retained. | Timecode ordering and spot-color solidity diagnostics need approval. |
 | Squeeze | Incoming shift-at-most-30 check landed; existing empty-tile compaction and partial-recovery controls remain. | Released-versus-draft default/grid policy remains open. The wide arithmetic model has no conformant-stream witness. |
-| Unknown source color | API proposal retains truthful source flags and recommends opt-in unmanaged handling. | Needs a policy/signature decision and valid-wire controls. |
+| Unknown source color | API proposal retains truthful source flags and recommends opt-in unmanaged handling. Native fixed-payload controls cover each Unknown flag and their combination. | Needs a policy/signature decision. |
 | Raw/local layer output | Existing source layer geometry is available; local F32 is the proposed first output contract. | `coalescing(false)` still lacks runtime behavior; output extent/CT-state/EC semantics need agreement. |
 
 Add cropping remains an API-contract question. Progressive coefficient omission
@@ -311,6 +311,26 @@ differences, not a complete upstream assertion-equivalence or conformance claim.
 
 ### Remaining source-review queue
 
+`just review-native-build <source> <build> <binary>` builds the public API
+observer against libjxl v0.12.0 (`a7a9c78`). `just review-native-oracle <binary>
+<new-directory>` captures the inputs, original color fields, frame geometry
+and interleaved F32 pixels with SHA-256 identities. The coalesced Rust check
+compares 252 original RGB float samples from solidity 0, 0.5 and 1, an
+increasing-timecode animation, and a cropped Add animation. Both renderers
+match at whole-file, 1-byte and 7-byte input in all-feature and minimal builds.
+The native library also emits and decodes solidity -0.5 and 2, and timecode
+sequences 2→1, 2→2 and 2→0→1. Those observations establish reference behavior.
+The reviewed format constraints and the proposed decoder diagnostics are
+recorded separately in `DECODER_API_PROPOSALS.md`.
+
+Libjxl `JxlDecoderRewind` plus `JxlDecoderSkipFrames(9)` reproduces the
+sequential pixels on frames 9–11 of the sprite-sheet fixture. The Rust
+regression checks the complete RGB F32 bytes via a hash for both fresh and
+reused decoders. The pre-optimization replay decodes three frames to get to
+frame 9 in either case. A sequential comparison of the same file shows 207
+F32 sample differences on frames 0–5, with maximum absolute error
+2.384185791015625e-7. Frames 6–11 agree exactly.
+
 The private fixes above include the encoded before-transform EC control,
 implicit XYB descriptor, cumulative animation area and selected metadata rules.
 Global and local MA trees now use the selected level's depth bound. The node
@@ -320,8 +340,10 @@ boundaries. Level 5 now excludes Black extra channels. The encoded CMYK
 control succeeds with Level 10 and valid ICC, and returns the Black-channel
 limit error with Level 5. Libjxl v0.12's encoder also requires Level 10 for
 Black. CMYK pixel tests select Level 10 and keep their exact checks.
-Remaining admission work includes timecode ordering, spot-color solidity
-and HF coefficient bounds.
+Shifted HF values and the progressive sums are checked against the selected
+signed width in both rendering paths. Direct coefficient controls cover exact
+16/32-bit boundaries, and the release suite retains the frozen reference bytes.
+Remaining admission work includes timecode ordering and spot-color solidity.
 Timecode and solidity diagnostics, Unknown source-color preservation
 and local-layer output are described in
 [`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). The separately approved
@@ -346,7 +368,9 @@ The explicit squeeze-grid and implicit-default-prefix questions require a
 released-versus-draft compatibility contract. Preserve legitimate empty-channel
 compaction and the existing partial-recovery control while that remains open.
 
-Wide squeeze remains a reachability question. This fork's scalar tail uses the
+Wide squeeze remains a reachability question. A direct call to released
+libjxl's widened scalar `SmoothTendency` confirms the arithmetic result
+626349397 for the reviewed intermediate values. This fork's scalar tail uses the
 same I32 kernel as SIMD bodies, so agreement is not an independent width oracle.
 The arithmetic model has no complete conformant encoded-stream witness. A
 candidate must establish declared precision/level, `modular_16bit_sufficient`

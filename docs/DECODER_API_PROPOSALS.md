@@ -77,6 +77,13 @@ no automatic CMS callback, explicit output-profile rejection, and unchanged
 known-color controls. XYB parsing is independent: it already has a public enum
 variant and does not need this API addition.
 
+The native observer now retains three 39-byte Unknown controls that share a
+complete Modular frame payload with an explicit sRGB control. Libjxl v0.12
+rejects the Unknown forms before image output. Its original and explicit sRGB
+controls agree on every one of 36 F32 samples. Those samples are the independent
+pixel reference for the fallback interpretation, with flag and CMS assertions
+needed for the Unknown forms themselves.
+
 Decision: adopt this opt-in design or approve an enum/API break. Recommendation:
 the additive opt-in design, with precise signatures reviewed before implementation.
 
@@ -100,6 +107,15 @@ contract is local F32. The Add-cropping question belongs here, not in malformed
 stream rejection. A display crop/region-of-interest API is another feature:
 this fork currently has no equivalent to upstream's `crop_region`.
 
+The native `JxlDecoderSetCoalescing(false)` observer reports a cropped Add
+layer at origin (-1, 1) with extent 3×2 and retains all 18 local RGB F32 samples.
+The same frame in the coalesced observation occupies the 4×3 canvas. This
+provides a negative-origin control for draft [PR75](https://github.com/imazen/zenjxl-decoder/pull/75).
+The isolated draft head `907b91b9` matches both layers' 54 F32 samples exactly
+in both renderers and for whole-file, 1-byte and 7-byte input. It also matches
+the origin, extent and Add mode. Broader F32 RGB differences remain documented
+on the draft.
+
 ## Diagnostics for additional format checks
 
 Timecode ordering and out-of-range spot-color solidity need accurate diagnostics.
@@ -114,6 +130,14 @@ Both classify as `InvalidBitstream`. These avoid reporting format consistency
 failures as resource exhaustion or unrelated CMS errors. The associated checks
 must have valid-wire positive and negative controls; cross-frame state must be
 snapshotted for seek, reset and rewind.
+
+Libjxl v0.12 emits and decodes the negative and above-one solidity controls
+and the descending, equal and zero-interrupted timecode controls. Positive
+solidity and increasing-timecode pixels have exact native references. The
+admission rules would intentionally be stricter than that native behavior.
+The positive controls include 2→0→3 and displayed codes 2→3 with a
+zero-duration intermediate frame coded as 5. A zero code leaves the ordering
+baseline intact, and a zero-duration frame does not advance it.
 
 ## Squeeze compatibility target
 
