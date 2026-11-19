@@ -70,6 +70,13 @@ impl JxlCodestreamLevel {
         }
     }
 
+    pub(crate) fn max_ma_tree_depth(self) -> usize {
+        match self {
+            Self::Level5 => 64,
+            Self::Level10 => 2048,
+        }
+    }
+
     /// Upper bound on the spline area estimate for an image of
     /// `image_area` pixels.
     pub(crate) fn spline_area_limit(self, image_area: u64) -> u64 {

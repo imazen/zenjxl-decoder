@@ -68,7 +68,7 @@ fn palette_predictor_bit_offset(codestream: &[u8]) -> (usize, u32) {
     let mut sbr = BitReader::new(section);
     LfQuantFactors::new(&mut sbr).unwrap();
     if sbr.read(1).unwrap() == 1 {
-        Tree::read(&mut sbr, 1 << 22, &MemoryTracker::unlimited()).unwrap();
+        Tree::read(&mut sbr, 1 << 22, 2048, &MemoryTracker::unlimited()).unwrap();
     }
     let header = GroupHeader::read(&mut sbr).unwrap();
     let end_bits = sbr.total_bits_read();

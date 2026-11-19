@@ -80,6 +80,10 @@ review-intensity-check:
 ci-job-log job output:
     gh api 'repos/{owner}/{repo}/actions/jobs/{{job}}/logs' --allow-escape-sequences > {{quote(output)}}
 
+# Run with the host's heavy-job wrapper.
+review-ma-tree-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib ma_tree_ -- --test-threads=1
+
 upstream-test-inventory upstream:
     python3 scripts/upstream-audit/inventory_tests.py {{quote(upstream)}}
 

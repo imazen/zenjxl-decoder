@@ -456,6 +456,8 @@ pub struct TransformLimits {
     /// Transforms in one list (see
     /// `JxlCodestreamLevel::max_modular_transforms`).
     pub max_transforms: usize,
+    /// Maximum root-to-leaf edge count for a local MA tree.
+    pub max_tree_depth: usize,
 }
 
 impl TransformLimits {
@@ -1136,6 +1138,7 @@ mod limit_tests {
             max_channels: level.max_modular_channels(),
             max_palette_samples,
             max_transforms: level.max_modular_transforms(),
+            max_tree_depth: level.max_ma_tree_depth(),
         }
     }
 

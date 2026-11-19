@@ -69,7 +69,12 @@ pub fn decode_modular_subbitstream(
             })
             .sum::<usize>();
         let size_limit = (1024 + num_local_samples).min(1 << 20);
-        Some(Tree::read(br, size_limit, memory_tracker)?)
+        Some(Tree::read(
+            br,
+            size_limit,
+            limits.max_tree_depth,
+            memory_tracker,
+        )?)
     } else {
         None
     };

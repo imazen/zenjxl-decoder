@@ -391,18 +391,22 @@ impl Frame {
         debug!(?color_correlation_params);
 
         let tree = if br.read(1)? == 1 {
-            // Calculate dynamic size limit based on image dimensions
-            let dynamic_limit = 1024
-                + self.header.width as usize
-                    * self.header.height as usize
-                    * (self.color_channels + self.decoder_state.extra_channel_info().len())
-                    / 16;
+            let (width, height) = self.header.size();
+            let channels = self.color_channels + self.decoder_state.extra_channel_info().len();
+            // Normative size uses coded samples, before Modular transforms.
+            // Widen first: a Level 10 frame need not fit a 32-bit product.
+            let dynamic_limit = (1024 + (width as u64 * height as u64 * channels as u64) / 16)
+                .min(1 << 22) as usize;
             // Use configured limit if set, otherwise use 2^22 default
             let configured_limit = self.decoder_state.limits.max_tree_size.unwrap_or(1 << 22);
             let size_limit = dynamic_limit.min(configured_limit);
             Some(Tree::read(
                 br,
                 size_limit,
+                self.decoder_state
+                    .limits
+                    .max_codestream_level
+                    .max_ma_tree_depth(),
                 &self.decoder_state.memory_tracker,
             )?)
         } else {

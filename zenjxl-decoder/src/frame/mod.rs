@@ -171,6 +171,7 @@ impl DecoderState {
             max_channels: self.limits.max_codestream_level.max_modular_channels(),
             max_palette_samples: self.limits.max_pixels.unwrap_or(usize::MAX),
             max_transforms: self.limits.max_codestream_level.max_modular_transforms(),
+            max_tree_depth: self.limits.max_codestream_level.max_ma_tree_depth(),
         }
     }
 

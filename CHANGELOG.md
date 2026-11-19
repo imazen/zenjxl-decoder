@@ -18,6 +18,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Enforce the selected level's MA-tree depth and exact node limits. Compute the global tree cap from coded frame dimensions.
+
 - Reject unsupported non-XYB output profile changes without CMS after image
   info, matching existing header admission and retaining state on refusal.
 

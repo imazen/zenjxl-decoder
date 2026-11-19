@@ -68,9 +68,7 @@ pub struct Tree {
     pub histograms: Histograms,
 }
 
-fn validate_tree(tree: &[TreeNode], num_properties: usize) -> Result<()> {
-    const HEIGHT_LIMIT: usize = 2048;
-
+fn validate_tree(tree: &[TreeNode], num_properties: usize, height_limit: usize) -> Result<()> {
     if tree.is_empty() {
         return Ok(());
     }
@@ -106,8 +104,8 @@ fn validate_tree(tree: &[TreeNode], num_properties: usize) -> Result<()> {
     }];
 
     while let Some(mut frame) = stack.pop() {
-        if frame.depth > HEIGHT_LIMIT {
-            return Err(at!(Error::TreeTooTall(frame.depth, HEIGHT_LIMIT)));
+        if frame.depth > height_limit {
+            return Err(at!(Error::TreeTooTall(frame.depth, height_limit)));
         }
 
         match (frame.stage, tree[frame.node]) {
@@ -434,6 +432,7 @@ impl Tree {
     pub fn read(
         br: &mut BitReader,
         size_limit: usize,
+        height_limit: usize,
         memory_tracker: &MemoryTracker,
     ) -> Result<Tree> {
         assert!(size_limit <= u32::MAX as usize);
@@ -446,8 +445,8 @@ impl Tree {
         let mut leaf_id = 0;
         let mut max_property = 0;
         while to_decode > 0 {
-            if tree.len() > size_limit {
-                return Err(at!(Error::TreeTooLarge(tree.len(), size_limit)));
+            if tree.len() >= size_limit {
+                return Err(at!(Error::TreeTooLarge(tree.len() + 1, size_limit)));
             }
             if tree.len() >= tree.capacity() {
                 tree.try_reserve(tree.len() * 2 + 1)
@@ -505,7 +504,7 @@ impl Tree {
         tree_reader.check_final_state(&tree_histograms, br)?;
 
         let num_properties = max_property as usize + 1;
-        validate_tree(&tree, num_properties)?;
+        validate_tree(&tree, num_properties, height_limit)?;
 
         // Check memory budget for flat tree allocation
         memory_tracker.check_alloc((tree.len() * std::mem::size_of::<FlatTreeNode>()) as u64)?;
@@ -643,5 +642,111 @@ impl Tree {
         self.max_property_count()
             .saturating_sub(NUM_NONREF_PROPERTIES)
             .div_ceil(PROPERTIES_PER_PREVCHAN)
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+    use crate::api::JxlCodestreamLevel;
+
+    fn encoded_comb(depth: usize) -> Vec<u8> {
+        // Three prefix tables: implicit zero for leaf fields, property 0/1,
+        // and a fixed split-value token followed by twelve bits.
+        let mut bits = vec![
+            (0, 1),
+            (1, 1),
+            (2, 2), // no LZ77, simple context map
+            (2, 2),
+            (1, 2),
+            (0, 2),
+            (0, 2),
+            (0, 2),
+            (0, 2),
+            (1, 1),
+            (1, 4),
+            (0, 1),
+            (0, 1), // prefix, HybridUint 100
+            (1, 4),
+            (0, 1),
+            (0, 1),
+            (1, 4),
+            (0, 1),
+            (0, 1),
+            (0, 1),
+            (1, 1),
+            (0, 4),
+            (1, 1),
+            (3, 4),
+            (5, 3), // alphabets 1, 2, 14
+            (1, 2),
+            (1, 2),
+            (0, 1),
+            (1, 1), // two property symbols
+            (1, 2),
+            (0, 2),
+            (13, 4), // one split-value token
+        ];
+        for i in 0..depth {
+            bits.extend([(1, 1), (2 * i as u64, 12)]);
+            if i != 0 {
+                bits.push((0, 1)); // right sibling at this depth
+            }
+        }
+        bits.extend([(0, 1), (0, 1)]); // children of the deepest split
+        bits.extend([(0, 1), (1, 1), (0, 2), (1, 1), (0, 4), (0, 1)]);
+        crate::util::test::pack_bits(&bits)
+    }
+
+    #[test]
+    fn ma_tree_encoded_node_and_depth_limits() {
+        let bytes = encoded_comb(65);
+        let tracker = MemoryTracker::unlimited();
+        let read = |nodes, depth| Tree::read(&mut BitReader::new(&bytes), nodes, depth, &tracker);
+        assert_eq!(read(131, 2048).unwrap().nodes.len(), 131);
+        assert!(matches!(
+            read(130, 2048).err().unwrap().error(),
+            Error::TreeTooLarge(131, 130)
+        ));
+        assert!(matches!(
+            read(131, 64).err().unwrap().error(),
+            Error::TreeTooTall(65, 64)
+        ));
+    }
+
+    fn comb(depth: usize) -> Vec<TreeNode> {
+        let leaf = TreeNode::Leaf {
+            predictor: Predictor::Zero,
+            offset: 0,
+            multiplier: 1,
+            id: 0,
+        };
+        let mut nodes = vec![leaf; 2 * depth + 1];
+        for i in 0..depth {
+            nodes[2 * i] = TreeNode::Split {
+                property: 0,
+                val: i as i32,
+                left: (2 * i + 2) as u32,
+                right: (2 * i + 1) as u32,
+            };
+        }
+        nodes
+    }
+
+    #[test]
+    fn ma_tree_depth_selected_level_boundaries() {
+        for level in [JxlCodestreamLevel::Level5, JxlCodestreamLevel::Level10] {
+            let bound = level.max_ma_tree_depth();
+            validate_tree(&comb(bound), 1, bound).unwrap();
+            let error = validate_tree(&comb(bound + 1), 1, bound).unwrap_err();
+            assert!(matches!(error.error(), Error::TreeTooTall(actual, limit)
+                if *actual == bound + 1 && *limit == bound));
+        }
+        validate_tree(
+            &comb(65),
+            1,
+            JxlCodestreamLevel::Level10.max_ma_tree_depth(),
+        )
+        .unwrap();
     }
 }

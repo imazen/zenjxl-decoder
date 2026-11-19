@@ -313,10 +313,12 @@ differences, not a complete upstream assertion-equivalence or conformance claim.
 
 The private fixes above include the encoded before-transform EC control,
 implicit XYB descriptor, cumulative animation area and selected metadata rules.
-Remaining admission work includes timecode ordering, spot-color solidity and
-the rest of the level-specific rules (including Level 5 Black-channel admission
-and entropy/tree bounds). These are not claimed complete by the size/precision
-checks. Timecode and solidity diagnostics, Unknown source-color preservation
+Global and local MA trees now use the selected level's depth bound. The node
+cap is inclusive, and the global cap uses coded dimensions and wide arithmetic.
+`just review-ma-tree-check` covers a 131-node encoded tree and both depth
+boundaries. Remaining admission work includes timecode ordering, spot-color
+solidity, Level 5 Black-channel admission and HF coefficient bounds.
+Timecode and solidity diagnostics, Unknown source-color preservation
 and local-layer output are described in
 [`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). The separately approved
 intensity-aware profile method is the one implemented API addition.
