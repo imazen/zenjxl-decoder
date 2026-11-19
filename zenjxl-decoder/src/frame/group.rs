@@ -13,6 +13,7 @@ use crate::transforms::{transform::*, transform_map::*};
 
 use crate::{
     BLOCK_DIM, BLOCK_SIZE, GROUP_DIM,
+    api::JxlCodestreamLevel,
     bit_reader::BitReader,
     entropy_coding::decode::SymbolReader,
     error::{Error, Result},
@@ -27,6 +28,50 @@ use crate::{
 use jxl_simd::{F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, simd_function};
 
 const LF_BUFFER_SIZE: usize = 32 * 32;
+
+#[inline]
+fn accumulate_hf_coefficient(previous: i32, unshifted: i32, shift: u32, bits: u32) -> Result<i32> {
+    let coefficient = (unshifted as i64) << shift;
+    let sum = previous as i64 + coefficient;
+    let half_range = 1i64 << (bits - 1);
+    let range = -half_range..half_range;
+    if !range.contains(&coefficient) || !range.contains(&sum) {
+        return Err(hf_coefficient_limit_error(coefficient, sum, half_range));
+    }
+    Ok(sum as i32)
+}
+
+#[cold]
+fn hf_coefficient_limit_error(coefficient: i64, sum: i64, half_range: i64) -> whereat::At<Error> {
+    let value = if (-half_range..half_range).contains(&coefficient) {
+        sum
+    } else {
+        coefficient
+    };
+    at!(Error::LimitExceeded {
+        resource: "quantized HF coefficient magnitude",
+        actual: value.unsigned_abs(),
+        limit: (half_range - i64::from(value >= 0)) as u64,
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn hf_coefficient_pass_and_sum_limits() {
+    for (level, max, min) in [
+        (JxlCodestreamLevel::Level5, i16::MAX as i32, i16::MIN as i32),
+        (JxlCodestreamLevel::Level10, i32::MAX, i32::MIN),
+    ] {
+        let bits = level.hf_coefficient_bits();
+        assert_eq!(accumulate_hf_coefficient(1, max - 1, 0, bits).unwrap(), max);
+        assert_eq!(accumulate_hf_coefficient(0, min / 2, 1, bits).unwrap(), min);
+        assert!(accumulate_hf_coefficient(max, 1, 0, bits).is_err());
+        assert!(accumulate_hf_coefficient(min, -1, 0, bits).is_err());
+        // The shifted pass value exceeds its range even if its sum would fit.
+        assert!(accumulate_hf_coefficient(-1, max / 2 + 1, 1, bits).is_err());
+    }
+    assert_eq!(accumulate_hf_coefficient(0, 16_384, 1, 32).unwrap(), 32_768);
+}
 
 /// Reusable buffers for VarDCT group decoding to avoid repeated allocations.
 pub struct VarDctBuffers {
@@ -497,9 +542,11 @@ pub fn decode_vardct_group(
     pixels: &mut Option<[Image<f32>; 3]>,
     buffers: &mut VarDctBuffers,
     tracker: &MemoryTracker,
+    codestream_level: JxlCodestreamLevel,
     #[cfg(feature = "jpeg")] mut jpeg_coeffs: Option<JpegCoeffSink<'_>>,
 ) -> Result<()> {
     crate::profile!(entropy_decode);
+    let hf_bits = codestream_level.hf_coefficient_bits();
     let x_dm_multiplier = (1.0 / (1.25)).powf(frame_header.x_qm_scale as f32 - 2.0);
     let b_dm_multiplier = (1.0 / (1.25)).powf(frame_header.b_qm_scale as f32 - 2.0);
 
@@ -782,14 +829,18 @@ pub fn decode_vardct_group(
                         // `prev` is whether the unshifted value is nonzero, as
                         // in libjxl's `DecodeACVarBlock`.
                         let (u_coeff, nonzero) = read_unsigned_nz!(ctx);
-                        let coeff = unpack_signed(u_coeff) << *shift;
                         prev = nonzero as usize;
                         nonzeros -= prev;
                         if nonzero {
                             nonzeros_part = part_if_nonzero;
                         }
                         let coeff_index = permutation[k] as usize;
-                        current_coeffs[coeff_index] += coeff;
+                        current_coeffs[coeff_index] = accumulate_hf_coefficient(
+                            current_coeffs[coeff_index],
+                            unpack_signed(u_coeff),
+                            *shift,
+                            hf_bits,
+                        )?;
                     }
                     if let Some(c) = cursor.take() {
                         reader.finish_plain_cursor(c, br);

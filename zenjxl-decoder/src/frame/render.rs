@@ -831,6 +831,7 @@ impl Frame {
                     .opsin_inverse_matrix
                     .quant_biases;
                 let tracker = &self.decoder_state.memory_tracker;
+                let codestream_level = self.decoder_state.limits.max_codestream_level;
 
                 // Frames whose groups render from their own pixels alone are
                 // rendered by each group's decode task, while the pixels are
@@ -931,6 +932,7 @@ impl Frame {
                                 &mut gw.pixels,
                                 &mut buffers,
                                 tracker,
+                                codestream_level,
                                 #[cfg(feature = "jpeg")]
                                 gw.jpeg_coeffs.as_mut().map(|[a, b, c]| {
                                     let rect = header.block_group_rect(gw.group);

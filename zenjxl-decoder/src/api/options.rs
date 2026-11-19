@@ -23,6 +23,7 @@ pub enum JxlCodestreamLevel {
     /// Level 5 bounds:
     /// - dimensions at most 2^18, area at most 2^28, precision at most 16 bits;
     /// - 16-bit Modular buffers sufficient and reconstructed ICC at most 2^22 bytes;
+    /// - no Black extra channel, MA trees at most 64 edges deep, signed 16-bit HF coefficients;
     /// - total spline area estimate at most `min(8 · pixels + 2^25, 2^30)`;
     /// - total patch area at most `max(8 · pixels, 2^20)`;
     /// - at most 256 modular channels after transforms;
@@ -33,6 +34,7 @@ pub enum JxlCodestreamLevel {
     /// Level 10 bounds:
     /// - dimensions at most 2^30, area at most 2^40, precision at most 32 bits;
     /// - reconstructed ICC at most 2^28 bytes;
+    /// - MA trees at most 2048 edges deep, signed 32-bit HF coefficients;
     /// - total spline area estimate at most `min(1024 · pixels + 2^32, 2^42)`;
     /// - total patch area at most `max(1024 · pixels, 2^20)`;
     /// - at most 65,536 modular channels after transforms;
@@ -74,6 +76,13 @@ impl JxlCodestreamLevel {
         match self {
             Self::Level5 => 64,
             Self::Level10 => 2048,
+        }
+    }
+
+    pub(crate) fn hf_coefficient_bits(self) -> u32 {
+        match self {
+            Self::Level5 => 16,
+            Self::Level10 => 32,
         }
     }
 

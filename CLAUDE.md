@@ -1,5 +1,25 @@
 # Decoder investigation notes
 
+## Resolved: selected-level Black, MA-tree and HF bounds — 2026-11-19
+
+Libjxl v0.12's encoder rejects Level 5 with a Black extra channel. The old
+decoder accepted a native 4×3 CMYK/ICC control at Level 5. Level 5 now refuses
+Black while Level 10 admits the existing CMYK fixture. The LCMS whole-image
+and thread migration goldens retain their exact hash with Level 10 selected.
+
+Both MA-tree readers enforce the selected root-to-leaf depth, with boundary
+checks at 64/65 and 2048/2049 edges. A 131-node entropy-coded tree exercises
+the inclusive node cap and Level 5 rejection. The global cap uses coded
+dimensions and widened arithmetic.
+
+Both VarDCT paths check each shifted HF pass value and cumulative coefficient
+at the selected signed width before narrowing. Direct boundary controls cover
+16/32-bit endpoints, shifted values and progressive sums. The high-width
+boundary controls exercise the coefficient step rather than a complete stream.
+The release workspace passes with 1,123 library passes and 29 existing ignores.
+All six frozen v0.12 RGBA frames retain exact bytes. The decoder tests and
+CMYK CLI checks pass with all features and no default features.
+
 ## Repaired: JPEG empty DHT and lost reconstruction errors — 2026-11-18
 
 Native v0.12 empty-DHT streams render but fail public reconstruction because

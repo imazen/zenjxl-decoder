@@ -18,6 +18,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Check shifted VarDCT HF coefficients and their progressive sums against the
+  selected level before converting to storage width.
 - Require Level 10 for CMYK streams with a Black extra channel.
 - Enforce the selected level's MA-tree depth and exact node limits. Compute the global tree cap from coded frame dimensions.
 

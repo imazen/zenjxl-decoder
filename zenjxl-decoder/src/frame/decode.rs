@@ -1446,6 +1446,7 @@ impl Frame {
                     &mut pixels,
                     buffers,
                     &self.decoder_state.memory_tracker,
+                    self.decoder_state.limits.max_codestream_level,
                     #[cfg(feature = "jpeg")]
                     self.jpeg_coeffs
                         .as_mut()
