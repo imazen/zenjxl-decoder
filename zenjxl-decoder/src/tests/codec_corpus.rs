@@ -45,6 +45,10 @@ fn decode_jxl_to_pixels_with_options(
     };
     #[cfg(not(feature = "cms"))]
     let options = JxlDecoderOptions::default();
+    let mut options = options;
+    if path.file_stem().and_then(|name| name.to_str()) == Some("cmyk_layers") {
+        options.limits.max_codestream_level = crate::api::JxlCodestreamLevel::Level10;
+    }
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
 
     // Advance to image info
@@ -587,7 +591,10 @@ mod tests {
 
         let options = JxlDecoderOptions {
             cms: Some(Box::new(MoxCms::new())),
-            ..JxlDecoderOptions::default()
+            ..JxlDecoderOptions::default().with_limits(
+                crate::api::JxlDecoderLimits::default()
+                    .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+            )
         };
         let image = crate::api::decode_with(&data, options)
             .expect("CMYK image should decode to RGB with CMS enabled (#37)");
@@ -1008,7 +1015,10 @@ mod tests {
 
         let options = JxlDecoderOptions {
             cms: Some(Box::new(MoxCms::new())),
-            ..JxlDecoderOptions::default()
+            ..JxlDecoderOptions::default().with_limits(
+                crate::api::JxlDecoderLimits::default()
+                    .with_max_codestream_level(crate::api::JxlCodestreamLevel::Level10),
+            )
         };
         let mut decoder = JxlDecoder::<states::Initialized>::new(options);
 

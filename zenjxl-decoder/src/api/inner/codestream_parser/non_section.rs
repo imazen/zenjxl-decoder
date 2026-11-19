@@ -20,7 +20,8 @@ use crate::{
     frame::{DecoderState, Frame, Section},
     headers::{
         FileHeader, JxlHeader, Orientation, color_encoding::ColorSpace,
-        encodings::UnconditionalCoder, frame_header::FrameHeader, toc::IncrementalTocReader,
+        encodings::UnconditionalCoder, extra_channels::ExtraChannel, frame_header::FrameHeader,
+        toc::IncrementalTocReader,
     },
     icc::IncrementalIccReader,
     util::{MemoryGuard, MemoryTracker},
@@ -189,12 +190,26 @@ fn check_sample_precision(
             }));
         }
     }
-    if level == crate::api::JxlCodestreamLevel::Level5 && !metadata.modular_16bit_sufficient {
-        return Err(at!(Error::LimitExceeded {
-            resource: "modular buffer bits",
-            actual: 32,
-            limit: 16,
-        }));
+    if level == crate::api::JxlCodestreamLevel::Level5 {
+        if !metadata.modular_16bit_sufficient {
+            return Err(at!(Error::LimitExceeded {
+                resource: "modular buffer bits",
+                actual: 32,
+                limit: 16,
+            }));
+        }
+        let black_channels = metadata
+            .extra_channel_info
+            .iter()
+            .filter(|ec| ec.ec_type == ExtraChannel::Black)
+            .count();
+        if black_channels != 0 {
+            return Err(at!(Error::LimitExceeded {
+                resource: "Black extra channels",
+                actual: black_channels as u64,
+                limit: 0,
+            }));
+        }
     }
     Ok(())
 }
@@ -208,7 +223,7 @@ fn check_profile_channels(
         let black = metadata
             .extra_channel_info
             .iter()
-            .any(|ec| ec.ec_type == crate::headers::extra_channels::ExtraChannel::Black);
+            .any(|ec| ec.ec_type == ExtraChannel::Black);
         if gray != (profile.channels() == 1) || black != profile.is_cmyk() {
             return Err(at!(Error::InvalidColorEncoding));
         }
@@ -665,6 +680,31 @@ impl CodestreamParser {
 mod conformance_limit_tests {
     use super::*;
     use crate::api::{JxlCodestreamLevel, JxlDecoderLimits};
+
+    #[test]
+    fn wire_black_channel_requires_level10() {
+        let data = crate::util::test::fixture_bytes("conformance_test_images/cmyk_layers.jxl");
+        let limits = JxlDecoderLimits::unlimited();
+        let header = crate::api::read_header_with(&data, limits.clone()).unwrap();
+        assert!(header.embedded_profile.is_cmyk());
+        let error = crate::api::read_header_with(
+            &data,
+            limits.with_max_codestream_level(JxlCodestreamLevel::Level5),
+        )
+        .err()
+        .expect("Black requires Level 10");
+        assert!(
+            matches!(
+                error.error(),
+                Error::LimitExceeded {
+                    resource: "Black extra channels",
+                    actual: 1,
+                    limit: 0,
+                }
+            ),
+            "{error:?}"
+        );
+    }
 
     #[test]
     fn black_channel_requires_cmyk_icc_and_gray_flag_matches_profile() {

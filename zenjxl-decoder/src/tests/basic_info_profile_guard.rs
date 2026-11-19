@@ -11,7 +11,7 @@
 //! transition: image info is not observable before the embedded color profile
 //! has been parsed.
 
-use crate::api::{JxlDecoderInner, JxlDecoderOptions};
+use crate::api::{JxlCodestreamLevel, JxlDecoderInner, JxlDecoderLimits, JxlDecoderOptions};
 
 /// Tiny chunk size to exercise the incremental parse path and deliberately
 /// stall inside the image header, before the embedded color profile box
@@ -31,7 +31,9 @@ fn test_resource(name: &str) -> Vec<u8> {
 #[test]
 fn basic_info_hidden_until_embedded_profile_cmyk() {
     let data = test_resource("conformance_test_images/cmyk_layers.jxl");
-    let mut decoder = JxlDecoderInner::new(JxlDecoderOptions::default());
+    let mut decoder = JxlDecoderInner::new(JxlDecoderOptions::default().with_limits(
+        JxlDecoderLimits::default().with_max_codestream_level(JxlCodestreamLevel::Level10),
+    ));
 
     let mut saw_some = false;
     for chunk in data.chunks(CHUNK_SIZE) {

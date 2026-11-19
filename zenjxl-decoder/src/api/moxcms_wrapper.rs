@@ -360,10 +360,16 @@ mod tests {
 
     /// The embedded CMYK profile of the committed `cmyk_layers.jxl` fixture.
     fn cmyk_layers_profile() -> JxlColorProfile {
-        use crate::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+        use crate::api::{
+            JxlCodestreamLevel, JxlDecoder, JxlDecoderLimits, JxlDecoderOptions, ProcessingResult,
+            states,
+        };
         let data = crate::util::test::fixture_bytes("conformance_test_images/cmyk_layers.jxl");
         let mut input = data.as_slice();
-        let mut decoder = JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default());
+        let mut decoder =
+            JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default().with_limits(
+                JxlDecoderLimits::default().with_max_codestream_level(JxlCodestreamLevel::Level10),
+            ));
         let decoder = loop {
             match decoder.process(&mut input).unwrap() {
                 ProcessingResult::Complete { result } => break result,

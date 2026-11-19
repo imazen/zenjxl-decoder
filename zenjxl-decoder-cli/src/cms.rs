@@ -247,14 +247,20 @@ mod tests {
 
     /// The embedded profile of the committed `cmyk_layers.jxl` conformance image.
     fn cmyk_layers_profile() -> JxlColorProfile {
-        use jxl::api::{JxlDecoder, JxlDecoderOptions, ProcessingResult, states};
+        use jxl::api::{
+            JxlCodestreamLevel, JxlDecoder, JxlDecoderLimits, JxlDecoderOptions, ProcessingResult,
+            states,
+        };
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl"
         );
         let data = std::fs::read(path).unwrap();
         let mut input = data.as_slice();
-        let mut decoder = JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default());
+        let mut decoder =
+            JxlDecoder::<states::Initialized>::new(JxlDecoderOptions::default().with_limits(
+                JxlDecoderLimits::default().with_max_codestream_level(JxlCodestreamLevel::Level10),
+            ));
         let decoder = loop {
             match decoder.process(&mut input).unwrap() {
                 ProcessingResult::Complete { result } => break result,
@@ -295,7 +301,12 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl");
         let input = std::fs::read(path).expect("CMYK regression fixture");
-        let options = jxl::api::JxlDecoderOptions::default().with_cms(Box::new(Lcms2Cms));
+        let options = jxl::api::JxlDecoderOptions::default()
+            .with_limits(
+                jxl::api::JxlDecoderLimits::default()
+                    .with_max_codestream_level(jxl::api::JxlCodestreamLevel::Level10),
+            )
+            .with_cms(Box::new(Lcms2Cms));
         let image = jxl::api::decode_with(&input, options).unwrap();
         assert_eq!((image.width, image.height, image.channels), (512, 512, 4));
         // Every byte of djxl v0.12's LCMS reference, not a sampled/tolerant gate.
@@ -335,14 +346,20 @@ mod tests {
     #[test]
     fn decoder_with_lcms_migrates_between_frame_states() {
         use jxl::api::{
-            JxlDecoder, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat, ProcessingResult,
+            JxlCodestreamLevel, JxlDecoder, JxlDecoderLimits, JxlDecoderOptions, JxlOutputBuffer,
+            JxlPixelFormat, ProcessingResult,
         };
         const INPUT: &[u8] = include_bytes!(
             "../../zenjxl-decoder/resources/test/conformance_test_images/cmyk_layers.jxl"
         );
         let (decoder, offset) = std::thread::spawn(|| {
             let mut input = INPUT;
-            let options = JxlDecoderOptions::default().with_cms(Box::new(Lcms2Cms));
+            let options = JxlDecoderOptions::default()
+                .with_limits(
+                    JxlDecoderLimits::default()
+                        .with_max_codestream_level(JxlCodestreamLevel::Level10),
+                )
+                .with_cms(Box::new(Lcms2Cms));
             let ProcessingResult::Complete { mut result } =
                 JxlDecoder::new(options).process(&mut input).unwrap()
             else {

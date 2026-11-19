@@ -163,6 +163,9 @@ fn first_image_with_mode(
         .with_adjust_orientation(false)
         .with_render_spot_colors(false)
         .with_parallel(parallel);
+    if name == CMYK {
+        options.limits.max_codestream_level = crate::api::JxlCodestreamLevel::Level10;
+    }
     if let Some(cms) = cms {
         options = options.with_cms(Box::new(cms));
     }

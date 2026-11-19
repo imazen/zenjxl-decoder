@@ -17,7 +17,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 | Work | Status and evidence | Remaining limit or decision |
 |---|---|---|
 | Upstream regression delta | 15 of 15 missing inputs imported and hash-checked; 128 identical core inputs reused. Applicable assertion ports and portable SIMD controls are retained. | Architecture/API-specific exclusions are listed below; this is not a complete assertion-equivalence audit. |
-| Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size and cumulative zero-duration area checks landed. | Complete selected-level entropy/tree/Black-channel admission is still queued. |
+| Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size, cumulative zero-duration area, MA-tree limits and Black-channel admission are enforced. | HF coefficient bounds are tracked separately. |
 | Before-transform EC references | Qualified full-canvas references now work; procedural encoded control matches all 36 v0.12 RGBA8 bytes. | Displaced/undersized planes still reject. |
 | Structured color and HDR CMS | XYB implicit descriptor, white-point/determinant checks, DCI ICC tagging and private MoxCMS HDR controls landed. Approved external ICC method and LCMS correction merged through [PR79](https://github.com/imazen/zenjxl-decoder/pull/79). | XYB control establishes header/representation behavior, not whole-image source-XYB accuracy. |
 | Seek and progressive input | Live reference replay, stable incremental rendering and upstream's end-only prefix flush schedule are retained. Exact scheduled sequential/parallel previews have separate controls. | Cached-seek frame-cost optimization is not implemented; streaming throughput is unmeasured. |
@@ -316,8 +316,12 @@ implicit XYB descriptor, cumulative animation area and selected metadata rules.
 Global and local MA trees now use the selected level's depth bound. The node
 cap is inclusive, and the global cap uses coded dimensions and wide arithmetic.
 `just review-ma-tree-check` covers a 131-node encoded tree and both depth
-boundaries. Remaining admission work includes timecode ordering, spot-color
-solidity, Level 5 Black-channel admission and HF coefficient bounds.
+boundaries. Level 5 now excludes Black extra channels. The encoded CMYK
+control succeeds with Level 10 and valid ICC, and returns the Black-channel
+limit error with Level 5. Libjxl v0.12's encoder also requires Level 10 for
+Black. CMYK pixel tests select Level 10 and keep their exact checks.
+Remaining admission work includes timecode ordering, spot-color solidity
+and HF coefficient bounds.
 Timecode and solidity diagnostics, Unknown source-color preservation
 and local-layer output are described in
 [`DECODER_API_PROPOSALS.md`](DECODER_API_PROPOSALS.md). The separately approved

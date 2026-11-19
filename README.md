@@ -35,8 +35,8 @@ Need only the dimensions? [`read_header(&data)`](https://docs.rs/zenjxl-decoder/
 
 ## Decoding untrusted input
 
-The default enforces Level 5. Some 16-bit and HDR streams declare that they
-need 32-bit Modular buffers and require Level 10. Select it explicitly with
+The default enforces Level 5. CMYK streams with a Black channel and streams
+that declare 32-bit Modular buffers require Level 10. Select it explicitly with
 `options.limits.max_codestream_level = JxlCodestreamLevel::Level10`
 (or CLI `--allow-level10`); caller memory and pixel limits still apply.
 
