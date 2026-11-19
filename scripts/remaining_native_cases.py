@@ -47,6 +47,34 @@ def source_color_cases(inputs):
         (inputs / f"{name}.jxl").write_bytes(data)
 
 
+def prefix_alphabet_cases(inputs):
+    # Single-section, uncropped 4x3 RGB8 Modular frame with no transforms.
+    header = pack([
+        (0x0AFF, 16), (0, 1), (0, 2), (2, 9), (3, 3),
+        (0, 1), (0, 1), (0, 1), (0, 2), (1, 1), (0, 2), (0, 1),
+        (1, 1), (0, 2), (1, 1),
+    ])
+    frame = pack([
+        (0, 1), (0, 2), (1, 1), (0, 2), (0, 1), (0, 2), (1, 2),
+        (0, 2), (0, 1), (0, 2), (1, 1), (0, 2), (1, 1), (0, 2), (0, 1),
+    ])
+    for name, size in (("prefix-one", 1), ("prefix-max", 32768), ("prefix-above", 32769)):
+        section = [
+            (1, 1), (0, 1),  # default LF quant, no global tree
+            (0, 1), (1, 1), (0, 2),  # local tree, default predictor weights, no transforms
+            (0, 1), (1, 1), (0, 2), (1, 1), (0, 4), (0, 1),  # one Zero leaf
+            (0, 1), (1, 1), (0, 4),  # sample prefix histogram, no LZ77
+        ]
+        if size == 1:
+            section.append((0, 1))
+        else:
+            exponent = (size - 1).bit_length() - 1
+            section += [(1, 1), (exponent, 4), (size - 1 - (1 << exponent), exponent)]
+            section += [(1, 2), (0, 2), (0, (size - 1).bit_length())]  # one symbol, token 0
+        payload = pack(section)
+        (inputs / f"{name}.jxl").write_bytes(header + frame + pack([(0, 2), (len(payload), 10)]) + payload)
+
+
 def observe(binary, input_path, prefix, coalescing=True):
     with prefix.with_suffix(".log").open("x") as log:
         result = subprocess.run(
@@ -68,8 +96,9 @@ def main():
     binary = args.binary.resolve(strict=True)
     subprocess.run([binary, "generate", inputs], check=True)
     source_color_cases(inputs)
+    prefix_alphabet_cases(inputs)
     for path in sorted(inputs.glob("*.jxl")):
-        expected = int(path.stem.startswith("unknown-"))
+        expected = int(path.stem.startswith("unknown-") or path.stem == "prefix-above")
         assert observe(binary, path, args.output / path.stem) == expected, path.stem
         if expected:
             assert (args.output / f"{path.stem}.log").read_text().endswith("result 1 0\n")
@@ -77,6 +106,9 @@ def main():
     assert (args.output / "explicit-srgb-0.f32").read_bytes() == (
         args.output / "plain-srgb-0.f32"
     ).read_bytes()
+    assert (args.output / "prefix-max-0.f32").read_bytes() == (
+        args.output / "prefix-one-0.f32"
+    ).read_bytes() == bytes(4 * 3 * 3 * 4)
     local_log = (args.output / "cropped-add-local.log").read_text()
     assert "frame 1 1 2 -1 1 3 2 1\n" in local_log
     assert (args.output / "cropped-add-local-1.f32").stat().st_size == 3 * 2 * 3 * 4

@@ -408,15 +408,21 @@ impl Table {
     }
 
     #[instrument(level = "trace", skip(br), ret, err)]
-    pub fn decode(al_size: usize, br: &mut BitReader) -> Result<Table> {
+    fn decode(al_size: usize, available: usize, br: &mut BitReader) -> Result<Table> {
         let entries = if al_size == 1 {
             vec![TableEntry { bits: 0, value: 0 }; TABLE_SIZE]
         } else {
-            assert!(al_size < 1 << HUFFMAN_MAX_BITS);
+            assert!(al_size <= 1 << HUFFMAN_MAX_BITS);
             let simple_code_or_skip = br.read(2)? as usize;
             if simple_code_or_skip == 1 {
                 Table::decode_simple_table(al_size, br)?
             } else {
+                // Only the complex form allocates one code length per symbol.
+                // A short prefix can grow, so request input before allocating.
+                let needed = al_size.div_ceil(HuffmanCodes::ALPHABET_BITS_RATIO);
+                if needed > available {
+                    return Err(at!(Error::OutOfBounds((needed - available).div_ceil(8))));
+                }
                 let mut code_length_code_lengths = [0u8; CODE_LENGTHS_CODE];
                 let mut space = 32;
                 const STATIC_HUFF_BITS: [u8; 16] = [2, 2, 2, 3, 2, 2, 2, 4, 2, 2, 2, 3, 2, 2, 2, 4];
@@ -514,7 +520,7 @@ impl HuffmanCodes {
             .map(|_| Ok(decode_varint16(br)? as usize + 1))
             .collect::<Result<_>>()?;
         let max = *alphabet_sizes.iter().max().unwrap();
-        if max >= (1 << HUFFMAN_MAX_BITS) {
+        if max > (1 << HUFFMAN_MAX_BITS) {
             return Err(at!(Error::AlphabetTooLargeHuff(max)));
         }
         // Bound total allocations across all tables.
@@ -522,21 +528,10 @@ impl HuffmanCodes {
         if total_alphabet > Self::MAX_TOTAL_ALPHABET_SIZE {
             return Err(at!(Error::AlphabetTooLargeHuff(total_alphabet)));
         }
-        // Bound per-table allocation relative to buffered input. A short
-        // incremental prefix is not proof that the alphabet is invalid:
-        // request enough bytes to satisfy this allocation policy and retry.
-        // The hard format/total-alphabet limits above remain fatal errors.
         let available = br.total_bits_available();
-        let input_cap = available.saturating_mul(Self::ALPHABET_BITS_RATIO);
-        for &sz in &alphabet_sizes {
-            if sz > 1 && sz > input_cap {
-                let missing_bits = sz.div_ceil(Self::ALPHABET_BITS_RATIO) - available;
-                return Err(at!(Error::OutOfBounds(missing_bits.div_ceil(8))));
-            }
-        }
         let tables = alphabet_sizes
             .iter()
-            .map(|sz| Table::decode(*sz, br))
+            .map(|sz| Table::decode(*sz, available, br))
             .collect::<Result<_>>()?;
         Ok(HuffmanCodes { tables })
     }
@@ -600,6 +595,37 @@ impl HuffmanCodes {
 mod test {
     use super::*;
     use test_log::test;
+
+    #[test]
+    fn prefix_alphabet_maximum_wire_stream() {
+        // A 4×3 RGB8 Modular stream with a one-leaf Zero predictor and one
+        // fixed Huffman symbol (token 0) in an alphabet of 32,768. Libjxl
+        // v0.12 decodes every F32 sample to zero. The neighboring alphabet
+        // 32,769 is rejected at the coded alphabet size.
+        let largest = [
+            0xff, 0x0a, 0x10, 0x30, 0x10, 0x09, 0x08, 0x02, 0x09, 0x20, 0x00, 0x89, 0x04, 0x42,
+            0xff, 0xff, 0x03, 0x00, 0x00,
+        ];
+        let above = [
+            0xff, 0x0a, 0x10, 0x30, 0x10, 0x09, 0x08, 0x02, 0x09, 0x20, 0x00, 0x89, 0x04, 0xc2,
+            0x07, 0x00, 0x04, 0x00, 0x00,
+        ];
+        for simple in [false, true] {
+            for chunk in [1, 7, usize::MAX] {
+                let frames = crate::api::decoder::tests::decode_frames_with_options(
+                    &largest,
+                    chunk,
+                    |_| 1,
+                    simple,
+                    crate::api::JxlDecoderOptions::default(),
+                );
+                assert_eq!(frames.len(), 1);
+                assert_eq!(frames[0].1, vec![0; 4 * 3 * 3 * 4]);
+            }
+        }
+        let error = crate::api::decode(&above).err().unwrap();
+        assert!(matches!(error.error(), Error::AlphabetTooLargeHuff(32769)));
+    }
 
     #[test]
     fn alphabet_allocation_guard_requests_more_prefix_bytes() {

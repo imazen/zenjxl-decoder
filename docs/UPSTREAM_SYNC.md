@@ -18,6 +18,7 @@ used are in [`scripts/upstream-audit/`](../scripts/upstream-audit/README.md).
 |---|---|---|
 | Upstream regression delta | 15 of 15 missing inputs imported and hash-checked; 128 identical core inputs reused. Applicable assertion ports and portable SIMD controls are retained. | Architecture/API-specific exclusions are listed below; this is not a complete assertion-equivalence audit. |
 | Selected-level and header guards | Image/frame size, sample precision, Modular buffer declaration, ICC output size, cumulative zero-duration area, MA-tree limits, Black-channel admission and HF coefficient bounds are enforced. | HF range boundaries are exercised at the coefficient step. |
+| Prefix entropy | The inclusive 32,768-symbol alphabet decodes the same 36 F32 samples as pinned libjxl. The 32,769-symbol neighbor is rejected. | The encoded control uses a compact simple table. |
 | Before-transform EC references | Qualified full-canvas references now work; procedural encoded control matches all 36 v0.12 RGBA8 bytes. | Displaced/undersized planes still reject. |
 | Structured color and HDR CMS | XYB implicit descriptor, white-point/determinant checks, DCI ICC tagging and private MoxCMS HDR controls landed. Approved external ICC method and LCMS correction merged through [PR79](https://github.com/imazen/zenjxl-decoder/pull/79). | XYB control establishes header/representation behavior, not whole-image source-XYB accuracy. |
 | Seek and progressive input | Live reference replay, exact target/continuation checks and upstream's end-only prefix flush schedule are retained. Self-contained reference replacements shorten the sprite-sheet replay from three decoded frames to two. | Reusing an already decoded reference remains open. |
@@ -151,6 +152,17 @@ buffered produced fatal `AlphabetTooLargeHuff(520)`. The guard now asks for the
 one additional byte its allocation policy requires, then retries. Allocation
 caps and the hard alphabet error remain intact. A direct prefix regression
 and the formerly failing progressive LF header-budget control pass.
+
+ISO/IEC 18181-1:2024 C.2.1 includes 32,768 in the prefix alphabet range.
+[Libjxl v0.12's decoder](https://github.com/libjxl/libjxl/blob/v0.12.0/lib/jxl/dec_ans.cc)
+accepts that endpoint. `just review-native-oracle` compares complete Modular
+RGB streams with alphabet sizes 1, 32,768 and 32,769. The first two decode to
+the same 36 F32 samples. Both decoders reject 32,769. The Rust regression
+requires those complete pixel bytes with both renderers and whole-file,
+1-byte and 7-byte input. Simple prefix tables use fixed-size storage. The
+input-proportional guard still applies to complex tables with the same budget,
+and the total alphabet cap remains in force. `just review-prefix-alphabet-check`
+exercises the wire and allocation regressions in both feature configurations.
 
 Upstream's `test_out_of_bounds_reports_bytes` reproduced a unit mismatch in
 `BitReader::skip_bits`: nine missing bits were reported as nine bytes instead
@@ -346,8 +358,10 @@ control succeeds with Level 10 and valid ICC, and returns the Black-channel
 limit error with Level 5. Libjxl v0.12's encoder also requires Level 10 for
 Black. CMYK pixel tests select Level 10 and keep their exact checks.
 Shifted HF values and the progressive sums are checked against the selected
-signed width in both rendering paths. Direct coefficient controls cover exact
-16/32-bit boundaries, and the release suite retains the frozen reference bytes.
+signed width in both rendering paths. The reviewed 2026 third-edition draft
+Annex M states these bounds. Direct coefficient controls cover the exact
+16/32-bit boundaries. The published 2024 Annex M text and an encoded stream
+that reaches those arithmetic boundaries remain unverified.
 Remaining admission work includes timecode ordering and spot-color solidity.
 Timecode and solidity diagnostics, Unknown source-color preservation
 and local-layer output are described in

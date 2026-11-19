@@ -178,6 +178,17 @@ requires a one-byte refill and retains a fatal hard-alphabet-limit control.
 The formerly failing LF header-budget control passes. No allocation cap was
 removed or raised.
 
+## Resolved: inclusive prefix alphabet endpoint — 2026-11-19
+
+A complete 19-byte Modular RGB stream with alphabet size 32,768 returned
+`AlphabetTooLargeHuff(32768)`. ISO/IEC 18181-1:2024 C.2.1 includes that value.
+The inclusive check now matches libjxl v0.12. The compact simple table decodes
+all 36 F32 samples exactly with either renderer in whole-file, 1-byte and
+7-byte chunks. Size 32,769 still fails. Simple tables use fixed-size storage.
+The buffered-input allocation guard retains its budget for complex tables,
+and the total alphabet cap still applies. See `docs/UPSTREAM_SYNC.md` and
+`just review-prefix-alphabet-check`.
+
 ## Resolved: frame-header dimension validation — 2026-11-17
 
 Upstream's frame-dimension regression first accepted a zero width in the

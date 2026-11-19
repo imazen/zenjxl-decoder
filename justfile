@@ -87,7 +87,7 @@ review-ma-tree-check:
 # Use an existing v0.12.0 source/build pair. Outputs are caller-owned evidence.
 review-native-build source build binary:
     {{quote(build)}}/tools/cjxl --version | rg 'v0\.12\.0 a7a9c78'
-    c++ -std=c++17 -O2 -I{{quote(source)}}/lib/include -I{{quote(build)}}/lib/include scripts/remaining_native.cc -L{{quote(build)}}/lib -Wl,-rpath,{{quote(build)}}/lib -ljxl -o {{quote(binary)}}
+    TMPDIR="$HOME/tmp" c++ -std=c++17 -O2 -I{{quote(source)}}/lib/include -I{{quote(build)}}/lib/include scripts/remaining_native.cc -L{{quote(build)}}/lib -Wl,-rpath,{{quote(build)}}/lib -ljxl -o {{quote(binary)}}
 
 review-native-oracle binary output:
     python3 scripts/remaining_native_cases.py {{quote(binary)}} {{quote(output)}}
@@ -95,6 +95,10 @@ review-native-oracle binary output:
 review-native-check:
     cargo test --locked -p zenjxl-decoder --all-features --lib -- native_remaining hf_coefficient_pass_and_sum_limits wire_black_channel_requires_level10 --test-threads=1
     cargo test --locked -p zenjxl-decoder --no-default-features --lib -- native_remaining hf_coefficient_pass_and_sum_limits wire_black_channel_requires_level10 --test-threads=1
+
+review-prefix-alphabet-check:
+    cargo test --locked -p zenjxl-decoder --all-features --lib entropy_coding::huffman -- --test-threads=1
+    cargo test --locked -p zenjxl-decoder --no-default-features --lib entropy_coding::huffman -- --test-threads=1
 
 review-seek-check:
     cargo test --locked --release -p zenjxl-decoder --all-features --lib seek -- --test-threads=1
