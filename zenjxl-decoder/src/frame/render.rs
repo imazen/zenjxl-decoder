@@ -751,22 +751,25 @@ impl Frame {
         // Batches cost ~2.5% of
         // frame time on a 48-group frame at 4 threads (M4 Pro, load
         // imbalance at the batch boundary), so smaller frames stay unbatched.
-        let recycle_modular = !is_vardct
-            && !self.header.has_noise()
-            && !lmp_ref!().needs_border_rendering()
-            && num_groups > num_threads * 16;
+        let can_recycle_modular =
+            !is_vardct && !self.header.has_noise() && !lmp_ref!().needs_border_rendering();
+        let recycle_boundary = num_threads * 16;
+        // Smaller batches bound the working set of 256-pixel groups.
+        // Shared ANS trees and smaller groups benefit from longer batches.
+        // See benchmarks/cold_modular_photo_2026-11-22.md.
+        let use_smaller_batches = can_recycle_modular
+            && num_groups >= recycle_boundary
+            && self.header.group_dim() == 256
+            && self
+                .lf_global
+                .as_ref()
+                .unwrap()
+                .tree
+                .as_ref()
+                .is_none_or(super::modular::GlobalTree::uses_prefix_codes);
+        let recycle_modular =
+            can_recycle_modular && (num_groups > recycle_boundary || use_smaller_batches);
         let decode_batch_size = if recycle_modular {
-            // Smaller batches bound the working set of 256-pixel groups.
-            // Shared ANS trees and smaller groups benefit from longer batches.
-            // See benchmarks/cold_modular_photo_2026-11-22.md.
-            let use_smaller_batches = self.header.group_dim() == 256
-                && self
-                    .lf_global
-                    .as_ref()
-                    .unwrap()
-                    .tree
-                    .as_ref()
-                    .is_none_or(super::modular::GlobalTree::uses_prefix_codes);
             let groups_per_worker = if use_smaller_batches { 4 } else { 8 };
             (num_threads * groups_per_worker).max(1)
         } else if num_needs_pixels > num_threads * 256 {

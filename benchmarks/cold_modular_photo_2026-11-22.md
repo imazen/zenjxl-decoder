@@ -150,3 +150,49 @@ The exact binary build uses the production candidate's code at the revision
 recorded in `coding-scope.commit` in the run directory. Phase marks,
 per-class normalized percentiles, release commands, raw timing samples,
 maximum RSS and warm reuse data remain there alongside the bitstream hashes.
+
+## Recycling at exactly 16 groups per worker
+
+At the old cutoff, a 256-pixel prefix-coded Modular frame with exactly
+16 groups per worker bypasses recycling. The 1447 glacier throughput
+stream has 128 groups. At eight workers it previously decoded all 128
+in one batch. It now uses four batches of 32. The equality case uses
+the existing smaller-batch eligibility check. Shared ANS trees, other
+group widths, noise and neighbor-dependent rendering keep their
+existing scheduling conditions.
+
+The same-stream builds start from decoder main
+`7f545adfe487ab5e433aed9617f5e6c9297110a9` with the same locked
+dependencies, Rust 1.99.1 and `all-simd,threads`. The tested candidate
+source is `3bd0cfb5767f41156faa57cedeba776f82f7b363a4`. The i270
+benchmark pins P cores and decodes to the same in-memory RGB8 or RGBA8
+output with CMS off. Baseline, candidate and A/A rotate across three
+blocks of five. Cold uses fresh processes. Warm uses one warmup per
+process. All 18 PNG16 readback pairs agree across decoders and 1/4/8
+workers.
+
+| Eight-worker 1447 throughput stream | Baseline MP/s | Candidate MP/s | Paired speedup | p95 latency ratio |
+|---|---:|---:|---:|---:|
+| Cold allocating | 361.49 | 511.98 | 1.439× | 0.494 |
+| Warm allocating | 499.95 | 649.30 | 1.306× | 0.840 |
+
+A separate phase trace uses one first decode per binary. Group decode
+falls from 15.29 to 8.16 ms and the final group phase from 4.28 to 0.05 ms.
+Named group phases total 24.26 ms before and 10.43 ms after. The timing
+table measures with phase diagnostics disabled. Builds, exact readbacks,
+timing and strict library Clippy took 193 s at 0.90 GiB peak RSS.
+
+The initial control tails include 1.110× cold p95 on the odd RGBA
+photo at four workers and 1.142× cold A/A p95 on VarDCT at eight.
+The eight-worker city throughput stream initially measures 0.962×
+warm with A/A at 0.894×. In the nine-block replays, these three
+candidate ratios are 1.000× p95, 1.004× p95 and 1.006× throughput,
+respectively. The odd RGBA warm eight-worker A/A p95 is 1.138× in
+the repeat, while the candidate p95 is 1.083×. After the repeats,
+all control medians are at least 0.982× and all candidate control
+p95 ratios are at most 1.084×.
+
+[Same-stream timings and control repeats](cold_modular_batch_boundary_2026-11-22.tsv).
+The six stream hashes, exact readbacks, phase logs, commands and
+raw samples are in
+`/mnt/v/output/zenjxl-decoder/cold-prefix-boundary-2026-11-22/current-main`.
