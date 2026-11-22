@@ -41,3 +41,31 @@ The build, tests and initial capture used 1.50 GiB peak RSS over
 317 seconds. Sampling and the latency repeat used 0.20 GiB over
 357 seconds. Full samples and commands are retained on i270 under
 `/mnt/v/output/zenjxl-decoder/small-bitset-trees-2026-11-22`.
+
+## Budgeted implementation on main
+
+The [landed decoder](https://github.com/imazen/zenjxl-decoder/commit/45ac2482179e097b0b587519f241ae343b84d667)
+charges the lookup tables and construction scratch to the decoder's
+memory tracker. The flat path handles an unavailable reservation. The
+scratch reservation drops when construction finishes. The table stays
+charged until the channel ends.
+
+The final implementation reproduces all 21 readbacks, including the
+odd RGBA8 and gray-alpha fixtures. The Modular and restrictive-limit
+checks pass, including the oracle's partial-reservation rollback.
+Strict release library Clippy passes. The scan measures 1.115×,
+1.115× and 1.125× at one, four and eight workers. The plot is 1.106×
+at one worker. Its eight-worker result varies across the two builds.
+
+The first 15-sample control has a 1.146× p95 ratio on textured VarDCT
+at eight workers. The 45-sample repeat gives 0.986× with A/A at
+0.995×. That repeat has a 1.108× p95 ratio on one-worker gray-alpha.
+The 105-sample alpha repeat gives 1.030× there with A/A at 1.046×.
+All p95 increases are within 10% in the final controls.
+
+[Final speed and parity run](small_modular_bitset_budgeted_2026-11-22.tsv),
+[45-sample controls](small_modular_bitset_controls_2026-11-22.tsv) and
+[105-sample alpha controls](small_modular_bitset_alpha_2026-11-22.tsv).
+The run-heavy peak RSS values are 1.52, 0.49 and 0.02 GiB respectively.
+Artifacts and commands are in
+`/mnt/v/output/zenjxl-decoder/small-bitset-budgeted-2026-11-22` on i270.
