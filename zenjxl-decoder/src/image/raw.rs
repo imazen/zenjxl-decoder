@@ -212,9 +212,13 @@ impl OwnedRawImage {
         if !parallel || data.len() < Self::PREFAULT_MIN_BYTES || rayon::current_num_threads() < 2 {
             return;
         }
-        data.par_chunks_mut(PAGE_SIZE).for_each(|chunk| {
-            chunk[0] = 0;
-        });
+        const PAGES_PER_CHUNK: usize = 64;
+        data.par_chunks_mut(PAGE_SIZE * PAGES_PER_CHUNK)
+            .for_each(|chunk| {
+                for page in chunk.iter_mut().step_by(PAGE_SIZE) {
+                    *page = 0;
+                }
+            });
     }
 
     /// Sets memory tracking on this image so that `tracked_bytes` are released
