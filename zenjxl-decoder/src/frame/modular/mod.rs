@@ -760,8 +760,8 @@ impl FullModularImage {
     /// `process_output(false)` (asserts dry_run set is empty).
     #[cfg(feature = "threads")]
     pub fn drain_dry_run_to_ready(&mut self) {
-        let dry = std::mem::take(&mut *self.ready_buffers_dry_run.lock().unwrap());
-        self.ready_buffers.extend(dry);
+        self.ready_buffers
+            .append(self.ready_buffers_dry_run.get_mut().unwrap());
     }
 
     #[instrument(

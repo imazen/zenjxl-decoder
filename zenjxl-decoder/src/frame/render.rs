@@ -800,6 +800,7 @@ impl Frame {
         let mut phase3a_prepare_dur = std::time::Duration::ZERO;
         let mut phase3b_dur = std::time::Duration::ZERO;
         let mut phase3c_dur = std::time::Duration::ZERO;
+        let mut tracked_groups = vec![false; lmp_ref!().num_groups()];
 
         for batch_start in (0..num_groups).step_by(decode_batch_size) {
             let batch_end = (batch_start + decode_batch_size).min(num_groups);
@@ -1239,6 +1240,7 @@ impl Frame {
                 }
 
                 groups_stored.push((gw.group, gw.do_render, true));
+                tracked_groups[gw.group] = true;
             }
 
             // Process modular transforms globally after marking ALL groups.
@@ -1258,7 +1260,8 @@ impl Frame {
                         }
                         modular_channels_output.push((group, chan));
                         // Track cross-group output from cascading transforms.
-                        if !groups_stored.iter().any(|(g, _, _)| *g == group) {
+                        if !tracked_groups[group] {
+                            tracked_groups[group] = true;
                             groups_stored.push((group, true, false));
                         }
                         Ok(())
@@ -1305,6 +1308,7 @@ impl Frame {
             // Build render_infos from store tracking + prepare results.
             let mut render_infos: Vec<GroupRenderInfo> = Vec::with_capacity(groups_stored.len());
             for &(group, do_render, is_main) in &groups_stored {
+                tracked_groups[group] = false;
                 let has_items = has_items_vec[group];
                 if is_main || has_items {
                     render_infos.push(GroupRenderInfo {
