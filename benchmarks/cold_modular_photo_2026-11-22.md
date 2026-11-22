@@ -488,3 +488,53 @@ the current scoped recycling policy.
 Build and validation use 1.99 GiB peak RSS over 242 s. Phase capture
 uses 0.11 GiB over 5 s. Exact commands, timings and hashes are under
 `modular-batch6-i270-2026-11-22` on i270.
+
+## CPU cycles and short RLE copies
+
+The decoder binary from `edc2abcc` has the same decoder and CLI source
+and lock as `19d6449d`. Sample user cycles on the pinned i270 P cores
+with `perf record --event cycles:u --count 1250000`. Each cell runs
+15 fresh processes with one allocating RGB8 decode and CMS off.
+The shares below are sampled self cycles across the process,
+including input loading. The libc columns include every caller.
+
+| Stream at 8 workers | Fused RLE Gradient | Plain fused prefix | memmove | memset | RCT | i32 to u8 |
+|---|---:|---:|---:|---:|---:|---:|
+| 1012 g128 | 50.39% | <0.10% | 9.29% | 3.54% | 6.79% | 6.40% |
+| 1237 g256 | 67.98% | <0.10% | 7.09% | 2.86% | 6.08% | 4.61% |
+| 1619 g256 | 65.34% | <0.10% | 7.99% | 3.25% | 6.51% | 4.09% |
+| 1606 stock | <0.10% | 67.58% | 3.89% | 2.32% | 5.35% | 4.41% |
+
+On the two g256 streams the contended mutex symbol accounts for
+0.14% and 0.24% of sampled self cycles. These samples give no
+measurement of off-CPU waiting.
+
+The [short-copy candidate](https://github.com/imazen/zenjxl-decoder/commit/d08794ec99874af74950a184bad6a4f785e46fb5)
+uses fixed-size copies for two, three and four samples when a fused
+RLE run has zero residual and predicts the top row. Other spans use
+the existing slice copy. The fused symbol is 144 bytes larger in the
+candidate executable and the non-fused symbol has the same size.
+The regular-reader differential unit test, strict library Clippy,
+48 same-file PNG16 pairs and 12 stock-to-profile pairs pass.
+
+The comparison uses the same four photo profiles, four controls,
+allocating RGB8/RGBA8 output, and three blocks of five with A/A at
+1, 4 and 8 workers. The eight-worker photo median is 0.992× cold
+(A/A 1.010×) and 0.996× warm (A/A 1.006×). The whole-system cold
+replay reaches 1.230× stock at one worker and 532.27 MP/s at eight.
+The photo class p95 ratio stays within 1.074×. The 1619 g256 cold
+eight-worker p95 is 1.176× with A/A at 1.005×. The candidate misses
+the throughput gate and is archived on
+`rejected/modular-short-rle-top-copy`.
+
+The completed profile wrapper uses 0.09 GiB peak RSS over 7 s.
+The earlier stack-symbolization attempt was stopped after the first
+recording, which is retained and used for the self-cycle report.
+The build, exact checks and replay take 361 s at 4.30 GiB peak RSS.
+Raw profiles, timings, hashes and commands are in
+`modular-cold-cycles-i270-2026-11-22` and
+`modular-short-rle-copy-i270-2026-11-22` on i270.
+
+[Cycle attribution](cold_modular_cycles_2026-11-22.tsv),
+[per-file timings and p95](cold_modular_short_rle_copy_2026-11-22.tsv),
+and [class comparisons](cold_modular_short_rle_copy_classes_2026-11-22.tsv).
