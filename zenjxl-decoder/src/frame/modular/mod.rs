@@ -46,6 +46,7 @@ use decode::decode_modular_subbitstream;
 pub use predict::Predictor;
 pub(crate) use transforms::apply::TransformLimits;
 use transforms::{TransformStepChunk, make_grids};
+pub use tree::GlobalTree;
 pub use tree::Tree;
 
 // Two rows on top, two pixels to the left, two pixels to the right.
@@ -471,7 +472,7 @@ impl FullModularImage {
         frame_header: &FrameHeader,
         image_metadata: &ImageMetadata,
         modular_color_channels: usize,
-        global_tree: &Option<Tree>,
+        global_tree: &Option<GlobalTree>,
         br: &mut BitReader,
         memory_tracker: &MemoryTracker,
         limits: transforms::apply::TransformLimits,
@@ -772,7 +773,7 @@ impl FullModularImage {
         &self,
         stream: ModularStreamId,
         frame_header: &FrameHeader,
-        global_tree: &Option<Tree>,
+        global_tree: &Option<GlobalTree>,
         br: &mut BitReader,
         memory_tracker: &MemoryTracker,
     ) -> Result<()> {
@@ -1237,7 +1238,7 @@ pub fn decode_vardct_lf(
     group: usize,
     frame_header: &FrameHeader,
     image_metadata: &ImageMetadata,
-    global_tree: &Option<Tree>,
+    global_tree: &Option<GlobalTree>,
     color_correlation_params: &ColorCorrelationParams,
     quant_params: &QuantizerParams,
     lf_quant: &LfQuantFactors,
@@ -1337,7 +1338,7 @@ pub fn decode_hf_metadata(
     group: usize,
     frame_header: &FrameHeader,
     image_metadata: &ImageMetadata,
-    global_tree: &Option<Tree>,
+    global_tree: &Option<GlobalTree>,
     hf_meta: &mut HfMetadata,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
@@ -1380,7 +1381,7 @@ pub(crate) fn decode_hf_metadata_into_rects(
     group: usize,
     frame_header: &FrameHeader,
     image_metadata: &ImageMetadata,
-    global_tree: &Option<Tree>,
+    global_tree: &Option<GlobalTree>,
     r: Rect,
     cr: Rect,
     mut ytox_map_rect: ImageRectMut<'_, i8>,

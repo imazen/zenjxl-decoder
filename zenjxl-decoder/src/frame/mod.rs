@@ -26,7 +26,7 @@ use crate::{
 use adaptive_lf_smoothing::adaptive_lf_smoothing;
 use block_context_map::BlockContextMap;
 use color_correlation_map::ColorCorrelationParams;
-use modular::{FullModularImage, Tree};
+use modular::{FullModularImage, GlobalTree};
 use quant_weights::DequantMatrices;
 use quantizer::{LfQuantFactors, QuantizerParams};
 
@@ -58,7 +58,7 @@ pub struct LfGlobalState {
     pub quant_params: Option<QuantizerParams>,
     block_context_map: Option<BlockContextMap>,
     color_correlation_params: Option<ColorCorrelationParams>,
-    tree: Option<Tree>,
+    tree: Option<GlobalTree>,
     modular_global: FullModularImage,
 }
 
