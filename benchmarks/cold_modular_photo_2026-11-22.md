@@ -448,3 +448,43 @@ The build, exact decode and timing wrapper uses 1.98 GiB peak RSS
 over 243 s. Phase capture uses 0.09 GiB over 4 s. Commands, binary
 and stream hashes, readbacks and raw samples are under
 `modular-batch3-i270-2026-11-22` on i270.
+
+## Six groups per worker under the scoped rule
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/d12de6c313467d1a12cc2b0275d8c62de947b86c)
+increases the four-group batch to six under the same 256-pixel
+recycling rule. It isolates batch width from the encoder's group size
+and entropy choices. The retained baseline `edc2abcc` matches the
+decoder source and dependency lock at the candidate parent
+`1fc1f412`. The i270 runs use the same eight files, P cores,
+allocating RGB8 or RGBA8 and three interleaved blocks of five
+with A/A. Strict Clippy, 48 same-file readbacks and 12
+stock-to-profile readbacks pass.
+
+| Relevant photo | Cold four-worker speedup | Warm four-worker speedup | Cold eight-worker speedup | Warm eight-worker speedup |
+|---|---:|---:|---:|---:|
+| 1237 g256 | 0.995× | 1.008× | 0.968× | 0.976× |
+| 1619 g256 | 0.988× | 1.000× | 0.937× | 0.946× |
+
+The phase capture uses 15 first decodes per file and arm. At four
+workers, the number of batches falls from 12 to eight and render
+time decreases from 4.44 to 4.02 ms on 1237 and 4.37 to 3.97 ms
+on 1619. Total time changes from 35.25 to 35.44 ms and 31.60 to
+31.32 ms. At eight workers, six batches fall to four while the
+group decode, store and render medians all increase on both photos.
+The independent whole-system replay measures 1.237× stock at one
+worker and 494.60 MP/s at eight, below the cold targets.
+
+Photo class p95 ratios stay within 1.091×. The 1619 cold
+eight-worker p95 reaches 1.127× with A/A at 1.012×. Candidate
+control class p95 ratios stay within 1.033×. The experiment is
+archived on `rejected/scoped-modular-batch-six`. The matched
+two-photo evidence favors four groups over three or six for
+the current scoped recycling policy.
+
+[Per-file timing](cold_modular_batch_six_2026-11-22.tsv),
+[class p95](cold_modular_batch_six_classes_2026-11-22.tsv), and
+[phase summaries](cold_modular_batch_six_phases_2026-11-22.tsv).
+Build and validation use 1.99 GiB peak RSS over 242 s. Phase capture
+uses 0.11 GiB over 5 s. Exact commands, timings and hashes are under
+`modular-batch6-i270-2026-11-22` on i270.
