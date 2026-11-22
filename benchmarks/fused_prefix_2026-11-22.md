@@ -190,3 +190,72 @@ allocating RGB8 endpoint as the other ablations. The build and
 run took 92 seconds with 0.91 GiB peak RSS. Full timing, commands,
 binary and stream identities and readbacks are under
 `/mnt/v/output/zenjxl-decoder/fused-prefix-refill-2026-11-22`.
+
+## Gradient arithmetic and prefix-table entry size
+
+Two experiments start at `7413bf0782e24a80c6e8131e0a4f1814c813d43f`.
+
+- [Wrapping i32 Gradient](https://github.com/imazen/zenjxl-decoder/commit/6cfe2fbb14086cb4acb699313e238bbee85dae74)
+  clamps the top-left sample before the wrapping sum. It passes the
+  wide-arithmetic boundary oracle and 33 readback comparisons. It
+  slows both native per-channel photos by 1.7–2.5% at one worker
+  and the terminal and plot by 6.2–6.7%.
+  [Paired results](fused_prefix_gradient_i32_2026-11-22.tsv).
+- [32-bit entries](https://github.com/imazen/zenjxl-decoder/commit/555c36eb00e32124cfd598a6f7c205b7a829547d)
+  pack two signed 12-bit residuals while retaining the 12-bit input
+  window. Larger residuals use the regular prefix cursor. All 36
+  readbacks, including the wide-channel control, match. The native
+  per-channel photos improve by 0.2–1.0% at one worker and show mixed
+  eight-worker results.
+  [Paired results](fused_prefix_packed32_2026-11-22.tsv).
+
+Each uses three blocks of five warm allocating RGB8 decodes with A/A on
+i270 at one, four and eight workers. Peak RSS was 1.49 and 1.50 GiB,
+respectively, for each build, tests and measurements. Raw files are in
+`gradient-i32-2026-11-22` and `packed-prefix-2026-11-22` under the
+decoder's output directory.
+
+## RLE spans and fused RLE tokens
+
+The [row-span experiment](https://github.com/imazen/zenjxl-decoder/commit/92f3c617dd49e95b05d2d1d186d2dfbb7d2c9ee2)
+changes the RLE path only, against the same fused-prefix comparator.
+The two native profile photos reach 120.16 / 514.22 MP/s at one and
+eight workers. All 33 worker-count and decoder comparisons are exact.
+The span change qualifies separately on [decoder main](rle_gradient_spans_2026-11-22.md).
+[Span ablation](fused_prefix_rle_spans_2026-11-22.tsv).
+
+The [fused token experiment](https://github.com/imazen/zenjxl-decoder/commit/085d9d122dd78540920d7b87503a6eeddf532c48)
+adds a short lookup for literals and run lengths on top of spans.
+It initializes at most one tracked table per eligible cluster. Relative
+to the span build, it improves the textured and smooth native photos
+by 4.5% and 5.7% at one worker. Their eight-worker changes are +4.3%
+and −5.0% respectively, with A/A block spread up to 8.6%. All 33
+readbacks are exact. The [whole-system study](lossless_rle_throughput_2026-11-22.md)
+measures the encoder profile and fused decoder together.
+[Token ablation](fused_prefix_rle_tokens_2026-11-22.tsv).
+
+These two sets use the same block and worker protocol. Peak RSS was
+1.49 and 1.50 GiB for their builds and runs. Full timings and commands
+are in `rle-spans-2026-11-22` and `fused-rle-tokens-2026-11-22` under
+the decoder's output directory.
+
+## Modular recycling batch size
+
+The prior fused-token comparator recycles after eight groups per worker.
+The [16-group experiment](https://github.com/imazen/zenjxl-decoder/commit/01f35c77411422dbc8da0da2f6343f40dd07a15d)
+reaches 488.49 / 595.87 MP/s on the textured and smooth native photos
+at eight workers. The [32-group experiment](https://github.com/imazen/zenjxl-decoder/commit/6d066a4ae42c1e8094511f943719515081311478)
+reaches 476.92 / 580.03 MP/s. Each reproduces all 33 readbacks. Several
+eight-worker A/A controls drift, especially on small graphics.
+
+Peak process RSS for the textured and smooth photos rises from
+127420 / 114528 KiB to 140956 / 127924 KiB with 16 groups. The 32-group
+run measures 168204 / 153620 KiB against its same-run baseline
+127556 / 113828 KiB. GNU time records these RSS values on separate
+same-stream runs. The larger batches remain experimental.
+
+[16-group timings](fused_prefix_batch16_2026-11-22.tsv) and
+[32-group timings](fused_prefix_batch32_2026-11-22.tsv). The build and
+benchmark peak RSS values are 0.90 and 0.91 GiB. Raw timings, commands
+and RSS checks are under `rle-sched-16-2026-11-22` and
+`rle-sched-32-2026-11-22` on i270.
