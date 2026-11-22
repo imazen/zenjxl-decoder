@@ -763,3 +763,46 @@ Counter capture takes 8 s at 0.09 GiB peak RSS.
 and [hardware counters](cold_modular_rle_complete_token_instructions_2026-11-22.tsv).
 Raw commands, sample timings and binary and stream hashes are under
 `/mnt/v/output/zenjxl-decoder/modular-rle-complete-token-i270-2026-11-22` on i270.
+
+### Modular render handoff bookkeeping
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/d8f9717cd8a2f9570094f3ef1b200c7b08de9322)
+drains the dry-run ready set into the final ready set with
+`BTreeSet::append`, which reuses the tree when the destination is empty.
+It also tracks groups already queued for rendering by group index, while
+keeping their emission order. This replaces the per-channel linear scan.
+The two changes are tested together.
+
+The baseline uses the landed refill code at `e14ae58d`. The same four
+native profiles and five controls use allocating RGB8/RGBA8 and
+1/4/8 pinned i270 workers. Each endpoint uses three interleaved
+blocks of five with A/A. All 66 PNG16 comparisons are exact.
+Ninety-six selected Modular, progressive and worker-parity tests
+and strict library Clippy pass, with one existing ignore.
+
+| i270 photo comparison | Paired median speedup, 1 / 4 / 8 workers | Candidate MP/s at 8 workers |
+|---|---:|---:|
+| Same file, cold | 1.001× / 1.008× / 1.002× | 550.45 |
+| Same file, warm | 1.001× / 1.005× / 1.012× | 633.32 |
+| Cold profile vs stock, candidate decoder | 1.314× / 1.381× / 1.282× | 553.03 |
+
+Eight-worker same-file A/A is 0.997× cold and 0.998× warm.
+The control class p95 stays within 1.019× across the replay.
+Individual p95 outliers and corresponding A/A values are retained
+in the per-file results. The experimental system's cold median
+clears 550 MP/s in this run. The same-file improvement is below
+the 5% decoder gate, so production keeps the existing handoff.
+Source is archived on `rejected/modular-render-handoff`.
+
+The separate eight-worker phase capture uses 15 fresh-process
+pairs per photo. P3a-store drops by paired medians of 1.8–5.0%.
+Its per-photo absolute median falls by 0.03–0.05 ms. The sequential
+one-worker replay follows the decoder's sequential path, which
+does not have a P3a-store phase. The build, tests, exact readbacks,
+timing and phase capture take 373 s at 4.30 GiB peak RSS.
+
+[Per-file timings](cold_modular_render_handoff_2026-11-22.tsv),
+[panel medians and p95](cold_modular_render_handoff_classes_2026-11-22.tsv),
+and [phase medians](cold_modular_render_handoff_phases_2026-11-22.tsv).
+Raw logs, timings and pinned commands are in
+`/mnt/v/output/zenjxl-decoder/modular-render-handoff-i270-2026-11-22` on i270.
