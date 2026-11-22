@@ -92,3 +92,29 @@ The separate profiler used 0.10 GiB over nine seconds.
 [Isolated samples summary](fused_channel_prefix_2026-11-22.tsv).
 Raw timings, both binaries, stream hashes and perf samples are in
 `/mnt/v/output/zenjxl-decoder/fused-channel-contexts-2026-11-22` on i270.
+
+### Building two-symbol entries from the first-residual table
+
+The [table-construction experiment](https://github.com/imazen/zenjxl-decoder/commit/7413bf0782e24a80c6e8131e0a4f1814c813d43f)
+decodes the first residual for each window once. It builds each pair by
+indexing the first-residual entry for the remaining bits and checking
+that its length fits. Both builds use the same multi-context decoder
+and the same six streams.
+
+| Stream | Paired throughput at 1 / 4 / 8 workers | p95 latency at 1 / 4 / 8 workers |
+|---|---:|---:|
+| Textured 1007, native | 1.088× / 1.063× / 1.065× | 0.917× / 0.940× / 0.934× |
+| Textured 1007, 1024 px | 1.131× / 1.100× / 1.041× | 0.877× / 0.909× / 1.175× |
+| Smooth 1019, native | 1.017× / 1.027× / 0.992× | 0.980× / 0.953× / 1.015× |
+
+The native photo medians are 104.86 and 433.11 MP/s at one and eight
+workers. The shared-prefix control has a four-worker paired ratio of
+0.977×. The textured crop's eight-worker p95 is 1.175× and its A/A
+p95 is 1.220×. The experiment remains short of the native throughput
+and control gates.
+
+All 18 decoder and worker-count comparisons match exactly. The build
+and timing run used 0.90 GiB peak RSS over 157 seconds. A separate
+single-worker profile used 0.10 GiB over eight seconds and retained
+raw CPU samples from both builds on both textured files.
+[Paired per-stream results](fused_channel_pair_build_2026-11-22.tsv).
