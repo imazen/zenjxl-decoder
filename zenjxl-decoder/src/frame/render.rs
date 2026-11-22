@@ -352,7 +352,41 @@ impl Frame {
                     };
                     modular_global.process_output(&self.header, true, &mut pass_to_pipeline)?;
                 }
-                for (group, passes) in chunk.iter_mut() {
+                let mut paired = false;
+                if let [(a_group, a_passes), (b_group, b_passes)] = chunk.as_mut_slice()
+                    && self.header.passes.num_passes == 1
+                    && a_group != b_group
+                    && a_passes.len() == 1
+                    && b_passes.len() == 1
+                    && a_passes[0].0 == b_passes[0].0
+                {
+                    for (group, passes) in
+                        [(*a_group, &mut a_passes[..]), (*b_group, &mut b_passes[..])]
+                    {
+                        self.decoder_state.check_cancelled()?;
+                        if self.decode_hf_group_with_modular(
+                            group,
+                            passes,
+                            &mut buffer_splitter,
+                            do_flush,
+                            false,
+                        )? {
+                            self.changed_since_last_flush
+                                .insert((group, RenderUnit::VarDCT));
+                        }
+                    }
+                    let lf_global = self.lf_global.as_ref().unwrap();
+                    lf_global.modular_global.read_hf_pair(
+                        a_passes[0].0,
+                        (*a_group, &mut a_passes[0].1),
+                        (*b_group, &mut b_passes[0].1),
+                        &self.header,
+                        &lf_global.tree,
+                        &self.decoder_state.memory_tracker,
+                    )?;
+                    paired = true;
+                }
+                for (group, passes) in chunk.iter_mut().filter(|_| !paired) {
                     // Check for cancellation between groups
                     self.decoder_state.check_cancelled()?;
                     if self.decode_hf_group(*group, passes, &mut buffer_splitter, do_flush)? {
@@ -1007,6 +1041,11 @@ impl Frame {
                     });
                 }
                 let workers = num_threads.min(order.len());
+                let pair_groups = !is_vardct
+                    && !header.has_noise()
+                    && !do_flush
+                    && header.passes.num_passes == 1
+                    && order.len() >= num_threads * 4;
                 let queue = std::sync::Mutex::new(order.into_iter());
                 // Groups whose render reads their neighbours are rendered as
                 // soon as the neighbours are decoded, ahead of further decodes.
@@ -1031,7 +1070,25 @@ impl Frame {
                                     continue;
                                 }
                             }
-                            let next = queue.lock().unwrap().next();
+                            let (next, partner) = {
+                                let mut queue = queue.lock().unwrap();
+                                let next = queue.next();
+                                let partner = if pair_groups
+                                    && next.as_ref().zip(queue.as_slice().first()).is_some_and(
+                                        |(first, second)| {
+                                            first.group != second.group
+                                                && matches!(
+                                                    (&first.passes[..], &second.passes[..]),
+                                                    ([(a, _)], [(b, _)]) if a == b
+                                                )
+                                        },
+                                    ) {
+                                    queue.next()
+                                } else {
+                                    None
+                                };
+                                (next, partner)
+                            };
                             let Some(gw) = next else {
                                 match deferred {
                                     // Renders still to be unlocked by groups other
@@ -1043,7 +1100,22 @@ impl Frame {
                                     _ => return Ok(()),
                                 }
                             };
-                            if let Err(e) = decode_group(gw) {
+                            let decoded = if let Some(other) = partner {
+                                (|| -> Result<()> {
+                                    stop.check().map_err(Error::from)?;
+                                    lf_global.modular_global.read_hf_pair(
+                                        gw.passes[0].0,
+                                        (gw.group, &mut gw.passes[0].1),
+                                        (other.group, &mut other.passes[0].1),
+                                        header,
+                                        &lf_global.tree,
+                                        tracker,
+                                    )
+                                })()
+                            } else {
+                                decode_group(gw)
+                            };
+                            if let Err(e) = decoded {
                                 // Leave nothing for the other workers.
                                 queue.lock().unwrap().by_ref().for_each(drop);
                                 if let Some(d) = deferred {

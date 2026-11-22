@@ -3,7 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use super::channel::decode_modular_channel;
+use super::channel::{ChannelStream, decode_modular_channel, try_decode_channel_pair};
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::SymbolReader,
@@ -28,11 +28,54 @@ pub fn decode_modular_subbitstream(
     memory_tracker: &MemoryTracker,
     limits: TransformLimits,
 ) -> Result<()> {
-    // Skip decoding if all grids are zero-sized.
-    let is_empty = buffers
+    with_modular_subbitstream(
+        buffers,
+        header,
+        global_tree,
+        br,
+        memory_tracker,
+        limits,
+        |buffers, header, tree, reader, br| {
+            for i in 0..buffers.len() {
+                if channel_nonempty(buffers, i) {
+                    decode_modular_channel(buffers, i, stream_id, header, tree, reader, br)?;
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn channel_nonempty(buffers: &[&mut ModularChannel], index: usize) -> bool {
+    buffers.get(index).is_some_and(|buffer| {
+        let (width, height) = buffer.data.size();
+        width != 0 && height != 0
+    })
+}
+
+fn subbitstream_empty(buffers: &[&mut ModularChannel]) -> bool {
+    buffers
         .iter()
-        .all(|buffer| matches!(buffer.data.size(), (0, _) | (_, 0)));
-    if is_empty {
+        .all(|buffer| matches!(buffer.data.size(), (0, _) | (_, 0)))
+}
+
+fn with_modular_subbitstream<'data>(
+    buffers: Vec<&mut ModularChannel>,
+    header: Option<GroupHeader>,
+    global_tree: &Option<Tree>,
+    br: &mut BitReader<'data>,
+    memory_tracker: &MemoryTracker,
+    limits: TransformLimits,
+    decode: impl FnOnce(
+        &mut [&mut ModularChannel],
+        &GroupHeader,
+        &Tree,
+        &mut SymbolReader,
+        &mut BitReader<'data>,
+    ) -> Result<()>,
+) -> Result<()> {
+    // Skip decoding if all grids are zero-sized.
+    if subbitstream_empty(&buffers) {
         return Ok(());
     }
     let mut transform_steps = vec![];
@@ -91,15 +134,7 @@ pub fn decode_modular_subbitstream(
         .unwrap_or(0);
     let mut reader = SymbolReader::new(&tree.histograms, br, Some(image_width))?;
 
-    for i in 0..buffers.len() {
-        // Keep channel numbering stable, but skip actually decoding empty channels.
-        // This matches libjxl, which continues the loop without renumbering.
-        let (w, h) = buffers[i].data.size();
-        if w == 0 || h == 0 {
-            continue;
-        }
-        decode_modular_channel(&mut buffers, i, stream_id, &header, tree, &mut reader, br)?;
-    }
+    decode(&mut buffers, &header, tree, &mut reader, br)?;
 
     reader.check_final_state(&tree.histograms, br)?;
 
@@ -110,4 +145,98 @@ pub fn decode_modular_subbitstream(
     }
 
     Ok(())
+}
+
+pub(crate) struct GroupInput<'a, 'data> {
+    pub buffers: Vec<&'a mut ModularChannel>,
+    pub id: usize,
+    pub bits: &'a mut BitReader<'data>,
+}
+
+pub(crate) fn decode_modular_subbitstream_pair(
+    a: GroupInput<'_, '_>,
+    b: GroupInput<'_, '_>,
+    global_tree: &Option<Tree>,
+    memory_tracker: &MemoryTracker,
+    limits: TransformLimits,
+) -> Result<()> {
+    if subbitstream_empty(&a.buffers) || subbitstream_empty(&b.buffers) {
+        decode_modular_subbitstream(
+            a.buffers,
+            a.id,
+            None,
+            global_tree,
+            a.bits,
+            memory_tracker,
+            limits,
+        )?;
+        return decode_modular_subbitstream(
+            b.buffers,
+            b.id,
+            None,
+            global_tree,
+            b.bits,
+            memory_tracker,
+            limits,
+        );
+    }
+    with_modular_subbitstream(
+        a.buffers,
+        None,
+        global_tree,
+        a.bits,
+        memory_tracker,
+        limits,
+        |bufs_a, header_a, tree_a, reader_a, bits_a| {
+            with_modular_subbitstream(
+                b.buffers,
+                None,
+                global_tree,
+                b.bits,
+                memory_tracker,
+                limits,
+                |bufs_b, header_b, tree_b, reader_b, bits_b| {
+                    for index in 0..bufs_a.len().max(bufs_b.len()) {
+                        let has_a = channel_nonempty(bufs_a, index);
+                        let has_b = channel_nonempty(bufs_b, index);
+                        if has_a
+                            && has_b
+                            && try_decode_channel_pair(
+                                index,
+                                bufs_a[index],
+                                ChannelStream {
+                                    id: a.id,
+                                    header: header_a,
+                                    tree: tree_a,
+                                    reader: reader_a,
+                                    bits: bits_a,
+                                },
+                                bufs_b[index],
+                                ChannelStream {
+                                    id: b.id,
+                                    header: header_b,
+                                    tree: tree_b,
+                                    reader: reader_b,
+                                    bits: bits_b,
+                                },
+                            )?
+                        {
+                            continue;
+                        }
+                        if has_a {
+                            decode_modular_channel(
+                                bufs_a, index, a.id, header_a, tree_a, reader_a, bits_a,
+                            )?;
+                        }
+                        if has_b {
+                            decode_modular_channel(
+                                bufs_b, index, b.id, header_b, tree_b, reader_b, bits_b,
+                            )?;
+                        }
+                    }
+                    Ok(())
+                },
+            )
+        },
+    )
 }

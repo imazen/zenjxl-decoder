@@ -10,4 +10,5 @@ mod rle_gradient;
 mod specialized_trees;
 
 pub use bitstream::decode_modular_subbitstream;
+pub(crate) use bitstream::{GroupInput, decode_modular_subbitstream_pair};
 pub use common::ModularStreamId;

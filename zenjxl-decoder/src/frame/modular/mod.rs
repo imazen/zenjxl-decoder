@@ -815,6 +815,44 @@ impl FullModularImage {
         Ok(())
     }
 
+    pub(crate) fn read_hf_pair(
+        &self,
+        pass: usize,
+        a: (usize, &mut BitReader<'_>),
+        b: (usize, &mut BitReader<'_>),
+        frame: &FrameHeader,
+        global_tree: &Option<Tree>,
+        tracker: &MemoryTracker,
+    ) -> Result<()> {
+        if self.buffer_info.is_empty() {
+            return Ok(());
+        }
+        let (a_group, a_bits) = a;
+        let (b_group, b_bits) = b;
+        debug_assert_ne!(a_group, b_group);
+        let indices = &self.section_buffer_indices[2 + pass];
+        let stream_id = |group| ModularStreamId::ModularHF { group, pass }.get_id(frame);
+        with_buffers(&self.buffer_info, indices, a_group, |a_buffers| {
+            with_buffers(&self.buffer_info, indices, b_group, |b_buffers| {
+                decode::decode_modular_subbitstream_pair(
+                    decode::GroupInput {
+                        buffers: a_buffers,
+                        id: stream_id(a_group),
+                        bits: a_bits,
+                    },
+                    decode::GroupInput {
+                        buffers: b_buffers,
+                        id: stream_id(b_group),
+                        bits: b_bits,
+                    },
+                    global_tree,
+                    tracker,
+                    self.limits,
+                )
+            })
+        })
+    }
+
     fn maybe_output(
         &self,
         buf: usize,

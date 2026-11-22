@@ -1354,6 +1354,17 @@ impl Frame {
         buffer_splitter: &mut BufferSplitter,
         force_render: bool,
     ) -> Result<bool> {
+        self.decode_hf_group_with_modular(group, passes, buffer_splitter, force_render, true)
+    }
+
+    pub(super) fn decode_hf_group_with_modular(
+        &mut self,
+        group: usize,
+        passes: &mut [(usize, BitReader)],
+        buffer_splitter: &mut BufferSplitter,
+        force_render: bool,
+        read_modular: bool,
+    ) -> Result<bool> {
         let stop: &dyn enough::Stop = &*self.decoder_state.stop;
         stop.check().map_err(Error::from)?;
         if passes.is_empty() {
@@ -1468,7 +1479,7 @@ impl Frame {
             }
         }
 
-        {
+        if read_modular {
             let lf_global = self.lf_global.as_ref().unwrap();
             for (pass, br) in passes.iter_mut() {
                 lf_global.modular_global.read_stream(

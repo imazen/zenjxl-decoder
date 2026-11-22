@@ -249,6 +249,177 @@ fn decode_fused_prefix<'r, 'b, 'a>(
     source.source
 }
 
+struct FusedRow<'a> {
+    row: &'a mut [i32],
+    top: &'a [i32],
+    x: usize,
+    left: i32,
+    top_left: i32,
+}
+
+impl<'a> FusedRow<'a> {
+    fn new(channel: &'a mut ModularChannel, y: usize) -> Self {
+        let width = channel.data.size().0;
+        let [row, top] = channel.data.distinct_full_rows_mut([y + 2, y + 1]);
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + width];
+        let top = &top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + width];
+        let initial = if y == 0 { 0 } else { top[0] };
+        Self {
+            row,
+            top,
+            x: 0,
+            left: initial,
+            top_left: initial,
+        }
+    }
+
+    #[inline(always)]
+    fn push<const FIRST: bool>(&mut self, residual: i32) {
+        if FIRST {
+            self.left = self.left.wrapping_add(residual);
+        } else {
+            let above = self.top[self.x];
+            let guess = clamped_gradient(self.left.into(), above.into(), self.top_left.into());
+            self.left = residual.wrapping_add(guess as i32);
+            self.top_left = above;
+        }
+        self.row[self.x] = self.left;
+        self.x += 1;
+    }
+
+    #[inline(always)]
+    fn step<const FIRST: bool>(&mut self, source: &mut FusedPrefixSource, histograms: &Histograms) {
+        let residuals = source.read(histograms, self.x + 1 < self.row.len());
+        self.push::<FIRST>(residuals.first);
+        if let Some(second) = residuals.second {
+            self.push::<FIRST>(second);
+        }
+    }
+}
+
+#[inline(always)]
+fn interleave_rows<const FIRST: bool>(
+    mut a: FusedRow<'_>,
+    source_a: &mut FusedPrefixSource,
+    hist_a: &Histograms,
+    mut b: FusedRow<'_>,
+    source_b: &mut FusedPrefixSource,
+    hist_b: &Histograms,
+) {
+    while a.x < a.row.len() && b.x < b.row.len() {
+        a.step::<FIRST>(source_a, hist_a);
+        b.step::<FIRST>(source_b, hist_b);
+    }
+    while a.x < a.row.len() {
+        a.step::<FIRST>(source_a, hist_a);
+    }
+    while b.x < b.row.len() {
+        b.step::<FIRST>(source_b, hist_b);
+    }
+}
+
+// Own both cursors here so the hot loop can keep them in registers.
+#[inline(never)]
+fn decode_fused_prefix_pair(
+    a: &mut ModularChannel,
+    mut source_a: FusedPrefixSource,
+    hist_a: &Histograms,
+    b: &mut ModularChannel,
+    mut source_b: FusedPrefixSource,
+    hist_b: &Histograms,
+) -> Result<()> {
+    interleave_rows::<true>(
+        FusedRow::new(a, 0),
+        &mut source_a,
+        hist_a,
+        FusedRow::new(b, 0),
+        &mut source_b,
+        hist_b,
+    );
+    for y in 1..a.data.size().1 {
+        interleave_rows::<false>(
+            FusedRow::new(a, y),
+            &mut source_a,
+            hist_a,
+            FusedRow::new(b, y),
+            &mut source_b,
+            hist_b,
+        );
+    }
+    let a = source_a.source;
+    let b = source_b.source;
+    a.reader.finish_plain_cursor(a.cursor, a.br);
+    b.reader.finish_plain_cursor(b.cursor, b.br);
+    a.br.check_for_error().map_err(|e| at!(e))?;
+    b.br.check_for_error().map_err(|e| at!(e))
+}
+
+pub(super) struct ChannelStream<'r, 'data> {
+    pub id: usize,
+    pub header: &'r GroupHeader,
+    pub tree: &'r Tree,
+    pub reader: &'r mut SymbolReader,
+    pub bits: &'r mut BitReader<'data>,
+}
+
+impl<'r, 'data> ChannelStream<'r, 'data> {
+    fn fused(
+        self,
+        chan: usize,
+        size: (usize, usize),
+    ) -> Result<Option<FusedPrefixSource<'r, 'r, 'data>>> {
+        if size.0 <= IMAGE_PADDING.0 || size.0 * size.1 < 4096 || self.tree.histograms.uses_lz77() {
+            return Ok(None);
+        }
+        let TreeSpecialCase::SingleGradientOnly(t) =
+            specialize_tree(self.tree, chan, self.id, size.0, self.header)?
+        else {
+            return Ok(None);
+        };
+        let cluster = t.clustered_ctx();
+        let Some(lut) = self.tree.fused_prefix(cluster) else {
+            return Ok(None);
+        };
+        let Some(cursor) = self.reader.plain_cursor(self.bits) else {
+            return Ok(None);
+        };
+        Ok(Some(FusedPrefixSource {
+            source: CursorSource {
+                cursor,
+                reader: self.reader,
+                br: self.bits,
+            },
+            lut,
+            cluster,
+        }))
+    }
+}
+
+pub(super) fn try_decode_channel_pair(
+    chan: usize,
+    a: &mut ModularChannel,
+    stream_a: ChannelStream<'_, '_>,
+    b: &mut ModularChannel,
+    stream_b: ChannelStream<'_, '_>,
+) -> Result<bool> {
+    let size_a = a.data.size();
+    let size_b = b.data.size();
+    if size_a.1 != size_b.1 {
+        return Ok(false);
+    }
+    let hist_a = &stream_a.tree.histograms;
+    let hist_b = &stream_b.tree.histograms;
+    let (Some(source_a), Some(source_b)) =
+        (stream_a.fused(chan, size_a)?, stream_b.fused(chan, size_b)?)
+    else {
+        return Ok(false);
+    };
+    debug_assert_eq!(a.data.offset(), IMAGE_OFFSET);
+    debug_assert_eq!(b.data.offset(), IMAGE_OFFSET);
+    decode_fused_prefix_pair(a, source_a, hist_a, b, source_b, hist_b)?;
+    Ok(true)
+}
+
 pub(super) trait ModularChannelDecoder {
     const NEEDS_TOP: bool;
     const NEEDS_TOPTOP: bool;
