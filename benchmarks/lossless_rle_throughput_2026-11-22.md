@@ -62,3 +62,54 @@ p95 increase in this repeat is 9.2%, on the four-worker smooth photo.
 the same interleaving, warmup and endpoints as the original system
 comparison and peaks at 0.12 GiB RSS over 95 seconds.
 [Same-stream batch results and standalone RSS](fused_prefix_2026-11-22.md#modular-recycling-batch-size).
+
+## Companion replay on current main
+
+The shared/local encoder policy tries frame-wide plain Gradient prefix
+tables, then frame-wide RLE tables. It accepts a shared form within
+both the stock rate and 5% of the actual local-table size. The same
+eight files decode faster with the experimental decoder on current
+main in the claimed warm whole-system comparison. All eight are
+smaller than the stock 128-pixel fast-decode streams.
+[Encoder policy and i270 evidence](https://github.com/imazen/jxl-encoder/blob/3987ff45a47b5b28c5f5016ba78ec24af6053872/benchmarks/faster_decode_imazen26_lossless_2026-11-22.md#shared-and-local-prefix-selection).
+
+The [companion experiment](https://github.com/imazen/zenjxl-decoder/commit/68bd721c5467f671e88142d4cd9a01fe58457793)
+combines per-channel fused prefix reads, the row-bounded RLE kernel on
+main, fused RLE tokens and 16 recycled groups per worker. The baseline
+binary uses main's row-bounded RLE code. Rust 1.99.1, AVX2, and the
+allocating RGB8 endpoint with CMS off are fixed. All timings use one
+warmup per process and three interleaved blocks of five measured
+decodes at each worker count.
+
+| Comparison | 1 worker | 4 workers | 8 workers |
+|---|---:|---:|---:|
+| Same eight profile streams | 1.116× | 1.151× | 1.043× |
+| Ten ordinary stream controls | 1.010× | 1.006× | 1.019× |
+| Whole-system photo throughput | 129.54 MP/s | 399.62 MP/s | 569.35 MP/s |
+| Whole-system photo speedup | 1.440× | 1.375× | 1.299× |
+| Whole-system graphics and scan speedup | 3.025× | 2.402× | 1.752× |
+
+The warm photo medians clear the absolute throughput targets on
+this cohort, including the two native originals alone at 132.32 /
+563.88 MP/s. The eight-worker median improvement on the same eight
+files falls short of the 5% decoder-only gate. This bundle remains an
+experiment. All 78 paired readbacks at three worker counts agree exactly
+in both RGB8/RGBA8 and PNG16. Controls include the ordinary Modular
+encoder, VarDCT, stock fast-decode files, odd alpha and RGB16 HDR.
+Scoped formatting, strict Clippy and all 23 focused Modular tests
+pass. Peak RSS from `run-heavy` was 1.51 GiB for the 115-second build and
+tests, 0.23 GiB for the 259-second timing run and 0.20 GiB for the
+9-second RGB8/RGBA8 output check.
+
+The targeted nine-block repeats cover 14 cells with p95 outliers or a
+control median below 0.98×. In the repeat, every ordinary-control p95
+and A/A p95 is within the 10% band. The former 0.979× median on the
+eight-worker native VarDCT comparison repeats at 1.011×. The
+eight-worker smooth photo crop still has an A/A p95 ratio of 1.102×
+on the same-file comparison, with a candidate/stock ratio of 0.994×.
+The repeat used 0.20 GiB peak RSS over 36 seconds.
+
+[Per-cell throughput and p95](lossless_rle_current_companion_2026-11-22.tsv)
+and [targeted p95 repeats](lossless_rle_current_companion_tail_2026-11-22.tsv).
+The full evidence is in `/mnt/v/output/zenjxl-decoder/shared-prefix-companion-2026-11-22`
+on i270.

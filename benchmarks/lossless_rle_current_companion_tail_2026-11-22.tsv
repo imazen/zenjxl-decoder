@@ -1,0 +1,15 @@
+mode	stream	workers	paired_speedup	p95_ratio	aa_p95_ratio
+controls	1007-64-tier0	1	1.002155	0.939680	0.989333
+controls	RGBA	1	1.126664	0.891937	1.088199
+controls	RGBA	4	1.119300	0.849894	0.795592
+controls	LA	4	1.107733	0.880013	0.962682
+controls	1007-64-tier0	8	0.987766	1.062736	0.942455
+controls	1019-native-base-d4	8	1.011366	1.007831	1.010304
+same-profile-files	7026-native	4	0.973568	1.002749	0.981170
+same-profile-files	1019-1024	8	1.058727	0.994480	1.101805
+same-profile-files	8457-native	8	1.084909	0.740430	0.789370
+stock-and-profile	1019-native-fast-g128	4	1.527689	0.648048	1.021349
+stock-and-profile	1019-1024-fast-g128	4	1.347227	0.752933	0.999118
+stock-and-profile	1019-1024-fast-g128	8	1.370126	0.679487	0.840319
+stock-and-profile	7026-native-fast-g128	8	1.902982	0.659668	1.023228
+stock-and-profile	8106-native-fast-g128	8	1.845509	0.734576	1.076193
