@@ -1047,15 +1047,10 @@ impl Frame {
                             }
                             let next = queue.lock().unwrap().next();
                             let Some(gw) = next else {
-                                match deferred {
-                                    // Renders still to be unlocked by groups other
-                                    // workers are decoding.
-                                    Some(d) if !d.all_rendered() => {
-                                        std::thread::yield_now();
-                                        continue;
-                                    }
-                                    _ => return Ok(()),
-                                }
+                                // In-flight decoders publish their input before
+                                // rechecking the ready queue. They can drain any
+                                // renders that are unlocked after this worker exits.
+                                return Ok(());
                             };
                             if let Err(e) = decode_group(gw) {
                                 // Leave nothing for the other workers.
@@ -1067,6 +1062,7 @@ impl Frame {
                             }
                         }
                     })?;
+                debug_assert!(deferred.is_none_or(InlineRender::all_rendered));
             }
             phase2_dur += phase2_start.elapsed();
             for gw in &work[batch_start..batch_end] {
