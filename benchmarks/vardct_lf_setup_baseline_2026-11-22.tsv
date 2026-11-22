@@ -1,0 +1,15 @@
+stream	workers	lf_groups_ms	lf_parallel_ms	hf_parse_ms	lf_hf_join_ms	copyback_ms	end_to_end_ms
+1007-native-base-d1	1	14.830					168.380
+1007-native-base-d1	8	5.890	5.550	0.250	5.640	0.210	39.950
+1007-native-base-d4	1	11.500					171.390
+1007-native-base-d4	8	4.760	4.380	0.240	4.530	0.200	37.710
+1007-native-tier1-epf0-gaboff-d0.98	1	8.400					138.280
+1007-native-tier1-epf0-gaboff-d0.98	8	3.650	3.210	0.250	3.440	0.200	22.880
+1019-native-base-d4	1	8.830					228.340
+1019-native-base-d4	8	4.290	3.940	0.180	4.080	0.230	48.440
+1019-native-tier1-epf0-d4	1	4.230					120.240
+1019-native-tier1-epf0-d4	8	2.560	2.170	0.190	2.350	0.220	29.230
+1237-native-base-d1	1	14.550					152.070
+1237-native-base-d1	8	5.640	5.270	0.250	5.430	0.210	34.680
+1619-native-base-d1	1	12.980					158.350
+1619-native-base-d1	8	4.960	4.620	0.240	4.730	0.200	35.110

@@ -1,0 +1,76 @@
+# VarDCT LF and HF metadata setup on i270
+
+The baseline is the decoder code in
+[dda06cbe](https://github.com/imazen/zenjxl-decoder/commit/dda06cbe104184544a5e4cf9dcb13901fdb01342).
+All builds use Rust 1.99.1, locked release dependencies and
+`--no-default-features --features all-simd,threads`. The same-file benchmark
+uses the retained imazen-26 encodes and an allocating RGB8 or RGBA8
+endpoint with CMS disabled. Baseline, candidate and A/A use three
+interleaved blocks of five processes with one warmup decode per process.
+The harness pins the same P cores at 1, 4 and 8 workers. It compares
+PNG16 hashes across binaries and worker counts before timing.
+The separate eight-worker phase measurements use three interleaved
+blocks of eight timed decodes after three warmups per process.
+
+## Where the baseline spends time
+
+The [phase inventory](vardct_lf_setup_baseline_2026-11-22.tsv) records
+1- and 8-worker medians after two warmups. At eight workers, the three
+ordinary d1 photos spend 4.96–5.89 ms in LF groups, which is 14.1–16.3%
+of decode wall time. LF-group timing includes the parallel LF and HF
+metadata decode, overlapped HF-global parsing and copy-back. Copy-back
+takes 0.20–0.21 ms, and the concurrent HF-global parser takes 0.24–0.25 ms.
+
+A CPU-clock profile of 1007 at ordinary d1 attributes 4.24% of total
+self samples to `WpOnlyLookup<false>::decode_channel` and 0.52% to
+`decode_hf_metadata_into_rects`. On the smooth 1019 d4 control the
+same functions account for 2.42% and 0.17%. The tier-1 d4 stream of
+1019 has 0.17% in HF metadata and no samples attributed to the
+weighted-only channel decoder. The scout and profiles took 20 s
+with 0.24 GiB peak RSS.
+
+## Exact weight normalization
+
+Candidate `3d97e182306654827cfdd55ce6376fb0f7b1c32b` clamps the normalization shift to zero.
+The original low-error branch already uses the same lookup and
+unshifted product, so the change preserves the arithmetic for every
+wire weight. The focused test checks both sides of the normalization
+and reciprocal-table boundaries for all sixteen wire weights. Both
+predictor tests and all 33 exact PNG16 comparisons pass.
+
+On the three ordinary d1 photos, the median paired LF time ratio is
+0.943 and the median eight-worker decoder speedup is 1.006× (A/A 1.015×).
+The native screenshot and mixed-page controls run at 0.924× and
+0.968× baseline at eight workers. The screenshot p95 latency ratio is
+1.137 (A/A 1.046). The experiment misses the stage and throughput
+targets and the controls fail. Source is on
+`rejected/lf-wp-unified-shift`. The passing run took 458 s with
+1.50 GiB peak RSS. An earlier build in the shared Cargo cache failed
+because its extracted `cc` dependency lacked modules. The measured
+build uses the retained project Cargo home.
+
+## AVX2-tier compile of the existing weighted loop
+
+Candidate `da447f0951f31d78bb74745bbf27e90e32f1b594` dispatches once per weighted-only channel
+through the existing AVX2 feature and token. It uses BMI2 shifts and
+leading-zero counts. In the generated code both dispatched and
+generic kernels call the residual-reader closure for every sample.
+The baseline inlines the residual read and calls the slow reader
+only when necessary.
+
+The ordinary d1 photos have a median paired LF-group latency ratio
+of 1.051 (A/A 1.006) and an eight-worker decode speedup of 0.990×
+(A/A 0.979×). Photo 1619 has a p95 latency ratio of 1.128 (A/A 1.046).
+All 33 PNG16 comparisons and the predictor control pass. This
+comparison uses a 256-pixel screenshot and 1024-pixel mixed-page
+control to exercise those paths. The first normalization run uses
+the native versions of those two files. The archived source is
+`rejected/lf-wp-avx2-outlined-reader`. The run took 314 s with
+1.50 GiB peak RSS.
+
+[Paired decode results](vardct_lf_setup_variants_2026-11-22.tsv)
+retain every cell and p95 ratio. [Phase results](vardct_lf_setup_phase_2026-11-22.tsv)
+retain the LF-group timing for each file and variant. Exact commands,
+binary and stream hashes, raw timings, readbacks, profiles, and the
+generated-code inspection are under
+`/mnt/v/output/zenjxl-decoder/lf-hf-setup-2026-11-22` on i270.
