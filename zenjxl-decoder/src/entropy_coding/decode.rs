@@ -407,6 +407,11 @@ pub struct RleCode<'h> {
     len_uint: &'h HybridUint,
 }
 
+pub(crate) enum RleSpan {
+    Run(i32, usize),
+    LiteralPair(i32, i32),
+}
+
 impl RleCode<'_> {
     pub(crate) fn build_fused(
         &self,
@@ -422,7 +427,7 @@ impl RleCode<'_> {
         )
     }
 
-    /// Reads one literal or up to `limit` copies of the prior symbol.
+    /// Reads literals or up to `limit` copies of the prior symbol.
     /// A short bit window leaves the cursor untouched for the regular reader.
     #[inline(always)]
     pub(crate) fn read_span(
@@ -430,10 +435,10 @@ impl RleCode<'_> {
         c: &mut RleCursor<'_>,
         limit: usize,
         fused: Option<&FusedRleLut>,
-    ) -> Option<(u32, usize)> {
+    ) -> Option<RleSpan> {
         debug_assert_ne!(limit, 0);
         if c.repeat_count == 0 || c.last_sym.is_none() {
-            let resolved = fused.and_then(|lut| lut.read(&mut c.fb));
+            let resolved = fused.and_then(|lut| lut.read(&mut c.fb, limit > 1));
             let token = match resolved {
                 Some(token) => token,
                 None => {
@@ -462,7 +467,15 @@ impl RleCode<'_> {
                 RlePrefixToken::Literal(value) => {
                     c.last_sym = Some(value);
                     c.repeat_count = 0;
-                    return Some((value, 1));
+                    return Some(RleSpan::Run(unpack_signed(value), 1));
+                }
+                RlePrefixToken::LiteralPair(first, second) => {
+                    c.last_sym = Some(second);
+                    c.repeat_count = 0;
+                    return Some(RleSpan::LiteralPair(
+                        unpack_signed(first),
+                        unpack_signed(second),
+                    ));
                 }
             }
         }
@@ -470,13 +483,13 @@ impl RleCode<'_> {
             if let Some(sym) = c.last_sym {
                 let span = (c.repeat_count as usize).min(limit);
                 c.repeat_count -= span as u32;
-                return Some((sym, span));
+                return Some(RleSpan::Run(unpack_signed(sym), span));
             }
             // An invalid run has no symbol and still consumes one repeat.
             c.repeat_count -= 1;
         }
         c.lz77_repeat = true;
-        Some((0, 1))
+        Some(RleSpan::Run(0, 1))
     }
 }
 

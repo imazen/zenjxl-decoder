@@ -15,7 +15,7 @@
 
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
+    entropy_coding::decode::{Histograms, RleCode, RleCursor, RleSpan, SymbolReader},
     entropy_coding::fused_prefix::FusedRleLut,
     frame::modular::{GlobalTree, IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
 };
@@ -47,9 +47,9 @@ struct Side<'a, 'b> {
 
 impl Side<'_, '_> {
     #[inline(always)]
-    fn read_span(&mut self, limit: usize, fused: Option<&FusedRleLut>) -> (i32, usize) {
+    fn read_span(&mut self, limit: usize, fused: Option<&FusedRleLut>) -> RleSpan {
         match self.code.read_span(&mut self.cursor, limit, fused) {
-            Some((v, count)) => (unpack_signed(v), count),
+            Some(span) => span,
             None => {
                 let (v, cursor) = read_slow(
                     self.cursor,
@@ -59,7 +59,7 @@ impl Side<'_, '_> {
                     self.cluster,
                 );
                 self.cursor = cursor;
-                (v, 1)
+                RleSpan::Run(v, 1)
             }
         }
     }
@@ -164,7 +164,17 @@ fn decode<'a, 'b, const FUSED: bool>(
             let mut last = 0i32;
             let mut x = 0;
             while x < w {
-                let (residual, count) = side.read_span(w - x, fused);
+                let (residual, count) = match side.read_span(w - x, fused) {
+                    RleSpan::Run(residual, count) => (residual, count),
+                    RleSpan::LiteralPair(first, second) => {
+                        last = last.wrapping_add(first);
+                        row[x] = last;
+                        last = last.wrapping_add(second);
+                        row[x + 1] = last;
+                        x += 2;
+                        continue;
+                    }
+                };
                 let end = x + count;
                 if count == 1 {
                     last = last.wrapping_add(residual);
@@ -186,7 +196,21 @@ fn decode<'a, 'b, const FUSED: bool>(
         let mut topleft = top[0];
         let mut x = 0;
         while x < w {
-            let (residual, count) = side.read_span(w - x, fused);
+            let (residual, count) = match side.read_span(w - x, fused) {
+                RleSpan::Run(residual, count) => (residual, count),
+                RleSpan::LiteralPair(first, second) => {
+                    let t = top[x];
+                    left = (clamped_gradient(left.into(), t.into(), topleft.into()) as i32)
+                        .wrapping_add(first);
+                    row[x] = left;
+                    topleft = top[x + 1];
+                    left = (clamped_gradient(left.into(), topleft.into(), t.into()) as i32)
+                        .wrapping_add(second);
+                    row[x + 1] = left;
+                    x += 2;
+                    continue;
+                }
+            };
             let end = x + count;
             if count == 1 {
                 let t = top[x];
