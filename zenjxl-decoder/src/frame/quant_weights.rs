@@ -3,7 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use std::{borrow::Cow, f32::consts::SQRT_2, sync::OnceLock};
+use std::{f32::consts::SQRT_2, sync::OnceLock};
 use whereat::at;
 
 use crate::util::f16;
@@ -368,8 +368,8 @@ impl QuantTable {
 
 pub struct DequantMatrices {
     /// 17 separate tables, one per QuantTable type.
-    /// Uses Cow to allow zero-copy borrowing from static cache for library tables.
-    tables: [Cow<'static, [f32]>; QuantTable::CARDINALITY],
+    /// Absent entries use the shared standard table for that transform.
+    tables: [Option<Box<[f32]>>; QuantTable::CARDINALITY],
     /// Raw quantization table data for JPEG reconstruction.
     /// Only stored when table 0 uses Raw encoding and jpeg feature is enabled.
     #[cfg(feature = "jpeg")]
@@ -1106,7 +1106,9 @@ impl DequantMatrices {
 
     pub fn matrix(&self, quant_kind: HfTransformType, c: usize) -> &[f32] {
         let qt_idx = QuantTable::for_strategy(quant_kind) as usize;
-        let table = &self.tables[qt_idx];
+        let table = self.tables[qt_idx]
+            .as_deref()
+            .unwrap_or_else(|| Self::get_library_table(qt_idx));
         let num = Self::REQUIRED_SIZE_X[qt_idx] * Self::REQUIRED_SIZE_Y[qt_idx] * BLOCK_SIZE;
         &table[c * num..]
     }
@@ -1119,17 +1121,13 @@ impl DequantMatrices {
     ) -> Result<Self> {
         let all_default = br.read(1)? == 1;
 
-        // Compute all tables during decode
         #[cfg(feature = "jpeg")]
         let mut raw_qtable: Option<(Vec<i32>, f32)> = None;
 
-        let tables: [Cow<'static, [f32]>; QuantTable::CARDINALITY] = if all_default {
-            // All library tables - borrow from static cache (zero-copy)
-            std::array::from_fn(|idx| Cow::Borrowed(Self::get_library_table(idx)))
+        let tables = if all_default {
+            [const { None }; QuantTable::CARDINALITY]
         } else {
-            // Decode and compute each table
-            let mut tables_vec: Vec<Cow<'static, [f32]>> =
-                Vec::with_capacity(QuantTable::CARDINALITY);
+            let mut tables_vec = Vec::with_capacity(QuantTable::CARDINALITY);
             for (i, (&required_size_x, required_size_y)) in Self::REQUIRED_SIZE_X
                 .iter()
                 .zip(Self::REQUIRED_SIZE_Y)
@@ -1154,8 +1152,8 @@ impl DequantMatrices {
                 }
 
                 let table = match encoding {
-                    QuantEncoding::Library => Cow::Borrowed(Self::get_library_table(i)),
-                    _ => Cow::Owned(Self::compute_table(&encoding, i)?.into_vec()),
+                    QuantEncoding::Library => None,
+                    _ => Some(Self::compute_table(&encoding, i)?),
                 };
                 tables_vec.push(table);
             }
@@ -1266,9 +1264,7 @@ mod test {
     fn check_dequant_matrix_correctness() -> Result<()> {
         // All library tables
         let matrices = DequantMatrices {
-            tables: std::array::from_fn(|idx| {
-                Cow::Borrowed(DequantMatrices::get_library_table(idx))
-            }),
+            tables: [const { None }; QuantTable::CARDINALITY],
             #[cfg(feature = "jpeg")]
             raw_qtable: None,
         };

@@ -19,7 +19,8 @@ use crate::{
     error::{Error, Result},
     frame::{
         HfGlobalState, HfMetadata, LfGlobalState, block_context_map::*,
-        color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS, quant_weights::DequantMatrices,
+        coeff_order::coeff_order_for, color_correlation_map::COLOR_TILE_DIM_IN_BLOCKS,
+        quant_weights::DequantMatrices,
     },
     headers::frame_header::FrameHeader,
     image::{Image, ImageRect, Rect},
@@ -808,7 +809,7 @@ pub fn decode_vardct_group(
                     let histo_offset = block_context_map.zero_density_context_offset(block_context)
                         + context_offset;
                     let mut prev = if nonzeros > num_coeffs / 16 { 0 } else { 1 };
-                    let permutation = &pass_info.coeff_orders[shape_id * 3 + c];
+                    let permutation = coeff_order_for(&pass_info.coeff_orders, shape_id, c);
                     let current_coeffs = &mut coeffs[c][coeffs_offset..coeffs_offset + num_coeffs];
                     // The context's `nonzeros` part for the current count and
                     // for one less are both looked up before the symbol is

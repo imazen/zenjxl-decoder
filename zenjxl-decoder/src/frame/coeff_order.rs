@@ -120,12 +120,11 @@ pub fn natural_coeff_order(transform: HfTransformType) -> Vec<u32> {
     out
 }
 
-pub fn decode_coeff_orders(used_orders: u32, br: &mut BitReader) -> Result<Vec<Permutation>> {
-    // Use cached natural coefficient orders instead of recomputing
-    let all_component_orders = 3 * NUM_ORDERS;
-    let mut permutations: Vec<Permutation> = (0..all_component_orders)
-        .map(|o| Permutation(Cow::Borrowed(get_natural_coeff_order(o / 3))))
-        .collect();
+pub fn decode_coeff_orders(
+    used_orders: u32,
+    br: &mut BitReader,
+) -> Result<Vec<Option<Permutation>>> {
+    let mut permutations = vec![None; 3 * NUM_ORDERS];
     if used_orders == 0 {
         return Ok(permutations);
     }
@@ -148,11 +147,19 @@ pub fn decode_coeff_orders(used_orders: u32, br: &mut BitReader) -> Result<Vec<P
                 &crate::util::MemoryTracker::default(),
             )?;
             let index = 3 * ord + c;
-            permutations[index].compose(&permutation);
+            let mut order = Permutation(Cow::Borrowed(get_natural_coeff_order(ord)));
+            order.compose(&permutation);
+            permutations[index] = Some(order);
         }
     }
     reader.check_final_state(&histograms, br)?;
     Ok(permutations)
+}
+
+pub fn coeff_order_for(orders: &[Option<Permutation>], shape: usize, channel: usize) -> &[u32] {
+    orders[shape * 3 + channel]
+        .as_deref()
+        .unwrap_or_else(|| get_natural_coeff_order(shape))
 }
 
 #[cfg(test)]

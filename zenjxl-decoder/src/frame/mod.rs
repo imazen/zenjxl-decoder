@@ -63,7 +63,7 @@ pub struct LfGlobalState {
 }
 
 pub struct PassState {
-    coeff_orders: Vec<Permutation>,
+    coeff_orders: Vec<Option<Permutation>>,
     histograms: Histograms,
 }
 

@@ -33,6 +33,22 @@ floating-point Modular control has a +12.7% one-worker p95 with a
 class p95 limit after pooling latency normalized by each stream's
 baseline median. The table retains every cell's median and p95.
 
+A nine-block confirmation used 45 samples per arm on the floating-point
+control, the progressive control, and two affected SDR streams. The
+floating-point control's one-worker p95 was −0.04% on replay, with
++1.34% A/A. All 12 replay cells met the p95 limit. The 64 px photo at
+d1 still had +3.1% and +5.1% median latency at 4 and 8 workers,
+respectively. The selected terminal crop had +3.1% at 8 workers.
+The full 28-cell warm result captures the aggregate cost. The replay
+used 0.43 GiB peak RSS over 138 seconds.
+
+All 24 encoded streams fully render in djxl v0.12.0 (`a7a9c78`) and
+jxl-rs (`f370be423933628eb7f783f1b61d4c765eca5f79`). The
+coefficient-order and quantization-table goldens and 13 selected
+progressive, HDR, alpha flush, and streaming library tests pass. The
+first corpus-backed test invocation lacked `CODEC_CORPUS_PATH`; the
+passing run supplies the existing codec corpus with no skipped tests.
+
 Run-heavy peak RSS was 1.50 GiB for the build and focused tests, and
 0.34 GiB for crop preparation, cold timing and the first warm attempt.
 That attempt reached a Level 5 admission error for a 32-bit float
