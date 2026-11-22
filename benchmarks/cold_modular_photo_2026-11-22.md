@@ -276,3 +276,35 @@ are archived. The builds, exact checks and timing take 223 s and
 and [phase medians](cold_modular_batch_preparation_phases_2026-11-22.tsv).
 Full samples, hashes, binaries and commands are in
 `/mnt/v/output/zenjxl-decoder/cold-compact-allocation-2026-11-22` on i270.
+
+### Use both group widths for cold throughput
+
+This follow-up selects between the two shipped lossless options on the
+three photos used for the width tuning. Count the groups the image
+would have at 256 px. Choose the 128 px stream when that count is at
+most 128, the eight-worker boundary of 16 groups per worker. Otherwise
+choose the 256 px stream. The cityscape and macro have 192 groups and
+the glacier has 128. The lookup uses dimensions only. The threshold
+was chosen after examining this panel, so the rule needs a fresh
+holdout before it can select a default.
+
+Both sides use the same `8496962d` decoder and the encoder outputs
+verified at `7fca6d6b`. The stock comparison uses `--fast-decode -g 0`.
+Every chosen file is smaller than stock. The median saving is 17.70%.
+All nine PNG16 readbacks match in each pass at 1, 4 and 8 workers.
+The allocating RGB8 path runs once per fresh process with CMS off.
+
+| Interleaved blocks of five | Median MP/s, 1 / 4 / 8 workers | Paired speedup, 1 / 4 / 8 workers |
+|---|---:|---:|
+| 3 | 147.20 / 389.78 / 550.20 | 1.364× / 1.324× / 1.258× |
+| 9 | 147.15 / 389.44 / 562.59 | 1.364× / 1.327× / 1.273× |
+
+The eight-worker A/A medians are 0.998× and 1.012×. A/A p95 stays
+within 1.030× for every file and worker count. The cityscape remains the
+slowest chosen stream, at 483.92 MP/s in the longer eight-worker run.
+The two replays take 26 s and 72 s, both at 0.12 GiB peak RSS.
+
+[Per-file timings and p95](cold_modular_width_routing_2026-11-22.tsv).
+The `geometry-cold` and `geometry-repeat-cold` directories in the
+same i270 run directory retain raw timings, selected stream names,
+exact readbacks and input and binary hashes.
