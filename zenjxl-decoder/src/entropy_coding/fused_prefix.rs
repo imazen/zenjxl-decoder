@@ -14,10 +14,10 @@ use crate::{
 const WINDOW_BITS: u32 = 12;
 const TABLE_SIZE: usize = 1 << WINDOW_BITS;
 const LENGTH_BITS: u32 = 4;
-const LENGTH_MASK: u64 = (1 << LENGTH_BITS) - 1;
-const FIRST_SHIFT: u32 = 16;
-const SECOND_SHIFT: u32 = 40;
-const RESIDUAL_MASK: u64 = (1 << 24) - 1;
+const LENGTH_MASK: u32 = (1 << LENGTH_BITS) - 1;
+const FIRST_SHIFT: u32 = 8;
+const SECOND_SHIFT: u32 = 20;
+const RESIDUAL_MASK: u32 = (1 << 12) - 1;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Residuals {
@@ -27,13 +27,13 @@ pub(crate) struct Residuals {
 
 #[derive(Debug)]
 pub(crate) struct FusedPrefixLut {
-    entries: Box<[u64; TABLE_SIZE]>,
+    entries: Box<[u32; TABLE_SIZE]>,
     _memory: MemoryGuard,
 }
 
 impl FusedPrefixLut {
     pub(super) fn build(table: &Table, uint: &HybridUint, tracker: &MemoryTracker) -> Option<Self> {
-        let bytes = std::mem::size_of::<[u64; TABLE_SIZE]>() as u64;
+        let bytes = std::mem::size_of::<[u32; TABLE_SIZE]>() as u64;
         tracker.try_allocate(bytes).ok()?;
         let memory = MemoryGuard::new(tracker.clone(), bytes);
         let mut entries = Vec::new();
@@ -43,9 +43,7 @@ impl FusedPrefixLut {
                 entries.push(0);
                 continue;
             };
-            let entry = (u64::from(first_len) << LENGTH_BITS)
-                | u64::from(first_len)
-                | (first << FIRST_SHIFT);
+            let entry = (first_len << LENGTH_BITS) | first_len | (first << FIRST_SHIFT);
             entries.push(entry);
         }
         // The remaining low bits already index a decoded first residual.
@@ -58,7 +56,7 @@ impl FusedPrefixLut {
             let first_len = (entry >> LENGTH_BITS) & LENGTH_MASK;
             let next = entries[window >> first_len];
             let second_len = (next >> LENGTH_BITS) & LENGTH_MASK;
-            if second_len != 0 && first_len + second_len <= u64::from(WINDOW_BITS) {
+            if second_len != 0 && first_len + second_len <= WINDOW_BITS {
                 let second = (next >> FIRST_SHIFT) & RESIDUAL_MASK;
                 entries[window] = (entry + second_len) | (second << SECOND_SHIFT);
             }
@@ -81,12 +79,12 @@ impl FusedPrefixLut {
             return None;
         }
         let total_len = entry & LENGTH_MASK;
-        let first = (entry.wrapping_shl(24) as i64 >> SECOND_SHIFT) as i32;
+        let first = (entry.wrapping_shl(12) as i32) >> SECOND_SHIFT;
         if allow_pair && total_len != first_len {
             bits.consume_buffered(total_len as usize);
             Some(Residuals {
                 first,
-                second: Some(((entry as i64) >> SECOND_SHIFT) as i32),
+                second: Some((entry as i32) >> SECOND_SHIFT),
             })
         } else {
             bits.consume_buffered(first_len as usize);
@@ -103,13 +101,13 @@ fn decode_residual(
     uint: &HybridUint,
     window: u32,
     available: u32,
-) -> Option<(u32, u64)> {
+) -> Option<(u32, u32)> {
     let (code_len, token) = table.lookup_window(window as usize);
     let remaining = available.checked_sub(code_len)?;
     let (extra_len, value) = uint.decode_window(token, window >> code_len, remaining)?;
     let length = code_len + extra_len;
     let residual = unpack_signed(value);
-    // The two values have 24 signed bits each. Long residuals use the ordinary cursor.
-    (length > 0 && (residual << 8) >> 8 == residual)
-        .then_some((length, residual as u64 & RESIDUAL_MASK))
+    // The two values have 12 signed bits each. Long residuals use the ordinary cursor.
+    (length > 0 && (residual << 20) >> 20 == residual)
+        .then_some((length, residual as u32 & RESIDUAL_MASK))
 }
