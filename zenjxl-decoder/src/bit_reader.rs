@@ -48,10 +48,9 @@ pub struct FastBits<'a> {
 }
 
 impl FastBits<'_> {
-    /// Retains the buffered word while it can satisfy a short lookup.
     #[inline(always)]
-    pub(crate) fn ensure_lookup(&mut self, num: usize) -> bool {
-        self.bits_in_buf >= num || self.ensure(num)
+    pub(crate) fn buffered_len(&self) -> usize {
+        self.bits_in_buf
     }
 
     /// Ensures at least `num` (<= 56) buffered bits using only the 8-byte
@@ -75,7 +74,8 @@ impl FastBits<'_> {
         true
     }
 
-    /// Low `num` buffered bits; requires a successful `ensure(num)`.
+    /// Low `num` bits of the cursor word. Bits above the buffered length
+    /// are unspecified. Call `ensure(num)` before using the full result.
     #[inline(always)]
     pub fn peek_buffered(&self, num: usize) -> u64 {
         self.bit_buf & ((1u64 << num) - 1)
