@@ -459,3 +459,51 @@ Cargo dev artifacts, the test and cold width replay takes 102 s at
 [Per-cell timings, p95 and A/A](fused_rle_shared_holdout_2026-11-22.tsv).
 Raw samples, exact readbacks, command and hash manifests, profiles and
 logs are under `/mnt/v/output/zenjxl-decoder/fused-rle-shared-holdout-2026-11-22`.
+
+## Twelve-bit RLE lookup width
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/c5e24c3e4003b039c5ecb15ce8e15ad41fe2549e)
+widens the shared fixed-Gradient RLE lookup from 10 to 12 lookahead bits.
+The memory-tracked table grows from 4 to 16 KiB per eligible cluster.
+The wider lookup can fuse longer literal and repeat tokens. Both builds
+use current baseline `edc2abcc`, Rust 1.99.1 and the same locked release
+dependencies with `all-simd,threads`.
+
+The four independent photo streams retain their previous widths.
+The controls cover the 128 px stock prefix stream, scanned text, odd
+RGBA and native d1 VarDCT. Both same-file endpoints decode in memory
+with CMS off at 1/4/8 pinned i270 workers. Three interleaved blocks of
+five include baseline A/A. The cold process measures its first decode.
+The warm process measures after one warmup. All 48 same-file PNG16
+readbacks agree across binaries and worker counts.
+
+| Comparison | Median MP/s, 1 / 4 / 8 workers | Median paired speedup, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Wider vs original, cold photos | 133.62 / 363.68 / 528.00 | 1.011× / 1.007× / 1.002× |
+| Wider vs original, warm photos | 139.07 / 403.55 / 581.11 | 1.009× / 0.990× / 1.009× |
+| Wider build on both streams, cold profile vs stock | 133.52 / 366.01 / 533.45 | 1.253× / 1.333× / 1.243× |
+
+The stock-to-profile comparison checks all 12 PNG16 pairs exactly.
+It meets the 1.25× one-worker bar in this run. The 550 MP/s cold
+eight-worker target remains open. The same-file gain falls short of
+the 5% decoder landing gate, so the source is archived on
+`rejected/rle-twelve-bit-window`.
+
+Class p95 ratios stay within 1.022×. The per-file cold p95 ratios
+include 1.214× on 1606 at one worker, 1.125× on 1237 at eight and
+1.511× on the odd RGBA control at eight. Those A/A p95 ratios
+are 0.993×, 1.004× and 1.134× respectively.
+
+Strict library Clippy and the focused RLE reader differential pass.
+The two earlier unit-test builds fail for lack of disk space. The
+completed test follows a package-scoped cleanup of inactive Cargo
+outputs. The baseline and candidate timing binaries retain their
+original hashes.
+
+[Per-file timings](fused_rle_twelve_bit_window_2026-11-22.tsv)
+and [class summaries](fused_rle_twelve_bit_window_classes_2026-11-22.tsv).
+The baseline build uses 1.99 GiB peak RSS over 52 s. The timing run
+uses 0.23 GiB over 193 s and the passing test uses 4.32 GiB over
+98 s under `run-heavy`. Exact hashes, raw timed samples, readbacks
+and command logs are under `rle-window-i270-2026-11-22` in the i270
+decoder run directory.
