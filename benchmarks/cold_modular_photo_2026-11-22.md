@@ -721,3 +721,45 @@ cold target open. The run takes 151 seconds at 0.58 GiB peak RSS.
 and [panel medians](cold_modular_rle_group_width_classes_2026-11-22.tsv).
 Raw samples, readbacks and pinned commands are in
 `/mnt/v/output/zenjxl-decoder/modular-rle-four-widths-i270-2026-11-22` on i270.
+
+### Refill only when the selected token is incomplete
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/b734705fecb7100b4d8fd2039960f687ea7ea80a)
+looks up a token before refilling. It consumes the entry when the
+encoded length fits in the currently buffered bits, even below the
+10-bit lookup width. Every entry depends only on its consumed low
+bits. A short window with an incomplete or absent entry triggers
+refill and lookup again when enough input remains.
+
+The exact boundary test covers every one of the 1,024 lookup
+indices with 0–10 remaining bits and with input available for an
+8-byte refill. Strict Clippy and four focused RLE tests pass.
+The same-file replay uses the on-demand refill binary at `e14ae58d`
+as control, with the four native profiles and five controls above.
+It keeps the pinned i270 cores, allocating RGB8/RGBA8 endpoints,
+1/4/8 workers, and three blocks of five with A/A. The same-file
+and stock comparisons pass all 66 PNG16 readbacks.
+
+| i270 photo comparison | Paired median speedup, 1 / 4 / 8 workers | Candidate MP/s at 8 workers |
+|---|---:|---:|
+| Same file, cold | 0.969× / 0.984× / 0.983× | 537.77 |
+| Same file, warm | 0.967× / 0.975× / 0.978× | 605.30 |
+| Cold profile vs stock, candidate decoder | 1.264× / 1.336× / 1.250× | 544.77 |
+
+The cold eight-worker control class p95 rises to 1.147×, with
+A/A at 1.011×. The candidate also slows the photo panel at
+every worker count and is archived on
+`rejected/modular-rle-complete-token`.
+
+On two 256 px profiles and at one and eight workers, three
+blocks of five first decodes retire 8.4–9.0% fewer branches.
+Retired instructions fall by 0.25–0.28% and branch misses by
+0.13–0.40%. These are pinned-core process-wide user counters.
+The build, tests and timing take 355 s at 4.26 GiB peak RSS.
+Counter capture takes 8 s at 0.09 GiB peak RSS.
+
+[Per-photo and control timings](cold_modular_rle_complete_token_2026-11-22.tsv),
+[panel medians and p95](cold_modular_rle_complete_token_classes_2026-11-22.tsv),
+and [hardware counters](cold_modular_rle_complete_token_instructions_2026-11-22.tsv).
+Raw commands, sample timings and binary and stream hashes are under
+`/mnt/v/output/zenjxl-decoder/modular-rle-complete-token-i270-2026-11-22` on i270.
