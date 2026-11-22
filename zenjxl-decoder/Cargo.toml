@@ -14,8 +14,8 @@ license = "BSD-3-Clause"
 include = ["/src/**", "/tests/**", "/benches/**", "/examples/**", "/LICENSE*"]
 
 [dependencies]
-archmage = { version = "0.9.32", default-features = false, features = ["std"] }
-magetypes = { version = "0.9.32", default-features = false, features = ["std"] }
+archmage = { version = "0.9.33", default-features = false, features = ["std"] }
+magetypes = { version = "0.9.33", default-features = false, features = ["std"] }
 thiserror = "2.0.21"
 whereat = "0.1.5"
 byteorder = "1.5.0"
@@ -40,7 +40,7 @@ paste = { package = "pastey", version = "0.2.3" }
 # at runtime even where the target guarantees them at compile time (NEON on
 # aarch64), so the differential decode really visits every tier. Dev-only: it
 # is not enabled for library builds.
-archmage = { version = "0.9.32", features = ["testable_dispatch"] }
+archmage = { version = "0.9.33", features = ["testable_dispatch"] }
 arbtest = "0.3.2"
 zenutils-fuzz = "0.1.0"
 png = "0.18.1"

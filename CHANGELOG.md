@@ -8,6 +8,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Changed
 
+- Upgrade `archmage` and `magetypes` to `0.9.33` (including `fuzz/Cargo.lock`,
+  retaining `moxcms` 0.9.1 in `Cargo.lock`).
 - Bump compatible stable dependencies (`enough` 0.4.5, `almost-enough` 0.4.5,
   `thiserror` 2.0.21, `smallvec` 1.16.6, `brotli` 9.1.3, `zenbench` 0.1.11,
   `zenutils-apidoc` 0.1.1, and CLI/macro dependencies) and refresh `Cargo.lock`
