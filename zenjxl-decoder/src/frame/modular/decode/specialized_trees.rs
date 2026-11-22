@@ -565,7 +565,45 @@ pub fn specialize_tree(
     xsize: usize,
     header: &GroupHeader,
 ) -> Result<TreeSpecialCase> {
-    // TODO(veluca): consider skipping the pruning if header.uses_global_tree is true.
+    // Channel and stream are constant. Follow their splits before allocating
+    // the per-channel pruning queue, which is unnecessary for a single leaf.
+    let mut root = 0;
+    while let TreeNode::Split {
+        property: property @ (0 | 1),
+        val,
+        left,
+        right,
+    } = tree.nodes[root as usize]
+    {
+        let value = if property == 0 { channel } else { stream };
+        root = if value as i32 > val { left } else { right };
+    }
+    if let TreeNode::Leaf {
+        predictor,
+        multiplier: 1,
+        offset: 0,
+        id,
+    } = tree.nodes[root as usize]
+        && matches!(predictor, Predictor::Zero | Predictor::Gradient)
+    {
+        let clustered_ctx = tree.histograms.map_context_to_cluster(id as usize);
+        let single_value = tree
+            .histograms
+            .single_symbol_value(clustered_ctx)
+            .map(unpack_signed);
+        return Ok(if predictor == Predictor::Zero {
+            TreeSpecialCase::NoTree(NoTree {
+                clustered_ctx,
+                single_value,
+            })
+        } else {
+            TreeSpecialCase::SingleGradientOnly(SingleGradientOnly {
+                clustered_ctx,
+                single_value,
+            })
+        });
+    }
+
     let mut pruned_tree = Vec::new();
     let mut queue = VecDeque::new();
     pruned_tree
@@ -574,7 +612,7 @@ pub fn specialize_tree(
     queue
         .try_reserve(tree.nodes.len())
         .map_err(|e| at!(crate::error::Error::from(e)))?;
-    queue.push_front(0);
+    queue.push_front(root);
 
     let mut uses_wp = false;
     let mut uses_non_wp = false;
@@ -648,36 +686,6 @@ pub fn specialize_tree(
     // Whether the specialised config-420 entropy reader may be used for the
     // remaining tree shapes (its preconditions: no LZ77, all configs 420).
     let config_420 = tree.histograms.can_use_config_420_fast_path();
-
-    if let [
-        TreeNode::Leaf {
-            predictor: Predictor::Zero,
-            multiplier: 1,
-            offset: 0,
-            id,
-        },
-    ] = &*pruned_tree
-    {
-        return Ok(TreeSpecialCase::NoTree(NoTree {
-            clustered_ctx: *id as usize,
-            single_value: single_symbol.map(unpack_signed),
-        }));
-    }
-
-    if let [
-        TreeNode::Leaf {
-            predictor: Predictor::Gradient,
-            multiplier: 1,
-            offset: 0,
-            id,
-        },
-    ] = &*pruned_tree
-    {
-        return Ok(TreeSpecialCase::SingleGradientOnly(SingleGradientOnly {
-            clustered_ctx: *id as usize,
-            single_value: single_symbol.map(unpack_signed),
-        }));
-    }
 
     if !uses_non_wp {
         // Try the specialized 420 config version (fast path for effort 3 encoded images)
