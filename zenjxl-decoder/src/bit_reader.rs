@@ -48,6 +48,12 @@ pub struct FastBits<'a> {
 }
 
 impl FastBits<'_> {
+    /// Retains the buffered word while it can satisfy a short lookup.
+    #[inline(always)]
+    pub(crate) fn ensure_lookup(&mut self, num: usize) -> bool {
+        self.bits_in_buf >= num || self.ensure(num)
+    }
+
     /// Ensures at least `num` (<= 56) buffered bits using only the 8-byte
     /// refill. Returns false near the end of the data, where the caller must
     /// fall back to `BitReader`.

@@ -83,7 +83,7 @@ impl FusedRleLut {
 
     #[inline(always)]
     pub(super) fn read(&self, bits: &mut FastBits<'_>) -> Option<RlePrefixToken> {
-        if !bits.ensure(RLE_WINDOW_BITS as usize) {
+        if !bits.ensure_lookup(RLE_WINDOW_BITS as usize) {
             return None;
         }
         let index = bits.peek_buffered(RLE_WINDOW_BITS as usize) as usize & (RLE_TABLE_SIZE - 1);
