@@ -1293,7 +1293,8 @@ impl Frame {
                 lmp_mut!()
                     .store_and_prepare_groups_parallel(&mut pending_stores, skip_border_copy)?
             } else {
-                lmp_mut!().prepare_groups_parallel(skip_border_copy)?
+                // Recyclable Modular groups have no border dependencies.
+                lmp_mut!().prepare_groups_parallel(skip_border_copy || recycle_modular)?
             };
             let mut has_items_vec = vec![false; lmp_ref!().num_groups()];
             for &(g, has) in &group_has_items {
