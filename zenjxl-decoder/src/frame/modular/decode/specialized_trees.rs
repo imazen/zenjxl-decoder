@@ -269,6 +269,24 @@ impl<const C420: bool> WpOnlyLookup<C420> {
     /// [`WeightedPredictorState::decode_row`]; same output as the
     /// per-sample `decode_one` path.
     pub(super) fn decode_channel(
+        self,
+        channel: &mut ModularChannel,
+        reader: &mut SymbolReader,
+        br: &mut BitReader,
+        histograms: &Histograms,
+    ) {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use archmage::SimdToken;
+            if let Some(token) = archmage::X64V3Token::summon() {
+                return decode_wp_channel_v3(token, self, channel, reader, br, histograms);
+            }
+        }
+        self.decode_channel_inner(channel, reader, br, histograms);
+    }
+
+    #[inline(always)]
+    fn decode_channel_inner(
         mut self,
         channel: &mut ModularChannel,
         reader: &mut SymbolReader,
@@ -314,6 +332,21 @@ impl<const C420: bool> WpOnlyLookup<C420> {
             reader.finish_plain_cursor(c, br);
         }
     }
+}
+
+// Compile the predictor and entropy cursor together with the BMI2 shifts
+// and leading-zero count available on the AVX2 decoder tier.
+#[cfg(all(target_arch = "x86_64", feature = "avx"))]
+#[archmage::arcane]
+fn decode_wp_channel_v3<const C420: bool>(
+    _token: archmage::X64V3Token,
+    decoder: WpOnlyLookup<C420>,
+    channel: &mut ModularChannel,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+    histograms: &Histograms,
+) {
+    decoder.decode_channel_inner(channel, reader, br, histograms);
 }
 
 /// One read through the regular reader, handing a [`PlainCursor`] back and
