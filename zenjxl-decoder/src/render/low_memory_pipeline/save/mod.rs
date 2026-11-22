@@ -14,6 +14,8 @@ use super::row_buffers::RowBuffer;
 
 mod identity;
 
+pub(super) use identity::store_modular_rgb8;
+
 // Placeholder slow implementation.
 impl SaveStage {
     // Takes as input only those channels that are *actually* saved.

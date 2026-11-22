@@ -21,6 +21,7 @@ pub struct SaveStage {
     /// When true, fill alpha channel with opaque (1.0) values.
     /// Used when RGBA output is requested but image has no alpha channel.
     pub(super) fill_opaque_alpha: bool,
+    pub(super) direct_modular_rgb8: bool,
 }
 
 impl SaveStage {
@@ -48,6 +49,7 @@ impl SaveStage {
             color_type,
             data_format,
             fill_opaque_alpha,
+            direct_modular_rgb8: false,
         }
     }
 
@@ -61,7 +63,11 @@ impl SaveStage {
     }
 
     pub fn input_type(&self) -> DataTypeTag {
-        self.data_format.data_type()
+        if self.direct_modular_rgb8 {
+            DataTypeTag::I32
+        } else {
+            self.data_format.data_type()
+        }
     }
 
     pub fn check_buffer_size(

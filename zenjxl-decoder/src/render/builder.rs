@@ -137,6 +137,7 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
         let mut stage_is_used = vec![false; self.shared.stages.len()];
         let num_channels = self.shared.num_channels();
         let mut channel_next_use = vec![None; num_channels];
+        let mut fused_modular_rgb8 = 0u8;
         // Prune unused stages.
         for i in (0..self.shared.stages.len()).rev() {
             let stage = &self.shared.stages[i];
@@ -181,6 +182,9 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
                                 self.shared.stages[i] = Stage::InOut(Pipeline::box_inout_stage(
                                     ConvertI32ToU8Stage::new(c, mult, (1 << b) - 1),
                                 ));
+                                if c < 3 && b == 8 && bit_depth == 8 {
+                                    fused_modular_rgb8 |= 1 << c;
+                                }
                             }
                         }
                     }
@@ -200,6 +204,19 @@ impl<Pipeline: RenderPipeline> RenderPipelineBuilder<Pipeline> {
             .zip(stage_is_used)
             .filter_map(|(s, used)| used.then_some(s))
             .collect();
+        // With only three clamp-to-byte conversions and an identity save,
+        // the low-memory renderer can write RGB directly from the group.
+        if num_channels == 3
+            && fused_modular_rgb8 == 0b111
+            && let [_, _, _, Stage::Save(save)] = self.shared.stages.as_mut_slice()
+            && save.orientation == Orientation::Identity
+            && save.color_type == JxlColorType::Rgb
+            && save.channels == [0, 1, 2]
+            && save.data_format == (JxlDataFormat::U8 { bit_depth: 8 })
+        {
+            save.direct_modular_rgb8 = true;
+            self.shared.stages.drain(..3);
+        }
         for (i, stage) in self.shared.stages.iter().enumerate() {
             let input_type = stage.input_type();
             let output_type = stage.output_type();
@@ -338,6 +355,47 @@ mod tests {
     use super::*;
     use crate::render::simple_pipeline::SimpleRenderPipeline;
     use crate::render::stages::HorizontalChromaUpsample;
+
+    #[test]
+    fn direct_modular_rgb8_save_requires_identity_rgb() -> Result<()> {
+        use crate::headers::bit_depth::BitDepth;
+        use crate::render::LowMemoryRenderPipeline;
+        use crate::render::stages::{ConvertF32ToU8Stage, ConvertModularToF32Stage};
+
+        for (orientation, color_type, direct) in [
+            (Orientation::Identity, JxlColorType::Rgb, true),
+            (Orientation::Identity, JxlColorType::Bgr, false),
+            (Orientation::FlipVertical, JxlColorType::Rgb, false),
+        ] {
+            let mut builder =
+                RenderPipelineBuilder::<LowMemoryRenderPipeline>::new(3, (259, 257), 0, 7);
+            for channel in 0..3 {
+                builder = builder.add_inout_stage(ConvertModularToF32Stage::new(
+                    channel,
+                    BitDepth::integer_samples(8),
+                ));
+            }
+            for channel in 0..3 {
+                builder = builder.add_inout_stage(ConvertF32ToU8Stage::new(channel, 8, true));
+            }
+            let pipeline = builder
+                .add_save_stage(
+                    &[0, 1, 2],
+                    orientation,
+                    0,
+                    color_type,
+                    JxlDataFormat::U8 { bit_depth: 8 },
+                    false,
+                )
+                .build()?;
+            let view = pipeline.read_view();
+            assert_eq!(
+                matches!(&view.shared.stages[..], [Stage::Save(save)] if save.direct_modular_rgb8),
+                direct
+            );
+        }
+        Ok(())
+    }
 
     /// Save(first) -> horizontal upsample of channel 1 -> Save(0, 1).
     /// Relative to the final output, the first Save sees channel 1 at half

@@ -323,6 +323,26 @@ pub(crate) fn render(
     image_area: Rect,
     buffers: &mut [Option<JxlOutputBuffer>],
 ) -> Result<()> {
+    if let [Stage::Save(save)] = view.shared.stages.as_slice()
+        && save.direct_modular_rgb8
+    {
+        if let Some(output) = buffers[save.output_buffer_index].as_mut() {
+            let group_dim = 1 << view.shared.log_group_size;
+            let group = gy * view.shared.group_count.0 + gx;
+            let input = view.input_buffer(group);
+            let planes = std::array::from_fn(|c| input.data[c].as_ref().unwrap());
+            let start_x = (image_area.origin.0 - gx * group_dim) * size_of::<i32>();
+            let end_x = start_x + image_area.size.0 * size_of::<i32>();
+            let start_y = image_area.origin.1 - gy * group_dim;
+            for y in 0..image_area.size.1 {
+                let rows = planes.map(|plane| {
+                    bytemuck::cast_slice::<u8, i32>(&plane.row(start_y + y)[start_x..end_x])
+                });
+                super::save::store_modular_rgb8(rows, output.row_mut(y));
+            }
+        }
+        return Ok(());
+    }
     let start_of_row = image_area.origin.0 == 0;
     let end_of_row = image_area.end().0 == view.shared.input_size.0;
 

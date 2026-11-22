@@ -5,7 +5,9 @@
 
 use std::ops::Range;
 
-use jxl_simd::{F32SimdVec, SimdDescriptor, U8SimdVec, U16SimdVec, simd_function};
+use jxl_simd::{
+    F32SimdVec, I32SimdVec, SimdDescriptor, SimdMask, U8SimdVec, U16SimdVec, simd_function,
+};
 
 use crate::{
     api::{Endianness, JxlDataFormat, JxlOutputBuffer},
@@ -156,6 +158,66 @@ simd_function!(
         }
     }
 );
+
+simd_function!(
+    store_modular_rgb8,
+    d: D,
+    pub(in crate::render::low_memory_pipeline) fn store_modular_rgb8_impl(
+        inputs: [&[i32]; 3],
+        output: &mut [u8],
+    ) {
+        let width = inputs[0].len();
+        let block = D::U8Vec::LEN;
+        let lanes = D::I32Vec::LEN;
+        const { assert!(D::U8Vec::LEN <= 64 && D::U8Vec::LEN.is_multiple_of(D::I32Vec::LEN)) };
+        let zero = D::I32Vec::splat(d, 0);
+        let max = D::I32Vec::splat(d, 255);
+        let mut output_blocks = output[..width * 3].chunks_exact_mut(block * 3);
+        let mut x = 0;
+        for dst in &mut output_blocks {
+            let [r, g, b] = inputs.map(|src| {
+                let mut bytes = [0u8; 64];
+                for (input, narrow) in src[x..x + block]
+                    .chunks_exact(lanes)
+                    .zip(bytes[..block].chunks_exact_mut(lanes))
+                {
+                    let value = D::I32Vec::load(d, input);
+                    let low = value.lt_zero().if_then_else_i32(zero, value);
+                    value.gt(max).if_then_else_i32(max, low).store_u8(narrow);
+                }
+                D::U8Vec::load(d, &bytes[..block])
+            });
+            D::U8Vec::store_interleaved_3(r, g, b, dst);
+            x += block;
+        }
+        for (pixel, x) in output_blocks.into_remainder().chunks_exact_mut(3).zip(x..width) {
+            for (dst, src) in pixel.iter_mut().zip(inputs) {
+                *dst = src[x].clamp(0, 255) as u8;
+            }
+        }
+    }
+);
+
+#[cfg(test)]
+#[test]
+fn modular_rgb8_save_clamps_odd_rows_without_touching_padding() {
+    let mut r = (0..259).map(|x| x - 1).collect::<Vec<_>>();
+    r[0] = i32::MIN;
+    r[258] = i32::MAX;
+    let g = (0..259).map(|x| 258 - x).collect::<Vec<_>>();
+    let b = (0..259).map(|x| (x * 17) % 259).collect::<Vec<_>>();
+    for width in [1, 15, 31, 65, 127, 259] {
+        let mut output = vec![19u8; width * 3 + 7];
+        store_modular_rgb8([&r[..width], &g[..width], &b[..width]], &mut output);
+        for x in 0..width {
+            assert_eq!(
+                &output[3 * x..3 * x + 3],
+                &[r[x], g[x], b[x]].map(|value| value.clamp(0, 255) as u8)
+            );
+        }
+        assert_eq!(&output[width * 3..], &[19; 7]);
+    }
+}
 
 define_run_interleaved!(
     run_interleaved_2_u16,
