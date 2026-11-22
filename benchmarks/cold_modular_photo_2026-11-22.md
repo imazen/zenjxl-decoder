@@ -232,3 +232,47 @@ at 0.51 GiB peak RSS. The sampling scout took 15 s at 0.13 GiB peak RSS.
 Raw timing and exact readback output are in the same benchmark run
 directory as the boundary replay. Raw CPU profiles are under
 `/mnt/v/output/zenjxl-decoder/render-wait-i270-2026-11-22`.
+
+## Render scratch and border preparation on both widths
+
+The panel uses the six retained production encodes of imazen-26 photos
+1009, 1427 and 1447 at 128 and 256 pixels per group. Stock lossless,
+ordinary VarDCT and an odd RGBA stream are controls. The baseline binary
+at `8496962d` has the same decoder source as main `8bbdb170`. Both
+candidates build with its locked release dependencies and runtime SIMD
+dispatch. Decode uses RGB8 or RGBA8, CMS off, and 1, 4 or 8 pinned i270
+workers. Cold and warm each use three interleaved blocks of five with A/A.
+Warm runs decode once before measurement. Before timing, all 27
+same-file PNG16 comparisons pass for each candidate.
+
+One variant retains owned render row scratch between batches. Each batch
+still uses its own read view of the pipeline. The other variant uses the
+existing no-copy preparation path for recyclable Modular batches, whose
+eligibility already requires zero border dependencies. It processes
+readiness markers without creating empty border images. Both variants
+start independently from the baseline.
+
+Both experiments miss the independent 5% throughput gate.
+
+| Variant | 256 px cold / warm | 128 px cold / warm |
+|---|---:|---:|
+| Reuse scratch across batches | 0.994× / 1.000× | 1.012× / 1.016× |
+| Skip empty borders | 1.003× / 0.943× | 1.006× / 0.967× |
+
+The ratios are eight-worker paired medians, with A/A medians of
+0.994–1.016× across these cells. In separate five-repeat first-decode
+traces, skipping empty borders reduces prepare time by 0.36–0.58 ms
+for the 128 px streams. Render time rises from 4.44 to 4.89 ms on
+1009 and from 4.37 to 4.74 ms on 1427. The 256 px macro's cold
+p95 under scratch reuse is 1.175× with A/A 0.936×. The stock
+eight-worker control under the border change is 0.957× cold.
+The per-file table retains these observations.
+
+[Scratch source](https://github.com/imazen/zenjxl-decoder/tree/rejected/modular-batch-render-context-reuse)
+and [border source](https://github.com/imazen/zenjxl-decoder/tree/rejected/modular-borderless-batch-preparation)
+are archived. The builds, exact checks and timing take 223 s and
+224 s respectively, each at 0.91 GiB peak RSS.
+[Paired timings and p95](cold_modular_batch_preparation_2026-11-22.tsv)
+and [phase medians](cold_modular_batch_preparation_phases_2026-11-22.tsv).
+Full samples, hashes, binaries and commands are in
+`/mnt/v/output/zenjxl-decoder/cold-compact-allocation-2026-11-22` on i270.
