@@ -145,3 +145,34 @@ timing and syscall comparison use 0.89 GiB over 150 s.
 Raw stacks, syscall counts, binary and stream hashes, exact readbacks
 and measurements are under
 `/mnt/v/output/zenjxl-decoder/render-wait-i270-2026-11-22`.
+
+## Cached low-error weights
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/9c4ab29200553545e866554dca17165afd5e7193)
+uses precomputed weights for error sums below 256 and the original
+calculation at larger sums. It selects the four rows for the wire
+weights once per decoded row. The predictor differential test and
+all 24 same-file PNG16 readbacks match. The baseline binary comes
+from `8496962d`, whose decoder and dependency sources match the
+candidate base `d9994cc5`.
+
+| VarDCT stream | Paired LF latency ratio | Paired eight-worker speedup |
+|---|---:|---:|
+| Native 1007 ordinary d1 | 0.904× | 1.000× |
+| Native 1237 ordinary d1 | 0.901× | 1.009× |
+| Native 1619 ordinary d1 | 0.935× | 1.011× |
+| 1024 px 1007 ordinary d1 | 0.901× | 1.039× |
+| Native 1007 tier 1, d0.98, EPF and gaborish disabled | 0.996× | 0.999× |
+
+On the three native ordinary d1 streams, median paired LF-group time
+falls 9.64%, with A/A at 0.995×. Median warm allocating throughput at
+eight workers improves by 0.91%, with A/A at 1.006×. The three Modular
+controls have speed ratios of at least 0.988× across worker counts,
+and all candidate p95 ratios are at most 1.063×. The LF and end-to-end
+targets remain open. The source is on `rejected/lf-wp-cached-error-weights`.
+
+[Per-file phase results](vardct_lf_cached_weights_phase_2026-11-22.tsv)
+and [whole-decode timings](vardct_lf_cached_weights_timing_2026-11-22.tsv).
+The build, differential tests, exact readbacks and i270 timings used
+1.51 GiB peak RSS over 251 seconds. The raw timing, commands and binary
+and stream hashes are under `/mnt/v/output/zenjxl-decoder/lf-weight-table-2026-11-22`.
