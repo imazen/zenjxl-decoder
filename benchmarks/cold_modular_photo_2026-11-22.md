@@ -585,3 +585,47 @@ readbacks, hashes and commands are in
 [Per-file timing and p95](cold_modular_signed_rle_2026-11-22.tsv),
 [class results](cold_modular_signed_rle_classes_2026-11-22.tsv)
 and [hardware counters](cold_modular_signed_rle_instructions_2026-11-22.tsv).
+
+## Two literals in the shared RLE table
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/8de6ff53a8ca9c05c02a875cafc6538f068c6855)
+tries to fit two consecutive literals into the existing 10-bit,
+4 KiB lookup. A pair entry holds two packed residuals, their total
+length and the first token's length. At a row boundary the decoder
+consumes only the first literal. A literal pair makes its second
+residual the previous symbol for subsequent repeats. The test covers
+all 1,024 lookahead windows of a mixed literal-and-repeat table,
+checking the token, bit count and next bits with and without room
+for a second pixel.
+
+The four profiles and five controls use the same binaries' release
+configuration, CPU affinity, allocation endpoints and A/A protocol
+as the signed cursor experiment. All 54 same-file PNG16 pairs and
+12 stock-to-profile pairs pass across worker counts. Four focused
+RLE tests and strict library Clippy pass.
+
+| i270 photo comparison | Median paired throughput, 1 / 4 / 8 workers | Candidate MP/s at 8 workers |
+|---|---:|---:|
+| Same file, cold | 0.935× / 0.955× / 0.976× | 513.54 |
+| Same file, warm | 0.932× / 0.956× / 0.962× | 587.09 |
+| Cold profile vs stock on the candidate | 1.156× / 1.252× / 1.167× | 512.91 |
+
+The warm one-worker photo class p95 latency ratio is 1.112×,
+with A/A at 0.999×. All control class p95 ratios stay within
+1.062×. Four individual ratios exceed 1.10×. Their matching A/A
+values and every tested cell are in the per-file table.
+
+The 256 px profiles retire 23.4–24.4% fewer instructions and
+32.4–34.1% fewer branches in the separate hardware-counter
+capture. Branch misses increase by 80.0–84.7%. These paired
+counts use one and eight workers and three blocks of five
+fresh processes per arm. The throughput gate fails. Source is
+archived on `rejected/modular-rle-literal-pairs`.
+
+Build and replay use 4.32 GiB peak RSS over 358 s. Hardware
+counters use 0.09 GiB over 8 s. The commands, binary and stream
+hashes, exact readbacks and individual timings are in
+`modular-rle-literal-pairs-i270-2026-11-22` on i270.
+[Per-file timing and p95](cold_modular_rle_literal_pairs_2026-11-22.tsv),
+[class results](cold_modular_rle_literal_pairs_classes_2026-11-22.tsv)
+and [hardware counters](cold_modular_rle_literal_pairs_instructions_2026-11-22.tsv).
