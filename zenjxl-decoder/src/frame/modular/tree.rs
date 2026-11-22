@@ -273,6 +273,11 @@ impl GlobalTree {
         Self { tree, prefix_luts }
     }
 
+    #[cfg(feature = "threads")]
+    pub(in crate::frame) fn uses_prefix_codes(&self) -> bool {
+        self.tree.histograms.uses_prefix_codes()
+    }
+
     pub(super) fn has_prefix_cache(&self) -> bool {
         self.prefix_luts.is_some()
     }

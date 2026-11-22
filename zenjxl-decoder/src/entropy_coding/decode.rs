@@ -835,8 +835,12 @@ impl Histograms {
         &self.uint_configs[cluster]
     }
 
+    pub(crate) fn uses_prefix_codes(&self) -> bool {
+        matches!(self.codes, Codes::Huffman(_))
+    }
+
     pub(crate) fn can_fuse_prefix(&self) -> bool {
-        matches!(self.codes, Codes::Huffman(_)) && !self.uses_lz77()
+        self.uses_prefix_codes() && !self.uses_lz77()
     }
 
     pub(crate) fn build_fused_prefix(
