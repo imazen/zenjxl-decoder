@@ -197,7 +197,14 @@ fn decode<'a, 'b, const FUSED: bool>(
             } else if residual == 0 && left == topleft {
                 // A zero residual with left == top-left predicts top, so
                 // the same condition holds throughout this span.
-                row[x..end].copy_from_slice(&top[x..end]);
+                // Fixed-size copies keep short spans in the reconstruction
+                // loop. Larger spans still use the slice copy.
+                match count {
+                    2 if FUSED => row[x..x + 2].copy_from_slice(&top[x..x + 2]),
+                    3 if FUSED => row[x..x + 3].copy_from_slice(&top[x..x + 3]),
+                    4 if FUSED => row[x..x + 4].copy_from_slice(&top[x..x + 4]),
+                    _ => row[x..end].copy_from_slice(&top[x..end]),
+                }
                 left = top[end - 1];
                 topleft = left;
             } else {
