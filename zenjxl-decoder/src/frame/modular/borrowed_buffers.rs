@@ -9,7 +9,7 @@ use crate::{
     error::Result,
     frame::modular::{IMAGE_OFFSET, IMAGE_PADDING},
     image::Image,
-    util::AtomicRefMut,
+    util::{AtomicRefMut, SmallVec},
 };
 
 use super::{ModularBufferInfo, ModularChannel};
@@ -23,9 +23,9 @@ pub fn with_buffers<T>(
     buffers: &[ModularBufferInfo],
     indices: &[usize],
     grid: usize,
-    f: impl FnOnce(Vec<&mut ModularChannel>) -> Result<T>,
+    f: impl FnOnce(SmallVec<[&mut ModularChannel; 4]>) -> Result<T>,
 ) -> Result<T> {
-    let mut bufs = vec![];
+    let mut bufs = SmallVec::<[_; 4]>::new();
     for i in indices {
         // Allocate buffers if they are not present.
         let buf = &buffers[*i];

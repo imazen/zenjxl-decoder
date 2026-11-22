@@ -13,14 +13,14 @@ use crate::{
         transforms::apply::{TransformLimits, meta_apply_local_transforms},
     },
     headers::{JxlHeader, modular::GroupHeader},
-    util::MemoryTracker,
+    util::{MemoryTracker, SmallVec},
 };
 use whereat::at;
 
 // This function will decode a header and apply local transforms if a header is not given.
 // The intended use of passing a header is for the DcGlobal section.
 pub fn decode_modular_subbitstream(
-    buffers: Vec<&mut ModularChannel>,
+    buffers: SmallVec<[&mut ModularChannel; 4]>,
     stream_id: usize,
     header: Option<GroupHeader>,
     global_tree: &Option<GlobalTree>,
@@ -35,28 +35,52 @@ pub fn decode_modular_subbitstream(
     if is_empty {
         return Ok(());
     }
-    let mut transform_steps = vec![];
-    let mut buffer_storage = vec![];
-
-    let buffers = buffers.into_iter().collect::<Vec<_>>();
-    let (header, mut buffers) = match header {
-        Some(h) => (h, buffers),
-        None => {
-            let h = GroupHeader::read(br)?;
-            if !h.transforms.is_empty() {
-                // Note: reassigning to `buffers` here convinces the borrow checker that the borrow of
-                // `buffer_storage` ought to outlive `buffers[..]`'s lifetime, which obviously breaks
-                // applying transforms later.
-                let new_bufs;
-                (new_bufs, transform_steps) =
-                    meta_apply_local_transforms(buffers, &mut buffer_storage, &h, limits)?;
-                (h, new_bufs)
-            } else {
-                (h, buffers)
-            }
-        }
+    let apply_local_transforms = header.is_none();
+    let header = match header {
+        Some(header) => header,
+        None => GroupHeader::read(br)?,
     };
+    let mut buffers = buffers;
+    if !apply_local_transforms || header.transforms.is_empty() {
+        return decode_channels(
+            &mut buffers,
+            stream_id,
+            &header,
+            global_tree,
+            br,
+            memory_tracker,
+            limits,
+        );
+    }
 
+    let mut buffer_storage = Vec::new();
+    let (mut transformed, steps) =
+        meta_apply_local_transforms(buffers.into_vec(), &mut buffer_storage, &header, limits)?;
+    decode_channels(
+        &mut transformed,
+        stream_id,
+        &header,
+        global_tree,
+        br,
+        memory_tracker,
+        limits,
+    )?;
+    drop(transformed);
+    for step in steps.iter().rev() {
+        step.local_apply(&mut buffer_storage)?;
+    }
+    Ok(())
+}
+
+fn decode_channels(
+    buffers: &mut [&mut ModularChannel],
+    stream_id: usize,
+    header: &GroupHeader,
+    global_tree: &Option<GlobalTree>,
+    br: &mut BitReader,
+    memory_tracker: &MemoryTracker,
+    limits: TransformLimits,
+) -> Result<()> {
     if header.use_global_tree && global_tree.is_none() {
         return Err(at!(Error::NoGlobalTree));
     }
@@ -105,16 +129,8 @@ pub fn decode_modular_subbitstream(
             br.check_for_error().map_err(|e| at!(e))?;
             continue;
         }
-        decode_modular_channel(&mut buffers, i, stream_id, &header, tree, &mut reader, br)?;
+        decode_modular_channel(buffers, i, stream_id, header, tree, &mut reader, br)?;
     }
 
-    reader.check_final_state(&tree.histograms, br)?;
-
-    drop(buffers);
-
-    for step in transform_steps.iter().rev() {
-        step.local_apply(&mut buffer_storage)?;
-    }
-
-    Ok(())
+    reader.check_final_state(&tree.histograms, br)
 }
