@@ -167,3 +167,26 @@ named profile captures are under
 on i270. The first profile invocation reused a filename through shell
 expansion. The four separately named captures in that directory
 supply the recorded sample shares.
+
+## Refill on demand
+
+Candidate `c22ba6afadcca090fd53301667f80014531e948a` refills the
+register-resident cursor when fewer than 12 bits remain. The archived
+comparison `7413bf0782e24a80c6e8131e0a4f1814c813d43f` attempts a
+refill at every fused lookup. Both have the same decoder, table and
+two-symbol prediction loop apart from that branch. The zqi prefix
+microbenchmark motivated examining refill frequency.
+
+The two native shared-prefix photos slow to 0.947× and 0.925× at
+one worker, with the matching A/A estimates within 0.81% of baseline.
+The textured per-channel native stream and 1024 px crop reach 0.968×
+and 0.955×. All ten streams reproduce exact 16-bit readbacks at all
+three worker counts. Eight-worker A/A variation reaches 32.5% on one
+crop. The one-worker result rejects the conditional refill change.
+
+[Per-stream results](fused_prefix_refill_2026-11-22.tsv) use three
+interleaved blocks of five decodes on the same i270 P cores and
+allocating RGB8 endpoint as the other ablations. The build and
+run took 92 seconds with 0.91 GiB peak RSS. Full timing, commands,
+binary and stream identities and readbacks are under
+`/mnt/v/output/zenjxl-decoder/fused-prefix-refill-2026-11-22`.
