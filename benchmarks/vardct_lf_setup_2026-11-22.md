@@ -15,7 +15,7 @@ blocks of eight timed decodes after three warmups per process.
 ## Where the baseline spends time
 
 The [phase inventory](vardct_lf_setup_baseline_2026-11-22.tsv) records
-1- and 8-worker medians after two warmups. At eight workers, the three
+1- and 8-worker medians from seven timed decodes after two warmups. At eight workers, the three
 ordinary d1 photos spend 4.96–5.89 ms in LF groups, which is 14.1–16.3%
 of decode wall time. LF-group timing includes the parallel LF and HF
 metadata decode, overlapped HF-global parsing and copy-back. Copy-back
@@ -89,8 +89,8 @@ Candidate `e7d211539b97755e8861f1102617ff1687cd524e` handles the two row edges e
 uses adjacent top-row samples and the carried left pixel for the
 interior. The output, tree properties and both error histories match
 the per-pixel decoder for default and custom weights through odd and
-even rows at widths 1 through 256. The differential test and all 24
-same-file PNG16 comparisons pass.
+even rows at widths 1, 2, 3, 4, 17, 255 and 256. The differential test
+and all 24 same-file PNG16 comparisons pass.
 
 The ordinary d1 photos have a median paired LF-group latency ratio of
 1.063 (A/A 1.010). Their median eight-worker speedup is 0.985× (A/A
