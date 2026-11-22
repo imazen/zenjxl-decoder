@@ -9,12 +9,13 @@ use whereat::at;
 use crate::bit_reader::{BitReader, FastBits};
 use crate::entropy_coding::ans::*;
 use crate::entropy_coding::context_map::*;
+use crate::entropy_coding::fused_prefix::{FusedPrefixLut, Residuals};
 use crate::entropy_coding::huffman::*;
 use crate::entropy_coding::hybrid_uint::*;
 use crate::error::{Error, Result};
 use crate::headers::encodings::*;
-use crate::util::NewWithCapacity;
 use crate::util::tracing_wrappers::*;
+use crate::util::{MemoryTracker, NewWithCapacity};
 
 pub fn decode_varint16(br: &mut BitReader) -> Result<u16> {
     if br.read(1)? != 0 {
@@ -313,6 +314,17 @@ pub struct PlainCursor<'a> {
     fb: FastBits<'a>,
     ans: u32,
     nbits_acc: u32,
+}
+
+impl PlainCursor<'_> {
+    #[inline(always)]
+    pub(crate) fn read_fused_signed(
+        &mut self,
+        lut: &FusedPrefixLut,
+        allow_pair: bool,
+    ) -> Option<Residuals> {
+        lut.read(&mut self.fb, allow_pair)
+    }
 }
 
 impl SymbolReader {
@@ -829,6 +841,21 @@ impl Histograms {
     #[inline(always)]
     fn uint_config(&self, cluster: usize) -> &HybridUint {
         &self.uint_configs[cluster]
+    }
+
+    pub(crate) fn build_fused_prefix(
+        &self,
+        cluster: usize,
+        tracker: &MemoryTracker,
+    ) -> Option<FusedPrefixLut> {
+        let Codes::Huffman(codes) = &self.codes else {
+            return None;
+        };
+        let config = self.uint_configs.get(cluster)?;
+        if self.uses_lz77() || self.single_symbol_value(cluster).is_some() {
+            return None;
+        }
+        FusedPrefixLut::build(codes.table(cluster), config, tracker)
     }
 
     /// Reads one unsigned symbol of `cluster` through a [`PlainCursor`]
