@@ -67,3 +67,19 @@ baseline, interleaving and readbacks as the coefficient experiment.
 The passing build, tests and benchmark took 308 s and 4.34 GiB peak
 RSS. Raw data and commands are under
 `/mnt/v/output/zenjxl-decoder/lf-wp-weight-table-2026-11-22` on i270.
+
+## Render-stage lock reference
+
+Upstream [jxl-rs 3b67215d8](https://github.com/libjxl/jxl-rs/commit/3b67215d8)
+replaces per-row RwLock acquisition in several stages with a snapshot
+cached per thread. At `6000956d`, Zen's corresponding EPF, Modular XYB,
+noise, patch and spline stages read frame or stage-owned data directly.
+The current render code takes mutexes around group contexts and pools
+of group buffers. These acquisitions occur per group, outside the row
+kernels. The upstream change therefore has no corresponding per-row
+lock to replace in the current Zen pipeline.
+
+The eight-worker profiles above attribute 0.07% and 0.16% of CPU
+samples to the contended standard mutex entry point on native d1
+images 1007 and 1619. This profiling event measures on-CPU samples.
+It provides no estimate of blocked time in the group scheduler.
