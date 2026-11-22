@@ -538,3 +538,50 @@ Raw profiles, timings, hashes and commands are in
 [Cycle attribution](cold_modular_cycles_2026-11-22.tsv),
 [per-file timings and p95](cold_modular_short_rle_copy_2026-11-22.tsv),
 and [class comparisons](cold_modular_short_rle_copy_classes_2026-11-22.tsv).
+
+## Signed residuals in the RLE cursor
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/3b863f1c6f6980eb2331ae2cd39c1089eab73397)
+packs signed literals into the existing 10-bit fused lookup and retains
+the last residual in signed form in the RLE cursor. Repeat lengths stay
+unsigned. Wider literals use the general token decode. Cursor handoffs
+convert the last residual to and from the general reader's unsigned
+representation. This also changes the non-fused cursor, so the replay
+adds the regular RLE stream of glacier photo 1447 as a fifth control.
+
+The four target streams, pinned i270 cores, Rust 1.99.1 release scope,
+RGB8/RGBA8 output and cold, warm and A/A schedule match the short-copy
+experiment above. Four RLE tests, including full-width packed-symbol
+round trips and exact generic-decoder comparisons, pass with strict
+library Clippy. All 54 same-file PNG16 pairs and 12 stock-to-profile
+pairs pass across worker counts.
+
+| Comparison | Median paired speedup, 1 / 4 / 8 workers | Candidate MP/s at 8 workers |
+|---|---:|---:|
+| Same-file photos, cold | 1.011× / 1.007× / 1.010× | 538.32 |
+| Same-file photos, warm | 1.010× / 1.005× / 0.998× | 622.16 |
+| Cold profiles vs stock on the candidate | 1.266× / 1.341× / 1.240× | 535.79 |
+
+The 256 px profiles gain 2.1–2.4% at one worker cold. The non-fused
+1447 control slows 5.0% cold and 4.0% warm at one worker, with A/A
+ratios of 0.999× and 1.002×. Its warm four-worker p95 reaches 1.104×
+with A/A at 1.058×. The scanned-text cold eight-worker p95 is 1.280×,
+with A/A at 1.348×. Candidate class p95 ratios stay within 1.037×.
+The candidate falls short of the independent decoder speedup and
+550 MP/s cold targets. Source is archived on
+`rejected/signed-modular-rle-cursor`.
+
+In a separate capture on the same 256 px streams and binaries,
+three alternating blocks of five fresh processes per arm count
+retired user instructions, branches and branch misses on the
+pinned P cores. The candidate uses 2.1–2.2% fewer instructions
+and 9.9–10.6% more branches at one and eight workers. Branch misses
+increase by 0.4–1.1%. The counts cover the entire process.
+
+The build and qualification use 4.31 GiB peak RSS over 357 s.
+The counter capture uses 0.09 GiB over 8 s. Raw timings, exact
+readbacks, hashes and commands are in
+`modular-signed-rle-i270-2026-11-22` on i270.
+[Per-file timing and p95](cold_modular_signed_rle_2026-11-22.tsv),
+[class results](cold_modular_signed_rle_classes_2026-11-22.tsv)
+and [hardware counters](cold_modular_signed_rle_instructions_2026-11-22.tsv).
