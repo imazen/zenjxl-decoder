@@ -816,7 +816,11 @@ pub fn decode_vardct_group(
                     // read; the symbol then only selects one, keeping the
                     // table load off the symbol-to-symbol dependency chain.
                     let mut nonzeros_part = zero_density_nonzeros_part(nonzeros, log_num_blocks);
-                    for k in num_blocks..num_coeffs {
+                    for (k, &coeff_index) in permutation[..num_coeffs]
+                        .iter()
+                        .enumerate()
+                        .skip(num_blocks)
+                    {
                         if nonzeros == 0 {
                             break;
                         }
@@ -835,7 +839,7 @@ pub fn decode_vardct_group(
                         if nonzero {
                             nonzeros_part = part_if_nonzero;
                         }
-                        let coeff_index = permutation[k] as usize;
+                        let coeff_index = coeff_index as usize;
                         current_coeffs[coeff_index] = accumulate_hf_coefficient(
                             current_coeffs[coeff_index],
                             unpack_signed(u_coeff),

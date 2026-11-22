@@ -60,3 +60,16 @@ are derived from the CLI's per-sample MP/s and pixel count. The streams,
 pinned commands, binary and stream hashes, exact readback hashes, and
 logs are retained on i270 under
 `/mnt/v/output/zenjxl-decoder/lazy-vardct-2026-11-22`.
+
+## Strict-lint follow-up
+
+Returning a coefficient-order slice exposed Clippy's
+`needless_range_loop` in the AC loop. The loop now walks the same
+coefficient indices directly and retains the same symbol contexts,
+bounds and end-of-block check. Strict library Clippy and 11 selected
+progressive, HDR and streaming tests pass. The follow-up matches all
+12 PNG16 readbacks against the original lazy build. A four-stream warm
+check returns 1.007× / 1.009× / 1.019× at 1 / 4 / 8 workers, within
+the range of that check's paired control variation. It does not
+replace the original cohort timing. The build and check used 1.50 GiB
+peak RSS. Raw samples are in `lint-fixed-warm` under the same run folder.
