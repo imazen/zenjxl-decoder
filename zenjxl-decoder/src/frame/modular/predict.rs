@@ -573,10 +573,7 @@ impl WeightedPredictorState {
         let mut te_w: i64 = 0;
         let mut carry_n = prev_pe[0];
         let mut carry_nw = prev_pe[0];
-        for x in 0..xsize {
-            let data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
-            let pos_ne = if x + 1 < xsize { x + 1 } else { x };
-            let pos_nw = if x > 0 { x - 1 } else { x };
+        let mut decode = |x: usize, pos_nw: usize, pos_ne: usize, data: PredictionData| {
             // At x = 0 both are prev_pe[0]; afterwards prev_pe[x] and
             // prev_pe[x - 1] as updated by the two previous samples.
             let errors_n = carry_n;
@@ -632,7 +629,6 @@ impl WeightedPredictorState {
             }
             let wp_pred = (pred + PREDICTION_ROUND) >> PRED_EXTRA_BITS;
             let val = read(p as i32).wrapping_add(wp_pred as i32);
-            row[x] = val;
 
             let v = add_bits(val);
             let e = (pred - v) as i32;
@@ -644,7 +640,7 @@ impl WeightedPredictorState {
             }
             cur_pe[x] = errs;
             // prev_pe[x + 1] is errors_ne unless x is the last sample.
-            let base = if x + 1 < xsize {
+            let base = if pos_ne > x {
                 errors_ne
             } else {
                 prev_pe[x + 1]
@@ -656,6 +652,42 @@ impl WeightedPredictorState {
             prev_pe[x + 1] = updated;
             carry_nw = errors_n;
             carry_n = updated;
+            val
+        };
+
+        if y < 2 || xsize < 3 {
+            for x in 0..xsize {
+                let data = PredictionData::get_rows(row, row_top, row_toptop, x, y);
+                let pos_ne = (x + 1).min(xsize - 1);
+                row[x] = decode(x, x.saturating_sub(1), pos_ne, data);
+            }
+        } else {
+            let first = PredictionData::get_rows(row, row_top, row_toptop, 0, y);
+            let mut left = decode(0, 0, 1, first);
+            row[0] = left;
+
+            // Interior samples use three adjacent top-row values and the
+            // previously reconstructed sample. Only the endpoints clamp.
+            let top_windows = row_top[..xsize].windows(3).zip(&row_toptop[1..xsize]);
+            let last = xsize - 1;
+            for (x, (sample, (top, &toptop))) in
+                row[1..last].iter_mut().zip(top_windows).enumerate()
+            {
+                let x = x + 1;
+                let data = PredictionData {
+                    left,
+                    top: top[1],
+                    topleft: top[0],
+                    topright: top[2],
+                    toptop,
+                    ..PredictionData::default()
+                };
+                left = decode(x, x - 1, x + 1, data);
+                *sample = left;
+            }
+
+            let final_data = PredictionData::get_rows(row, row_top, row_toptop, last, y);
+            row[last] = decode(last, last - 1, last, final_data);
         }
         self.carry_pos = (usize::MAX, usize::MAX);
     }
@@ -791,6 +823,68 @@ mod tests {
         );
         state.update_errors((rng.next() % 256) as i32, pos, xsize);
         res
+    }
+
+    #[test]
+    fn weighted_row_windows_match_per_pixel_prediction() {
+        for width in [1, 2, 3, 4, 17, 255, 256] {
+            for wp_header in [
+                WeightedHeader::default(&crate::headers::encodings::Empty {}),
+                WeightedHeader {
+                    all_default: false,
+                    p1c: 31,
+                    p2c: 7,
+                    p3ca: 1,
+                    p3cb: 25,
+                    p3cc: 14,
+                    p3cd: 6,
+                    p3ce: 9,
+                    w0: 0,
+                    w1: 4,
+                    w2: 15,
+                    w3: 1,
+                    ..WeightedHeader::default(&crate::headers::encodings::Empty {})
+                },
+            ] {
+                let mut windowed = WeightedPredictorState::new(&wp_header, width).unwrap();
+                let mut per_pixel = WeightedPredictorState::new(&wp_header, width).unwrap();
+                let mut top = vec![0; width];
+                let mut toptop = top.clone();
+                let mut rng = SimpleRandom::new();
+                for y in 0..9 {
+                    let residuals: Vec<i32> = (0..width)
+                        .map(|x| {
+                            let r = rng.next() as i32;
+                            if (x + y) % 5 == 0 {
+                                r.wrapping_mul(3)
+                            } else {
+                                r % 1024 - 512
+                            }
+                        })
+                        .collect();
+                    let mut read = residuals.iter().copied();
+                    let mut properties = vec![];
+                    let mut actual = vec![0; width];
+                    windowed.decode_row(y, &mut actual, &top, &toptop, |p| {
+                        properties.push(p);
+                        read.next().unwrap()
+                    });
+                    let mut expected = vec![0; width];
+                    for x in 0..width {
+                        let data = PredictionData::get_rows(&expected, &top, &toptop, x, y);
+                        let (pred, property) = per_pixel.predict_and_property((x, y), width, &data);
+                        assert_eq!(properties[x], property, "width {width}, ({x},{y})");
+                        expected[x] = residuals[x].wrapping_add(pred as i32);
+                        per_pixel.update_errors(expected[x], (x, y), width);
+                    }
+                    assert_eq!(actual, expected, "width {width}, row {y}");
+                    assert_eq!(windowed.pred_errors_buffer, per_pixel.pred_errors_buffer);
+                    assert_eq!(windowed.error, per_pixel.error);
+                    toptop = top;
+                    top = actual;
+                }
+            }
+        }
     }
 
     #[test]
