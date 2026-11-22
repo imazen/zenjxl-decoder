@@ -71,7 +71,7 @@ impl FusedPrefixLut {
 
     #[inline(always)]
     pub(super) fn read(&self, bits: &mut FastBits<'_>, allow_pair: bool) -> Option<Residuals> {
-        if !bits.ensure(WINDOW_BITS as usize) {
+        if !bits.ensure_lookup(WINDOW_BITS as usize) {
             return None;
         }
         let index = bits.peek_buffered(WINDOW_BITS as usize) as usize & (TABLE_SIZE - 1);
