@@ -52,3 +52,43 @@ readback check. Run-heavy peak RSS in table order was 0.17, 0.18, 0.17 and
 per-decode p95 or buffer reuse. Historical starting points are
 [PR 61](https://github.com/imazen/zenjxl-decoder/pull/61) commits
 `0441e81b` and `31ad13d6`.
+
+## Per-channel histogram lookup
+
+The [multi-context experiment](https://github.com/imazen/zenjxl-decoder/commit/c06340c393e10546404c208fb0e84e03601c7fa0)
+builds up to four charged lookup tables per tree on demand. Each channel
+uses the table and fallback reader for its selected cluster. LZ77 and
+singleton codes retain their existing paths. The
+[matched-source control](https://github.com/imazen/zenjxl-decoder/commit/6b31390fd961977511f3ab73c72d8d7839815040)
+restricts table construction to single-context streams.
+
+| Stream | Paired throughput, 1 / 4 / 8 workers | p95 latency, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Textured 1007, 1024 px | 1.093× / 1.072× / 1.076× | 0.908× / 0.946× / 0.879× |
+| Textured 1007, native | 1.051× / 1.037× / 0.977× | 0.951× / 0.991× / 0.989× |
+| Smooth 1019, native | 1.012× / 1.001× / 1.028× | 0.984× / 0.990× / 1.027× |
+| Terminal 8457, native | 1.005× / 1.008× / 0.959× | 1.002× / 0.984× / 1.023× |
+
+The 1024 px textured crop gains at all three worker counts. The native
+textured stream loses 2.3% median throughput at eight workers. The native
+terminal loses 4.1% at eight workers, and the single-context shared-prefix
+control loses 2.6% with A/A at 0.961×. The native throughput and general
+adoption targets remain open.
+
+Single-worker `perf` sampling finds `decode_residual`, used to construct
+the tables, at 16.05% of sampled userspace time on the textured crop and
+11.07% on its native original. On the smooth native stream, the distance-1
+RLE decoder takes 63.58% of sampled userspace time and table construction
+takes 2.66%.
+
+The initial comparison against the earlier two-symbol build includes
+11 unchanged input streams and exact readbacks at one, four and eight
+workers. The isolated six-stream comparison adds 18 exact readback pairs
+and 25 individual decodes per arm and worker count. Both use 1.99.1 release
+builds and i270 P-core pinning. The initial build and run used 0.91 GiB
+peak RSS over 104 seconds. The isolated test used 0.90 GiB over 159 seconds.
+The separate profiler used 0.10 GiB over nine seconds.
+
+[Isolated samples summary](fused_channel_prefix_2026-11-22.tsv).
+Raw timings, both binaries, stream hashes and perf samples are in
+`/mnt/v/output/zenjxl-decoder/fused-channel-contexts-2026-11-22` on i270.
