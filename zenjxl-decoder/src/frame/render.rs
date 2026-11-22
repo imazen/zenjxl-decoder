@@ -745,11 +745,10 @@ impl Frame {
         // barrier cycle. Each barrier costs ~1ms+ from thread synchronization,
         // so we avoid batching unless group count is very high (8K+ images).
         // At 4T/384 groups, 6 batches caused 40% overhead vs unbatched.
-        // Large modular frames without noise or border-dependent stages are
-        // decoded in batches of eight groups per thread, so that the group
-        // buffers rendered in one batch return through the recycle pool and
-        // are reused by the next, bounding the frame's group buffers by the
-        // batch instead of the image (upstream #812). Batches cost ~2.5% of
+        // In large Modular frames without noise or border-dependent stages,
+        // group buffers return to the recycle pool between batches. The pool
+        // bounds group buffer allocations by batch size (upstream #812).
+        // Batches cost ~2.5% of
         // frame time on a 48-group frame at 4 threads (M4 Pro, load
         // imbalance at the batch boundary), so smaller frames stay unbatched.
         let recycle_modular = !is_vardct
@@ -757,7 +756,11 @@ impl Frame {
             && !lmp_ref!().needs_border_rendering()
             && num_groups > num_threads * 16;
         let decode_batch_size = if recycle_modular {
-            (num_threads * 8).max(1)
+            // Smaller batches bound the working set of 256-pixel groups on
+            // parallel photo decodes. The 128-pixel groups need more work
+            // between barriers. See benchmarks/cold_modular_photo_2026-11-22.md.
+            let groups_per_worker = if self.header.group_dim() == 256 { 4 } else { 8 };
+            (num_threads * groups_per_worker).max(1)
         } else if num_needs_pixels > num_threads * 256 {
             num_threads * 64
         } else {
