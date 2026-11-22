@@ -7,6 +7,7 @@ use super::common::precompute_references;
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::{Histograms, PlainCursor, SymbolReader, unpack_signed},
+    entropy_coding::fused_prefix::FusedPrefixLut,
     error::Result,
     frame::modular::{
         IMAGE_OFFSET, IMAGE_PADDING, ModularChannel, Tree,
@@ -14,7 +15,7 @@ use crate::{
             common::make_pixel,
             specialized_trees::{TreeSpecialCase, specialize_tree},
         },
-        predict::{PredictionData, WeightedPredictorState},
+        predict::{PredictionData, WeightedPredictorState, clamped_gradient},
         tree::{NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, predict},
     },
     headers::modular::GroupHeader,
@@ -174,6 +175,89 @@ impl SymbolSource for CursorSource<'_, '_, '_> {
             None => self.slow(histograms, cluster, true),
         }
     }
+}
+
+struct FusedPrefixSource<'r, 'b, 'a> {
+    source: CursorSource<'r, 'b, 'a>,
+    lut: &'r FusedPrefixLut,
+    cluster: usize,
+}
+
+impl FusedPrefixSource<'_, '_, '_> {
+    #[inline(always)]
+    fn read(&mut self, histograms: &Histograms) -> i32 {
+        self.source
+            .cursor
+            .read_fused_signed(self.lut)
+            .unwrap_or_else(|| self.source.read_signed(histograms, self.cluster))
+    }
+}
+
+/// Single-Gradient reconstruction needs the previous row and the current
+/// left value. Keep the entropy cursor in a by-value source for the channel.
+#[inline(never)]
+fn decode_fused_prefix<'r, 'b, 'a>(
+    channel: &mut ModularChannel,
+    source: FusedPrefixSource<'r, 'b, 'a>,
+    histograms: &Histograms,
+) -> CursorSource<'r, 'b, 'a> {
+    let mut source = source;
+    let (width, height) = channel.data.size();
+    for y in 0..height {
+        let [row, top] = channel.data.distinct_full_rows_mut([y + 2, y + 1]);
+        let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + width];
+        if y == 0 {
+            let mut left = 0i32;
+            for pixel in row {
+                left = left.wrapping_add(source.read(histograms));
+                *pixel = left;
+            }
+            continue;
+        }
+        let top = &top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + width];
+        let mut left = top[0];
+        let mut top_left = top[0];
+        for (pixel, &above) in row.iter_mut().zip(top) {
+            let guess = clamped_gradient(left.into(), above.into(), top_left.into());
+            left = source.read(histograms).wrapping_add(guess as i32);
+            *pixel = left;
+            top_left = above;
+        }
+    }
+    source.source
+}
+
+/// Keep construction and the dedicated loop out of the ordinary channel handler.
+#[inline(never)]
+fn try_decode_fused_prefix(
+    channel: &mut ModularChannel,
+    tree: &Tree,
+    cluster: usize,
+    reader: &mut SymbolReader,
+    br: &mut BitReader<'_>,
+) -> bool {
+    #[cfg(test)]
+    if tests::DISABLE_FUSED.load(std::sync::atomic::Ordering::Relaxed)
+        || tests::DISABLE_CURSOR.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return false;
+    }
+    let Some(cursor) = reader.plain_cursor(br) else {
+        return false;
+    };
+    let Some(lut) = tree.fused_prefix(cluster) else {
+        return false;
+    };
+    #[cfg(test)]
+    tests::FUSED_USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let fused = FusedPrefixSource {
+        source: CursorSource { cursor, reader, br },
+        lut,
+        cluster,
+    };
+    let src = decode_fused_prefix(channel, fused, &tree.histograms);
+    src.reader.finish_plain_cursor(src.cursor, src.br);
+    true
 }
 
 pub(super) trait ModularChannelDecoder {
@@ -404,6 +488,14 @@ fn decode_modular_channel_inner(
             ) {
                 return Ok(());
             }
+            // A global tree shares the lookup across groups. Keep the
+            // ordinary cursor for group-local trees and small channels.
+            if header.use_global_tree
+                && size.0 * size.1 >= 4096
+                && try_decode_fused_prefix(buffers[chan], tree, t.clustered_ctx(), reader, br)
+            {
+                return Ok(());
+            }
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::General(t) => {
@@ -417,12 +509,16 @@ fn decode_modular_channel_inner(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     /// Test-only switch that sends every channel through the regular reader.
     pub(super) static DISABLE_CURSOR: AtomicBool = AtomicBool::new(false);
     /// Channels decoded through a `CursorSource`.
     pub(super) static CURSOR_USES: AtomicUsize = AtomicUsize::new(0);
+    pub(super) static DISABLE_FUSED: AtomicBool = AtomicBool::new(false);
+    pub(super) static FUSED_USES: AtomicUsize = AtomicUsize::new(0);
+    static PREFIX_TEST_LOCK: Mutex<()> = Mutex::new(());
     /// Test-only switch that sends weighted-predictor-only channels through
     /// the per-sample `decode_one` path instead of `decode_row`.
     pub(super) static DISABLE_WP_ROWS: AtomicBool = AtomicBool::new(false);
@@ -464,6 +560,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn fused_prefix_matches_plain_cursor() {
+        let _lock = PREFIX_TEST_LOCK.lock().unwrap();
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/plain-cursor");
+        for name in ["gradient_rgb8.jxl", "gradient_gray16.jxl"] {
+            let data = std::fs::read(dir.join(name)).unwrap();
+            fast_matches_generic(name, &data, &DISABLE_FUSED, &FUSED_USES);
+        }
+    }
+
     /// jxl-encoder single-leaf lossless files (prefix codes, no LZ77):
     /// Gradient leaves (`--fast-decode`, 200x96 RGB8 and 272x96 16-bit
     /// gray, two groups across) and a Zero leaf (`-P 0`, 104x36). Each section's
@@ -472,6 +579,8 @@ mod tests {
     #[test]
     fn plain_cursor_matches_reader_path() {
         use crate::api::decoder::tests::decode;
+        let _lock = PREFIX_TEST_LOCK.lock().unwrap();
+        DISABLE_FUSED.store(true, Ordering::Relaxed);
         let dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/plain-cursor");
         for name in ["gradient_rgb8.jxl", "gradient_gray16.jxl", "zero_rgb8.jxl"] {
@@ -494,5 +603,6 @@ mod tests {
                 }
             }
         }
+        DISABLE_FUSED.store(false, Ordering::Relaxed);
     }
 }

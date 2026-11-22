@@ -484,6 +484,24 @@ impl Table {
         br.consume_optimistic(self.entries[pos].bits as usize);
         self.entries[pos].value as u32
     }
+
+    /// Code at the low end of a zero-extended lookahead window.
+    /// The caller must reject a result that extends past its known bits.
+    pub(super) fn lookup_window(&self, window: usize) -> (u32, u32) {
+        let mut index = window & (TABLE_SIZE - 1);
+        let root = self.entries[index];
+        let length = usize::from(root.bits);
+        if length <= TABLE_BITS {
+            return (u32::from(root.bits), u32::from(root.value));
+        }
+        let subtable_bits = length - TABLE_BITS;
+        index += usize::from(root.value) + ((window >> TABLE_BITS) & ((1 << subtable_bits) - 1));
+        let entry = self.entries[index];
+        (
+            (TABLE_BITS + usize::from(entry.bits)) as u32,
+            u32::from(entry.value),
+        )
+    }
 }
 
 #[derive(Debug)]
