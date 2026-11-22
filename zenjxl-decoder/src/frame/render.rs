@@ -770,7 +770,7 @@ impl Frame {
         let recycle_modular =
             can_recycle_modular && (num_groups > recycle_boundary || use_smaller_batches);
         let decode_batch_size = if recycle_modular {
-            let groups_per_worker = if use_smaller_batches { 4 } else { 8 };
+            let groups_per_worker = if use_smaller_batches { 3 } else { 8 };
             (num_threads * groups_per_worker).max(1)
         } else if num_needs_pixels > num_threads * 256 {
             num_threads * 64
