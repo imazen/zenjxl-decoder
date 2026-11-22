@@ -16,7 +16,8 @@
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
-    frame::modular::{IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
+    entropy_coding::fused_prefix::FusedRleLut,
+    frame::modular::{GlobalTree, IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
 };
 
 /// Reads one sample with the regular reader. The cursor goes in and out by
@@ -46,8 +47,8 @@ struct Side<'a, 'b> {
 
 impl Side<'_, '_> {
     #[inline(always)]
-    fn read_span(&mut self, limit: usize) -> (i32, usize) {
-        match self.code.read_span(&mut self.cursor, limit) {
+    fn read_span(&mut self, limit: usize, fused: Option<&FusedRleLut>) -> (i32, usize) {
+        match self.code.read_span(&mut self.cursor, limit, fused) {
             Some((v, count)) => (unpack_signed(v), count),
             None => {
                 let (v, cursor) = read_slow(
@@ -85,7 +86,7 @@ pub(super) fn try_decode(
     };
     #[cfg(test)]
     tests::USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let side = decode(
+    let side = decode::<false>(
         channel,
         Side {
             code,
@@ -95,15 +96,62 @@ pub(super) fn try_decode(
             histograms,
             cluster,
         },
+        None,
     );
     side.reader.finish_rle_cursor(side.cursor, side.br);
     true
 }
+pub(super) fn try_decode_fused(
+    channel: &mut ModularChannel,
+    tree: &GlobalTree,
+    channel_id: usize,
+    stream_id: usize,
+    reader: &mut SymbolReader,
+    br: &mut BitReader<'_>,
+) -> bool {
+    #[cfg(test)]
+    if tests::DISABLE.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
+    let histograms = &tree.tree.histograms;
+    let Some(cursor) = reader.rle_cursor(histograms, br) else {
+        return false;
+    };
+    let Some((cluster, fused)) = tree.rle_lut(channel_id, stream_id, &cursor) else {
+        return false;
+    };
+    let Some(code) = histograms.rle_code(cluster) else {
+        return false;
+    };
+    crate::profile!(modular_decode);
+    #[cfg(test)]
+    tests::USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let side = decode::<true>(
+        channel,
+        Side {
+            code,
+            cursor,
+            reader,
+            br,
+            histograms,
+            cluster,
+        },
+        Some(fused),
+    );
+    side.reader.finish_rle_cursor(side.cursor, side.br);
+    true
+}
+
 /// Takes and returns the side by value so the cursor stays in registers;
 /// behind a `&mut` into this non-inlined function it would be stored and
 /// reloaded around every sample.
 #[inline(never)]
-fn decode<'a, 'b>(channel: &mut ModularChannel, side: Side<'a, 'b>) -> Side<'a, 'b> {
+fn decode<'a, 'b, const FUSED: bool>(
+    channel: &mut ModularChannel,
+    side: Side<'a, 'b>,
+    fused: Option<&FusedRleLut>,
+) -> Side<'a, 'b> {
+    let fused = if FUSED { fused } else { None };
     const { assert!(IMAGE_OFFSET.1 == 2) };
     // A local copy, unlike the by-pointer argument, can be split into
     // registers.
@@ -116,7 +164,7 @@ fn decode<'a, 'b>(channel: &mut ModularChannel, side: Side<'a, 'b>) -> Side<'a, 
             let mut last = 0i32;
             let mut x = 0;
             while x < w {
-                let (residual, count) = side.read_span(w - x);
+                let (residual, count) = side.read_span(w - x, fused);
                 let end = x + count;
                 if count == 1 {
                     last = last.wrapping_add(residual);
@@ -138,7 +186,7 @@ fn decode<'a, 'b>(channel: &mut ModularChannel, side: Side<'a, 'b>) -> Side<'a, 
         let mut topleft = top[0];
         let mut x = 0;
         while x < w {
-            let (residual, count) = side.read_span(w - x);
+            let (residual, count) = side.read_span(w - x, fused);
             let end = x + count;
             if count == 1 {
                 let t = top[x];

@@ -11,9 +11,9 @@ use std::sync::OnceLock;
 
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::Histograms,
     entropy_coding::decode::SymbolReader,
-    entropy_coding::fused_prefix::FusedPrefixLut,
+    entropy_coding::decode::{Histograms, RleCursor},
+    entropy_coding::fused_prefix::{FusedPrefixLut, FusedRleLut},
     error::{Error, Result},
     frame::modular::predict::PredictionData,
     image::Image,
@@ -249,12 +249,17 @@ impl BitsetTree {
 /// Frame-owned MA tree. Group-local trees use `Tree` without a lookup cache.
 pub struct GlobalTree {
     pub(super) tree: Tree,
-    prefix_luts: Option<[OnceLock<Option<FusedPrefixLut>>; 4]>,
+    prefix_luts: Option<PrefixLuts>,
+}
+
+enum PrefixLuts {
+    Plain([OnceLock<Option<FusedPrefixLut>>; 4]),
+    Rle([OnceLock<Option<FusedRleLut>>; 4]),
 }
 
 impl GlobalTree {
     pub(crate) fn new(tree: Tree) -> Self {
-        let prefix_luts = (tree.histograms.can_fuse_prefix()
+        let prefix_luts = (tree.histograms.uses_prefix_codes()
             && tree.nodes.iter().all(|node| {
                 matches!(
                     node,
@@ -269,7 +274,13 @@ impl GlobalTree {
                     }
                 )
             }))
-        .then_some([const { OnceLock::new() }; 4]);
+        .then(|| {
+            if tree.histograms.can_fuse_prefix() {
+                PrefixLuts::Plain([const { OnceLock::new() }; 4])
+            } else {
+                PrefixLuts::Rle([const { OnceLock::new() }; 4])
+            }
+        });
         Self { tree, prefix_luts }
     }
 
@@ -289,21 +300,49 @@ impl GlobalTree {
         channel: usize,
         stream: usize,
     ) -> Option<(usize, &FusedPrefixLut)> {
-        let caches = self.prefix_luts.as_ref()?;
+        let PrefixLuts::Plain(caches) = self.prefix_luts.as_ref()? else {
+            return None;
+        };
+        let cluster = self.prefix_cluster(channel, stream);
+        let lut = caches
+            .get(cluster)?
+            .get_or_init(|| {
+                self.tree
+                    .histograms
+                    .build_fused_prefix(cluster, &self.tree.memory_tracker)
+            })
+            .as_ref()?;
+        Some((cluster, lut))
+    }
+
+    pub(super) fn rle_lut(
+        &self,
+        channel: usize,
+        stream: usize,
+        cursor: &RleCursor<'_>,
+    ) -> Option<(usize, &FusedRleLut)> {
+        let PrefixLuts::Rle(caches) = self.prefix_luts.as_ref()? else {
+            return None;
+        };
+        let cluster = self.prefix_cluster(channel, stream);
+        let lut = caches
+            .get(cluster)?
+            .get_or_init(|| {
+                self.tree
+                    .histograms
+                    .rle_code(cluster)?
+                    .build_fused(cursor, &self.tree.memory_tracker)
+            })
+            .as_ref()?;
+        Some((cluster, lut))
+    }
+
+    fn prefix_cluster(&self, channel: usize, stream: usize) -> usize {
         let mut pos = 0;
         loop {
             match self.tree.nodes[pos] {
                 TreeNode::Leaf { id, .. } => {
-                    let cluster = self.tree.histograms.map_context_to_cluster(id as usize);
-                    let lut = caches
-                        .get(cluster)?
-                        .get_or_init(|| {
-                            self.tree
-                                .histograms
-                                .build_fused_prefix(cluster, &self.tree.memory_tracker)
-                        })
-                        .as_ref()?;
-                    return Some((cluster, lut));
+                    return self.tree.histograms.map_context_to_cluster(id as usize);
                 }
                 TreeNode::Split {
                     property,

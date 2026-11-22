@@ -248,7 +248,9 @@ pub(super) fn try_decode_fused_prefix(
         return false;
     }
     let Some(cursor) = reader.plain_cursor(br) else {
-        return false;
+        return super::rle_gradient::try_decode_fused(
+            channel, tree, channel_id, stream_id, reader, br,
+        );
     };
     let Some((cluster, lut)) = tree.prefix_lut(channel_id, stream_id) else {
         return false;

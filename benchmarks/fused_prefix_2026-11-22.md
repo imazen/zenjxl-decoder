@@ -399,3 +399,63 @@ the 12 GiB wrapper. No source expectations changed.
 [Caller-buffer output and rewind results](fused_prefix_frame_owned_reuse_2026-11-22.tsv).
 Raw samples, release binary hashes, source commits and build commands
 are retained in the same i270 run directory.
+
+## Frame-owned RLE tables on the native photo holdout
+
+This variant uses the historical 10-bit literal/run lookup in the shared
+fixed-Gradient path. For each eligible frame it lazily builds at most four
+4 KiB tables under the existing memory tracker. Run state and reconstruction
+continue to use row-bounded spans. The generic loop remains available for
+local tables, longer tokens and short input windows. The underlying lookup
+comes from the earlier [fused token experiment](https://github.com/imazen/zenjxl-decoder/commit/085d9d122dd78540920d7b87503a6eeddf532c48).
+
+On i270, the same-stream baseline has the boundary scheduling change
+in `ff36edc0`. It has the same decode source as `866472df`, the parent
+of the measured candidate `1d56a4dba582f3793c92622bcc0a1ce9a3f2fbdd`.
+Both binaries use Rust 1.99.1 and locked release dependencies with
+`all-simd,threads`. Each endpoint is allocating RGB8 or RGBA8 with
+CMS off, pinned P cores, three interleaved blocks of five decodes,
+and baseline A/A.
+
+| Same profile file | Cold speedup at 1 / 4 / 8 workers | Warm speedup at 1 / 4 / 8 workers |
+|---|---:|---:|
+| 1009 cityscape, shared RLE | 1.203× / 1.143× / 1.116× | 1.215× / 1.163× / 1.149× |
+| 1427 macro, shared RLE | 1.165× / 1.116× / 1.078× | 1.174× / 1.148× / 1.027× |
+| 1447 glacier, local RLE | 1.001× / 0.985× / 1.017× | 1.001× / 1.005× / 0.932× |
+
+The nine-block warm glacier repeat gives 0.999× / 1.014× / 1.018×.
+The original 8-worker A/A was 0.946×. Its four-worker warm p95
+latency ratio of 1.110 moves to 0.992 in the repeat. The stock
+prefix and VarDCT controls keep at least 0.985× median throughput
+when rounded to three decimals, and at most 1.052× p95 latency.
+Odd RGBA improves in all measured cells. A sampled one-worker profile
+identifies the fused RLE body on the cityscape, macro and forced
+128-pixel glacier. The production glacier uses the non-fused RLE body.
+
+The whole-system replays use the new decoder on both sides and stock
+`--fast-decode -g 0` on the baseline. The three forced 128-pixel RLE
+streams are from the encoder's retained width ablation.
+
+| Photo cohort endpoint | Median MP/s, 1 / 4 / 8 workers | Paired median speedup, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Production 256 px, warm | 133.22 / 389.79 / 660.40 | 1.183× / 1.205× / 1.195× |
+| Forced 128 px, warm | 143.76 / 378.32 / 549.48 | 1.282× / 1.236× / 1.214× |
+| Forced 128 px, cold | 137.45 / 331.55 / 511.34 | 1.274× / 1.193× / 1.157× |
+
+The forced 128-pixel glacier reaches 165.43 / 739.18 MP/s warm. Its
+stream is 25.45% smaller than stock. The colder eight-worker cohort
+remains below 550 MP/s. The forced-width results characterize the
+retained stream choices. The public encoder entry point is a separate check.
+
+All 36 same-stream and stock-to-profile PNG16 comparisons agree across
+binary and worker count. Strict library Clippy and the focused Modular
+and progressive suites pass. The progressive suite retains one existing
+ignore. The warm build and timing run takes 166 s at 0.91 GiB peak RSS.
+The cold controls, warm width run and CPU profiles finish before the
+test build fills the disk, at 0.40 GiB peak RSS. After clearing inactive
+Cargo dev artifacts, the test and cold width replay takes 102 s at
+1.50 GiB peak RSS.
+
+[Per-cell timings, p95 and A/A](fused_rle_shared_holdout_2026-11-22.tsv).
+Raw samples, exact readbacks, command and hash manifests, profiles and
+logs are under `/mnt/v/output/zenjxl-decoder/fused-rle-shared-holdout-2026-11-22`.
