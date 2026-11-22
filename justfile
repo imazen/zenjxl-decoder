@@ -162,6 +162,10 @@ speed-compare *ARGS:
 paired-u8 output baseline candidate *args:
     python3 scripts/perf/paired_u8.py {{quote(output)}} {{quote(baseline)}} {{quote(candidate)}} {{args}}
 
+# Compare the still-image API with caller-owned output buffers and rewind.
+build-paired-output:
+    cargo build --locked --release -p zenjxl-decoder-cli --bin paired-output --no-default-features --features all-simd,threads
+
 # Interleaved ARM decode comparisons, full output preserved.
 arm-decode-tiers-macos:
     mkdir -p "$HOME/tmp"
