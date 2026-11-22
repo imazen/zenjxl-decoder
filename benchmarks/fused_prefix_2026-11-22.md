@@ -507,3 +507,41 @@ uses 0.23 GiB over 193 s and the passing test uses 4.32 GiB over
 98 s under `run-heavy`. Exact hashes, raw timed samples, readbacks
 and command logs are under `rle-window-i270-2026-11-22` in the i270
 decoder run directory.
+
+## Keep Gradient prediction in 32 bits
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/3f08ae0c35f242343dba34ddc52cff30cbc1288a)
+reconstructs the fixed-Gradient prefix/RLE path with a wrapping i32
+intermediate. When top-left is between left and top, the unclamped
+prediction also lies between those values, so it fits in i32. If
+top-left is outside their range, the clamp selects one of the endpoints.
+An arithmetic test checks all 729 triples from nine values, including
+the signed extremes and their neighbors, against the ordinary widened
+predictor.
+
+The build uses the locked `all-simd,threads` closure and Rust 1.99.1.
+Its base `0ee1d786` has the same decoder and dependency sources as the
+retained binary from `edc2abcc`. The four independent photo streams and
+the stock prefix, scan, odd RGBA and d1 VarDCT controls use RGB8 or
+RGBA8 on i270, with CMS off, 1/4/8 pinned workers, and three interleaved
+blocks of five per arm with A/A. Strict library Clippy and all 48
+same-file PNG16 readbacks pass.
+
+| Allocating photo endpoint | Candidate MP/s, 1 / 4 / 8 workers | Median paired speedup, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Cold | 128.59 / 359.28 / 528.11 | 0.974× / 0.989× / 0.998× |
+| Warm | 133.57 / 394.23 / 585.31 | 0.974× / 0.984× / 0.972× |
+
+The one-worker slowdown appears on all four photos at both endpoints.
+Class p95 ratios stay within 1.076×. The individual results include
+a warm eight-worker p95 ratio of 1.187× on 1606 and 1.295× on the
+scan, with A/A at 1.040× and 1.005× respectively. The decoder
+throughput gate fails. Source is archived on `rejected/rle-gradient-i32`.
+
+Both the arithmetic and the existing reader differential tests pass.
+The build and timing wrapper uses 1.98 GiB peak RSS over 211 s.
+The focused release tests take 99 s at 4.29 GiB peak RSS.
+[Per-file timing](fused_rle_gradient_i32_2026-11-22.tsv) and
+[class summaries](fused_rle_gradient_i32_classes_2026-11-22.tsv).
+The raw samples, pixel and binary hashes, and commands are under
+`gradient-i32-i270-2026-11-22` on i270.
