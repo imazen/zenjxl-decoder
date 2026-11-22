@@ -327,3 +327,34 @@ timing run at 0.23 GiB over 220 seconds. The full out-of-line build
 and comparison used 1.51 GiB peak RSS over 295 seconds. Its targeted
 repeats used 0.07 GiB over 47 seconds. Exact logs and binary hashes
 remain in the same i270 run directory.
+
+## Frame-owned lookup for shared Gradient prefix streams
+
+The [frame-owned experiment](https://github.com/imazen/zenjxl-decoder/commit/e8af08b565ef57a78d70007ae7583a91a85ce399)
+caches up to four one-residual tables on the frame-global MA tree.
+Eligible trees use prefix coding without LZ77, Gradient leaves with unit
+multipliers and zero offsets, and splits on channel or stream. The table
+uses the regular cursor for residuals outside its bit window. The
+group-local tree layout and channel loop retain their existing code.
+
+| Identical streams | 1 worker | 4 workers | 8 workers |
+|---|---:|---:|---:|
+| Seven photo streams, median paired speedup | 1.142× | 1.124× | 1.111× |
+| Ten ordinary controls, median paired speedup | 0.997× | 1.001× | 1.002× |
+| Detailed 12 MP photo, shared plain prefix | 1.289× | 1.259× | 1.219× |
+| Smooth 12 MP photo, local RLE | 0.995× | 1.005× | 1.024× |
+
+All 51 warm pairs match in PNG16 at their respective worker counts.
+The focused Modular suite passes all 23 tests, including checks that both
+fused and regular cursor paths run and return identical frames. Scoped
+formatting and strict library Clippy pass. The largest control p95 ratios
+are 1.199× for a 64 px photo at one worker, 1.118× for a plot at four and
+1.127× for an odd RGBA control at eight. The revision remains experimental
+while those tails and the caller-buffer endpoint are evaluated.
+
+The reference is `c266f4c7` and the release binary is `2fd15d5a`.
+The experiment bookmark adds test-only controls. These are three blocks
+of five interleaved warm allocating RGB8/RGBA8 decodes on i270, with A/A.
+The release build, library Clippy and paired capture used 0.91 GiB peak
+RSS over 231 seconds under `run-heavy`.
+[Per-cell timing, p95 and stream hashes](fused_prefix_frame_owned_2026-11-22.tsv).
