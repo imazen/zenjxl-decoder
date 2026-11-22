@@ -403,3 +403,48 @@ six cases. [Per-file timings](cold_modular_inline_channels_2026-11-22.tsv)
 and [class p95](cold_modular_inline_channels_classes_2026-11-22.tsv).
 Raw timing, heaptrack, sources and exact hashes are under
 `inline-modular-channels-2026-11-22` on i270.
+
+## Three groups per worker under the scoped rule
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/4c6892dc26d9a2b4564701e333777aaf52feaf21)
+uses three groups per worker in the existing 256-pixel prefix or
+local-tree recycling rule. The baseline uses four. The 128-pixel
+streams and stock prefix, scan, RGBA and VarDCT remain controls.
+Baseline binary `edc2abcc` shares decode and dependency sources with
+the experiment parent `9f5ea645`.
+
+Both allocating endpoints use i270, RGB8 or RGBA8, CMS disabled,
+1/4/8 pinned workers, and three interleaved blocks of five with
+same-file A/A. All 48 same-file PNG16 pairs and 12 stock-to-profile
+pairs match. Strict library Clippy passes.
+
+| Relevant profile | Cold four-worker speedup | Warm four-worker speedup | Cold eight-worker speedup | Warm eight-worker speedup |
+|---|---:|---:|---:|---:|
+| 1237 g256 | 0.864× | 0.793× | 0.977× | 0.893× |
+| 1619 g256 | 0.863× | 0.798× | 0.994× | 1.001× |
+
+A separate phase replay at four and eight workers uses 15 first
+decodes per file and arm. At four workers, each file goes from
+12 batches of 16 to 16 batches of 12. The timed render phase
+increases from 4.29 to 8.84 ms for 1237 and 4.32 to 8.44 ms
+for 1619. Group decode increases from 20.58 to 21.91 ms and
+17.68 to 18.79 ms respectively. At eight workers the render phase
+also increases, by 0.39 and 0.30 ms. These phase measurements
+use the existing diagnostics. Standalone throughput timings keep
+the diagnostics disabled.
+
+The cold system replay with the candidate on both arms reaches
+1.234× stock at one worker and 524.37 MP/s at eight on the four
+photos. The experiment misses the speed goals. The four-worker
+class p95 ratios are 1.175× cold and 1.235× warm. The unchanged
+scan control's cold four-worker per-file p95 reaches 1.493× with
+A/A at 1.134×. The source is archived on
+`rejected/scoped-modular-batch-three`.
+
+[Per-file timings](cold_modular_batch_three_2026-11-22.tsv),
+[class p95](cold_modular_batch_three_classes_2026-11-22.tsv) and
+[phase summaries](cold_modular_batch_three_phases_2026-11-22.tsv).
+The build, exact decode and timing wrapper uses 1.98 GiB peak RSS
+over 243 s. Phase capture uses 0.09 GiB over 4 s. Commands, binary
+and stream hashes, readbacks and raw samples are under
+`modular-batch3-i270-2026-11-22` on i270.
