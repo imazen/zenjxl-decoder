@@ -41,3 +41,29 @@ The successful build, tests and benchmark took 325 s and 4.26 GiB
 peak RSS. Commands, binary and stream hashes, exact readbacks and raw
 timings are under `/mnt/v/output/zenjxl-decoder/lf-wp-default-2026-11-22`
 on i270.
+
+## Exact lookup for small prediction errors
+
+Candidate `3af4135af4a8aaf6390f1cdbe7c7090529af6826` adds two
+256-entry tables to the default-coefficient kernel. All four errors
+must fit the lookup. The generic arithmetic handles larger errors
+and custom coefficients. Three focused tests pass, including the
+full table range and large-error fallbacks. All eight streams match
+baseline in the same exact readbacks at 1, 4 and 8 workers.
+
+On native d1 photos 1007 and 1619, the paired LF-group reductions
+are 12.62% and 10.70%. Whole-image decode speedups at eight workers
+are 1.042× and 1.025×. The tier-1 d0.98 control, whose profile spends
+more time in Gradient prediction, has a 1.014× LF latency ratio.
+This change misses the 15% phase and 5% full-image gates. The
+one-worker p95 on 1619 is 1.173×, with A/A at 0.991×. The small
+RGBA control's eight-worker throughput is 0.931× with A/A at
+0.929×. The measured candidate is archived under
+`rejected/lf-default-wp-weight-table`.
+
+The [decode](lf_wp_table_2026-11-22.tsv) and
+[phase](lf_wp_table_phase_2026-11-22.tsv) runs use the same streams,
+baseline, interleaving and readbacks as the coefficient experiment.
+The passing build, tests and benchmark took 308 s and 4.34 GiB peak
+RSS. Raw data and commands are under
+`/mnt/v/output/zenjxl-decoder/lf-wp-weight-table-2026-11-22` on i270.
