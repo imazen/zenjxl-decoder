@@ -196,3 +196,39 @@ p95 ratios are at most 1.084×.
 The six stream hashes, exact readbacks, phase logs, commands and
 raw samples are in
 `/mnt/v/output/zenjxl-decoder/cold-prefix-boundary-2026-11-22/current-main`.
+
+### Profile comparison on three further native photographs
+
+Decode the frozen stock and throughput encodes for imazen-26 originals
+1009, 1427 and 1447 with the boundary candidate on both sides. The
+stock uses `--fast-decode -g 0`. The throughput streams preserve exact
+samples and save 17.70% median bytes. The encoder study has independent
+jxl-rs and djxl v0.12 checks, encoder identities, and the balanced
+profile comparison.
+[Encoder results](https://github.com/imazen/jxl-encoder/blob/873e5c9/benchmarks/faster_decode_imazen26_lossless_2026-11-22.md#three-additional-native-lossless-photo-controls).
+
+| RGB8 endpoint | Median MP/s, 1 / 4 / 8 workers | Paired median speedup, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Cold allocating | 126.09 / 351.36 / 507.11 | 1.172× / 1.191× / 1.153× |
+| Warm allocating | 130.45 / 388.68 / 564.26 | 1.166× / 1.159× / 1.142× |
+| Warm caller-owned | 141.65 / 458.78 / 629.86 | 1.181× / 1.243× / 1.326× |
+
+The eight-worker allocating cold endpoint still falls below 550 MP/s.
+The one-worker relative speedup falls below 1.25× at every endpoint.
+The cityscape is the principal one-worker outlier, reaching 0.922×
+warm. At one worker on that source, `perf` assigns 74.61% of stock
+self samples to `decode_fused_prefix` and 77.63% of profile self
+samples to `rle_gradient::decode`. Integer-to-RGB8 conversion accounts
+for 3.71–3.98% in the stock, profile and forced plain-prefix captures.
+
+Both allocating endpoints use three blocks of five, with all nine
+stock-to-profile PNG16 pairs matching exactly at each endpoint.
+The caller-owned harness checks byte equality between the profile and
+stock outputs and between its reused and allocating decodes.
+The extended controls and all three endpoints took 307 s
+at 0.51 GiB peak RSS. The sampling scout took 15 s at 0.13 GiB peak RSS.
+
+[Per-original timings, p95 and A/A](cold_modular_batch_boundary_system_2026-11-22.tsv).
+Raw timing and exact readback output are in the same benchmark run
+directory as the boundary replay. Raw CPU profiles are under
+`/mnt/v/output/zenjxl-decoder/render-wait-i270-2026-11-22`.
