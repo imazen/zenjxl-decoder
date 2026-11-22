@@ -15,8 +15,11 @@
 
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
-    frame::modular::{IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
+    entropy_coding::{
+        decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
+        fused_prefix::FusedRleLut,
+    },
+    frame::modular::{IMAGE_OFFSET, ModularChannel, Tree, predict::clamped_gradient},
 };
 
 /// Reads one sample with the regular reader. The cursor goes in and out by
@@ -37,6 +40,7 @@ fn read_slow<'b>(
 
 struct Side<'a, 'b> {
     code: RleCode<'a>,
+    fused: Option<&'a FusedRleLut>,
     cursor: RleCursor<'b>,
     reader: &'a mut SymbolReader,
     br: &'a mut BitReader<'b>,
@@ -47,7 +51,7 @@ struct Side<'a, 'b> {
 impl Side<'_, '_> {
     #[inline(always)]
     fn read_span(&mut self, limit: usize) -> (i32, usize) {
-        match self.code.read_span(&mut self.cursor, limit) {
+        match self.code.read_span(&mut self.cursor, limit, self.fused) {
             Some((v, count)) => (unpack_signed(v), count),
             None => {
                 let (v, cursor) = read_slow(
@@ -71,17 +75,24 @@ pub(super) fn try_decode(
     cluster: usize,
     reader: &mut SymbolReader,
     br: &mut BitReader,
-    histograms: &Histograms,
+    tree: &Tree,
 ) -> bool {
     #[cfg(test)]
     if tests::DISABLE.load(std::sync::atomic::Ordering::Relaxed) {
         return false;
     }
+    let histograms = &tree.histograms;
     let Some(cursor) = reader.rle_cursor(histograms, br) else {
         return false;
     };
     let Some(code) = histograms.rle_code(cluster) else {
         return false;
+    };
+    let (width, height) = channel.data.size();
+    let fused = if width.saturating_mul(height) >= 4096 {
+        tree.fused_rle(cluster, &cursor)
+    } else {
+        None
     };
     #[cfg(test)]
     tests::USES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -89,6 +100,7 @@ pub(super) fn try_decode(
         channel,
         Side {
             code,
+            fused,
             cursor,
             reader,
             br,

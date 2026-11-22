@@ -468,13 +468,7 @@ fn decode_modular_channel_inner(
             decode_modular_channel_impl(buffers, chan, t, reader, br, &tree.histograms)
         }
         TreeSpecialCase::SingleGradientOnly(t) => {
-            if super::rle_gradient::try_decode(
-                buffers[chan],
-                t.clustered_ctx(),
-                reader,
-                br,
-                &tree.histograms,
-            ) {
+            if super::rle_gradient::try_decode(buffers[chan], t.clustered_ctx(), reader, br, tree) {
                 return Ok(());
             }
             #[cfg(test)]

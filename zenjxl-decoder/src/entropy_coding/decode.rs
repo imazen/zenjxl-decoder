@@ -9,7 +9,7 @@ use whereat::at;
 use crate::bit_reader::{BitReader, FastBits};
 use crate::entropy_coding::ans::*;
 use crate::entropy_coding::context_map::*;
-use crate::entropy_coding::fused_prefix::{FusedPrefixLut, Residuals};
+use crate::entropy_coding::fused_prefix::{FusedPrefixLut, FusedRleLut, Residuals, RlePrefixToken};
 use crate::entropy_coding::huffman::*;
 use crate::entropy_coding::hybrid_uint::*;
 use crate::error::{Error, Result};
@@ -412,25 +412,62 @@ pub struct RleCode<'h> {
 }
 
 impl RleCode<'_> {
+    pub(crate) fn build_fused(
+        &self,
+        cursor: &RleCursor<'_>,
+        tracker: &crate::util::MemoryTracker,
+    ) -> Option<FusedRleLut> {
+        FusedRleLut::build(
+            self.table,
+            self.uint,
+            self.len_uint,
+            cursor.min_symbol,
+            tracker,
+        )
+    }
+
     /// Reads one literal or up to `limit` copies of the prior symbol.
     /// A short bit window leaves the cursor untouched for the regular reader.
     #[inline(always)]
-    pub fn read_span(&self, c: &mut RleCursor<'_>, limit: usize) -> Option<(u32, usize)> {
+    pub(crate) fn read_span(
+        &self,
+        c: &mut RleCursor<'_>,
+        limit: usize,
+        fused: Option<&FusedRleLut>,
+    ) -> Option<(u32, usize)> {
         debug_assert_ne!(limit, 0);
         if c.repeat_count == 0 || c.last_sym.is_none() {
-            // A prefix code (<= 15 bits) plus up to 31 hybrid-uint extra bits.
-            if !c.fb.ensure(47) {
-                return None;
-            }
-            let token = self.table.read_fast(&mut c.fb);
-            if let Some(token) = token.checked_sub(c.min_symbol) {
-                let count = self.len_uint.read_fast(token, &mut c.fb, &mut c.nbits_acc);
-                c.repeat_count = count.wrapping_add(c.min_length);
-            } else {
-                let value = self.uint.read_fast(token, &mut c.fb, &mut c.nbits_acc);
-                c.last_sym = Some(value);
-                c.repeat_count = 0;
-                return Some((value, 1));
+            let resolved = fused.and_then(|lut| lut.read(&mut c.fb));
+            let token = match resolved {
+                Some(token) => token,
+                None => {
+                    // A prefix code (<= 15 bits) plus up to 31 hybrid-uint extra bits.
+                    if !c.fb.ensure(47) {
+                        return None;
+                    }
+                    let token = self.table.read_fast(&mut c.fb);
+                    if let Some(token) = token.checked_sub(c.min_symbol) {
+                        RlePrefixToken::Repeat(self.len_uint.read_fast(
+                            token,
+                            &mut c.fb,
+                            &mut c.nbits_acc,
+                        ))
+                    } else {
+                        RlePrefixToken::Literal(self.uint.read_fast(
+                            token,
+                            &mut c.fb,
+                            &mut c.nbits_acc,
+                        ))
+                    }
+                }
+            };
+            match token {
+                RlePrefixToken::Repeat(count) => c.repeat_count = count.wrapping_add(c.min_length),
+                RlePrefixToken::Literal(value) => {
+                    c.last_sym = Some(value);
+                    c.repeat_count = 0;
+                    return Some((value, 1));
+                }
             }
         }
         if c.repeat_count > 0 {
