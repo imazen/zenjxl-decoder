@@ -108,3 +108,40 @@ retain the LF-group timing for each file and variant. Exact commands,
 binary and stream hashes, raw timings, readbacks, profiles, and the
 generated-code inspection are under
 `/mnt/v/output/zenjxl-decoder/lf-hf-setup-2026-11-22` on i270.
+
+## Neighbor-render waits
+
+Eight-worker RGB8 output on the three native photo streams reaches
+71,232–121,356 `sched_yield` calls per process across 15 decodes,
+including three warmups. These are medians of three runs. The same
+one-worker measurements record zero yields. In separate stack captures
+with decoder `8496962d`, 57.3–60.2% of recorded yield stacks come from
+the neighbor-render wait in `decode_groups_parallel`. The remaining
+recorded stacks come from Rayon's worker wait. This count measures
+call origin. It gives no duration estimate for a yield or a row lock.
+
+The [worker-retirement experiment](https://github.com/imazen/zenjxl-decoder/commit/78938076f269410b93571000b709db966e848899)
+lets a worker exit when the decode and ready-render queues are empty.
+Workers that still own a decode publish their input and drain ready
+renders. All 18 PNG16 outputs agree with the baseline across
+binary and 1/4/8 workers. The warm allocating timings use three
+interleaved blocks of five and A/A.
+
+| VarDCT stream | Eight-worker yields, baseline → retirement | Eight-worker paired speedup |
+|---|---:|---:|
+| 1009 ordinary d1 | 106,910 → 21,160 | 0.931× |
+| 1427 tier 1 d1 | 107,708 → 19,167 | 0.979× |
+| 1447 tier 1 d3.98 | 60,260 → 18,010 | 0.936× |
+
+Each syscall pair is a single process per arm with three warmups and
+12 timed decodes. The warm speedup uses the separate interleaved
+timings. The five VarDCT cells have median 0.972× and 0.964× at four
+and eight workers, with A/A at 1.004× and 1.002×. The speedup gate fails.
+The source is archived on `rejected/retire-vardct-render-workers`.
+
+The stack capture uses 0.24 GiB peak RSS over 5 s. The build, readback,
+timing and syscall comparison use 0.89 GiB over 150 s.
+[Per-file timings and A/A](vardct_render_worker_retirement_2026-11-22.tsv).
+Raw stacks, syscall counts, binary and stream hashes, exact readbacks
+and measurements are under
+`/mnt/v/output/zenjxl-decoder/render-wait-i270-2026-11-22`.

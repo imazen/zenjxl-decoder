@@ -421,7 +421,7 @@ and baseline A/A.
 |---|---:|---:|
 | 1009 cityscape, shared RLE | 1.203× / 1.143× / 1.116× | 1.215× / 1.163× / 1.149× |
 | 1427 macro, shared RLE | 1.165× / 1.116× / 1.078× | 1.174× / 1.148× / 1.027× |
-| 1447 glacier, local RLE | 1.001× / 0.985× / 1.017× | 1.001× / 1.005× / 0.932× |
+| 1447 glacier, regular RLE | 1.001× / 0.985× / 1.017× | 1.001× / 1.005× / 0.932× |
 
 The nine-block warm glacier repeat gives 0.999× / 1.014× / 1.018×.
 The original 8-worker A/A was 0.946×. Its four-worker warm p95
