@@ -59,11 +59,15 @@ pub(crate) struct ContextPool<'a> {
 
 #[cfg(feature = "threads")]
 impl<'a> ContextPool<'a> {
-    pub(crate) fn new(factory: ContextFactory<'a>) -> Self {
+    pub(crate) fn new(factory: ContextFactory<'a>, idle: Vec<GroupRenderContext>) -> Self {
         Self {
             factory,
-            pool: std::sync::Mutex::new(Vec::new()),
+            pool: std::sync::Mutex::new(idle),
         }
+    }
+
+    pub(crate) fn into_idle(self) -> Vec<GroupRenderContext> {
+        self.pool.into_inner().unwrap()
     }
 
     /// Takes a context from the pool, creating one if none is idle.

@@ -800,6 +800,7 @@ impl Frame {
         let mut phase3a_prepare_dur = std::time::Duration::ZERO;
         let mut phase3b_dur = std::time::Duration::ZERO;
         let mut phase3c_dur = std::time::Duration::ZERO;
+        let mut idle_render_contexts = Vec::new();
 
         for batch_start in (0..num_groups).step_by(decode_batch_size) {
             let batch_end = (batch_start + decode_batch_size).min(num_groups);
@@ -882,6 +883,7 @@ impl Frame {
                                 self.header.size_groups(),
                                 crate::render::low_memory_pipeline::ContextPool::new(
                                     lmp.context_factory(),
+                                    Vec::new(),
                                 ),
                                 needs_neighbours,
                             )
@@ -1331,8 +1333,10 @@ impl Frame {
                 any_rendered |= has_output;
                 let p = lmp_ref!();
                 let view = p.read_view();
-                let ctx_pool =
-                    crate::render::low_memory_pipeline::ContextPool::new(p.context_factory());
+                let ctx_pool = crate::render::low_memory_pipeline::ContextPool::new(
+                    p.context_factory(),
+                    std::mem::take(&mut idle_render_contexts),
+                );
                 let num_buffer_slots = buffer_splitter.get_full_buffers().len();
 
                 let (all_layouts, fragments) =
@@ -1443,6 +1447,7 @@ impl Frame {
                         buffer_splitter::copy_back_local_buffers(owned, output);
                     }
                 }
+                idle_render_contexts = ctx_pool.into_idle();
             }
             phase3b_dur += phase3b_start.elapsed();
 
