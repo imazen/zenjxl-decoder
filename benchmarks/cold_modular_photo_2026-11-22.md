@@ -688,3 +688,36 @@ ignores, in 114 s at 8.96 GiB peak RSS.
 and [hardware counters](cold_modular_rle_refill_instructions_2026-11-22.tsv).
 Raw results, commands and hashes are in
 `/mnt/v/output/zenjxl-decoder/modular-rle-refill-i270-2026-11-22` on i270.
+
+### All four legal group widths on the independent photos
+
+Replay the four independent imazen-26 photos on decoder `e14ae58d`.
+The existing rule picks 128 px groups on 1012 and 1606 and 256 px
+groups on 1237 and 1619. Compare each pick with the other small
+width, 512 px and 1024 px. The pinned encoder and effort-7
+Gradient prefix/RLE controls match the original width study.
+Only the group-size argument changes in the new encodes.
+
+Each alternative uses five interleaved blocks of five cold
+allocating RGB8 decodes with A/A at 1, 4 and 8 pinned i270 workers.
+All 36 worker/stream pairs match exact PNG16 output. Pinned
+jxl-rs and djxl v0.12 independently reproduce all eight new
+streams' original RGB8 rasters.
+
+| Group-width choice | Median MP/s, 1 / 4 / 8 workers | Paired speedup versus existing choice, 8 workers | Median bytes vs legacy fast-decode |
+|---|---:|---:|---:|
+| Existing 128/256 rule, range across three replays | 139.56–139.76 / 378.94–380.39 / 545.90–548.19 | 1.000× | −12.49% |
+| Opposite 128/256 width | 137.44 / 351.35 / 440.15 | 0.821× | −12.30% |
+| 512 px throughout | 108.76 / 240.94 / 333.62 | 0.622× | −0.17% |
+| 1024 px throughout | 99.89 / 234.71 / 321.41 | 0.566× | −0.19% |
+
+The existing rule wins on each photo at eight workers. A/A
+median throughput is within 1.0% of baseline at eight workers
+for all three comparisons. Changing width leaves the 550 MP/s
+cold target open. The run takes 151 seconds at 0.58 GiB peak RSS.
+
+[Rate and stream hashes](cold_modular_rle_group_width_rates_2026-11-22.tsv),
+[per-photo timings and p95](cold_modular_rle_group_width_2026-11-22.tsv),
+and [panel medians](cold_modular_rle_group_width_classes_2026-11-22.tsv).
+Raw samples, readbacks and pinned commands are in
+`/mnt/v/output/zenjxl-decoder/modular-rle-four-widths-i270-2026-11-22` on i270.
