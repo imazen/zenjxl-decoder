@@ -57,6 +57,8 @@ def main():
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("files", type=Path, nargs="+")
+    parser.add_argument("--candidate-streams", type=Path, nargs="+",
+                        help="Candidate codestreams in the order of the baseline files")
     parser.add_argument("--cpus", help="Comma-separated CPU numbers in allocation order")
     parser.add_argument("--allow-level10", action="store_true")
     parser.add_argument("--rounds", type=int, default=3,
@@ -73,11 +75,21 @@ def main():
     cpus = args.cpus.split(",") if args.cpus else []
     if cpus and (len(cpus) < max(WORKERS) or len(set(cpus)) != len(cpus)):
         parser.error("--cpus needs at least eight distinct CPU numbers")
-    streams = {file.resolve(): digest(file) for file in args.files}
+    baseline_files = list(dict.fromkeys(file.resolve() for file in args.files))
+    if args.candidate_streams:
+        if len(baseline_files) != len(args.files) or len(args.candidate_streams) != len(baseline_files):
+            parser.error("--candidate-streams requires one entry per distinct baseline file")
+        candidate_files = [file.resolve() for file in args.candidate_streams]
+    else:
+        candidate_files = baseline_files
+    paired_streams = dict(zip(baseline_files, candidate_files, strict=True))
+    streams = {file: digest(file) for file in dict.fromkeys([*baseline_files, *candidate_files])}
     baseline = args.baseline.resolve()
     candidate = args.candidate.resolve()
-    if digest(baseline) == digest(candidate):
-        parser.error("baseline and candidate binaries must differ")
+    if digest(baseline) == digest(candidate) and all(
+        streams[file] == streams[other] for file, other in paired_streams.items()
+    ):
+        parser.error("baseline and candidate must differ in binary or stream bytes")
     variants = [("baseline", baseline), ("candidate", candidate), ("aa", baseline)]
     args.output.mkdir()
     individual = args.cold or args.per_sample
@@ -97,6 +109,8 @@ def main():
         "allow_level10": args.allow_level10,
         "verify_pixels": args.verify_pixels,
     }
+    if args.candidate_streams:
+        manifest["candidate_streams"] = {str(file): str(other) for file, other in paired_streams.items()}
     (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     sample_output = args.output / "samples.tsv"
     sample_file = sample_output.open("x", newline="", buffering=1) if individual else nullcontext()
@@ -121,13 +135,13 @@ def main():
             with (args.output / "readbacks.tsv").open("x", newline="", buffering=1) as exact:
                 parity = csv.writer(exact, delimiter="\t", lineterminator="\n")
                 parity.writerow(["file", "workers", "baseline_png_sha256", "candidate_png_sha256"])
-                for file in streams:
+                for file, other in paired_streams.items():
                     expected = None
                     for workers in WORKERS:
                         hashes = [
-                            readback(binary, file, workers, [*options, *worker_args(workers)],
+                            readback(binary, stream, workers, [*options, *worker_args(workers)],
                                      affinity(workers), args.output / "readback.png", log)
-                            for binary in (baseline, candidate)
+                            for binary, stream in ((baseline, file), (candidate, other))
                         ]
                         parity.writerow([file, workers, *hashes])
                         if expected is None:
@@ -140,10 +154,11 @@ def main():
         if sample_log is not None:
             sample_writer = csv.writer(sample_log, delimiter="\t", lineterminator="\n")
             sample_writer.writerow(["file", "workers", "round", "variant", "sample", "pixels", "mp_s"])
-        for workers, file, round_id in itertools.product(WORKERS, streams, range(args.rounds)):
+        for workers, file, round_id in itertools.product(WORKERS, baseline_files, range(args.rounds)):
             first = round_id % len(variants)
             for name, binary in variants[first:] + variants[:first]:
-                cmd = [*affinity(workers), str(binary), str(file), *options, "--data-type", "u8",
+                stream = paired_streams[file] if name == "candidate" else file
+                cmd = [*affinity(workers), str(binary), str(stream), *options, "--data-type", "u8",
                        *worker_args(workers),
                        "--speedtest", "--num-reps", str(repetitions), "--warmup-reps", str(warmup)]
                 rates = []
@@ -164,7 +179,7 @@ def main():
                         sample_writer.writerow([file, workers, round_id + 1, name, sample, pixels, rate])
                 # The block aggregate divides total pixels by total decode time.
                 speed = len(rates) / sum(1 / rate for rate in rates)
-                writer.writerow([file, streams[file], workers, round_id + 1, name, pixels, f"{speed:.6f}"])
+                writer.writerow([file, streams[stream], workers, round_id + 1, name, pixels, f"{speed:.6f}"])
 
 
 if __name__ == "__main__":
