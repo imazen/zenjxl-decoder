@@ -385,12 +385,46 @@ fn add_bits(x: i32) -> i64 {
 }
 
 #[inline(always)]
-fn error_weight(x: u32, maxweight: u32) -> u32 {
-    let shift = floor_log2_nonzero(x as u64 + 1) as i32 - 5;
+const fn error_weight(x: u32, maxweight: u32) -> u32 {
+    let shift = (x as u64 + 1).ilog2() as i32 - 5;
     if shift < 0 {
         4u32 + maxweight * DIVLOOKUP[x as usize & 63]
     } else {
         4u32 + ((maxweight * DIVLOOKUP[(x as usize >> shift) & 63]) >> shift)
+    }
+}
+
+const WP_WEIGHT_TABLE_SIZE: usize = 256;
+
+const fn weight_table(maxweight: u32) -> [u32; WP_WEIGHT_TABLE_SIZE] {
+    let mut table = [0; WP_WEIGHT_TABLE_SIZE];
+    let mut i = 0;
+    while i < table.len() {
+        table[i] = error_weight(i as u32, maxweight);
+        i += 1;
+    }
+    table
+}
+
+static DEFAULT_FIRST_WEIGHT: [u32; WP_WEIGHT_TABLE_SIZE] = weight_table(DEFAULT_WP_WEIGHTS[0]);
+static DEFAULT_OTHER_WEIGHTS: [u32; WP_WEIGHT_TABLE_SIZE] = weight_table(DEFAULT_WP_WEIGHTS[1]);
+
+#[inline(always)]
+fn row_weights<const DEFAULT: bool>(
+    errors: [u32; NUM_PREDICTORS],
+    max_weight: [u32; NUM_PREDICTORS],
+) -> [u32; NUM_PREDICTORS] {
+    let [first, second, third, fourth] = errors;
+    if DEFAULT && (first | second | third | fourth) < WP_WEIGHT_TABLE_SIZE as u32 {
+        let mask = WP_WEIGHT_TABLE_SIZE - 1;
+        [
+            DEFAULT_FIRST_WEIGHT[first as usize & mask],
+            DEFAULT_OTHER_WEIGHTS[second as usize & mask],
+            DEFAULT_OTHER_WEIGHTS[third as usize & mask],
+            DEFAULT_OTHER_WEIGHTS[fourth as usize & mask],
+        ]
+    } else {
+        std::array::from_fn(|i| error_weight(errors[i], max_weight[i]))
     }
 }
 
@@ -595,15 +629,12 @@ impl WeightedPredictorState {
             let errors_n = carry_n;
             let errors_nw = carry_nw;
             let errors_ne = prev_pe[pos_ne];
-            let mut weights = [0u32; NUM_PREDICTORS];
-            for i in 0..NUM_PREDICTORS {
-                weights[i] = error_weight(
-                    errors_n[i]
-                        .wrapping_add(errors_ne[i])
-                        .wrapping_add(errors_nw[i]),
-                    max_weight[i],
-                );
-            }
+            let errors = std::array::from_fn(|i| {
+                errors_n[i]
+                    .wrapping_add(errors_ne[i])
+                    .wrapping_add(errors_nw[i])
+            });
+            let mut weights = row_weights::<DEFAULT>(errors, max_weight);
             let n = add_bits(data.top);
             let w = add_bits(data.left);
             let ne = add_bits(data.topright);
@@ -766,7 +797,10 @@ impl WeightedPredictorState {
 mod tests {
     use crate::headers::modular::{GroupHeader, WeightedHeader};
 
-    use super::{PredictionData, WeightedPredictorState};
+    use super::{
+        DEFAULT_WP_WEIGHTS, PredictionData, WP_WEIGHT_TABLE_SIZE, WeightedPredictorState,
+        row_weights,
+    };
 
     struct SimpleRandom {
         out: i64,
@@ -804,6 +838,17 @@ mod tests {
         );
         state.update_errors((rng.next() % 256) as i32, pos, xsize);
         res
+    }
+
+    #[test]
+    fn default_wp_error_lookup_matches_formula() {
+        for error in (0..=WP_WEIGHT_TABLE_SIZE as u32).chain([1 << 16, u32::MAX]) {
+            let errors = [error; 4];
+            assert_eq!(
+                row_weights::<true>(errors, DEFAULT_WP_WEIGHTS),
+                row_weights::<false>(errors, DEFAULT_WP_WEIGHTS)
+            );
+        }
     }
 
     #[test]
