@@ -10,9 +10,9 @@ use whereat::at;
 use super::{Predictor, predict::WeightedPredictorState};
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::Histograms,
     entropy_coding::decode::SymbolReader,
-    entropy_coding::fused_prefix::FusedPrefixLut,
+    entropy_coding::decode::{Histograms, RleCursor},
+    entropy_coding::fused_prefix::{FusedPrefixLut, FusedRleLut},
     error::{Error, Result},
     frame::modular::predict::PredictionData,
     image::Image,
@@ -69,6 +69,7 @@ pub struct Tree {
     pub nodes: Vec<TreeNode>,
     pub histograms: Histograms,
     fused_prefix: [OnceLock<Option<FusedPrefixLut>>; 4],
+    fused_rle: [OnceLock<Option<FusedRleLut>>; 4],
     memory_tracker: MemoryTracker,
 }
 
@@ -519,6 +520,7 @@ impl Tree {
             nodes: tree,
             histograms,
             fused_prefix: [const { OnceLock::new() }; 4],
+            fused_rle: [const { OnceLock::new() }; 4],
             memory_tracker: memory_tracker.clone(),
         })
     }
@@ -529,6 +531,17 @@ impl Tree {
             .get_or_init(|| {
                 self.histograms
                     .build_fused_prefix(cluster, &self.memory_tracker)
+            })
+            .as_ref()
+    }
+
+    pub(super) fn fused_rle(&self, cluster: usize, cursor: &RleCursor<'_>) -> Option<&FusedRleLut> {
+        self.fused_rle
+            .get(cluster)?
+            .get_or_init(|| {
+                self.histograms
+                    .rle_code(cluster)?
+                    .build_fused(cursor, &self.memory_tracker)
             })
             .as_ref()
     }
