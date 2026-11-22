@@ -16,6 +16,15 @@ the binary somewhere stable, since each experiment compares two builds.
 - `abn.py <threads> <rounds> <file> <label=cmd>...`: interleaved A/B runs,
   median and max MP/s per variant. Environment variables go before the
   command, e.g. `"nopf=JXL_NOPF=1 ./cli --no-cms"`.
+- `just paired-u8 OUTPUT BASELINE CANDIDATE FILE...`: three interleaved
+  rounds of five in-memory u8 decodes at 1, 4 and 8 workers. The baseline
+  binary runs twice per round as an A/A control. Both builds need the
+  `threads` feature. `--cpus 2,3,0,1,4,5,6,7` pins the worker sets on Linux.
+  `--verify-pixels` checks identical 16-bit PNG readbacks across binaries
+  and worker counts before timing. Use `--allow-level10` when the inputs
+  need Level 10. The fresh output directory holds binary and stream hashes,
+  commands, results, and optional readback hashes. The CLI reports one
+  aggregate throughput value per five repeats.
 - `vsdj.py <cli> <threads> <rounds> <files...>`: interleaved runs of this
   decoder, djxl and upstream jxl-rs, median of per-round means, plus the
   zen/djxl ratio. Set `DJXL` and `JXLRS_CLI` to the binaries. djxl runs

@@ -158,6 +158,10 @@ ci:
 speed-compare *ARGS:
     scripts/upstream-audit/speed_compare.sh {{ARGS}}
 
+# Paired comparisons of two pinned CLI release binaries with identical output.
+paired-u8 output baseline candidate *args:
+    python3 scripts/perf/paired_u8.py {{quote(output)}} {{quote(baseline)}} {{quote(candidate)}} {{args}}
+
 # Interleaved ARM decode comparisons, full output preserved.
 arm-decode-tiers-macos:
     mkdir -p "$HOME/tmp"
