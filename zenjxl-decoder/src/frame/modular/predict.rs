@@ -384,12 +384,8 @@ fn add_bits(x: i32) -> i64 {
 
 #[inline(always)]
 fn error_weight(x: u32, maxweight: u32) -> u32 {
-    let shift = floor_log2_nonzero(x as u64 + 1) as i32 - 5;
-    if shift < 0 {
-        4u32 + maxweight * DIVLOOKUP[x as usize & 63]
-    } else {
-        4u32 + ((maxweight * DIVLOOKUP[(x as usize >> shift) & 63]) >> shift)
-    }
+    let shift = floor_log2_nonzero(u64::from(x) + 1).saturating_sub(5);
+    4 + ((maxweight * DIVLOOKUP[((x >> shift) & 63) as usize]) >> shift)
 }
 
 #[inline(always)]
@@ -753,7 +749,34 @@ impl WeightedPredictorState {
 mod tests {
     use crate::headers::modular::{GroupHeader, WeightedHeader};
 
-    use super::{PredictionData, WeightedPredictorState};
+    use super::{DIVLOOKUP, PredictionData, WeightedPredictorState, error_weight};
+
+    #[test]
+    fn weighted_error_matches_original_at_normalization_boundaries() {
+        let mut errors: Vec<u32> = (0..256).collect();
+        // Every reciprocal-table transition for every attainable scale.
+        for shift in 1..=27 {
+            for index in 32..=64u64 {
+                let boundary = index << shift;
+                errors.extend((boundary - 2..=boundary + 1).filter_map(|x| u32::try_from(x).ok()));
+            }
+        }
+        for weight in 0..=15 {
+            for &error in &errors {
+                let shift = (u64::from(error) + 1).ilog2() as i32 - 5;
+                let expected = if shift < 0 {
+                    weight * DIVLOOKUP[(error & 63) as usize]
+                } else {
+                    (weight * DIVLOOKUP[((error >> shift) & 63) as usize]) >> shift
+                };
+                assert_eq!(
+                    error_weight(error, weight),
+                    4 + expected,
+                    "{error}, {weight}"
+                );
+            }
+        }
+    }
 
     struct SimpleRandom {
         out: i64,
