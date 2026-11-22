@@ -18,7 +18,7 @@ use crate::{
         },
         predict::{PredictionData, WeightedPredictorState, clamped_gradient},
         tree::{
-            FlatTreeNode, NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, TreeNode, predict_flat,
+            NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, PrunedTree, TreeNode, predict_pruned,
         },
     },
     headers::modular::GroupHeader,
@@ -30,7 +30,7 @@ use crate::{
 /// specialised `read_*_config_420` reader can be used (no reader-state
 /// dispatch, no per-cluster config lookup per pixel).
 pub struct NoWpTree<const C420: bool> {
-    flat_nodes: Vec<FlatTreeNode>,
+    search_tree: PrunedTree,
     references: Image<i32>,
     property_buffer: IsolatedBuf<i32>,
     used_mask: u32,
@@ -43,13 +43,14 @@ pub struct NoWpTree<const C420: bool> {
 impl<const C420: bool> NoWpTree<C420> {
     fn new(
         nodes: Vec<TreeNode>,
-        max_property_count: usize,
+        tree: &Tree,
         channel: usize,
         stream: usize,
         xsize: usize,
         single_symbol: Option<u32>,
     ) -> Result<Self> {
-        let num_ref_props = max_property_count
+        let num_ref_props = tree
+            .max_property_count()
             .saturating_sub(NUM_NONREF_PROPERTIES)
             .next_multiple_of(PROPERTIES_PER_PREVCHAN);
         let references = Image::<i32>::new((num_ref_props, xsize))?;
@@ -60,10 +61,10 @@ impl<const C420: bool> NoWpTree<C420> {
         property_buffer[1] = stream as i32;
 
         let used_mask = Tree::compute_used_property_mask(&nodes);
-        let flat_nodes = Tree::build_flat_tree(&nodes)?;
+        let search_tree = tree.pruned_tree(&nodes, xsize)?;
 
         Ok(Self {
-            flat_nodes,
+            search_tree,
             references,
             property_buffer,
             used_mask,
@@ -92,8 +93,8 @@ impl<const C420: bool> ModularChannelDecoder for NoWpTree<C420> {
         src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
-        let prediction_result = predict_flat(
-            &self.flat_nodes,
+        let prediction_result = predict_pruned(
+            &self.search_tree,
             prediction_data,
             xsize,
             None,
@@ -122,7 +123,7 @@ pub struct GeneralTree<const C420: bool> {
 impl<const C420: bool> GeneralTree<C420> {
     fn new(
         nodes: Vec<TreeNode>,
-        max_property_count: usize,
+        tree: &Tree,
         header: &GroupHeader,
         channel: usize,
         stream: usize,
@@ -131,14 +132,7 @@ impl<const C420: bool> GeneralTree<C420> {
     ) -> Result<Self> {
         let wp_state = WeightedPredictorState::new(&header.wp_header, xsize)?;
         Ok(Self {
-            no_wp_tree: NoWpTree::new(
-                nodes,
-                max_property_count,
-                channel,
-                stream,
-                xsize,
-                single_symbol,
-            )?,
+            no_wp_tree: NoWpTree::new(nodes, tree, channel, stream, xsize, single_symbol)?,
             wp_state,
         })
     }
@@ -161,8 +155,8 @@ impl<const C420: bool> ModularChannelDecoder for GeneralTree<C420> {
         src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
-        let prediction_result = predict_flat(
-            &self.no_wp_tree.flat_nodes,
+        let prediction_result = predict_pruned(
+            &self.no_wp_tree.search_tree,
             prediction_data,
             xsize,
             Some(&mut self.wp_state),
@@ -711,7 +705,7 @@ pub fn specialize_tree(
         return Ok(if config_420 {
             TreeSpecialCase::NoWp420(NoWpTree::new(
                 pruned_tree,
-                tree.max_property_count(),
+                tree,
                 channel,
                 stream,
                 xsize,
@@ -720,7 +714,7 @@ pub fn specialize_tree(
         } else {
             TreeSpecialCase::NoWp(NoWpTree::new(
                 pruned_tree,
-                tree.max_property_count(),
+                tree,
                 channel,
                 stream,
                 xsize,
@@ -732,7 +726,7 @@ pub fn specialize_tree(
     Ok(if config_420 {
         TreeSpecialCase::General420(GeneralTree::new(
             pruned_tree,
-            tree.max_property_count(),
+            tree,
             header,
             channel,
             stream,
@@ -742,7 +736,7 @@ pub fn specialize_tree(
     } else {
         TreeSpecialCase::General(GeneralTree::new(
             pruned_tree,
-            tree.max_property_count(),
+            tree,
             header,
             channel,
             stream,
