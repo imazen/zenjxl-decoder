@@ -68,6 +68,40 @@ the native versions of those two files. The archived source is
 `rejected/lf-wp-avx2-outlined-reader`. The run took 314 s with
 1.50 GiB peak RSS.
 
+## Inlined AVX2 residual reader
+
+Candidate `a13f5116a64af827bf54d0f58b6b822dece38f71` replaces the residual closure with a typed
+reader whose hot method is explicitly inlined. The AVX2 machine code
+retains BMI2 shifts and leading-zero counts and removes the call to
+the ordinary residual closure. The ordinary d1 photos still have a
+median LF-group latency ratio of 1.034 (A/A 0.997). Eight-worker decode
+speedup is 1.003× (A/A 1.004×). All 33 exact PNG16 checks and the
+predictor control pass. The mixed-page crop and screenshot control
+have p95 latency ratios of 1.114 and 1.122 at one and four workers
+respectively (A/A 0.985 and 0.975). The result is archived as
+`rejected/lf-wp-avx2-inlined-reader`. The run took 314 s with
+1.52 GiB peak RSS.
+
+
+## Weighted predictor row windows
+
+Candidate `e7d211539b97755e8861f1102617ff1687cd524e` handles the two row edges explicitly and
+uses adjacent top-row samples and the carried left pixel for the
+interior. The output, tree properties and both error histories match
+the per-pixel decoder for default and custom weights through odd and
+even rows at widths 1 through 256. The differential test and all 24
+same-file PNG16 comparisons pass.
+
+The ordinary d1 photos have a median paired LF-group latency ratio of
+1.063 (A/A 1.010). Their median eight-worker speedup is 0.985× (A/A
+1.010×). The generated code calls the shared pixel step from both row
+loops. The small RGBA control has a one-worker p95 latency ratio of
+1.459 (A/A 1.016). The source is archived on `rejected/lf-wp-row-windows`.
+The run took 250 s with 1.50 GiB peak RSS.
+
+All four candidates miss the 15% LF phase reduction and 5% eight-worker
+decode speedup targets on the three ordinary d1 photos.
+
 [Paired decode results](vardct_lf_setup_variants_2026-11-22.tsv)
 retain every cell and p95 ratio. [Phase results](vardct_lf_setup_phase_2026-11-22.tsv)
 retain the LF-group timing for each file and variant. Exact commands,
