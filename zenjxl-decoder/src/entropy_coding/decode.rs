@@ -35,6 +35,19 @@ pub fn unpack_signed(unsigned: u32) -> i32 {
     ((unsigned >> 1) ^ ((!unsigned) & 1).wrapping_sub(1)) as i32
 }
 
+#[inline(always)]
+fn pack_signed(value: i32) -> u32 {
+    ((value as u32) << 1) ^ ((value >> 31) as u32)
+}
+
+#[cfg(test)]
+#[test]
+fn rle_signed_cursor_symbol_round_trips() {
+    for packed in [0, 1, 2, 3, 0x7fff_ffff, 0x8000_0000, u32::MAX - 1, u32::MAX] {
+        assert_eq!(pack_signed(unpack_signed(packed)), packed);
+    }
+}
+
 #[derive(UnconditionalCoder, Debug)]
 struct Lz77Params {
     pub enabled: bool,
@@ -354,7 +367,7 @@ pub struct RleCursor<'a> {
     nbits_acc: u32,
     min_symbol: u32,
     min_length: u32,
-    last_sym: Option<u32>,
+    last_sym: Option<i32>,
     repeat_count: u32,
     lz77_repeat: bool,
 }
@@ -379,7 +392,7 @@ impl SymbolReader {
             nbits_acc: 0,
             min_symbol: rle.min_symbol,
             min_length: rle.min_length,
-            last_sym: rle.last_sym,
+            last_sym: rle.last_sym.map(unpack_signed),
             repeat_count: rle.repeat_count,
             lz77_repeat: false,
         })
@@ -392,7 +405,7 @@ impl SymbolReader {
         let SymbolReaderState::Rle(rle) = &mut self.state else {
             unreachable!("RleCursor taken from a reader in RLE state");
         };
-        rle.last_sym = cursor.last_sym;
+        rle.last_sym = cursor.last_sym.map(pack_signed);
         rle.repeat_count = cursor.repeat_count;
         self.errors.nbits_acc |= cursor.nbits_acc;
         self.errors.lz77_repeat |= cursor.lz77_repeat;
@@ -430,7 +443,7 @@ impl RleCode<'_> {
         c: &mut RleCursor<'_>,
         limit: usize,
         fused: Option<&FusedRleLut>,
-    ) -> Option<(u32, usize)> {
+    ) -> Option<(i32, usize)> {
         debug_assert_ne!(limit, 0);
         if c.repeat_count == 0 || c.last_sym.is_none() {
             let resolved = fused.and_then(|lut| lut.read(&mut c.fb));
@@ -449,11 +462,11 @@ impl RleCode<'_> {
                             &mut c.nbits_acc,
                         ))
                     } else {
-                        RlePrefixToken::Literal(self.uint.read_fast(
+                        RlePrefixToken::Literal(unpack_signed(self.uint.read_fast(
                             token,
                             &mut c.fb,
                             &mut c.nbits_acc,
-                        ))
+                        )))
                     }
                 }
             };

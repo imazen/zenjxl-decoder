@@ -17,11 +17,13 @@ const WINDOW_BITS: u32 = 12;
 // Row span reconstruction still owns the repeat-count and predictor state.
 const RLE_WINDOW_BITS: u32 = 10;
 const RLE_TABLE_SIZE: usize = 1 << RLE_WINDOW_BITS;
-const RLE_FLAG: u32 = 1 << 31;
-const RLE_VALUE_MASK: u32 = (RLE_FLAG - 1) >> LENGTH_BITS;
+// Four length bits, one repeat flag, then a signed literal or unsigned length.
+const RLE_FLAG: u32 = 1 << LENGTH_BITS;
+const RLE_PAYLOAD_SHIFT: u32 = LENGTH_BITS + 1;
+const RLE_VALUE_MASK: u32 = u32::MAX >> RLE_PAYLOAD_SHIFT;
 
 pub(super) enum RlePrefixToken {
-    Literal(u32),
+    Literal(i32),
     Repeat(u32),
 }
 
@@ -69,7 +71,12 @@ impl FusedRleLut {
             if length == 0 || value > RLE_VALUE_MASK {
                 continue;
             }
-            let entry = flag | (value << LENGTH_BITS) | length;
+            let payload = if flag == 0 {
+                unpack_signed(value) as u32
+            } else {
+                value
+            };
+            let entry = (payload << RLE_PAYLOAD_SHIFT) | flag | length;
             // The token depends on the consumed low bits only.
             for slot in entries[index..].iter_mut().step_by(1 << length) {
                 *slot = entry;
@@ -92,11 +99,10 @@ impl FusedRleLut {
             return None;
         }
         bits.consume_buffered((entry & LENGTH_MASK) as usize);
-        let value = (entry >> LENGTH_BITS) & RLE_VALUE_MASK;
         Some(if entry & RLE_FLAG != 0 {
-            RlePrefixToken::Repeat(value)
+            RlePrefixToken::Repeat(entry >> RLE_PAYLOAD_SHIFT)
         } else {
-            RlePrefixToken::Literal(value)
+            RlePrefixToken::Literal((entry as i32) >> RLE_PAYLOAD_SHIFT)
         })
     }
 }

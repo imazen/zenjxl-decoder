@@ -15,7 +15,7 @@
 
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
+    entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader},
     entropy_coding::fused_prefix::FusedRleLut,
     frame::modular::{GlobalTree, IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
 };
@@ -49,7 +49,7 @@ impl Side<'_, '_> {
     #[inline(always)]
     fn read_span(&mut self, limit: usize, fused: Option<&FusedRleLut>) -> (i32, usize) {
         match self.code.read_span(&mut self.cursor, limit, fused) {
-            Some((v, count)) => (unpack_signed(v), count),
+            Some(span) => span,
             None => {
                 let (v, cursor) = read_slow(
                     self.cursor,
