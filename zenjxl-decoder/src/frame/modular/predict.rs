@@ -408,6 +408,10 @@ fn weighted_average(pixels: &[i64; NUM_PREDICTORS], weights: &mut [u32; NUM_PRED
     (sum * DIVLOOKUP[(weight_sum - 1) as usize] as i64) >> 24
 }
 
+pub(super) trait WeightedResidualReader {
+    fn read(&mut self, property: i32) -> i32;
+}
+
 #[derive(Debug)]
 pub struct WeightedPredictorState {
     prediction: [i64; NUM_PREDICTORS],
@@ -538,13 +542,13 @@ impl WeightedPredictorState {
     /// once per row, so indexing needs no row-parity select and no per-access
     /// bounds checks beyond the slices' own.
     #[inline(always)]
-    pub fn decode_row(
+    pub(super) fn decode_row(
         &mut self,
         y: usize,
         row: &mut [i32],
         row_top: &[i32],
         row_toptop: &[i32],
-        mut read: impl FnMut(i32) -> i32,
+        residuals: &mut impl WeightedResidualReader,
     ) {
         let xsize = row.len();
         let stride = xsize + 2;
@@ -631,7 +635,7 @@ impl WeightedPredictorState {
                 pred = mn.max(mx.min(pred));
             }
             let wp_pred = (pred + PREDICTION_ROUND) >> PRED_EXTRA_BITS;
-            let val = read(p as i32).wrapping_add(wp_pred as i32);
+            let val = residuals.read(p as i32).wrapping_add(wp_pred as i32);
             row[x] = val;
 
             let v = add_bits(val);

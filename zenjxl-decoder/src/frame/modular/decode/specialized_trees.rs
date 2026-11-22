@@ -8,7 +8,7 @@ use whereat::at;
 
 use crate::{
     bit_reader::BitReader,
-    entropy_coding::decode::{Histograms, SymbolReader, unpack_signed},
+    entropy_coding::decode::{Histograms, PlainCursor, SymbolReader, unpack_signed},
     error::Result,
     frame::modular::{
         ModularChannel, Predictor, Tree,
@@ -16,7 +16,9 @@ use crate::{
             channel::{ModularChannelDecoder, SymbolSource},
             common::{make_pixel, precompute_references},
         },
-        predict::{PredictionData, WeightedPredictorState, clamped_gradient},
+        predict::{
+            PredictionData, WeightedPredictorState, WeightedResidualReader, clamped_gradient,
+        },
         tree::{
             NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, PrunedTree, TreeNode, predict_pruned,
         },
@@ -269,6 +271,24 @@ impl<const C420: bool> WpOnlyLookup<C420> {
     /// [`WeightedPredictorState::decode_row`]; same output as the
     /// per-sample `decode_one` path.
     pub(super) fn decode_channel(
+        self,
+        channel: &mut ModularChannel,
+        reader: &mut SymbolReader,
+        br: &mut BitReader,
+        histograms: &Histograms,
+    ) {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use archmage::SimdToken;
+            if let Some(token) = archmage::X64V3Token::summon() {
+                return decode_wp_channel_v3(token, self, channel, reader, br, histograms);
+            }
+        }
+        self.decode_channel_inner(channel, reader, br, histograms);
+    }
+
+    #[inline(always)]
+    fn decode_channel_inner(
         mut self,
         channel: &mut ModularChannel,
         reader: &mut SymbolReader,
@@ -278,11 +298,16 @@ impl<const C420: bool> WpOnlyLookup<C420> {
         const { assert!(crate::frame::modular::IMAGE_OFFSET.1 == 2) };
         let off = crate::frame::modular::IMAGE_OFFSET.0;
         let (w, h) = channel.data.size();
-        let lut = &self.lut;
-        // Entropy state in registers (`PlainCursor`, streams without LZ77);
-        // near the end of the data one symbol at a time goes through the
-        // regular reader.
-        let mut cursor = reader.plain_cursor(br);
+        // The cursor borrows the input bytes and keeps entropy state in
+        // registers until the stream tail needs the regular reader.
+        let cursor = reader.plain_cursor(br);
+        let mut residuals = WpChannelResiduals::<C420> {
+            lut: &self.lut,
+            histograms,
+            reader,
+            br,
+            cursor,
+        };
         for y in 0..h {
             let [row, row_top, row_toptop] = channel.data.distinct_full_rows_mut([y + 2, y + 1, y]);
             self.wp_state.decode_row(
@@ -290,30 +315,65 @@ impl<const C420: bool> WpOnlyLookup<C420> {
                 &mut row[off..off + w],
                 &row_top[off..off + w],
                 &row_toptop[off..off + w],
-                |property| {
-                    let ctx = lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
-                        .clamp(0, LUT_TABLE_SIZE as i64 - 1)
-                        as usize] as usize;
-                    if let Some(c) = cursor.as_mut() {
-                        let fast = if C420 {
-                            histograms.read_unsigned_plain_420(c, ctx)
-                        } else {
-                            histograms.read_unsigned_plain(c, ctx)
-                        };
-                        if let Some(v) = fast {
-                            return unpack_signed(v);
-                        }
-                    }
-                    let (v, c) = read_slow::<C420>(cursor.take(), reader, br, histograms, ctx);
-                    cursor = c;
-                    v
-                },
+                &mut residuals,
             );
         }
-        if let Some(c) = cursor {
-            reader.finish_plain_cursor(c, br);
+        if let Some(c) = residuals.cursor {
+            residuals.reader.finish_plain_cursor(c, residuals.br);
         }
     }
+}
+
+struct WpChannelResiduals<'a, 'data, const C420: bool> {
+    lut: &'a [u8; LUT_TABLE_SIZE],
+    histograms: &'a Histograms,
+    reader: &'a mut SymbolReader,
+    br: &'a mut BitReader<'data>,
+    cursor: Option<PlainCursor<'data>>,
+}
+
+impl<const C420: bool> WeightedResidualReader for WpChannelResiduals<'_, '_, C420> {
+    // Keep the entropy read in the same target-feature function as the
+    // predictor. An ordinary closure can become an out-of-line call.
+    #[inline(always)]
+    fn read(&mut self, property: i32) -> i32 {
+        let ctx = self.lut[(property as i64 - LUT_MIN_SPLITVAL as i64)
+            .clamp(0, LUT_TABLE_SIZE as i64 - 1) as usize] as usize;
+        if let Some(cursor) = self.cursor.as_mut() {
+            let fast = if C420 {
+                self.histograms.read_unsigned_plain_420(cursor, ctx)
+            } else {
+                self.histograms.read_unsigned_plain(cursor, ctx)
+            };
+            if let Some(v) = fast {
+                return unpack_signed(v);
+            }
+        }
+        let (v, cursor) = read_slow::<C420>(
+            self.cursor.take(),
+            self.reader,
+            self.br,
+            self.histograms,
+            ctx,
+        );
+        self.cursor = cursor;
+        v
+    }
+}
+
+// Compile the predictor and entropy cursor together with the BMI2 shifts
+// and leading-zero count available on the AVX2 decoder tier.
+#[cfg(all(target_arch = "x86_64", feature = "avx"))]
+#[archmage::arcane]
+fn decode_wp_channel_v3<const C420: bool>(
+    _token: archmage::X64V3Token,
+    decoder: WpOnlyLookup<C420>,
+    channel: &mut ModularChannel,
+    reader: &mut SymbolReader,
+    br: &mut BitReader,
+    histograms: &Histograms,
+) {
+    decoder.decode_channel_inner(channel, reader, br, histograms);
 }
 
 /// One read through the regular reader, handing a [`PlainCursor`] back and
