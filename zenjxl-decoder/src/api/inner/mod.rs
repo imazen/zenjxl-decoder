@@ -272,7 +272,7 @@ impl JxlDecoderInner {
     /// After calling this, the caller should provide input from the beginning of the file.
     pub fn reset(&mut self) {
         self.box_parser = BoxParser::new();
-        self.codestream_parser = CodestreamParser::new();
+        self.codestream_parser.reset();
     }
 
     /// Visible frames discovered so far (see

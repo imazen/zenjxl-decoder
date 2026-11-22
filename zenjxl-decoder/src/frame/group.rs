@@ -89,6 +89,10 @@ pub struct VarDctBuffers {
 }
 
 impl VarDctBuffers {
+    pub(super) fn clear_tracked_maps(&mut self) {
+        self.num_nzeros.clear();
+    }
+
     /// Creates a new VarDctBuffers with fallible allocation.
     pub fn new() -> Result<Self> {
         Ok(Self {

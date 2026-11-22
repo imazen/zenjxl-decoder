@@ -419,7 +419,12 @@ impl CodestreamParser {
             }
         }
 
-        let decoder_state = self.frame.take().unwrap().finalize()?;
+        let mut frame = self.frame.take().unwrap();
+        let scratch = frame.take_vardct_scratch();
+        let decoder_state = frame.finalize()?;
+        if let Some(scratch) = scratch {
+            self.vardct_scratch = Some(scratch);
+        }
         // Preview frame has is_last=true but the main frame follows: the
         // helper recreates the decoder state from the saved file header,
         // routing every option through `apply_decoder_options`

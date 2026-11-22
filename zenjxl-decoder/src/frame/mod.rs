@@ -36,6 +36,7 @@ mod coeff_order;
 pub mod color_correlation_map;
 pub mod decode;
 mod group;
+pub(crate) use group::VarDctBuffers;
 pub mod lf_preview;
 pub mod modular;
 mod quant_weights;
@@ -284,7 +285,7 @@ pub struct Frame {
     /// frames use the incremental renderer so flushes match sequential output.
     parallel_full_frame: Option<bool>,
     /// Reusable buffers for VarDCT group decoding.
-    vardct_buffers: Option<group::VarDctBuffers>,
+    pub(crate) vardct_buffers: Option<VarDctBuffers>,
     /// JPEG coefficient storage for JPEG reconstruction.
     /// Per-channel arrays of i16 coefficients at image-wide block positions.
     #[cfg(feature = "jpeg")]
@@ -396,6 +397,14 @@ impl Frame {
             Some(self.decoder_state)
         };
         Ok(decoder_state)
+    }
+
+    pub(crate) fn take_vardct_scratch(&mut self) -> Option<VarDctBuffers> {
+        self.vardct_buffers.take().map(|mut scratch| {
+            // The next frame or file can use a different memory tracker.
+            scratch.clear_tracked_maps();
+            scratch
+        })
     }
 
     fn modular_color_channels(&self) -> usize {

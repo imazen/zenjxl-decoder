@@ -24,7 +24,7 @@ use crate::{
         },
     },
     error::{Error, Result},
-    frame::{DecoderState, Frame, Section},
+    frame::{DecoderState, Frame, Section, VarDctBuffers},
     headers::{
         Animation, FileHeader,
         frame_header::{FrameHeader, FrameType},
@@ -144,6 +144,7 @@ pub(super) struct CodestreamParser {
     zero_duration_pixels: u64,
     toc_parser: Option<IncrementalTocReader>,
     pub(super) frame: Option<Frame>,
+    vardct_scratch: Option<VarDctBuffers>,
 
     // Buffers.
     non_section_buf: SmallBuffer,
@@ -297,6 +298,7 @@ impl CodestreamParser {
             zero_duration_pixels: 0,
             toc_parser: None,
             frame: None,
+            vardct_scratch: None,
             first_vardct_quantizer: None,
             non_section_buf: SmallBuffer::new(4096),
             non_section_bit_offset: 0,
@@ -365,10 +367,16 @@ impl CodestreamParser {
     pub(super) fn rewind(&mut self) -> Option<JxlPixelFormat> {
         let pixel_format = self.pixel_format.take();
         let parsed_frame_headers = self.parsed_frame_headers;
-        *self = Self::new();
+        self.reset();
         self.parsed_frame_headers = parsed_frame_headers;
         self.pixel_format = pixel_format.clone();
         pixel_format
+    }
+
+    pub(super) fn reset(&mut self) {
+        let vardct_scratch = self.vardct_scratch.take();
+        *self = Self::new();
+        self.vardct_scratch = vardct_scratch;
     }
 
     /// Captures the seek point for the frame header that is about to be

@@ -580,11 +580,14 @@ impl CodestreamParser {
         // Save file_header before creating frame (for preview frame recovery)
         self.saved_file_header = self.decoder_state.as_ref().map(|ds| ds.file_header.clone());
 
-        let frame = Frame::from_header_and_toc(
+        let mut frame = Frame::from_header_and_toc(
             self.frame_header.take().unwrap(),
             toc,
             self.decoder_state.take().unwrap(),
         )?;
+        if frame.header().encoding == crate::headers::frame_header::Encoding::VarDCT {
+            frame.vardct_buffers = self.vardct_scratch.take();
+        }
 
         // Use fallible allocation: `num_groups()` is derived from the
         // (untrusted) frame header dimensions and can be astronomically
