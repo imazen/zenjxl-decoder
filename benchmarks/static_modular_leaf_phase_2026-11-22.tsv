@@ -1,0 +1,6 @@
+stream	baseline_lf_ms	candidate_lf_ms	paired_lf_latency_ratio	paired_aa_ratio
+1007-native-base-d1	6.230000	6.305000	1.004052	0.990369
+1007-native-base-d4	4.935000	4.910000	0.993884	0.994934
+1019-native-base-d4	4.250000	4.270000	1.003525	1.019976
+1019-native-tier1-epf0-d4.08	2.625000	2.625000	1.007619	1.000000
+1019-native-tier4-d4.55	2.965000	2.945000	0.993255	0.991540
