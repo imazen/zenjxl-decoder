@@ -30,6 +30,15 @@ the binary somewhere stable, since each experiment compares two builds.
   warmup before each measured decode. Both options retain individual
   measurements in `samples.tsv` as well as the block aggregates. Use
   `--rounds` to increase the number of interleaved blocks.
+- `just build-paired-output` builds the caller-owned RGB8/RGBA8 benchmark.
+  `target/release/paired-output --workers 8 BASE... --candidate-inputs PROFILE...`
+  compares corresponding baseline and profile streams on reused output
+  buffers. A second baseline arm supplies A/A. Add `--exact-pairs` for
+  lossless stream pairs. Each arm must reproduce its own allocating
+  decode exactly before timing, after the first decode into a cleared
+  buffer, and after the last decode. Both streams must have the same
+  image dimensions and output channel count. With a single stream list,
+  the tool compares allocation, output reuse, and decoder rewind.
 - `vsdj.py <cli> <threads> <rounds> <files...>`: interleaved runs of this
   decoder, djxl and upstream jxl-rs, median of per-round means, plus the
   zen/djxl ratio. Set `DJXL` and `JXLRS_CLI` to the binaries. djxl runs
