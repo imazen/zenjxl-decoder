@@ -364,6 +364,8 @@ impl Predictor {
 /// Number of sub-predictors blended by the weighted predictor (also the
 /// number of per-predictor error rows persisted across group rows).
 pub(crate) const NUM_PREDICTORS: usize = 4;
+const DEFAULT_WP_COEFFICIENTS: [u32; 7] = [16, 10, 7, 7, 7, 0, 0];
+const DEFAULT_WP_WEIGHTS: [u32; NUM_PREDICTORS] = [13, 12, 12, 12];
 const PRED_EXTRA_BITS: i64 = 3;
 const PREDICTION_ROUND: i64 = ((1 << PRED_EXTRA_BITS) >> 1) - 1;
 // Allows to approximate division by a number from 1 to 64.
@@ -530,6 +532,12 @@ impl WeightedPredictorState {
         self.carry_pos = (pos.0 + 1, pos.1);
     }
 
+    pub(super) fn uses_default_coefficients(&self) -> bool {
+        let h = &self.wp_header;
+        [h.p1c, h.p2c, h.p3ca, h.p3cb, h.p3cc, h.p3cd, h.p3ce] == DEFAULT_WP_COEFFICIENTS
+            && [h.w0, h.w1, h.w2, h.w3] == DEFAULT_WP_WEIGHTS
+    }
+
     /// Decodes row `y` of a channel whose tree is the weighted predictor
     /// alone: for each sample, `read(property)` returns the decoded
     /// residual for WP property `property`, which is added to the WP
@@ -538,7 +546,7 @@ impl WeightedPredictorState {
     /// once per row, so indexing needs no row-parity select and no per-access
     /// bounds checks beyond the slices' own.
     #[inline(always)]
-    pub fn decode_row(
+    pub(super) fn decode_row<const DEFAULT: bool>(
         &mut self,
         y: usize,
         row: &mut [i32],
@@ -560,13 +568,18 @@ impl WeightedPredictorState {
         let prev_e = &prev_e[..stride];
         let cur_pe = &mut cur_pe[..stride];
         let prev_pe = &mut prev_pe[..stride];
-        let max_weight = [
-            self.wp_header.w0,
-            self.wp_header.w1,
-            self.wp_header.w2,
-            self.wp_header.w3,
-        ];
         let h = &self.wp_header;
+        let max_weight = if DEFAULT {
+            DEFAULT_WP_WEIGHTS
+        } else {
+            [h.w0, h.w1, h.w2, h.w3]
+        };
+        let [p1c, p2c, p3ca, p3cb, p3cc, p3cd, p3ce] = if DEFAULT {
+            DEFAULT_WP_COEFFICIENTS
+        } else {
+            [h.p1c, h.p2c, h.p3ca, h.p3cb, h.p3cc, h.p3cd, h.p3ce]
+        }
+        .map(i64::from);
         // The previous sample's error and the N/NW error sums it just
         // updated are carried in registers: reloading them right after
         // the store put a store-to-load forward on the per-sample chain.
@@ -615,13 +628,13 @@ impl WeightedPredictorState {
 
             let prediction = [
                 w + ne - n,
-                n - (((sum_wn + te_ne) * h.p1c as i64) >> 5),
-                w - (((sum_wn + te_nw) * h.p2c as i64) >> 5),
-                n - ((te_nw * (h.p3ca as i64)
-                    + (te_n * (h.p3cb as i64))
-                    + (te_ne * (h.p3cc as i64))
-                    + ((nn - n) * (h.p3cd as i64))
-                    + ((nw - w) * (h.p3ce as i64)))
+                n - (((sum_wn + te_ne) * p1c) >> 5),
+                w - (((sum_wn + te_nw) * p2c) >> 5),
+                n - ((te_nw * p3ca
+                    + te_n * p3cb
+                    + te_ne * p3cc
+                    + (nn - n) * p3cd
+                    + (nw - w) * p3ce)
                     >> 5),
             ];
             let mut pred = weighted_average(&prediction, &mut weights);
@@ -791,6 +804,62 @@ mod tests {
         );
         state.update_errors((rng.next() % 256) as i32, pos, xsize);
         res
+    }
+
+    #[test]
+    fn default_wp_coefficients_match_dynamic_rows() {
+        let mut header = WeightedHeader {
+            all_default: false,
+            p1c: 16,
+            p2c: 10,
+            p3ca: 7,
+            p3cb: 7,
+            p3cc: 7,
+            p3cd: 0,
+            p3ce: 0,
+            w0: 13,
+            w1: 12,
+            w2: 12,
+            w3: 12,
+        };
+        let mut rng = SimpleRandom::new();
+        for width in [1, 2, 37, 256] {
+            let mut generic = WeightedPredictorState::new(&header, width).unwrap();
+            let mut specialized = WeightedPredictorState::new(&header, width).unwrap();
+            assert!(specialized.uses_default_coefficients());
+            let mut top = vec![0; width];
+            let mut toptop = top.clone();
+            let mut row = top.clone();
+            let mut result = top.clone();
+            for y in 0..17 {
+                let residuals: Vec<i32> = (0..width)
+                    .map(|_| ((rng.next() % 2_049) - 1_024) as i32)
+                    .collect();
+                let mut properties = Vec::with_capacity(width);
+                let mut values = residuals.iter();
+                generic.decode_row::<false>(y, &mut row, &top, &toptop, |property| {
+                    properties.push(property);
+                    *values.next().unwrap()
+                });
+                let mut expected = properties.into_iter().zip(residuals);
+                specialized.decode_row::<true>(y, &mut result, &top, &toptop, |property| {
+                    let (expected, residual) = expected.next().unwrap();
+                    assert_eq!(property, expected);
+                    residual
+                });
+                assert_eq!(result, row);
+                assert_eq!(specialized.error, generic.error);
+                assert_eq!(specialized.pred_errors_buffer, generic.pred_errors_buffer);
+                std::mem::swap(&mut toptop, &mut top);
+                std::mem::swap(&mut top, &mut row);
+            }
+        }
+        header.p3ce = 1;
+        assert!(
+            !WeightedPredictorState::new(&header, 17)
+                .unwrap()
+                .uses_default_coefficients()
+        );
     }
 
     #[test]

@@ -269,6 +269,21 @@ impl<const C420: bool> WpOnlyLookup<C420> {
     /// [`WeightedPredictorState::decode_row`]; same output as the
     /// per-sample `decode_one` path.
     pub(super) fn decode_channel(
+        self,
+        channel: &mut ModularChannel,
+        reader: &mut SymbolReader,
+        br: &mut BitReader,
+        histograms: &Histograms,
+    ) {
+        if self.wp_state.uses_default_coefficients() {
+            self.decode_channel_impl::<true>(channel, reader, br, histograms);
+        } else {
+            self.decode_channel_impl::<false>(channel, reader, br, histograms);
+        }
+    }
+
+    #[inline(never)]
+    fn decode_channel_impl<const DEFAULT: bool>(
         mut self,
         channel: &mut ModularChannel,
         reader: &mut SymbolReader,
@@ -285,7 +300,7 @@ impl<const C420: bool> WpOnlyLookup<C420> {
         let mut cursor = reader.plain_cursor(br);
         for y in 0..h {
             let [row, row_top, row_toptop] = channel.data.distinct_full_rows_mut([y + 2, y + 1, y]);
-            self.wp_state.decode_row(
+            self.wp_state.decode_row::<DEFAULT>(
                 y,
                 &mut row[off..off + w],
                 &row_top[off..off + w],
