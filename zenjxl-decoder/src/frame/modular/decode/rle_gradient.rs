@@ -16,7 +16,7 @@
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
-    frame::modular::{IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
+    frame::modular::{IMAGE_OFFSET, ModularChannel, predict::clamped_gradient_i32},
 };
 
 /// Reads one sample with the regular reader. The cursor goes in and out by
@@ -124,8 +124,8 @@ fn decode<'a, 'b>(channel: &mut ModularChannel, side: Side<'a, 'b>) -> Side<'a, 
         let mut left = top[0];
         let mut topleft = top[0];
         for (p, &t) in row.iter_mut().zip(top) {
-            let pred = clamped_gradient(left as i64, t as i64, topleft as i64);
-            left = side.read().wrapping_add(pred as i32);
+            let pred = clamped_gradient_i32(left, t, topleft);
+            left = side.read().wrapping_add(pred);
             *p = left;
             topleft = t;
         }

@@ -15,7 +15,7 @@ use crate::{
             common::make_pixel,
             specialized_trees::{TreeSpecialCase, specialize_tree},
         },
-        predict::{PredictionData, WeightedPredictorState, clamped_gradient},
+        predict::{PredictionData, WeightedPredictorState, clamped_gradient_i32},
         tree::{NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, predict},
     },
     headers::modular::GroupHeader,
@@ -231,15 +231,15 @@ fn decode_fused_prefix<'r, 'b, 'a>(
         while x < width {
             let residuals = source.read(histograms, x + 1 < width);
             let above = top[x];
-            let guess = clamped_gradient(left.into(), above.into(), top_left.into());
-            left = residuals.first.wrapping_add(guess as i32);
+            let guess = clamped_gradient_i32(left, above, top_left);
+            left = residuals.first.wrapping_add(guess);
             row[x] = left;
             top_left = above;
             x += 1;
             if let Some(second) = residuals.second {
                 let above = top[x];
-                let guess = clamped_gradient(left.into(), above.into(), top_left.into());
-                left = second.wrapping_add(guess as i32);
+                let guess = clamped_gradient_i32(left, above, top_left);
+                left = second.wrapping_add(guess);
                 row[x] = left;
                 top_left = above;
                 x += 1;

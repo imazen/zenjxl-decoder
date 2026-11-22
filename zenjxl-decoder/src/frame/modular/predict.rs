@@ -308,6 +308,40 @@ pub fn clamped_gradient(left: i64, top: i64, topleft: i64) -> i64 {
     if topleft > max { min } else { grad_clamp_max }
 }
 
+/// The Gradient predictor for a unit-multiplier, zero-offset leaf.
+/// Clamping the subtrahend also clamps the result, with the endpoints reversed.
+#[inline(always)]
+pub(super) fn clamped_gradient_i32(left: i32, top: i32, topleft: i32) -> i32 {
+    let clamped = topleft.max(left.min(top)).min(left.max(top));
+    left.wrapping_add(top).wrapping_sub(clamped)
+}
+
+#[cfg(test)]
+#[test]
+fn clamped_gradient_i32_matches_wide_gradient_at_boundaries() {
+    let edges = [
+        i32::MIN,
+        i32::MIN + 1,
+        -65_536,
+        -1,
+        0,
+        1,
+        65_535,
+        i32::MAX - 1,
+        i32::MAX,
+    ];
+    for left in edges {
+        for top in edges {
+            for topleft in edges {
+                assert_eq!(
+                    clamped_gradient_i32(left, top, topleft),
+                    clamped_gradient(left.into(), top.into(), topleft.into()) as i32,
+                );
+            }
+        }
+    }
+}
+
 impl Predictor {
     pub const NUM_PREDICTORS: u32 = Predictor::AverageAll as u32 + 1;
 
