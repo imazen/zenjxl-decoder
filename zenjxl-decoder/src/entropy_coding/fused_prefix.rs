@@ -15,7 +15,7 @@ const WINDOW_BITS: u32 = 12;
 
 // A smaller table resolves either one literal or one repeat-length token.
 // Row span reconstruction still owns the repeat-count and predictor state.
-const RLE_WINDOW_BITS: u32 = 10;
+const RLE_WINDOW_BITS: u32 = 12;
 const RLE_TABLE_SIZE: usize = 1 << RLE_WINDOW_BITS;
 const RLE_FLAG: u32 = 1 << 31;
 const RLE_VALUE_MASK: u32 = (RLE_FLAG - 1) >> LENGTH_BITS;
