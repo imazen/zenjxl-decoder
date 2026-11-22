@@ -629,3 +629,62 @@ hashes, exact readbacks and individual timings are in
 [Per-file timing and p95](cold_modular_rle_literal_pairs_2026-11-22.tsv),
 [class results](cold_modular_rle_literal_pairs_classes_2026-11-22.tsv)
 and [hardware counters](cold_modular_rle_literal_pairs_instructions_2026-11-22.tsv).
+
+## On-demand refill for the fused RLE window
+
+The fused 10-bit RLE lookup uses bits already in the cursor when the
+window fits. The short-window branch refills through the existing
+8-byte reader. The general readers retain their refill policy.
+The earlier [plain Huffman refill experiment](fused_prefix_2026-11-22.md#refill-on-demand)
+used a different loop and lookup.
+
+The tested source at `54f2025951f630046289b96e268aa476997dc63d` is
+tree-identical to the landed revision `e14ae58d9c6b5cd576d58fc50a9010a0cf9750f2`.
+The baseline is `6211b24c` with the runtime binary built at `edc2abcc`.
+The readback and timing commands use the same four pinned native
+imazen-26 photo profiles and five controls as the paired-literal
+experiment, with an allocating RGB8/RGBA8 endpoint and the same
+1/4/8 pinned i270 P-core affinity. Each block includes five decodes
+and an A/A arm. The confirmation adds five warm blocks and separately
+repeats the cold stock comparison with nine blocks. All 105 PNG16
+pairs across the two runs match across binaries or profiles and workers.
+
+| i270 photo comparison | Median paired speedup, 1 / 4 / 8 workers | Candidate MP/s, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Same file, cold (3 blocks) | 1.058× / 1.046× / 1.040× | 139.64 / 381.70 / 544.30 |
+| Same file, warm (8 pooled blocks) | 1.060× / 1.044× / 1.032× | 145.59 / 421.36 / 627.06 |
+| Cold profile vs stock, current decoder (3 blocks) | 1.301× / 1.373× / 1.242× | 139.64 / 379.74 / 547.53 |
+| Cold profile vs stock, current decoder (9 blocks) | 1.301× / 1.364× / 1.264× | 139.67 / 381.64 / 548.87 |
+
+The one-worker same-file improvement meets the 5% decoder gate at
+both endpoints. In the first warm run the eight-worker control
+median is 0.976×. It is 1.008× in the confirmation and 1.002×
+across the pooled samples, with pooled A/A at 0.999×. The non-fused
+1447 stream and odd RGBA stream have individual eight-worker pooled
+warm speedups of 0.977× and 0.972×. Their first-run p95 latency
+ratios of 1.106× and 1.362× move to 0.999× and 1.093× in the pool.
+The control class p95 ratio is at most 1.021× across the cold and
+pooled warm endpoints. The throughput-tier replay meets its
+relative speed targets and the absolute one-worker target.
+The 550 MP/s eight-worker cold target remains open.
+
+In three alternating blocks of five fresh processes per arm on
+1237 and 1619, the candidate retires 15.9–16.8% fewer user instructions
+with 0.28–0.31% more branches and 64.1–66.6% more branch misses.
+These counters cover the pinned process lifetime at one and eight
+workers. The build, focused tests, strict Clippy and first replay
+take 356 s at 4.24 GiB peak RSS. The corpus-backed feature replay,
+confirmation timing and counters take 277 s at 0.23 GiB peak RSS.
+An initial library invocation omitted the feature corpus path and
+failed all 103 active feature tests. The corpus-backed feature replay
+passes all 103. A full run with the raw corpus still needs two PNG
+references. The documented reference preparation script generates
+them with pinned djxl v0.12.0 `a7a9c78`. The completed library suite
+with those references passes all 1,098 active tests with 28 existing
+ignores, in 114 s at 8.96 GiB peak RSS.
+
+[Per-file timing and p95](cold_modular_rle_refill_2026-11-22.tsv),
+[class results](cold_modular_rle_refill_classes_2026-11-22.tsv)
+and [hardware counters](cold_modular_rle_refill_instructions_2026-11-22.tsv).
+Raw results, commands and hashes are in
+`/mnt/v/output/zenjxl-decoder/modular-rle-refill-i270-2026-11-22` on i270.
