@@ -46,9 +46,9 @@ struct Side<'a, 'b> {
 
 impl Side<'_, '_> {
     #[inline(always)]
-    fn read(&mut self) -> i32 {
-        match self.code.read(&mut self.cursor) {
-            Some(v) => unpack_signed(v),
+    fn read_span(&mut self, limit: usize) -> (i32, usize) {
+        match self.code.read_span(&mut self.cursor, limit) {
+            Some((v, count)) => (unpack_signed(v), count),
             None => {
                 let (v, cursor) = read_slow(
                     self.cursor,
@@ -58,7 +58,7 @@ impl Side<'_, '_> {
                     self.cluster,
                 );
                 self.cursor = cursor;
-                v
+                (v, 1)
             }
         }
     }
@@ -114,20 +114,53 @@ fn decode<'a, 'b>(channel: &mut ModularChannel, side: Side<'a, 'b>) -> Side<'a, 
         let row = &mut row[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + w];
         if y == 0 {
             let mut last = 0i32;
-            for p in row.iter_mut() {
-                last = side.read().wrapping_add(last);
-                *p = last;
+            let mut x = 0;
+            while x < w {
+                let (residual, count) = side.read_span(w - x);
+                let end = x + count;
+                if count == 1 {
+                    last = last.wrapping_add(residual);
+                    row[x] = last;
+                } else if residual == 0 {
+                    row[x..end].fill(last);
+                } else {
+                    for p in &mut row[x..end] {
+                        last = last.wrapping_add(residual);
+                        *p = last;
+                    }
+                }
+                x = end;
             }
             continue;
         }
         let top = &row_top[IMAGE_OFFSET.0..IMAGE_OFFSET.0 + w];
         let mut left = top[0];
         let mut topleft = top[0];
-        for (p, &t) in row.iter_mut().zip(top) {
-            let pred = clamped_gradient(left as i64, t as i64, topleft as i64);
-            left = side.read().wrapping_add(pred as i32);
-            *p = left;
-            topleft = t;
+        let mut x = 0;
+        while x < w {
+            let (residual, count) = side.read_span(w - x);
+            let end = x + count;
+            if count == 1 {
+                let t = top[x];
+                left = (clamped_gradient(left.into(), t.into(), topleft.into()) as i32)
+                    .wrapping_add(residual);
+                row[x] = left;
+                topleft = t;
+            } else if residual == 0 && left == topleft {
+                // A zero residual with left == top-left predicts top, so
+                // the same condition holds throughout this span.
+                row[x..end].copy_from_slice(&top[x..end]);
+                left = top[end - 1];
+                topleft = left;
+            } else {
+                for (p, &t) in row[x..end].iter_mut().zip(&top[x..end]) {
+                    left = (clamped_gradient(left.into(), t.into(), topleft.into()) as i32)
+                        .wrapping_add(residual);
+                    *p = left;
+                    topleft = t;
+                }
+            }
+            x = end;
         }
     }
     side
