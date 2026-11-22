@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 use std::fmt::Debug;
+use std::sync::OnceLock;
 use whereat::at;
 
 use super::{Predictor, predict::WeightedPredictorState};
@@ -11,6 +12,7 @@ use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::Histograms,
     entropy_coding::decode::SymbolReader,
+    entropy_coding::fused_prefix::FusedPrefixLut,
     error::{Error, Result},
     frame::modular::predict::PredictionData,
     image::Image,
@@ -246,6 +248,7 @@ impl BitsetTree {
 pub struct Tree {
     pub nodes: Vec<TreeNode>,
     pub histograms: Histograms,
+    fused_prefix: [OnceLock<Option<FusedPrefixLut>>; 4],
     memory_tracker: MemoryTracker,
 }
 
@@ -707,8 +710,19 @@ impl Tree {
         Ok(Tree {
             nodes: tree,
             histograms,
+            fused_prefix: [const { OnceLock::new() }; 4],
             memory_tracker: memory_tracker.clone(),
         })
+    }
+
+    pub(super) fn fused_prefix(&self, cluster: usize) -> Option<&FusedPrefixLut> {
+        self.fused_prefix
+            .get(cluster)?
+            .get_or_init(|| {
+                self.histograms
+                    .build_fused_prefix(cluster, &self.memory_tracker)
+            })
+            .as_ref()
     }
 
     /// Compute a bitmask of which properties the tree actually splits on.
