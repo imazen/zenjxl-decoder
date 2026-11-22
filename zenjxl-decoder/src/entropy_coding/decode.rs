@@ -852,7 +852,10 @@ impl Histograms {
             return None;
         };
         let config = self.uint_configs.get(cluster)?;
-        if self.uses_lz77() || self.single_symbol_value(cluster).is_some() {
+        if self.uses_lz77()
+            || self.uint_configs.len() != 1
+            || self.single_symbol_value(cluster).is_some()
+        {
             return None;
         }
         FusedPrefixLut::build(codes.table(cluster), config, tracker)
