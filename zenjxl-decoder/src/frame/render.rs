@@ -746,7 +746,7 @@ impl Frame {
         // so we avoid batching unless group count is very high (8K+ images).
         // At 4T/384 groups, 6 batches caused 40% overhead vs unbatched.
         // Large modular frames without noise or border-dependent stages are
-        // decoded in batches of eight groups per thread, so that the group
+        // decoded in batches of four groups per thread, so that the group
         // buffers rendered in one batch return through the recycle pool and
         // are reused by the next, bounding the frame's group buffers by the
         // batch instead of the image (upstream #812). Batches cost ~2.5% of
@@ -757,7 +757,7 @@ impl Frame {
             && !lmp_ref!().needs_border_rendering()
             && num_groups > num_threads * 16;
         let decode_batch_size = if recycle_modular {
-            (num_threads * 8).max(1)
+            (num_threads * 4).max(1)
         } else if num_needs_pixels > num_threads * 256 {
             num_threads * 64
         } else {
