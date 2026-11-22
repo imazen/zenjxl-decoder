@@ -17,7 +17,7 @@ use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::{Histograms, RleCode, RleCursor, SymbolReader, unpack_signed},
     entropy_coding::fused_prefix::FusedRleLut,
-    frame::modular::{GlobalTree, IMAGE_OFFSET, ModularChannel, predict::clamped_gradient},
+    frame::modular::{GlobalTree, IMAGE_OFFSET, ModularChannel},
 };
 
 /// Reads one sample with the regular reader. The cursor goes in and out by
@@ -190,8 +190,7 @@ fn decode<'a, 'b, const FUSED: bool>(
             let end = x + count;
             if count == 1 {
                 let t = top[x];
-                left = (clamped_gradient(left.into(), t.into(), topleft.into()) as i32)
-                    .wrapping_add(residual);
+                left = gradient_i32(left, t, topleft).wrapping_add(residual);
                 row[x] = left;
                 topleft = t;
             } else if residual == 0 && left == topleft {
@@ -202,8 +201,7 @@ fn decode<'a, 'b, const FUSED: bool>(
                 topleft = left;
             } else {
                 for (p, &t) in row[x..end].iter_mut().zip(&top[x..end]) {
-                    left = (clamped_gradient(left.into(), t.into(), topleft.into()) as i32)
-                        .wrapping_add(residual);
+                    left = gradient_i32(left, t, topleft).wrapping_add(residual);
                     *p = left;
                     topleft = t;
                 }
@@ -212,6 +210,17 @@ fn decode<'a, 'b, const FUSED: bool>(
         }
     }
     side
+}
+
+#[inline(always)]
+fn gradient_i32(left: i32, top: i32, top_left: i32) -> i32 {
+    let min = left.min(top);
+    let max = left.max(top);
+    // With top_left in [min, max], the result also lies in [min, max].
+    // Wrapping intermediates therefore give the exact final i32 value.
+    let prediction = left.wrapping_add(top).wrapping_sub(top_left);
+    let clamped_max = if top_left < min { max } else { prediction };
+    if top_left > max { min } else { clamped_max }
 }
 
 #[cfg(test)]
@@ -223,6 +232,33 @@ mod tests {
     pub(super) static DISABLE: AtomicBool = AtomicBool::new(false);
     /// Channels decoded here.
     pub(super) static USES: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn gradient_i32_matches_widened_gradient() {
+        use crate::frame::modular::predict::clamped_gradient;
+
+        let values = [
+            i32::MIN,
+            i32::MIN + 1,
+            -2,
+            -1,
+            0,
+            1,
+            2,
+            i32::MAX - 1,
+            i32::MAX,
+        ];
+        for left in values {
+            for top in values {
+                for top_left in values {
+                    assert_eq!(
+                        super::gradient_i32(left, top, top_left),
+                        clamped_gradient(left.into(), top.into(), top_left.into()) as i32
+                    );
+                }
+            }
+        }
+    }
 
     /// libjxl v0.12 `cjxl -e 1 -d 0` files (272x96, two groups across;
     /// RGB8, 16-bit gray, RGBA8): RLE-only LZ77 with prefix codes and one
