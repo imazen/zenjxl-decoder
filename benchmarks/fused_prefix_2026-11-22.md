@@ -118,3 +118,52 @@ and timing run used 0.90 GiB peak RSS over 157 seconds. A separate
 single-worker profile used 0.10 GiB over eight seconds and retained
 raw CPU samples from both builds on both textured files.
 [Paired per-stream results](fused_channel_pair_build_2026-11-22.tsv).
+
+## Interleaving two Modular groups on i270
+
+Candidate `2d15f44e08916571f8cf5bafe3457c2849731a4e` alternates prefix
+reads for eligible Gradient channels from two independent groups.
+The comparator `7413bf0782e24a80c6e8131e0a4f1814c813d43f` already has
+the same prefix table, table builder and two-symbol reader. Both were
+built with Rust 1.99.1 and the release flags above. The paired run
+reproduced the same 16-bit readback hashes on all nine streams in
+both binaries at 1, 4 and 8 workers.
+
+| Stream | Paired speedup, 1 / 4 / 8 | Candidate p95 latency ratio, 1 / 4 / 8 |
+|---|---:|---:|
+| Textured photo, shared prefix | 1.070 / 1.050 / 0.992 | 0.935 / 0.883 / 1.008 |
+| Smooth photo, shared prefix | 1.087 / 0.988 / 0.964 | 0.928 / 1.051 / 0.963 |
+| Textured photo, per-channel | 1.013 / 0.950 / 0.923 | 0.986 / 1.079 / 1.013 |
+| Smooth photo, per-channel | 1.001 / 0.955 / 0.943 | 0.996 / 1.130 / 1.052 |
+| Terminal, per-channel | 1.002 / 1.004 / 0.902 | 1.015 / 1.000 / 1.004 |
+| Mixed page, tier 0 | 0.999 / 0.973 / 0.988 | 1.001 / 1.017 / 1.022 |
+
+The shared-prefix one-worker improvement repeats across both images.
+The faster per-channel streams gain at most 1.3% at one worker and
+lose 5.7–9.8% at eight. Their median throughput is 105.53 MP/s at one
+worker and 406.89 MP/s at eight across the two photos. Their throughput
+targets remain open. The smooth per-channel four-worker p95 exceeds
+1.10× with a same-cell A/A of 1.038×. Some eight-worker tail controls
+also drift. Do not use the candidate as a general optimization.
+The shared-prefix one-worker result applies to that stream shape.
+
+Separate CPU sampling reaches the paired kernel in both stream shapes.
+The kernel accounts for 74.39% and 65.50% of user CPU samples at one and
+eight workers on the textured shared-prefix file, and 32.48% and 29.60%
+on its per-channel counterpart. These sample shares establish that the
+paths ran. They give no direct estimate of the scheduling cost.
+
+The [block run](fused_prefix_interleaving_blocks_2026-11-22.tsv) uses
+three interleaved blocks of five decodes. The
+[individual run](fused_prefix_interleaving_latency_2026-11-22.tsv) uses
+five blocks of five fresh processes per arm, each warming once, with
+the same allocating RGB8 endpoint and CPU affinity. It uses the nearest
+rank p95 from 25 recorded latencies per cell. Both include A/A.
+Run-heavy peak RSS was 0.92 GiB for the build and block run, and
+0.13 GiB for the individual run and for the separate profile. Full
+binary and stream hashes, exact readbacks, commands, raw timings and
+named profile captures are under
+`/mnt/v/output/zenjxl-decoder/interleaved-prefix-groups-2026-11-22`
+on i270. The first profile invocation reused a filename through shell
+expansion. The four separately named captures in that directory
+supply the recorded sample shares.
