@@ -360,3 +360,46 @@ use 2.00 GiB peak RSS over 210 s under `run-heavy`.
 [class summaries](cold_modular_prefault_256k_classes_2026-11-22.tsv).
 The raw timings, readbacks, commands and hashes are under
 `independent-cold-phases-2026-11-22` on i270.
+
+## Inline Modular channel lists
+
+The [candidate](https://github.com/imazen/zenjxl-decoder/commit/b604803c9c0022955faef8748a7fe6165301a89d)
+stores up to four borrow guards and channel references in `SmallVec`
+inline storage. Larger channel lists can spill to the heap. The local
+transform path keeps its existing vector and calls the same entropy
+decoder over a slice. The path without local transforms passes the
+inline slice directly.
+
+One complete first decode of 1606 g128 at one worker under heaptrack
+makes 12,813 allocation calls on baseline and 10,909 on the
+candidate. The reported peak heap is 38.92 MB for both. This is a
+whole-process diagnostic, including startup and input acquisition.
+
+Baseline `edc2abcc` has the same decoder and dependency sources as
+the candidate's parent `3e2818ad`. Use the same four independent photo
+streams and RGB8 or RGBA8 controls for stock prefix, scanned text,
+odd alpha and native d1 VarDCT. Each allocating endpoint uses i270 at
+1/4/8 pinned workers and three interleaved blocks of five with A/A.
+Cold runs decode once per process and warm runs decode after one
+warmup. Strict library Clippy and all 48 frozen-stream PNG16 pairs pass.
+
+| Endpoint | Photo throughput ratio at 1 / 4 / 8 workers | Candidate MP/s at 1 / 4 / 8 workers |
+|---|---:|---:|
+| Cold allocating | 0.994× / 1.012× / 1.003× | 131.25 / 363.34 / 524.56 |
+| Warm allocating | 0.993× / 0.996× / 0.990× | 136.35 / 396.89 / 588.56 |
+
+Neither endpoint reaches the independent decoder gate. All candidate
+class p95 ratios stay within 1.057×. The 1237 and 1619 individual
+cold eight-worker p95 ratios are 1.193× and 1.182×, with A/A at 1.155×
+and 0.964×. The experiment is archived on
+`rejected/inline-modular-channel-lists`.
+
+The six transform limit tests pass. The build and timing wrapper
+takes 210 s at 1.98 GiB peak RSS. Heaptrack capture and release test
+build use 4.34 GiB over 100 s. The initial borrow-lifetime compile
+failure and the zero-match test filter are retained in the run logs.
+The completed transform tests use the compiled binary and match all
+six cases. [Per-file timings](cold_modular_inline_channels_2026-11-22.tsv)
+and [class p95](cold_modular_inline_channels_classes_2026-11-22.tsv).
+Raw timing, heaptrack, sources and exact hashes are under
+`inline-modular-channels-2026-11-22` on i270.
