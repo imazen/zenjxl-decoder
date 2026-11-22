@@ -61,6 +61,174 @@ impl FlatTreeNode {
             predictor,
         }
     }
+
+    #[inline(always)]
+    fn prediction(&self, data: PredictionData, weighted: i64) -> PredictionResult {
+        PredictionResult {
+            guess: self.predictor.predict_one(data, weighted) + self.properties_or_offset[0] as i64,
+            multiplier: self.splitvals_or_multiplier[0] as u32,
+            context: self.child_id,
+        }
+    }
+}
+
+pub(super) enum PrunedTree {
+    Flat(Vec<FlatTreeNode>),
+    Mask(BitsetTree),
+}
+
+impl PrunedTree {
+    pub(super) fn new(nodes: &[TreeNode], width: usize) -> Result<Self> {
+        if width >= 64
+            && let Some(tree) = BitsetTree::build(nodes)?
+        {
+            return Ok(Self::Mask(tree));
+        }
+        Ok(Self::Flat(Tree::build_flat_tree(nodes)?))
+    }
+}
+
+const MIN_MASK_PROPERTY: i32 = -1024;
+const MAX_MASK_PROPERTY: i32 = 1023;
+const MASK_LOOKUP_SIZE: usize = (MAX_MASK_PROPERTY - MIN_MASK_PROPERTY + 1) as usize;
+const MAX_MASK_PROPERTIES: usize = 8;
+
+struct PropertyMask {
+    property: usize,
+    lookup: [u8; MASK_LOOKUP_SIZE],
+    intervals: Vec<u64>,
+}
+
+pub(super) struct BitsetTree {
+    masks: Vec<PropertyMask>,
+    leaves: Vec<FlatTreeNode>,
+}
+
+impl BitsetTree {
+    // One mask bit per leaf. Values outside the lookup range select the same
+    // interval as the clamped value because all splits are inside that range.
+    fn build(nodes: &[TreeNode]) -> Result<Option<Self>> {
+        if nodes.len() < 5 || nodes.len() > 127 {
+            return Ok(None);
+        }
+        let mut properties = [0u8; MAX_MASK_PROPERTIES];
+        let mut num_properties = 0;
+        for node in nodes {
+            match *node {
+                TreeNode::Leaf { offset, .. } => {
+                    if i16::try_from(offset).is_err() {
+                        return Ok(None);
+                    }
+                }
+                TreeNode::Split { property, val, .. } => {
+                    if !(MIN_MASK_PROPERTY..MAX_MASK_PROPERTY).contains(&val) {
+                        return Ok(None);
+                    }
+                    if !properties[..num_properties].contains(&property) {
+                        if num_properties == MAX_MASK_PROPERTIES {
+                            return Ok(None);
+                        }
+                        properties[num_properties] = property;
+                        num_properties += 1;
+                    }
+                }
+            }
+        }
+        if num_properties < 2 {
+            return Ok(None);
+        }
+
+        let reserve = |err: std::collections::TryReserveError| at!(Error::from(err));
+        let mut masks = Vec::new_with_capacity(num_properties).map_err(reserve)?;
+        let mut splits: [Vec<i32>; MAX_MASK_PROPERTIES] = std::array::from_fn(|_| Vec::new());
+        let mut ranges = [(0, 0); MAX_MASK_PROPERTIES];
+        for (slot, &property) in properties[..num_properties].iter().enumerate() {
+            let cuts = &mut splits[slot];
+            cuts.try_reserve_exact(nodes.len() / 2).map_err(reserve)?;
+            cuts.extend(nodes.iter().filter_map(|node| match *node {
+                TreeNode::Split {
+                    property: p, val, ..
+                } if p == property => Some(val),
+                _ => None,
+            }));
+            cuts.sort_unstable();
+            cuts.dedup();
+            let mut lookup = [0; MASK_LOOKUP_SIZE];
+            let mut interval = 0;
+            for (index, entry) in lookup.iter_mut().enumerate() {
+                if cuts
+                    .get(interval)
+                    .is_some_and(|&cut| cut < MIN_MASK_PROPERTY + index as i32)
+                {
+                    interval += 1;
+                }
+                *entry = interval as u8;
+            }
+            let mut intervals = Vec::new_with_capacity(cuts.len() + 1).map_err(reserve)?;
+            intervals.resize(cuts.len() + 1, 0);
+            ranges[slot].1 = intervals.len();
+            masks.push(PropertyMask {
+                property: property as usize,
+                lookup,
+                intervals,
+            });
+        }
+
+        let mut leaves = Vec::new_with_capacity(nodes.len().div_ceil(2)).map_err(reserve)?;
+        let mut stack = Vec::new_with_capacity(nodes.len()).map_err(reserve)?;
+        stack.push((0, ranges));
+        while let Some((index, mut ranges)) = stack.pop() {
+            match nodes[index as usize] {
+                TreeNode::Split {
+                    property,
+                    val,
+                    left,
+                    right,
+                } => {
+                    let slot = properties[..num_properties]
+                        .iter()
+                        .position(|&p| p == property)
+                        .unwrap();
+                    let boundary = splits[slot].binary_search(&val).unwrap() + 1;
+                    let (start, end) = ranges[slot];
+                    if !(start < boundary && boundary < end) {
+                        return Ok(None);
+                    }
+                    ranges[slot] = (boundary, end);
+                    stack.push((left, ranges));
+                    ranges[slot] = (start, boundary);
+                    stack.push((right, ranges));
+                }
+                TreeNode::Leaf {
+                    predictor,
+                    multiplier,
+                    offset,
+                    id,
+                } => {
+                    let bit = 1u64 << leaves.len();
+                    for (mask, &(start, end)) in masks.iter_mut().zip(&ranges) {
+                        for interval in &mut mask.intervals[start..end] {
+                            *interval |= bit;
+                        }
+                    }
+                    leaves.push(FlatTreeNode::leaf(predictor, offset, multiplier, id));
+                }
+            }
+        }
+        Ok(Some(Self { masks, leaves }))
+    }
+
+    #[inline(always)]
+    fn leaf(&self, properties: &[i32]) -> &FlatTreeNode {
+        let mut candidates = u64::MAX;
+        for mask in &self.masks {
+            let value = properties[mask.property].clamp(MIN_MASK_PROPERTY, MAX_MASK_PROPERTY);
+            let index = (value - MIN_MASK_PROPERTY) as usize;
+            candidates &= mask.intervals[mask.lookup[index] as usize];
+        }
+        debug_assert_eq!(candidates.count_ones(), 1);
+        &self.leaves[candidates.trailing_zeros() as usize]
+    }
 }
 
 pub struct Tree {
@@ -367,8 +535,8 @@ pub(super) fn predict(
 /// Optimized prediction using flat tree (matches C++ context_predict.h:351-371).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-pub(super) fn predict_flat(
-    flat_tree: &[FlatTreeNode],
+pub(super) fn predict_pruned(
+    tree: &PrunedTree,
     prediction_data: PredictionData,
     xsize: usize,
     wp_state: Option<&mut WeightedPredictorState>,
@@ -389,6 +557,15 @@ pub(super) fn predict_flat(
         used_mask,
     );
 
+    let flat_tree = match tree {
+        PrunedTree::Mask(tree) => {
+            return tree
+                .leaf(property_buffer)
+                .prediction(prediction_data, wp_pred);
+        }
+        PrunedTree::Flat(flat) => flat,
+    };
+
     // Flat tree traversal — all child_id + offset values are validated
     // in build_flat_tree, so indexing here cannot go out of bounds.
     let mut pos = 0;
@@ -397,13 +574,7 @@ pub(super) fn predict_flat(
 
         if node.property0 < 0 {
             // Leaf node — predictor was pre-validated at tree build time
-            let pred = node.predictor.predict_one(prediction_data, wp_pred);
-
-            return PredictionResult {
-                guess: pred + node.properties_or_offset[0] as i64,
-                multiplier: node.splitvals_or_multiplier[0] as u32,
-                context: node.child_id,
-            };
+            return node.prediction(prediction_data, wp_pred);
         }
 
         // Split node: C++ logic from context_predict.h:361-365
@@ -748,5 +919,94 @@ mod level_tests {
             JxlCodestreamLevel::Level10.max_ma_tree_depth(),
         )
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bitset_tests {
+    use super::*;
+
+    #[test]
+    fn property_masks_match_branch_boundaries_and_repeated_splits() {
+        let leaf = |id| TreeNode::Leaf {
+            predictor: Predictor::Gradient,
+            offset: id as i32 - 3,
+            multiplier: id + 1,
+            id,
+        };
+        let nodes = [
+            TreeNode::Split {
+                property: 9,
+                val: 17,
+                left: 1,
+                right: 2,
+            },
+            TreeNode::Split {
+                property: 2,
+                val: -11,
+                left: 3,
+                right: 4,
+            },
+            TreeNode::Split {
+                property: 9,
+                val: -40,
+                left: 5,
+                right: 6,
+            },
+            leaf(0),
+            leaf(1),
+            leaf(2),
+            leaf(3),
+        ];
+        let tree = BitsetTree::build(&nodes).unwrap().unwrap();
+        let boundaries = [
+            i32::MIN,
+            -1024,
+            -41,
+            -40,
+            -39,
+            -12,
+            -11,
+            -10,
+            16,
+            17,
+            18,
+            1023,
+            i32::MAX,
+        ];
+        let mut properties = [0; 10];
+        for y in boundaries {
+            for g in boundaries {
+                properties[2] = y;
+                properties[9] = g;
+                let mut index = 0;
+                while let TreeNode::Split {
+                    property,
+                    val,
+                    left,
+                    right,
+                } = nodes[index]
+                {
+                    index = if properties[property as usize] > val {
+                        left
+                    } else {
+                        right
+                    } as usize;
+                }
+                let TreeNode::Leaf {
+                    id,
+                    multiplier,
+                    offset,
+                    ..
+                } = nodes[index]
+                else {
+                    unreachable!()
+                };
+                let result = tree.leaf(&properties);
+                assert_eq!(result.child_id, id);
+                assert_eq!(result.splitvals_or_multiplier[0] as u32, multiplier);
+                assert_eq!(result.properties_or_offset[0] as i32, offset);
+            }
+        }
     }
 }

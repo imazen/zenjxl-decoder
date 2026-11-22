@@ -18,7 +18,7 @@ use crate::{
         },
         predict::{PredictionData, WeightedPredictorState, clamped_gradient},
         tree::{
-            FlatTreeNode, NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, TreeNode, predict_flat,
+            NUM_NONREF_PROPERTIES, PROPERTIES_PER_PREVCHAN, PrunedTree, TreeNode, predict_pruned,
         },
     },
     headers::modular::GroupHeader,
@@ -30,7 +30,7 @@ use crate::{
 /// specialised `read_*_config_420` reader can be used (no reader-state
 /// dispatch, no per-cluster config lookup per pixel).
 pub struct NoWpTree<const C420: bool> {
-    flat_nodes: Vec<FlatTreeNode>,
+    search_tree: PrunedTree,
     references: Image<i32>,
     property_buffer: IsolatedBuf<i32>,
     used_mask: u32,
@@ -60,10 +60,10 @@ impl<const C420: bool> NoWpTree<C420> {
         property_buffer[1] = stream as i32;
 
         let used_mask = Tree::compute_used_property_mask(&nodes);
-        let flat_nodes = Tree::build_flat_tree(&nodes)?;
+        let search_tree = PrunedTree::new(&nodes, xsize)?;
 
         Ok(Self {
-            flat_nodes,
+            search_tree,
             references,
             property_buffer,
             used_mask,
@@ -92,8 +92,8 @@ impl<const C420: bool> ModularChannelDecoder for NoWpTree<C420> {
         src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
-        let prediction_result = predict_flat(
-            &self.flat_nodes,
+        let prediction_result = predict_pruned(
+            &self.search_tree,
             prediction_data,
             xsize,
             None,
@@ -161,8 +161,8 @@ impl<const C420: bool> ModularChannelDecoder for GeneralTree<C420> {
         src: &mut S,
         histograms: &Histograms,
     ) -> i32 {
-        let prediction_result = predict_flat(
-            &self.no_wp_tree.flat_nodes,
+        let prediction_result = predict_pruned(
+            &self.no_wp_tree.search_tree,
             prediction_data,
             xsize,
             Some(&mut self.wp_state),
