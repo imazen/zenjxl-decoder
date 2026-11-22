@@ -213,7 +213,7 @@ fn decode_fused_prefix<'r, 'b, 'a>(
         if y == 0 {
             let mut left = 0i32;
             while x < width {
-                let residuals = source.read(histograms, x + 1 < width);
+                let residuals = source.read(histograms, false);
                 left = left.wrapping_add(residuals.first);
                 row[x] = left;
                 x += 1;
@@ -229,7 +229,7 @@ fn decode_fused_prefix<'r, 'b, 'a>(
         let mut left = top[0];
         let mut top_left = top[0];
         while x < width {
-            let residuals = source.read(histograms, x + 1 < width);
+            let residuals = source.read(histograms, false);
             let above = top[x];
             let guess = clamped_gradient(left.into(), above.into(), top_left.into());
             left = residuals.first.wrapping_add(guess as i32);
