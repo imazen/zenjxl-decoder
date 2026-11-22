@@ -383,14 +383,31 @@ fn add_bits(x: i32) -> i64 {
 }
 
 #[inline(always)]
-fn error_weight(x: u32, maxweight: u32) -> u32 {
-    let shift = floor_log2_nonzero(x as u64 + 1) as i32 - 5;
+const fn error_weight(x: u32, maxweight: u32) -> u32 {
+    let shift = (x as u64 + 1).ilog2() as i32 - 5;
     if shift < 0 {
         4u32 + maxweight * DIVLOOKUP[x as usize & 63]
     } else {
         4u32 + ((maxweight * DIVLOOKUP[(x as usize >> shift) & 63]) >> shift)
     }
 }
+
+// The wire weights are four bits. Cache the common small error sums
+// and keep the full arithmetic for the rest of the u32 range.
+const CACHED_ERROR_COUNT: usize = 256;
+static CACHED_ERROR_WEIGHTS: [[u32; CACHED_ERROR_COUNT]; 16] = {
+    let mut table = [[0; CACHED_ERROR_COUNT]; 16];
+    let mut weight = 0;
+    while weight < table.len() {
+        let mut error = 0;
+        while error < CACHED_ERROR_COUNT {
+            table[weight][error] = error_weight(error as u32, weight as u32);
+            error += 1;
+        }
+        weight += 1;
+    }
+    table
+};
 
 #[inline(always)]
 fn weighted_average(pixels: &[i64; NUM_PREDICTORS], weights: &mut [u32; NUM_PREDICTORS]) -> i64 {
@@ -566,6 +583,7 @@ impl WeightedPredictorState {
             self.wp_header.w2,
             self.wp_header.w3,
         ];
+        let weight_tables = max_weight.map(|w| &CACHED_ERROR_WEIGHTS[w as usize]);
         let h = &self.wp_header;
         // The previous sample's error and the N/NW error sums it just
         // updated are carried in registers: reloading them right after
@@ -584,12 +602,14 @@ impl WeightedPredictorState {
             let errors_ne = prev_pe[pos_ne];
             let mut weights = [0u32; NUM_PREDICTORS];
             for i in 0..NUM_PREDICTORS {
-                weights[i] = error_weight(
-                    errors_n[i]
-                        .wrapping_add(errors_ne[i])
-                        .wrapping_add(errors_nw[i]),
-                    max_weight[i],
-                );
+                let error = errors_n[i]
+                    .wrapping_add(errors_ne[i])
+                    .wrapping_add(errors_nw[i]);
+                weights[i] = if let Some(&weight) = weight_tables[i].get(error as usize) {
+                    weight
+                } else {
+                    error_weight(error, max_weight[i])
+                };
             }
             let n = add_bits(data.top);
             let w = add_bits(data.left);
