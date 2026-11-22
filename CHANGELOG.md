@@ -6,6 +6,15 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ## [Unreleased]
 
+### Changed
+
+- Bump compatible stable dependencies (`enough` 0.4.5, `almost-enough` 0.4.5,
+  `thiserror` 2.0.21, `smallvec` 1.16.6, `brotli` 9.1.3, `zenbench` 0.1.11,
+  `zenutils-apidoc` 0.1.1, and CLI/macro dependencies) and refresh `Cargo.lock`
+  and `fuzz/Cargo.lock` (retaining `moxcms` 0.9.1 in `Cargo.lock`).
+- Pass `CROSS_CONTAINER_OPTS="--security-opt seccomp=unconfined"` in the
+  `test-i686` CI job.
+
 ### Added
 
 - Add `JxlColorProfile::try_as_icc_with_intensity_target` for fallible
