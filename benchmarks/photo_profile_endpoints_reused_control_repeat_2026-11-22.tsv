@@ -1,0 +1,2 @@
+stream	workers	n_per_arm	speedup	aa_speedup	p95_ratio	aa_p95_ratio
+RGBA	8	75	0.958631	0.947790	1.032519	1.042250
