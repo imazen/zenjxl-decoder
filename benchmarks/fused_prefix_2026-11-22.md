@@ -259,3 +259,32 @@ same-stream runs. The larger batches remain experimental.
 benchmark peak RSS values are 0.90 and 0.91 GiB. Raw timings, commands
 and RSS checks are under `rle-sched-16-2026-11-22` and
 `rle-sched-32-2026-11-22` on i270.
+
+## Independent steps on the shared/local profile
+
+The i270 replay holds the eight selected imazen-26 files fixed and
+adds one decoder change at a time. The baseline is the landed
+row-span decoder. The files cover shared plain prefix, shared RLE
+and group-local tables. Each row uses 15 separately timed RGB8
+decodes per arm at each worker count, warm in memory, with CMS off
+and an interleaved A/A control. All 96 PNG16 comparisons agree.
+
+| Added change | Matching stream forms | Paired median, 1 / 4 / 8 workers |
+|---|---|---:|
+| Fused one-residual lookup | Shared plain | 1.294× / 1.217× / 1.297× |
+| Two residuals per lookup | Shared plain | 1.068× / 1.062× / 1.037× |
+| Fused RLE tokens | Shared RLE | 1.120× / 1.068× / 0.996× |
+| 16 recycled groups per worker | All eight streams | 1.000× / 1.057× / 0.996× |
+
+The one-residual lookup accounts for most of the shared plain-prefix
+gain. The incremental two-residual, RLE-token and larger-batch results
+fall short of the independent eight-worker target on these files.
+The scheduling experiment varies batch size. The earlier
+[group-interleaving experiment](#interleaving-two-modular-groups-on-i270)
+instead alternates the entropy readers within a worker.
+
+[Per-cell step results, bytes and p95](fused_prefix_independent_steps_2026-11-22.tsv).
+Build receipts, exact output hashes, commands and raw timings are under
+`/mnt/v/output/zenjxl-decoder/independent-prefix-2026-11-22` on i270.
+The isolated builds used 0.91 GiB peak RSS over 92 seconds. The timed
+comparisons used 0.12 GiB over 212 seconds.

@@ -17,6 +17,34 @@ pub struct HybridUint {
 }
 
 impl HybridUint {
+    /// Decodes the extra bits of a token from a bounded lookahead window.
+    /// Tokens requiring more bits, including invalid overlong tokens, stay on
+    /// the regular reader so that its error accounting sees them.
+    pub(super) fn decode_window(
+        &self,
+        symbol: u32,
+        window: u32,
+        available: u32,
+    ) -> Option<(u32, u32)> {
+        if symbol < self.split_token {
+            return Some((0, symbol));
+        }
+        let embedded_bits = self.lsb_in_token + self.msb_in_token;
+        let extra =
+            self.split_exponent - embedded_bits + ((symbol - self.split_token) >> embedded_bits);
+        if extra > available {
+            return None;
+        }
+        let low = symbol & ((1 << self.lsb_in_token) - 1);
+        let high = ((symbol >> self.lsb_in_token) & ((1 << self.msb_in_token) - 1))
+            | (1 << self.msb_in_token);
+        let bits = window & ((1 << extra) - 1);
+        Some((
+            extra,
+            ((((high << extra) | bits) << self.lsb_in_token) | low),
+        ))
+    }
+
     pub(super) fn is_split_exponent_zero(&self) -> bool {
         self.split_exponent == 0
     }
