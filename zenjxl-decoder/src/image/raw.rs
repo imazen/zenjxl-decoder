@@ -205,17 +205,7 @@ impl OwnedRawImage {
     /// flag and the function is a no-op otherwise, leaving the pages to be
     /// faulted lazily by the (then single) rendering thread.
     #[cfg(feature = "threads")]
-    pub fn prefault_parallel(&mut self, parallel: bool) {
-        use rayon::prelude::*;
-        const PAGE_SIZE: usize = 4096;
-        let data = self.data.data_slice_mut();
-        if !parallel || data.len() < Self::PREFAULT_MIN_BYTES || rayon::current_num_threads() < 2 {
-            return;
-        }
-        data.par_chunks_mut(PAGE_SIZE).for_each(|chunk| {
-            chunk[0] = 0;
-        });
-    }
+    pub fn prefault_parallel(&mut self, _parallel: bool) {}
 
     /// Sets memory tracking on this image so that `tracked_bytes` are released
     /// back to `tracker` when this image is dropped.
