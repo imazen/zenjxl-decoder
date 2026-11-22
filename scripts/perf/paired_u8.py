@@ -7,6 +7,7 @@
 """Interleaved in-memory RGB8/RGBA8 decode comparisons with an A/A control."""
 
 import argparse
+from contextlib import nullcontext
 import csv
 import hashlib
 import itertools
@@ -58,9 +59,17 @@ def main():
     parser.add_argument("files", type=Path, nargs="+")
     parser.add_argument("--cpus", help="Comma-separated CPU numbers in allocation order")
     parser.add_argument("--allow-level10", action="store_true")
+    parser.add_argument("--rounds", type=int, default=3,
+                        help="Number of interleaved blocks (default: 3)")
+    parser.add_argument("--cold", action="store_true",
+                        help="Run each measured decode in a fresh process, with no warmup")
+    parser.add_argument("--per-sample", action="store_true",
+                        help="Use a fresh process and one warmup for every warm sample")
     parser.add_argument("--verify-pixels", action="store_true",
                         help="Check exact 16-bit output at every worker count before timing")
     args = parser.parse_args()
+    if args.rounds < 1:
+        parser.error("--rounds must be positive")
     cpus = args.cpus.split(",") if args.cpus else []
     if cpus and (len(cpus) < max(WORKERS) or len(set(cpus)) != len(cpus)):
         parser.error("--cpus needs at least eight distinct CPU numbers")
@@ -71,19 +80,28 @@ def main():
         parser.error("baseline and candidate binaries must differ")
     variants = [("baseline", baseline), ("candidate", candidate), ("aa", baseline)]
     args.output.mkdir()
+    individual = args.cold or args.per_sample
+    repetitions = 1 if individual else 5
+    samples = 5 if individual else 1
+    warmup = 0 if args.cold else 1
     manifest = {
         "binaries": {str(path): digest(path) for path in (baseline, candidate)},
         "streams": {str(path): sha for path, sha in streams.items()},
-        "rounds": 3,
+        "rounds": args.rounds,
         "repetitions": 5,
-        "warmup": 1,
+        "warmup": warmup,
+        "cold_process": args.cold,
+        "processes_per_block": samples,
         "workers": WORKERS,
         "cpus": cpus,
         "allow_level10": args.allow_level10,
         "verify_pixels": args.verify_pixels,
     }
     (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    sample_output = args.output / "samples.tsv"
+    sample_file = sample_output.open("x", newline="", buffering=1) if individual else nullcontext()
     with (
+        sample_file as sample_log,
         (args.output / "results.tsv").open("x", newline="", buffering=1) as results,
         (args.output / "commands.log").open("x", buffering=1) as log,
     ):
@@ -118,22 +136,35 @@ def main():
                             raise ValueError(f"decoded output differs: {file} at {workers} workers")
 
         shape = {}
-        for workers, file, round_id in itertools.product(WORKERS, streams, range(3)):
-            for name, binary in variants[round_id:] + variants[:round_id]:
+        sample_writer = None
+        if sample_log is not None:
+            sample_writer = csv.writer(sample_log, delimiter="\t", lineterminator="\n")
+            sample_writer.writerow(["file", "workers", "round", "variant", "sample", "pixels", "mp_s"])
+        for workers, file, round_id in itertools.product(WORKERS, streams, range(args.rounds)):
+            first = round_id % len(variants)
+            for name, binary in variants[first:] + variants[:first]:
                 cmd = [*affinity(workers), str(binary), str(file), *options, "--data-type", "u8",
                        *worker_args(workers),
-                       "--speedtest", "--num-reps", "5", "--warmup-reps", "1"]
-                print(json.dumps(cmd), file=log)
-                run = subprocess.run(cmd, capture_output=True, text=True)
-                print(run.stdout, run.stderr, sep="", file=log)
-                run.check_returncode()
-                match = SPEED.search(run.stdout)
-                if not match or int(match[1]) % 5 or float(match[2]) <= 0:
-                    raise ValueError(f"missing or invalid timing: {name} {file}\n{run.stdout}")
-                pixels = int(match[1]) // 5
-                if pixels != shape.setdefault(file, pixels):
-                    raise ValueError(f"decoded dimensions differ: {name} {file}")
-                writer.writerow([file, streams[file], workers, round_id + 1, name, pixels, match[2]])
+                       "--speedtest", "--num-reps", str(repetitions), "--warmup-reps", str(warmup)]
+                rates = []
+                for sample in range(1, samples + 1):
+                    print(json.dumps(cmd), file=log)
+                    run = subprocess.run(cmd, capture_output=True, text=True)
+                    print(run.stdout, run.stderr, sep="", file=log)
+                    run.check_returncode()
+                    match = SPEED.search(run.stdout)
+                    if not match or int(match[1]) % repetitions or float(match[2]) <= 0:
+                        raise ValueError(f"missing or invalid timing: {name} {file}\n{run.stdout}")
+                    pixels = int(match[1]) // repetitions
+                    if pixels != shape.setdefault(file, pixels):
+                        raise ValueError(f"decoded dimensions differ: {name} {file}")
+                    rate = float(match[2])
+                    rates.append(rate)
+                    if sample_writer is not None:
+                        sample_writer.writerow([file, workers, round_id + 1, name, sample, pixels, rate])
+                # The block aggregate divides total pixels by total decode time.
+                speed = len(rates) / sum(1 / rate for rate in rates)
+                writer.writerow([file, streams[file], workers, round_id + 1, name, pixels, f"{speed:.6f}"])
 
 
 if __name__ == "__main__":

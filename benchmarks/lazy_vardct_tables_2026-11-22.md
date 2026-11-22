@@ -1,0 +1,46 @@
+# Lazy standard VarDCT tables on i270
+
+[Upstream jxl-rs](https://github.com/libjxl/jxl-rs/commit/7d250dbd2) defers
+building standard quantization matrices and natural coefficient orders
+until the corresponding transform is used. The candidate adapts that
+policy to this decoder's existing per-transform static caches. Custom
+tables and custom coefficient orders still parse and compute at HF-global.
+
+Compare decoder `e58a4838725704e37d90f2acd1d11dcccd7ab98a` with the lazy
+candidate using `all-simd,threads` release builds on i270. Use 24
+streams from six imazen-26 SDR sources, center cropped to 64 or 256
+pixels and encoded at effort 7, distances 1 and 4. Warm timing adds
+progressive, alpha, floating-point Modular, and bike controls. The timed
+endpoint allocates and produces u8 output with CMS disabled. Each sample
+starts a new process. Cold timing measures its first in-memory decode,
+and warm timing measures the immediate second decode. Three blocks of
+five decodes per arm include a second baseline for A/A.
+
+| Workers | Cold baseline / candidate median (ms) | Cold median paired latency reduction | Warm median latency change |
+|---|---:|---:|---:|
+| 1 | 4.866 / 0.895 | 81.9% | −0.22% |
+| 4 | 5.247 / 0.997 | 81.2% | +0.21% |
+| 8 | 5.380 / 1.051 | 80.8% | +1.53% |
+
+The columns report medians across cells. Latency change first divides
+the candidate cell median by the baseline cell median. All cold cells
+beat the 20% latency target. All 72 cold and 84 warm PNG16 comparisons
+match exactly across builds and worker counts.
+
+Nearest-rank p95 over 15 warm samples is the worst observation. The
+floating-point Modular control has a +12.7% one-worker p95 with a
+−0.3% A/A and −0.2% median change. The compact SDR classes meet the
+class p95 limit after pooling latency normalized by each stream's
+baseline median. The table retains every cell's median and p95.
+
+Run-heavy peak RSS was 1.50 GiB for the build and focused tests, and
+0.34 GiB for crop preparation, cold timing and the first warm attempt.
+That attempt reached a Level 5 admission error for a 32-bit float
+fixture in the baseline. The warm rerun explicitly enables Level 10
+for both binaries and used 0.42 GiB peak RSS.
+
+[Per-stream results](lazy_vardct_tables_2026-11-22.tsv). Per-decode durations
+are derived from the CLI's per-sample MP/s and pixel count. The streams,
+pinned commands, binary and stream hashes, exact readback hashes, and
+logs are retained on i270 under
+`/mnt/v/output/zenjxl-decoder/lazy-vardct-2026-11-22`.

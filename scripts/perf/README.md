@@ -24,7 +24,12 @@ the binary somewhere stable, since each experiment compares two builds.
   and worker counts before timing. Use `--allow-level10` when the inputs
   need Level 10. The fresh output directory holds binary and stream hashes,
   commands, results, and optional readback hashes. The CLI reports one
-  aggregate throughput value per five repeats.
+  aggregate throughput value per five repeats. With `--cold`, each block
+  launches five fresh processes and measures the first in-memory decode
+  in each. `--per-sample` uses the same process layout with one untimed
+  warmup before each measured decode. Both options retain individual
+  measurements in `samples.tsv` as well as the block aggregates. Use
+  `--rounds` to increase the number of interleaved blocks.
 - `vsdj.py <cli> <threads> <rounds> <files...>`: interleaved runs of this
   decoder, djxl and upstream jxl-rs, median of per-round means, plus the
   zen/djxl ratio. Set `DJXL` and `JXLRS_CLI` to the binaries. djxl runs
