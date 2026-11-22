@@ -806,3 +806,66 @@ timing and phase capture take 373 s at 4.30 GiB peak RSS.
 and [phase medians](cold_modular_render_handoff_phases_2026-11-22.tsv).
 Raw logs, timings and pinned commands are in
 `/mnt/v/output/zenjxl-decoder/modular-render-handoff-i270-2026-11-22` on i270.
+
+### Write identity Modular RGB8 directly
+
+The builder already combines each 8-bit Modular plane's numeric
+conversion with its clamp-to-byte stage. When the three resulting
+conversions feed the sole identity RGB8 save, the
+[landed change](https://github.com/imazen/zenjxl-decoder/commit/05042e1b5b46151a507da3f116eadee805117599)
+reads the decoded i32 group planes and interleaves clamped bytes into the
+output row. The optimized pipeline avoids the input row copies and planar
+byte staging. The measured source `61c8428af969e743a24f98748596f41b34ce74c8`
+has the same tree as the landed revision.
+
+The same-file comparison uses the decoder at `e14ae58d` as baseline.
+The four native photo profiles and five controls, pinned i270 cores,
+RGB8/RGBA8 endpoints and three blocks of five at 1/4/8 workers match
+the handoff experiment above. Readbacks explicitly select PNG8 to
+exercise the changed output type. All 81 PNG8 pairs match across
+workers and revisions or profiles, including the longer cold comparison
+and the odd RGBA confirmation. The dispatch test checks RGB Identity,
+BGR and vertical flip. The row test checks clipping, odd widths and
+untouched destination padding.
+
+| i270 photo comparison | Paired median throughput, 1 / 4 / 8 workers | Candidate MP/s, 1 / 4 / 8 workers |
+|---|---:|---:|
+| Same file, cold | 1.121× / 1.080× / 1.056× | 154.61 / 406.28 / 566.42 |
+| Same file, warm | 1.128× / 1.106× / 1.098× | 162.32 / 463.46 / 677.49 |
+| Cold profile vs legacy stock, 3 blocks | 1.304× / 1.387× / 1.243× | 154.57 / 405.10 / 576.00 |
+| Cold profile vs legacy stock, 9 blocks | 1.304× / 1.401× / 1.255× | 154.57 / 407.16 / 572.31 |
+| Caller-owned profile vs legacy stock, 5 blocks | 1.336× / 1.460× / 1.397× | 179.86 / 551.85 / 795.88 |
+
+The caller-owned replay compares the output of reuse with fresh
+allocation and checks exact stock/profile output for all 12 worker
+and stream pairs. The nine-block first-decode run exceeds the 120
+and 550 MP/s floors and the 1.25× and 1.10× gains at one and eight
+workers. The four selected streams retain their existing
+12.49% median byte savings.
+
+No control class median slows and the largest same-file control
+class p95 ratio is 1.037×. Odd RGBA was 0.948× at eight workers
+cold in the initial run, with A/A at 0.929×. In the nine-block
+repeat it is 1.003× with A/A at 0.976× and p95 at 0.924×.
+Individual candidate p95 ratios stay below 1.10×. Individual
+A/A p95 ratios above 1.10× occur on 1606 stock cold at eight
+workers, 1606 g128 warm at one worker and odd RGBA warm at eight
+workers. The per-file table retains each value and its counterpart.
+
+At eight workers P3b drops by 37.1–42.7% across the four photos in
+the separate phase capture, saving 0.85–0.94 ms in per-photo
+medians. A pinned single-worker cycle sample on 1237 finds the
+AVX2 direct RGB8 save symbol. Strict library Clippy, a scalar-only
+library build check and all 1,100 active release library tests pass.
+The initial build, tests, timing and phase capture take 362 s at
+4.32 GiB peak RSS. The full suite, longer replay, caller-owned and
+cycle captures take 257 s at 8.26 GiB peak RSS. The RGBA repeat
+takes 1 s at 0.02 GiB.
+
+[Per-file timings](cold_modular_direct_rgb8_2026-11-22.tsv),
+[panel medians and p95](cold_modular_direct_rgb8_classes_2026-11-22.tsv),
+[phase medians](cold_modular_direct_rgb8_phases_2026-11-22.tsv),
+[caller-owned timings](cold_modular_direct_rgb8_reuse_2026-11-22.tsv),
+and [odd RGBA repeat](cold_modular_direct_rgb8_rgba_2026-11-22.tsv).
+Raw timings, commands, readbacks, cycle samples and hashes are in
+`/mnt/v/output/zenjxl-decoder/modular-direct-rgb8-i270-2026-11-22` on i270.
