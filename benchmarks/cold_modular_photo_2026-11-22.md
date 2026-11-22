@@ -308,3 +308,55 @@ The two replays take 26 s and 72 s, both at 0.12 GiB peak RSS.
 The `geometry-cold` and `geometry-repeat-cold` directories in the
 same i270 run directory retain raw timings, selected stream names,
 exact readbacks and input and binary hashes.
+
+## Cold phase attribution on the independent width panel
+
+The same decoder source as `5113c242` decodes each of the four pinned
+photo profiles and the 1606 stock stream twice in each fresh process,
+with CMS off and one or eight pinned i270 workers. The diagnostic build
+is `edc2abcc`. At each worker count, the three interleaved blocks of five
+first/second pairs give 15 observations per file. Frame and section
+times are subtracted from CLI total on each decode before calculating
+the median first-minus-second difference.
+
+| Profile | 8-worker first-minus-second total | Outside frame and section timers | Group decode P2 gap |
+|---|---:|---:|---:|
+| 1012 g128 | +2.24 ms | +1.26 ms | +0.48 ms |
+| 1606 g128 | +3.16 ms | +2.11 ms | +0.45 ms |
+| 1237 g256 | +3.53 ms | +4.68 ms | −0.29 ms |
+| 1619 g256 | +0.78 ms | +3.77 ms | −0.45 ms |
+
+The residual includes allocation, output prefaulting and other work
+outside the frame and section timers. The CLI still reports a
+constant-zero separate allocation field. The individual phase medians
+can differ from the sum of the median phase differences. The
+diagnostic capture uses 0.13 GiB peak RSS over 14 s.
+
+The [prefault experiment](https://github.com/imazen/zenjxl-decoder/commit/96a3e380518e1649c45633887aa42ed87040cdf0)
+groups the same 4 KiB page touches into 256 KiB Rayon work items.
+This changes neither the pages touched nor the existing threshold and
+eligibility. Rebuild against the same locked dependencies, Rust 1.99.1,
+and release features `all-simd,threads`. Compare the same profile
+streams and four controls using 1/4/8 workers, RGB8 or RGBA8 and three
+interleaved blocks of five with A/A. The timed cold decodes run once
+per process. A warmup decode precedes each warm measurement. Strict
+library Clippy and 48 exact PNG16 pairs pass.
+
+| i270 photo endpoint | Paired speedup at 1 / 4 / 8 workers | Candidate MP/s at 1 / 4 / 8 workers |
+|---|---:|---:|
+| Cold allocating | 1.000× / 0.999× / 0.997× | 132.14 / 364.70 / 525.84 |
+| Warm allocating | 1.001× / 0.990× / 1.015× | 137.26 / 397.29 / 607.81 |
+
+The photo medians miss the independent 5% decoder improvement gate.
+All class p95 latency ratios stay within 1.078×. Two control tails
+exceed 1.10× individually. Scanned text is 1.194× with A/A at 1.367×
+at four workers cold. Odd RGBA is 1.375× with A/A at 1.168× at eight
+workers warm. The experiment is archived on
+`rejected/cold-prefault-256k-spans`. Build, exact checks and timings
+use 2.00 GiB peak RSS over 210 s under `run-heavy`.
+
+[Phase diagnostics](cold_modular_independent_phases_2026-11-22.tsv),
+[paired timing](cold_modular_prefault_256k_2026-11-22.tsv) and
+[class summaries](cold_modular_prefault_256k_classes_2026-11-22.tsv).
+The raw timings, readbacks, commands and hashes are under
+`independent-cold-phases-2026-11-22` on i270.
