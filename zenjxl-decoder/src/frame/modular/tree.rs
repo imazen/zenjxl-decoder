@@ -7,10 +7,13 @@ use std::fmt::Debug;
 use whereat::at;
 
 use super::{Predictor, predict::WeightedPredictorState};
+use std::sync::OnceLock;
+
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::Histograms,
     entropy_coding::decode::SymbolReader,
+    entropy_coding::fused_prefix::FusedPrefixLut,
     error::{Error, Result},
     frame::modular::predict::PredictionData,
     image::Image,
@@ -240,6 +243,74 @@ impl BitsetTree {
         }
         debug_assert_eq!(candidates.count_ones(), 1);
         &self.leaves[candidates.trailing_zeros() as usize]
+    }
+}
+
+/// Frame-owned MA tree. Group-local trees use `Tree` without a lookup cache.
+pub struct GlobalTree {
+    pub(super) tree: Tree,
+    prefix_luts: Option<[OnceLock<Option<FusedPrefixLut>>; 4]>,
+}
+
+impl GlobalTree {
+    pub(crate) fn new(tree: Tree) -> Self {
+        let prefix_luts = (tree.histograms.can_fuse_prefix()
+            && tree.nodes.iter().all(|node| {
+                matches!(
+                    node,
+                    TreeNode::Split {
+                        property: 0 | 1,
+                        ..
+                    } | TreeNode::Leaf {
+                        predictor: Predictor::Gradient,
+                        offset: 0,
+                        multiplier: 1,
+                        ..
+                    }
+                )
+            }))
+        .then_some([const { OnceLock::new() }; 4]);
+        Self { tree, prefix_luts }
+    }
+
+    pub(super) fn has_prefix_cache(&self) -> bool {
+        self.prefix_luts.is_some()
+    }
+
+    /// Static splits depend only on the channel and stream, so resolve the
+    /// histogram before entering the channel loop.
+    pub(super) fn prefix_lut(
+        &self,
+        channel: usize,
+        stream: usize,
+    ) -> Option<(usize, &FusedPrefixLut)> {
+        let caches = self.prefix_luts.as_ref()?;
+        let mut pos = 0;
+        loop {
+            match self.tree.nodes[pos] {
+                TreeNode::Leaf { id, .. } => {
+                    let cluster = self.tree.histograms.map_context_to_cluster(id as usize);
+                    let lut = caches
+                        .get(cluster)?
+                        .get_or_init(|| {
+                            self.tree
+                                .histograms
+                                .build_fused_prefix(cluster, &self.tree.memory_tracker)
+                        })
+                        .as_ref()?;
+                    return Some((cluster, lut));
+                }
+                TreeNode::Split {
+                    property,
+                    val,
+                    left,
+                    right,
+                } => {
+                    let value = if property == 0 { channel } else { stream };
+                    pos = if value as i32 > val { left } else { right } as usize;
+                }
+            }
+        }
     }
 }
 

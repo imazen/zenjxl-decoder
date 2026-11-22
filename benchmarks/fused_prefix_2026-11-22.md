@@ -358,3 +358,44 @@ of five interleaved warm allocating RGB8/RGBA8 decodes on i270, with A/A.
 The release build, library Clippy and paired capture used 0.91 GiB peak
 RSS over 231 seconds under `run-heavy`.
 [Per-cell timing, p95 and stream hashes](fused_prefix_frame_owned_2026-11-22.tsv).
+
+### Frame-owned confirmation and integration
+
+The initial tail repeats use nine blocks of five and bring every
+flagged p95 at or below 1.095×. An additional 21-block odd RGBA repeat
+measures 1.036× paired throughput and 0.824× p95 at eight workers,
+with A/A at 0.985× throughput and 1.034× p95.
+
+The caller-owned decode output confirms the textured 256 px group
+file gains at 1/4/8 workers with both decoder recreation and rewind.
+The two RLE photographs show smaller changes. Each pair matches RGB8
+output across all endpoint variants, and matches the reference binary
+on the independent PNG8 and PNG16 readbacks.
+
+| Identical 12 MP textured stream, 256 px groups | 1 worker | 4 workers | 8 workers |
+|---|---:|---:|---:|
+| Reuse caller's output buffer | 1.322× | 1.239× | 1.146× |
+| Reuse output and rewind decoder | 1.320× | 1.217× | 1.160× |
+| Final production CLI, warm allocating | 1.295× | 1.207× | 1.123× |
+
+On fresh processes the textured native 128 px group file reaches
+1.274× / 1.192× / 1.172× at 1/4/8 workers. The smooth crop's
+four-worker p95 is 0.979× on the nine-block repeat with the final
+production binary. The final four- and eight-worker plot controls
+had initial p95 outliers. They repeat at 0.995× and 0.980× p95
+over 21 blocks. The plot's eight-worker throughput ratio is
+0.979× in that repeat.
+
+Release format and strict Clippy pass, including the profiling feature.
+The two-core library run passed 995 tests. Its 103 failures all require
+the external feature corpus. Rerunning those cases with the local
+`CODEC_CORPUS_PATH` passes all 103, with the existing ignores retained.
+The fixture test runs on two cores to bound its internal worker count.
+Both initial 8 GiB wrapper runs were stopped by the memory cgroup.
+The two-core run and encoder replay used 5.06 GiB peak RSS under
+the 12 GiB wrapper. No source expectations changed.
+
+[Warm and cold confirmations](fused_prefix_frame_owned_confirmation_2026-11-22.tsv).
+[Caller-buffer output and rewind results](fused_prefix_frame_owned_reuse_2026-11-22.tsv).
+Raw samples, release binary hashes, source commits and build commands
+are retained in the same i270 run directory.

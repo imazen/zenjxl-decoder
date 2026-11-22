@@ -3,13 +3,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use super::channel::decode_modular_channel;
+use super::channel::{decode_modular_channel, try_decode_fused_prefix};
 use crate::{
     bit_reader::BitReader,
     entropy_coding::decode::SymbolReader,
     error::{Error, Result},
     frame::modular::{
-        ModularChannel, Tree,
+        GlobalTree, ModularChannel, Tree,
         transforms::apply::{TransformLimits, meta_apply_local_transforms},
     },
     headers::{JxlHeader, modular::GroupHeader},
@@ -23,7 +23,7 @@ pub fn decode_modular_subbitstream(
     buffers: Vec<&mut ModularChannel>,
     stream_id: usize,
     header: Option<GroupHeader>,
-    global_tree: &Option<Tree>,
+    global_tree: &Option<GlobalTree>,
     br: &mut BitReader,
     memory_tracker: &MemoryTracker,
     limits: TransformLimits,
@@ -78,10 +78,11 @@ pub fn decode_modular_subbitstream(
     } else {
         None
     };
-    let tree = if header.use_global_tree {
-        global_tree.as_ref().unwrap()
+    let (tree, prefix_tree) = if header.use_global_tree {
+        let shared = global_tree.as_ref().unwrap();
+        (&shared.tree, shared.has_prefix_cache().then_some(shared))
     } else {
-        local_tree.as_ref().unwrap()
+        (local_tree.as_ref().unwrap(), None)
     };
 
     let image_width = buffers
@@ -96,6 +97,12 @@ pub fn decode_modular_subbitstream(
         // This matches libjxl, which continues the loop without renumbering.
         let (w, h) = buffers[i].data.size();
         if w == 0 || h == 0 {
+            continue;
+        }
+        if let Some(shared) = prefix_tree
+            && try_decode_fused_prefix(buffers[i], shared, i, stream_id, &mut reader, br)
+        {
+            br.check_for_error().map_err(|e| at!(e))?;
             continue;
         }
         decode_modular_channel(&mut buffers, i, stream_id, &header, tree, &mut reader, br)?;

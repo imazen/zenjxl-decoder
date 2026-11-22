@@ -13,7 +13,9 @@ use super::{
     coeff_order::decode_coeff_orders,
     color_correlation_map::ColorCorrelationParams,
     group::{VarDctBuffers, decode_vardct_group},
-    modular::{FullModularImage, ModularStreamId, Tree, decode_hf_metadata, decode_vardct_lf},
+    modular::{
+        FullModularImage, GlobalTree, ModularStreamId, Tree, decode_hf_metadata, decode_vardct_lf,
+    },
     quant_weights::DequantMatrices,
     quantizer::{LfQuantFactors, QuantizerParams},
 };
@@ -400,7 +402,7 @@ impl Frame {
             // Use configured limit if set, otherwise use 2^22 default
             let configured_limit = self.decoder_state.limits.max_tree_size.unwrap_or(1 << 22);
             let size_limit = dynamic_limit.min(configured_limit);
-            Some(Tree::read(
+            Some(GlobalTree::new(Tree::read(
                 br,
                 size_limit,
                 self.decoder_state
@@ -408,7 +410,7 @@ impl Frame {
                     .max_codestream_level
                     .max_ma_tree_depth(),
                 &self.decoder_state.memory_tracker,
-            )?)
+            )?))
         } else {
             None
         };
