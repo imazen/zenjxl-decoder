@@ -350,7 +350,7 @@ impl SymbolReader {
 /// Register-resident entropy state for hot loops over prefix-coded streams
 /// whose LZ77 only repeats the previous symbol (the RLE shape libjxl's
 /// effort-1 lossless encoder writes). Same use as [`PlainCursor`]: obtain
-/// with [`SymbolReader::rle_cursor`], read with [`RleCode::read`], and
+/// with [`SymbolReader::rle_cursor`], read with [`RleCode::read_span`], and
 /// return with [`SymbolReader::finish_rle_cursor`].
 #[derive(Clone, Copy)]
 pub struct RleCursor<'a> {
@@ -412,42 +412,38 @@ pub struct RleCode<'h> {
 }
 
 impl RleCode<'_> {
-    /// Reads one unsigned symbol through an [`RleCursor`], with the same
-    /// result and error state as the reader's RLE path
-    /// (`RleState::pull_symbol` / `push_token`). `None`, with nothing
-    /// changed, when a token must be read near the end of the data; the
-    /// caller then uses the regular reader.
+    /// Reads one literal or up to `limit` copies of the prior symbol.
+    /// A short bit window leaves the cursor untouched for the regular reader.
     #[inline(always)]
-    pub fn read(&self, c: &mut RleCursor<'_>) -> Option<u32> {
-        if c.repeat_count > 0
-            && let Some(sym) = c.last_sym
-        {
-            c.repeat_count -= 1;
-            return Some(sym);
-        }
-        // A prefix code (<= 15 bits) plus up to 31 hybrid-uint extra bits.
-        if !c.fb.ensure(47) {
-            return None;
-        }
-        // `pull_symbol` consumes one repeat even without a symbol to repeat.
-        c.repeat_count = c.repeat_count.saturating_sub(1);
-        let token = self.table.read_fast(&mut c.fb);
-        if let Some(token) = token.checked_sub(c.min_symbol) {
-            let count = self.len_uint.read_fast(token, &mut c.fb, &mut c.nbits_acc);
-            // Overflow is invalid but unreported, as on the reader's path.
-            c.repeat_count = count.wrapping_add(c.min_length);
-        } else {
-            c.last_sym = Some(self.uint.read_fast(token, &mut c.fb, &mut c.nbits_acc));
-            c.repeat_count = 1;
-        }
-        if c.repeat_count > 0 {
-            c.repeat_count -= 1;
-            if let Some(sym) = c.last_sym {
-                return Some(sym);
+    pub fn read_span(&self, c: &mut RleCursor<'_>, limit: usize) -> Option<(u32, usize)> {
+        debug_assert_ne!(limit, 0);
+        if c.repeat_count == 0 || c.last_sym.is_none() {
+            // A prefix code (<= 15 bits) plus up to 31 hybrid-uint extra bits.
+            if !c.fb.ensure(47) {
+                return None;
+            }
+            let token = self.table.read_fast(&mut c.fb);
+            if let Some(token) = token.checked_sub(c.min_symbol) {
+                let count = self.len_uint.read_fast(token, &mut c.fb, &mut c.nbits_acc);
+                c.repeat_count = count.wrapping_add(c.min_length);
+            } else {
+                let value = self.uint.read_fast(token, &mut c.fb, &mut c.nbits_acc);
+                c.last_sym = Some(value);
+                c.repeat_count = 0;
+                return Some((value, 1));
             }
         }
+        if c.repeat_count > 0 {
+            if let Some(sym) = c.last_sym {
+                let span = (c.repeat_count as usize).min(limit);
+                c.repeat_count -= span as u32;
+                return Some((sym, span));
+            }
+            // An invalid run has no symbol and still consumes one repeat.
+            c.repeat_count -= 1;
+        }
         c.lz77_repeat = true;
-        Some(0)
+        Some((0, 1))
     }
 }
 
