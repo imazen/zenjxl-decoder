@@ -43,14 +43,25 @@ impl FusedPrefixLut {
                 entries.push(0);
                 continue;
             };
-            let (second_len, second) =
-                decode_residual(table, uint, window >> first_len, WINDOW_BITS - first_len)
-                    .unwrap_or((0, 0));
             let entry = (u64::from(first_len) << LENGTH_BITS)
-                | u64::from(first_len + second_len)
-                | (first << FIRST_SHIFT)
-                | (second << SECOND_SHIFT);
+                | u64::from(first_len)
+                | (first << FIRST_SHIFT);
             entries.push(entry);
+        }
+        // The remaining low bits already index a decoded first residual.
+        // Its length determines whether it fits without the zero-filled high bits.
+        for window in 0..TABLE_SIZE {
+            let entry = entries[window];
+            if entry == 0 {
+                continue;
+            }
+            let first_len = (entry >> LENGTH_BITS) & LENGTH_MASK;
+            let next = entries[window >> first_len];
+            let second_len = (next >> LENGTH_BITS) & LENGTH_MASK;
+            if second_len != 0 && first_len + second_len <= u64::from(WINDOW_BITS) {
+                let second = (next >> FIRST_SHIFT) & RESIDUAL_MASK;
+                entries[window] = (entry + second_len) | (second << SECOND_SHIFT);
+            }
         }
         Some(Self {
             entries: entries.into_boxed_slice().try_into().ok()?,
