@@ -1543,6 +1543,9 @@ impl Frame {
         output_profile: &JxlColorProfile,
         max_pixels: usize,
     ) -> Result<Option<CmsStage>> {
+        if decoder_state.file_header.image_metadata.xyb_encoded {
+            return Ok(None);
+        }
         let Some(cms) = cms else { return Ok(None) };
         let Some(input_profile) = &decoder_state.embedded_color_profile else {
             return Ok(None);
@@ -2007,10 +2010,14 @@ impl Frame {
             cms_used = true;
         }
 
-        // For CMYK images, we need to handle blending in CMYK color space.
-        // If ANY frame in the image needs blending, ALL frames must save their
-        // reference in CMYK space so that subsequent frames can blend correctly.
+        // For non-XYB CMYK images, blending and reference frame recording
+        // happen in CMYK space, so CMYK -> RGB conversion is deferred until
+        // after blending/saving. For XYB-encoded images that carry a Black
+        // extra channel, inverse XYB already decodes the three color channels
+        // into sRGB (not CMY ink values), so blending/references stay in sRGB
+        // and neither CMYK ICC conversion nor BlackChannelStage applies.
         let cmyk_needs_deferred_cms = has_black_channel
+            && !xyb_encoded
             && (frame_header.needs_blending()
                 || (frame_header.can_be_referenced && !frame_header.save_before_ct));
 
@@ -2060,8 +2067,8 @@ impl Frame {
             }
         }
 
-        // For CMYK images that don't need deferred CMS, apply Black channel conversion here
-        if has_black_channel && !cmyk_needs_deferred_cms && !raw_cmyk_requested {
+        // For non-XYB CMYK images that don't need deferred CMS, apply Black channel conversion here
+        if has_black_channel && !xyb_encoded && !cmyk_needs_deferred_cms && !raw_cmyk_requested {
             for (i, info) in decoder_state
                 .file_header
                 .image_metadata
