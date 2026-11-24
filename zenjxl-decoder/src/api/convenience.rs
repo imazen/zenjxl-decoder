@@ -122,7 +122,6 @@ pub fn decode_with(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage, 
 fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage> {
     let mut input: &[u8] = data;
 
-    let has_cms = options.cms.is_some();
     #[cfg(feature = "threads")]
     let parallel = options.parallel;
 
@@ -154,17 +153,18 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
         .iter()
         .position(|ec| ec.ec_type == ExtraChannel::Alpha);
 
-    // A CMYK image's K (Black) extra channel is consumed by the CMS CMYK->RGB
-    // conversion; requesting it as an output extra channel as well is rejected
-    // by the render pipeline (CmsConsumedChannelRequested). Drop it from the
-    // output when CMS is enabled. (#37)
-    let cms_black = if has_cms {
-        info.extra_channels
-            .iter()
-            .position(|ec| ec.ec_type == ExtraChannel::Black)
-    } else {
-        None
-    };
+    // `decode` / `decode_with` always produces RGB(A) display output and never
+    // returns un-interleaved extra channels. Drop any Black (K) extra channel
+    // from `extra_channel_format` unconditionally:
+    // - with CMS enabled, requesting a CMS-consumed Black channel is rejected
+    //   with `CmsConsumedChannelRequested` (#37);
+    // - without CMS, requesting Black signals `raw_cmyk_requested` in the
+    //   render pipeline, suppressing `BlackChannelStage` so K is never folded
+    //   into CMY (turning pure black CMYK ink into white).
+    let black_channel = info
+        .extra_channels
+        .iter()
+        .position(|ec| ec.ec_type == ExtraChannel::Black);
 
     let u8_format = JxlDataFormat::U8 { bit_depth: 8 };
 
@@ -177,8 +177,8 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
             .iter()
             .enumerate()
             .map(|(i, _)| {
-                if Some(i) == main_alpha || Some(i) == cms_black {
-                    None // alpha interleaved into RGBA; black consumed by CMS
+                if Some(i) == main_alpha || Some(i) == black_channel {
+                    None // alpha interleaved into RGBA; black folded or unused for RGB(A) output
                 } else {
                     Some(u8_format)
                 }
@@ -190,10 +190,10 @@ fn decode_with_inner(data: &[u8], options: JxlDecoderOptions) -> Result<JxlImage
     let output_profile = decoder.output_color_profile().clone();
 
     // Count non-interleaved extra channels (everything except the main alpha
-    // and the CMS-consumed black channel)
+    // and the dropped black channel)
     let extra_count = info.extra_channels.len()
         - usize::from(main_alpha.is_some())
-        - usize::from(cms_black.is_some());
+        - usize::from(black_channel.is_some());
 
     // Phase 2: WithImageInfo → WithFrameInfo (parse frame header)
     let decoder = match decoder.process(&mut input)? {
