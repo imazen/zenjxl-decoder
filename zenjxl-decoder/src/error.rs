@@ -223,7 +223,7 @@ pub enum Error {
     InvalidRCT(u32),
     #[error("Invalid channel range: {0}..{1}, {2} total channels")]
     InvalidChannelRange(usize, usize, usize),
-    #[error("Invalid transform: mixing different channels (different shape or different shift)")]
+    #[error("Cannot apply modular transform to channels with incompatible layouts")]
     MixingDifferentChannels,
     #[error("Invalid transform: squeezing meta-channels needs an in-place transform")]
     MetaSqueezeRequiresInPlace,

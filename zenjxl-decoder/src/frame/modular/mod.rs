@@ -651,7 +651,7 @@ impl FullModularImage {
             transform_steps,
             &section_buffer_indices,
             &mut buffer_info,
-        );
+        )?;
 
         #[cfg(feature = "tracing")]
         for (i, bi) in buffer_info.iter().enumerate() {

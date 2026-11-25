@@ -29,6 +29,8 @@ This project is a fork of [libjxl/jxl-rs](https://github.com/libjxl/jxl-rs). The
 
 ### Fixed
 
+- Return a decode error when an inverse Modular RCT receives incompatible
+  input grids, before scheduling its tiles.
 - Reproduce the pinned libjxl AVX2 noise rounding and retain exact RGB F32
   regressions for the complete sprite-sheet animation.
 - Accept the inclusive 32,768-symbol prefix alphabet limit, including compact

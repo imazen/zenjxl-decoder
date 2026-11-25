@@ -1,5 +1,17 @@
 # Decoder investigation notes
 
+## Modular inverse RCT input grids — 2026-11-25
+
+The inverse reversible color transform reads the same tile index from
+three channels. Their dimensions, shifts and bit depths are checked before
+grid assignment. Grid construction now checks that all three inputs also
+use the same grid kind and returns `Error::MixingDifferentChannels` on a
+mismatch. The error propagates through frame setup before tile allocation.
+
+A scheduler test exercises global, LF and HF placement and two mismatched
+assignments directly in memory. It checks the propagated output grids and
+the typed refusal. Codestream conformance for mixed-grid RCT remains open.
+
 ## Direct Modular RGB8 builder test — 2026-11-25
 
 The builder test used a parallel-rendering accessor and failed to compile

@@ -1146,6 +1146,50 @@ mod limit_tests {
         matches!(r, Err(e) if matches!(e.error(), Error::LimitExceeded { resource, .. } if *resource == what))
     }
 
+    #[test]
+    fn inverse_rct_checks_input_grids_before_scheduling() {
+        use crate::util::test::{fixture_bytes, read_headers_and_toc};
+
+        let (_, frame, _) = read_headers_and_toc(&fixture_bytes("3x3_srgb_lossless.jxl")).unwrap();
+        let header = header(vec![transform(TransformId::Rct)]);
+        let limits = limits(JxlCodestreamLevel::Level5, usize::MAX);
+        let kinds = [
+            ModularGridKind::None,
+            ModularGridKind::Lf,
+            ModularGridKind::Hf,
+        ];
+        for placement in [[0, 0, 0], [1, 1, 1], [2, 2, 2], [1, 0, 1], [1, 1, 2]] {
+            let (mut buffers, transforms) =
+                meta_apply_transforms(&sized_channels(3, 3), &header, limits).unwrap();
+            let [
+                TransformStep::Rct {
+                    buf_in, buf_out, ..
+                },
+            ] = transforms.as_slice()
+            else {
+                panic!("expected a single RCT");
+            };
+            let outputs = *buf_out;
+            let mut sections = [vec![], vec![], vec![]];
+            for (&input, section) in buf_in.iter().zip(placement) {
+                sections[section].push(input);
+            }
+            let result = super::super::make_grids(&frame, transforms, &sections, &mut buffers);
+            if placement == [placement[0]; 3] {
+                assert_eq!(result.unwrap().len(), 1);
+                for output in outputs {
+                    assert_eq!(buffers[output].grid_kind, kinds[placement[0]]);
+                }
+            } else {
+                assert!(matches!(
+                    result.unwrap_err().error(),
+                    Error::MixingDifferentChannels
+                ));
+                assert!(buffers.iter().all(|buf| buf.buffer_grid.is_empty()));
+            }
+        }
+    }
+
     /// Level 5 allows 256 modular channels, Level 10 65,536 (upstream
     /// jxl-rs 7dad7ef / accec18).
     #[test]

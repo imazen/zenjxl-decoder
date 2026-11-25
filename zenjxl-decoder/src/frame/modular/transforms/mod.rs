@@ -9,7 +9,9 @@ use std::sync::atomic::Ordering;
 use apply::TransformStep;
 pub use apply::TransformStepChunk;
 use num_derive::FromPrimitive;
+use whereat::at;
 
+use crate::error::{Error, Result};
 use crate::frame::modular::BUFFER_STATUS_NOT_RENDERED;
 use crate::frame::modular::ModularBuffer;
 use crate::headers::frame_header::FrameHeader;
@@ -50,7 +52,7 @@ pub fn make_grids(
     transform_steps: Vec<TransformStep>,
     section_buffer_indices: &[Vec<usize>],
     buffer_info: &mut Vec<ModularBufferInfo>,
-) -> Vec<TransformStepChunk> {
+) -> Result<Vec<TransformStepChunk>> {
     // Initialize grid sizes, starting from coded channels.
     for i in section_buffer_indices[1].iter() {
         buffer_info[*i].grid_kind = ModularGridKind::Lf;
@@ -71,12 +73,14 @@ pub fn make_grids(
             TransformStep::Rct {
                 buf_in, buf_out, ..
             } => {
-                let grid_in = buffer_info[buf_in[0]].grid_kind;
-                for i in 0..3 {
-                    assert_eq!(grid_in, buffer_info[buf_in[i]].grid_kind);
+                // Inverse RCT consumes the same tile index from all three planes.
+                // Channel geometry was checked before the grids were assigned.
+                let [first, second, third] = buf_in.map(|i| buffer_info[i].grid_kind);
+                if first != second || first != third {
+                    return Err(at!(Error::MixingDifferentChannels));
                 }
-                for i in 0..3 {
-                    buffer_info[buf_out[i]].grid_kind = grid_in;
+                for &i in buf_out {
+                    buffer_info[i].grid_kind = first;
                 }
             }
             TransformStep::Palette {
@@ -441,5 +445,5 @@ pub fn make_grids(
 
     trace!(?grid_transform_steps, ?buffer_info);
 
-    grid_transform_steps
+    Ok(grid_transform_steps)
 }
