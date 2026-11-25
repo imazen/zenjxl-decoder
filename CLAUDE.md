@@ -1,5 +1,12 @@
 # Decoder investigation notes
 
+## Direct Modular RGB8 builder test — 2026-11-25
+
+The builder test used a parallel-rendering accessor and failed to compile
+without `threads`. It now inspects the finished stages through a test-only
+accessor in every feature configuration. The same assertion checks that
+identity RGB selects the direct save and that BGR and flipped RGB do not.
+
 ## Resolved: selected-level Black, MA-tree and HF bounds — 2026-11-19
 
 Libjxl v0.12's encoder rejects Level 5 with a Black extra channel. The old

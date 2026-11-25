@@ -807,6 +807,13 @@ impl RenderPipeline for LowMemoryRenderPipeline {
     }
 }
 
+#[cfg(test)]
+impl LowMemoryRenderPipeline {
+    pub(super) fn stages(&self) -> &[Stage<RowBuffer>] {
+        &self.shared.stages
+    }
+}
+
 /// Methods for the parallel rendering path.
 #[cfg(feature = "threads")]
 impl LowMemoryRenderPipeline {

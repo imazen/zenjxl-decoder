@@ -388,9 +388,8 @@ mod tests {
                     false,
                 )
                 .build()?;
-            let view = pipeline.read_view();
             assert_eq!(
-                matches!(&view.shared.stages[..], [Stage::Save(save)] if save.direct_modular_rgb8),
+                matches!(pipeline.stages(), [Stage::Save(save)] if save.direct_modular_rgb8),
                 direct
             );
         }
